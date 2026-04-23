@@ -1028,6 +1028,22 @@ impl PipelineSection {
         }
     }
 
+    /// WaitingUser status with no input box — Enter triggers an action directly.
+    fn action(
+        name: impl Into<String>,
+        summary: impl Into<String>,
+        events: Vec<impl Into<String>>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            status: SectionStatus::WaitingUser,
+            summary: summary.into(),
+            events: events.into_iter().map(Into::into).collect(),
+            transcript: Vec::new(),
+            input_placeholder: None,
+        }
+    }
+
     fn pending(name: impl Into<String>, summary: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -1104,15 +1120,13 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             Phase::IdeaInput => PipelineSection::pending("Brainstorm", "waiting for idea"),
             Phase::BrainstormRunning => {
                 if let Some(err) = &state.agent_error {
-                    PipelineSection::waiting_user(
+                    PipelineSection::action(
                         "Brainstorm",
                         "failed — press Enter to retry",
                         vec![
                             format!("error: {err}"),
                             format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
                         ],
-                        Vec::<String>::new(),
-                        "press Enter to retry brainstorm",
                     )
                 } else if window_launched {
                     PipelineSection::running(
@@ -1124,9 +1138,9 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                         ],
                     )
                 } else {
-                    PipelineSection::running(
+                    PipelineSection::action(
                         "Brainstorm",
-                        "ready — press Enter to run",
+                        "press Enter to run",
                         vec![
                             format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
                         ],
@@ -1151,15 +1165,15 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
             Phase::SpecReviewRunning => {
                 if let Some(err) = &state.agent_error {
-                    PipelineSection::running(
+                    PipelineSection::action(
                         "Spec Review",
                         "failed — press Enter to retry",
                         vec![format!("error: {err}")],
                     )
                 } else {
-                    PipelineSection::running(
+                    PipelineSection::action(
                         "Spec Review",
-                        "ready — press Enter to run",
+                        "press Enter to run",
                         Vec::<String>::new(),
                     )
                 }

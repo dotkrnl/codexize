@@ -6,7 +6,7 @@ use nix::{
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::{
-    io::Write,
+    io::{Read, Write},
     thread,
     time::{Duration, Instant},
 };
@@ -53,6 +53,18 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
         .write_all(spec.script.as_bytes())
         .with_context(|| format!("failed to write {} warm-up script", spec.program))?;
     drop(stdin);
+
+    // Drain PTY output in a background thread so the child never blocks on a
+    // full PTY buffer. Without this, CLIs that produce large startup output
+    // (e.g. Kimi's ~2.5 KB banner vs the ~4 KB kernel buffer) stall before
+    // they can finish initialising (token refresh, etc.).
+    let mut reader = master
+        .try_clone_reader()
+        .context("failed to open warm-up PTY reader")?;
+    thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        while reader.read(&mut buf).unwrap_or(0) > 0 {}
+    });
 
     let started = Instant::now();
     loop {

@@ -11,6 +11,7 @@ pub enum Phase {
     IdeaInput,
     BrainstormRunning,
     SpecReviewRunning,
+    SpecReviewPaused,
     PlanningRunning,
     PlanReviewRunning,
     AwaitingPlanApproval,
@@ -26,6 +27,7 @@ impl Phase {
             Phase::IdeaInput => "Idea Input".to_string(),
             Phase::BrainstormRunning => "Brainstorming".to_string(),
             Phase::SpecReviewRunning => "Spec Review".to_string(),
+            Phase::SpecReviewPaused => "Spec Review".to_string(),
             Phase::PlanningRunning => "Planning".to_string(),
             Phase::PlanReviewRunning => "Plan Review".to_string(),
             Phase::AwaitingPlanApproval => "Awaiting Approval".to_string(),
@@ -63,6 +65,9 @@ pub struct RunState {
     /// Model used per phase, keyed by phase label string
     #[serde(default)]
     pub phase_models: std::collections::BTreeMap<String, PhaseModel>,
+    /// All spec reviewers in order (may be multiple rounds)
+    #[serde(default)]
+    pub spec_reviewers: Vec<PhaseModel>,
 }
 
 impl RunState {
@@ -74,6 +79,7 @@ impl RunState {
             selected_model: None,
             agent_error: None,
             phase_models: std::collections::BTreeMap::new(),
+            spec_reviewers: Vec::new(),
         }
     }
 

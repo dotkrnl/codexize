@@ -1,7 +1,7 @@
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache,
-    selection::{self, ModelStatus, QuotaError, VendorKind, select_preferring_different_vendor},
+    selection::{self, ModelStatus, QuotaError, VendorKind, select_for_review},
     state::{self, Phase, PhaseModel, RunState},
     tmux::{self, TmuxContext},
     tui::AppTerminal,
@@ -184,6 +184,12 @@ impl App {
                 // Phases that just need Enter pressed (no text input) —
                 // only fire when the user is focused on the active phase section
                 if on_current {
+                    if self.state.current_phase == Phase::SpecReviewPaused {
+                        // Add another review round
+                        let _ = self.state.transition_to(Phase::SpecReviewRunning);
+                        self.launch_spec_review();
+                        return false;
+                    }
                     if self.state.current_phase == Phase::BrainstormRunning
                         && (self.state.agent_error.is_some() || !self.window_launched)
                     {
@@ -202,6 +208,16 @@ impl App {
                     self.input_mode = true;
                 } else {
                     self.toggle_selected_section();
+                }
+                false
+            }
+            KeyCode::Char('n') => {
+                // Proceed to next phase from a paused review state
+                if self.state.current_phase == Phase::SpecReviewPaused {
+                    let _ = self.state.transition_to(Phase::PlanningRunning);
+                    self.sections = build_sections(&self.state, self.window_launched);
+                    self.section_scroll.resize(self.sections.len(), usize::MAX);
+                    self.selected = current_section_index(&self.sections);
                 }
                 false
             }
@@ -291,7 +307,8 @@ impl App {
         let artifacts = run_dir.join("artifacts");
         let path = match self.state.current_phase {
             Phase::BrainstormRunning
-            | Phase::SpecReviewRunning => artifacts.join("spec.md"),
+            | Phase::SpecReviewRunning
+            | Phase::SpecReviewPaused => artifacts.join("spec.md"),
             Phase::PlanningRunning
             | Phase::PlanReviewRunning
             | Phase::AwaitingPlanApproval => artifacts.join("plan.md"),
@@ -334,9 +351,15 @@ impl App {
                 self.state.agent_error = None;
                 let _ = self.state.transition_to(Phase::IdeaInput);
             }
-            Phase::SpecReviewRunning => {
+            Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
                 kill_window("[Spec Review]");
-                let _ = fs::remove_file(artifacts.join("spec-review.md"));
+                // Remove all spec review artifacts
+                for i in 1..=self.state.spec_reviewers.len().max(1) {
+                    let _ = fs::remove_file(artifacts.join(format!("spec-review-{i}.md")));
+                    let _ = fs::remove_file(prompts.join(format!("spec-review-{i}.md")));
+                }
+                self.state.spec_reviewers.clear();
+                self.state.phase_models.remove("spec-review");
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
             }
             Phase::PlanningRunning => {
@@ -392,31 +415,34 @@ impl App {
 
         let run_id = self.state.run_id.clone();
         let spec_path = state::run_dir(&run_id).join("artifacts").join("spec.md");
-        let review_path = state::run_dir(&run_id).join("artifacts").join("spec-review.md");
+        let review_n = self.state.spec_reviewers.len() + 1;
+        let review_path = state::run_dir(&run_id).join("artifacts")
+            .join(format!("spec-review-{review_n}.md"));
 
-        // Determine which vendor/model was used for brainstorm to avoid repeating it
-        let prior_vendor = self.state.phase_models.get("brainstorm")
-            .and_then(|pm| vendor_from_str(&pm.vendor));
-        let prior_model = self.state.phase_models.get("brainstorm")
-            .map(|pm| pm.model.clone())
-            .unwrap_or_default();
+        // Build exclusion list: brainstorm model + all previous reviewers
+        let mut excluded = self.state.spec_reviewers.clone();
+        if let Some(pm) = self.state.phase_models.get("brainstorm").cloned() {
+            excluded.push(pm);
+        }
 
-        let chosen = if let Some(pv) = prior_vendor {
-            select_preferring_different_vendor(&self.models, selection::TaskKind::Review, pv, &prior_model)
-                .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        } else {
-            selection::select(&self.models, selection::TaskKind::Review)
-                .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        let chosen = select_for_review(&self.models, &excluded)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()));
+
+        let (model, vendor_kind, vendor) = match chosen {
+            Some(c) => c,
+            None => {
+                self.state.agent_error = Some("no unused model available for review".to_string());
+                let _ = self.state.save();
+                self.sections = build_sections(&self.state, self.window_launched);
+                return;
+            }
         };
 
-        let (model, vendor_kind, vendor) = chosen
-            .unwrap_or_else(|| ("o4-mini".to_string(), VendorKind::Codex, "codex".to_string()));
-
-        // Delete any leftover artifact from a previous run so poll_agent_window
-        // only advances when the current agent actually produces the file.
+        // Delete any leftover artifact so poll only advances when this run produces it
         let _ = std::fs::remove_file(&review_path);
 
-        let prompt_path = state::run_dir(&run_id).join("prompts").join("spec-review.md");
+        let prompt_path = state::run_dir(&run_id).join("prompts")
+            .join(format!("spec-review-{review_n}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -471,8 +497,9 @@ impl App {
             ),
             Phase::SpecReviewRunning => (
                 "[Spec Review]",
-                run_dir.join("artifacts").join("spec-review.md"),
-                Phase::PlanningRunning,
+                run_dir.join("artifacts")
+                    .join(format!("spec-review-{}.md", self.state.spec_reviewers.len() + 1)),
+                Phase::SpecReviewPaused,
             ),
             _ => return,
         };
@@ -486,6 +513,12 @@ impl App {
         self.window_launched = false;
         if artifact_path.exists() {
             self.state.agent_error = None;
+            // Record the reviewer before transitioning
+            if self.state.current_phase == Phase::SpecReviewRunning {
+                if let Some(pm) = self.state.phase_models.get("spec-review").cloned() {
+                    self.state.spec_reviewers.push(pm);
+                }
+            }
             let _ = self.state.transition_to(next_phase);
         } else {
             let error = format!(
@@ -594,7 +627,8 @@ impl App {
             Span::styled(
                 {
                     let e = if self.editable_artifact().is_some() { " e" } else { "" };
-                    format!(" | Up/Down Enter t PgUp/PgDn b{e} q")
+                    let n = if self.state.current_phase == Phase::SpecReviewPaused { " n" } else { "" };
+                    format!(" | Up/Down Enter t PgUp/PgDn b{e}{n} q")
                 },
                 Style::default().fg(Color::DarkGray),
             ),
@@ -1210,6 +1244,21 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                     )
                 }
             }
+            Phase::SpecReviewPaused => {
+                let n = state.spec_reviewers.len();
+                let reviewers: Vec<String> = state.spec_reviewers.iter()
+                    .enumerate()
+                    .map(|(i, r)| format!("review {}: {} ({})", i + 1, r.model, r.vendor))
+                    .collect();
+                let mut events = reviewers;
+                events.push("Enter: add another review  ·  n: proceed to planning".to_string());
+                PipelineSection::action(
+                    "Spec Review",
+                    format!("{n} review{} done — Enter for more, n to proceed",
+                        if n == 1 { "" } else { "s" }),
+                    events,
+                )
+            }
             _ => PipelineSection::done(
                 "Spec Review",
                 phase_done_summary(state, "spec-review", "review complete"),
@@ -1218,7 +1267,8 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
         },
         match phase {
-            Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
+            Phase::IdeaInput | Phase::BrainstormRunning
+            | Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
                 PipelineSection::pending("Planning", "blocked on spec review")
             }
             Phase::PlanningRunning => PipelineSection::running(

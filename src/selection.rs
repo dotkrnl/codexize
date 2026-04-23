@@ -139,6 +139,43 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     (statuses, errors)
 }
 
+/// Select a reviewer excluding all previously used models.
+/// Prefers a vendor not yet used; falls back to any unused model.
+/// Returns None only if every available model has already reviewed.
+pub fn select_for_review<'a>(
+    models: &'a [ModelStatus],
+    used: &[crate::state::PhaseModel],
+) -> Option<&'a ModelStatus> {
+    let used_vendors: Vec<VendorKind> = used.iter()
+        .filter_map(|r| str_to_vendor(&r.vendor))
+        .collect();
+    let used_names: Vec<&str> = used.iter().map(|r| r.model.as_str()).collect();
+
+    // 1. Different vendor AND different model
+    let fresh_vendor: Vec<&ModelStatus> = models.iter()
+        .filter(|m| !used_vendors.contains(&m.vendor) && !used_names.contains(&m.name.as_str()))
+        .collect();
+    if let Some(m) = weighted_sample(&fresh_vendor, TaskKind::Review) {
+        return Some(m);
+    }
+
+    // 2. Same vendor but different model
+    let fresh_model: Vec<&ModelStatus> = models.iter()
+        .filter(|m| !used_names.contains(&m.name.as_str()))
+        .collect();
+    weighted_sample(&fresh_model, TaskKind::Review)
+}
+
+fn str_to_vendor(s: &str) -> Option<VendorKind> {
+    match s {
+        "claude" => Some(VendorKind::Claude),
+        "codex"  => Some(VendorKind::Codex),
+        "gemini" => Some(VendorKind::Gemini),
+        "kimi"   => Some(VendorKind::Kimi),
+        _        => None,
+    }
+}
+
 /// Select excluding a specific vendor — tries a different vendor first.
 /// Falls back to same vendor (excluding the specific model) if nothing else available.
 /// Falls back to any model if all else fails.

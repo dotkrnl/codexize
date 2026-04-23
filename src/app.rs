@@ -183,6 +183,10 @@ impl App {
                 }
                 false
             }
+            KeyCode::Char('e') => {
+                self.open_editable_artifact();
+                false
+            }
             KeyCode::Char('t') => {
                 self.toggle_transcript();
                 false
@@ -269,6 +273,35 @@ impl App {
 
     fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+    }
+
+    fn editable_artifact(&self) -> Option<std::path::PathBuf> {
+        let run_dir = state::run_dir(&self.state.run_id);
+        let artifacts = run_dir.join("artifacts");
+        let path = match self.state.current_phase {
+            Phase::BrainstormRunning
+            | Phase::SpecReviewRunning => artifacts.join("spec.md"),
+            Phase::PlanningRunning
+            | Phase::PlanReviewRunning
+            | Phase::AwaitingPlanApproval => artifacts.join("plan.md"),
+            Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
+                run_dir.join("rounds").join(format!("{r:03}")).join("task.md")
+            }
+            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser => return None,
+        };
+        if path.exists() { Some(path) } else { None }
+    }
+
+    fn open_editable_artifact(&self) {
+        let Some(path) = self.editable_artifact() else { return };
+        let path_str = path.display().to_string();
+        // Open in a new tmux window; window closes when vim exits
+        let _ = std::process::Command::new("tmux")
+            .args(["new-window", "-n", "[Edit]", &format!("vim {path_str}")])
+            .output();
+        let _ = std::process::Command::new("tmux")
+            .args(["select-window", "-t", "[Edit]"])
+            .output();
     }
 
     fn can_go_back(&self) -> bool {
@@ -443,7 +476,10 @@ impl App {
                 self.tmux.session_name, self.tmux.window_index, self.tmux.window_name
             )),
             Span::styled(
-                " | Up/Down Enter t PgUp/PgDn b q",
+                {
+                    let e = if self.editable_artifact().is_some() { " e" } else { "" };
+                    format!(" | Up/Down Enter t PgUp/PgDn b{e} q")
+                },
                 Style::default().fg(Color::DarkGray),
             ),
         ]))

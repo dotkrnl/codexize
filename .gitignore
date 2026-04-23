@@ -2,3 +2,4 @@
 .superpowers/
 .codexize/
 .DS_Store
+/target/

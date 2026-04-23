@@ -36,7 +36,7 @@ impl AgentAdapter for CodexAdapter {
 
     fn window_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
-            r#"codex -m {model} "$(cat {prompt_path})""#,
+            r#"codex --yolo -m {model} "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -56,12 +56,10 @@ impl AgentAdapter for ClaudeAdapter {
             .unwrap_or(false)
     }
 
-    fn window_command(&self, _model: &str, prompt_path: &str) -> String {
-        // Claude Code does not accept a per-invocation model flag in interactive
-        // mode; it uses whatever is configured. The model selection still
-        // determines which vendor is chosen.
+    fn window_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
-            r#"claude --dangerously-skip-permissions "$(cat {prompt_path})""#,
+            r#"claude --dangerously-skip-permissions --model {model} "$(cat {prompt_path})""#,
+            model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
     }

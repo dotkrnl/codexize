@@ -648,13 +648,12 @@ fn live_map_direct<T: LiveModelLike>(models: Vec<T>) -> BTreeMap<String, Option<
 }
 
 fn live_map_kimi(models: Vec<kimi::LiveModel>) -> BTreeMap<String, Option<u8>> {
-    let mut mapped = live_map_direct(models);
-    if let Some(quota) = mapped.get("kimi-latest").copied().flatten().or_else(|| mapped.get("kimi").copied().flatten()) {
-        mapped.insert("kimi-latest".to_string(), Some(quota));
-        mapped.insert("kimi-code".to_string(), Some(quota));
-        mapped.insert("kimi-for-coding".to_string(), Some(quota));
-    }
-    mapped
+    // Kimi only has one effective model (kimi-latest); expose it under that
+    // canonical name regardless of what the API returns.
+    let quota = models
+        .into_iter()
+        .find_map(|m| m.quota_percent);
+    BTreeMap::from([("kimi-latest".to_string(), quota)])
 }
 
 trait LiveModelLike {

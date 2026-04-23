@@ -75,16 +75,16 @@ impl App {
         let current = current_section_index(&sections);
 
         // Load cached models immediately so the UI is populated on first frame
-        let (models, model_refresh) = match cache::load() {
-            Some((cached, expired)) => {
+        let (models, quota_errors, model_refresh) = match cache::load() {
+            Some((cached, errors, expired)) => {
                 let refresh = if expired {
                     ModelRefreshState::Fetching(spawn_refresh())
                 } else {
                     ModelRefreshState::Idle(Instant::now())
                 };
-                (cached, refresh)
+                (cached, errors, refresh)
             }
-            None => (Vec::new(), ModelRefreshState::Fetching(spawn_refresh())),
+            None => (Vec::new(), Vec::new(), ModelRefreshState::Fetching(spawn_refresh())),
         };
 
         Self {
@@ -102,7 +102,7 @@ impl App {
             input_buffer: String::new(),
             confirm_back: false,
             window_launched: false,
-            quota_errors: Vec::new(),
+            quota_errors,
             quota_retry_delay: Duration::from_secs(60),
         }
     }
@@ -634,11 +634,11 @@ impl App {
                 let stupid_level = model
                     .stupid_level
                     .map(|v| format!("{v:>2}"))
-                    .unwrap_or_else(|| "--".to_string());
+                    .unwrap_or_else(|| " -".to_string());
                 let quota = model
                     .quota_percent
                     .map(|v| format!("{v:>3}%"))
-                    .unwrap_or_else(|| " --".to_string());
+                    .unwrap_or_else(|| " --%".to_string());
 
                 // Vendor tag only on first row of each group; blank pad on rest
                 let tag_span = if i == 0 {
@@ -937,7 +937,7 @@ impl App {
         match &self.model_refresh {
             ModelRefreshState::Fetching(rx) => {
                 if let Ok((models, errors)) = rx.try_recv() {
-                    let _ = cache::save(&models);
+                    let _ = cache::save(&models, &errors);
                     self.models = models;
                     if errors.is_empty() {
                         self.quota_retry_delay = Duration::from_secs(60);

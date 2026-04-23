@@ -1,4 +1,4 @@
-use crate::selection::{ModelStatus, VendorKind};
+use crate::selection::{ModelStatus, QuotaError, VendorKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -7,10 +7,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const TTL: Duration = Duration::from_secs(30 * 60);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 struct CachedModels {
-    saved_at: u64, // unix seconds
+    saved_at: u64,
     models: Vec<CachedModel>,
+    #[serde(default)]
+    quota_errors: Vec<CachedQuotaError>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedQuotaError {
+    vendor: String,
+    message: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -49,7 +57,7 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-pub fn load() -> Option<(Vec<ModelStatus>, bool)> {
+pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
     let path = cache_path();
     let text = fs::read_to_string(&path).ok()?;
     let cached: CachedModels = serde_json::from_str(&text).ok()?;
@@ -83,10 +91,19 @@ pub fn load() -> Option<(Vec<ModelStatus>, bool)> {
         return None;
     }
 
-    Some((models, expired))
+    let errors = cached
+        .quota_errors
+        .into_iter()
+        .filter_map(|e| {
+            let vendor = parse_vendor(&e.vendor)?;
+            Some(QuotaError { vendor, message: e.message })
+        })
+        .collect();
+
+    Some((models, errors, expired))
 }
 
-pub fn save(models: &[ModelStatus]) -> Result<()> {
+pub fn save(models: &[ModelStatus], errors: &[QuotaError]) -> Result<()> {
     let path = cache_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("failed to create cache directory")?;
@@ -109,6 +126,13 @@ pub fn save(models: &[ModelStatus]) -> Result<()> {
                 planning_weight: m.planning_weight,
                 build_weight: m.build_weight,
                 review_weight: m.review_weight,
+            })
+            .collect(),
+        quota_errors: errors
+            .iter()
+            .map(|e| CachedQuotaError {
+                vendor: vendor_str(e.vendor).to_string(),
+                message: e.message.clone(),
             })
             .collect(),
     };

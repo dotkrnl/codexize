@@ -449,7 +449,8 @@ fn selection_probability(
     quota_percent: Option<u8>,
     axes: &[&str],
 ) -> f64 {
-    let quota_weight = quota_percent.unwrap_or(0) as f64 / 100.0;
+    // Assume 50% when quota is not available so unprobed models still participate
+    let quota_weight = quota_percent.unwrap_or(50) as f64 / 100.0;
     if quota_weight <= 0.0 {
         return 0.0;
     }

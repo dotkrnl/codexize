@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{AgentRun, CodexAdapter, launch_in_window},
+    adapters::{AgentRun, CodexAdapter, launch_interactive},
     cache,
     selection::{self, ModelStatus, VendorKind},
     state::{self, Phase, RunState},
@@ -326,7 +326,7 @@ impl App {
             artifact_paths: vec![spec_path.clone()],
         };
 
-        match launch_in_window("[Brainstorm]", &run, &CodexAdapter) {
+        match launch_interactive("[Brainstorm]", &run, &CodexAdapter) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
@@ -944,7 +944,7 @@ fn build_sections(state: &RunState) -> Vec<PipelineSection> {
 
 fn brainstorm_prompt(idea: &str, spec_path: &str) -> String {
     format!(
-        r#"You are a senior software architect doing a brainstorm session.
+        r#"You are a senior software architect running a brainstorm session with the operator.
 
 The operator has described the following idea:
 
@@ -952,18 +952,19 @@ The operator has described the following idea:
 {idea}
 ---
 
-Your task:
-1. Explore the idea thoroughly — identify goals, constraints, risks, and open questions.
-2. Propose a clear technical approach.
-3. Write a concise spec to: {spec_path}
+Your job is to produce a tight spec at: {spec_path}
 
-The spec must be a markdown file covering:
-- Purpose and goals
-- Non-negotiable constraints
-- Key design decisions and rationale
-- Open risks
+**How to work:**
+1. Start by asking the operator focused clarifying questions — goals, constraints, non-negotiables, what success looks like. Ask them one batch at a time, not one by one.
+2. Listen to the answers and probe anything still unclear.
+3. Once you have enough to write a good spec, tell the operator and ask for their go-ahead.
+4. Write the spec to {spec_path} as a markdown file covering:
+   - Purpose and goals
+   - Non-negotiable constraints
+   - Key design decisions and rationale
+   - Open risks
 
-Write the spec now. Do not ask clarifying questions — make reasonable assumptions and note them.
+Do not write the spec until you have asked your questions and received answers. The operator is here and ready to respond.
 "#
     )
 }

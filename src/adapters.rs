@@ -59,16 +59,6 @@ pub fn launch_interactive(
         bail!("tmux new-window failed");
     }
 
-    // Switch operator to the new window immediately
-    let status = Command::new("tmux")
-        .args(["select-window", "-t", window_name])
-        .status()
-        .context("failed to switch to tmux window")?;
-
-    if !status.success() {
-        bail!("tmux select-window failed");
-    }
-
     Ok(())
 }
 

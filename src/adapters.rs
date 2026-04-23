@@ -69,9 +69,12 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // --verbose forces interim progress to stdout instead of buffering
+        // Claude's --print text mode does not emit partial chunks — only the
+        // final response. stream-json + --include-partial-messages is the
+        // only way to get live token streaming; pipe through jq to recover
+        // plain text. Reading the prompt from stdin avoids ARG_MAX issues.
         format!(
-            r#"claude --dangerously-skip-permissions --print --verbose --model {model} "$(cat {prompt_path})""#,
+            r#"claude --dangerously-skip-permissions --print --output-format stream-json --include-partial-messages --verbose --model {model} < {prompt_path} | jq -jr --unbuffered '(.delta.text // .message.content[0].text // empty)'"#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )

@@ -48,6 +48,14 @@ pub fn current_context() -> Result<TmuxContext> {
     })
 }
 
+pub fn window_exists(name: &str) -> bool {
+    Command::new("tmux")
+        .args(["select-window", "-t", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 pub fn create_window(name: &str, command: &str) -> Result<()> {
     let status = Command::new("tmux")
         .args(["new-window", "-n", name, command])

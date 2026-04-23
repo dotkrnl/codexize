@@ -3,7 +3,7 @@ use crate::{
     cache,
     selection::{self, ModelStatus, VendorKind},
     state::{self, Phase, RunState},
-    tmux::TmuxContext,
+    tmux::{self, TmuxContext},
     tui::AppTerminal,
 };
 use anyhow::Result;
@@ -104,6 +104,7 @@ impl App {
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         loop {
             self.refresh_models_if_due();
+            self.poll_agent_window();
             terminal.draw(|frame| self.draw(frame))?;
 
             if event::poll(Duration::from_millis(250))? {
@@ -215,6 +216,17 @@ impl App {
                         return false;
                     }
 
+                    // BrainstormRunning + error: retry
+                    if self.state.current_phase == Phase::BrainstormRunning
+                        && self.state.agent_error.is_some()
+                    {
+                        self.input_buffer.clear();
+                        self.input_mode = false;
+                        let idea = self.state.idea_text.clone().unwrap_or_default();
+                        self.launch_brainstorm(idea);
+                        return false;
+                    }
+
                     self.sections[self.selected]
                         .transcript
                         .push(format!("> {trimmed}"));
@@ -242,7 +254,44 @@ impl App {
         self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
     }
 
+    fn poll_agent_window(&mut self) {
+        let (window_name, artifact_path, next_phase) = match self.state.current_phase {
+            Phase::BrainstormRunning => (
+                "[Brainstorm]",
+                state::run_dir(&self.state.run_id)
+                    .join("artifacts")
+                    .join("spec.md"),
+                Phase::SpecReviewRunning,
+            ),
+            _ => return,
+        };
+
+        // Window is still alive — nothing to do yet
+        if tmux::window_exists(window_name) {
+            return;
+        }
+
+        // Window is gone — check if the required artifact was produced
+        if artifact_path.exists() {
+            self.state.agent_error = None;
+            let _ = self.state.transition_to(next_phase);
+        } else {
+            let error = format!(
+                "agent window closed without producing {}",
+                artifact_path.display()
+            );
+            self.state.agent_error = Some(error);
+            let _ = self.state.save();
+        }
+
+        self.sections = build_sections(&self.state);
+        self.section_scroll.resize(self.sections.len(), usize::MAX);
+        self.selected = current_section_index(&self.sections);
+    }
+
     fn launch_brainstorm(&mut self, idea: String) {
+        self.state.agent_error = None;
+
         // Pick best available Codex model by build rank; fall back to default
         let model = self
             .models
@@ -790,17 +839,35 @@ fn build_sections(state: &RunState) -> Vec<PipelineSection> {
         },
         match phase {
             Phase::IdeaInput => PipelineSection::pending("Brainstorm", "waiting for idea"),
-            Phase::BrainstormRunning => PipelineSection::running(
-                "Brainstorm",
-                "agent running in [Brainstorm] window",
-                vec![
-                    format!(
-                        "model: {}",
-                        state.selected_model.as_deref().unwrap_or("unknown")
-                    ),
-                    "waiting for spec.md artifact".to_string(),
-                ],
-            ),
+            Phase::BrainstormRunning => {
+                if let Some(err) = &state.agent_error {
+                    PipelineSection::waiting_user(
+                        "Brainstorm",
+                        "agent failed — retry?",
+                        vec![
+                            format!("error: {err}"),
+                            format!(
+                                "model: {}",
+                                state.selected_model.as_deref().unwrap_or("unknown")
+                            ),
+                        ],
+                        Vec::<String>::new(),
+                        "press Enter to retry brainstorm",
+                    )
+                } else {
+                    PipelineSection::running(
+                        "Brainstorm",
+                        "agent running in [Brainstorm] window",
+                        vec![
+                            format!(
+                                "model: {}",
+                                state.selected_model.as_deref().unwrap_or("unknown")
+                            ),
+                            "waiting for spec.md artifact".to_string(),
+                        ],
+                    )
+                }
+            }
             _ => PipelineSection::done(
                 "Brainstorm",
                 "spec written",

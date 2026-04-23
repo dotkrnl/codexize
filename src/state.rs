@@ -52,6 +52,8 @@ pub struct RunState {
     pub idea_text: Option<String>,
     #[serde(default)]
     pub selected_model: Option<String>,
+    #[serde(default)]
+    pub agent_error: Option<String>,
 }
 
 impl RunState {
@@ -61,6 +63,7 @@ impl RunState {
             current_phase: Phase::IdeaInput,
             idea_text: None,
             selected_model: None,
+            agent_error: None,
         }
     }
 

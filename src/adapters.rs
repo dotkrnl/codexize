@@ -59,6 +59,15 @@ pub fn launch_interactive(
         bail!("tmux new-window failed");
     }
 
+    let status = Command::new("tmux")
+        .args(["select-window", "-t", window_name])
+        .status()
+        .context("failed to switch to agent window")?;
+
+    if !status.success() {
+        bail!("tmux select-window failed");
+    }
+
     Ok(())
 }
 

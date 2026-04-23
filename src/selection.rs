@@ -1,5 +1,7 @@
 use crate::{claude, codex, gemini, kimi};
 use std::collections::BTreeMap;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +39,15 @@ impl VendorKind {
             Self::Codex => codex::REFRESH_INTERVAL,
             Self::Gemini => gemini::REFRESH_INTERVAL,
             Self::Kimi => kimi::REFRESH_INTERVAL,
+        }
+    }
+
+    fn sort_key(self) -> u8 {
+        match self {
+            Self::Codex => 0,
+            Self::Claude => 1,
+            Self::Gemini => 2,
+            Self::Kimi => 3,
         }
     }
 }
@@ -101,12 +112,47 @@ impl ModelStatus {
 
 pub fn load_all_models() -> Vec<ModelStatus> {
     let mut all = Vec::new();
-    all.extend(load_codex_models());
-    all.extend(load_claude_models());
-    all.extend(load_gemini_models());
-    all.extend(load_kimi_models());
+    for (_, mut models) in load_models_for_vendors(&[
+        VendorKind::Codex,
+        VendorKind::Claude,
+        VendorKind::Gemini,
+        VendorKind::Kimi,
+    ]) {
+        all.append(&mut models);
+    }
     all.sort_by(|left, right| left.name.cmp(&right.name));
     all
+}
+
+pub fn load_models_for_vendor(vendor: VendorKind) -> Vec<ModelStatus> {
+    match vendor {
+        VendorKind::Claude => load_claude_models(),
+        VendorKind::Codex => load_codex_models(),
+        VendorKind::Gemini => load_gemini_models(),
+        VendorKind::Kimi => load_kimi_models(),
+    }
+}
+
+pub fn load_models_for_vendors(vendors: &[VendorKind]) -> Vec<(VendorKind, Vec<ModelStatus>)> {
+    let (tx, rx) = mpsc::channel();
+
+    thread::scope(|scope| {
+        for vendor in vendors.iter().copied() {
+            let tx = tx.clone();
+            scope.spawn(move || {
+                let _ = tx.send((vendor, load_models_for_vendor(vendor)));
+            });
+        }
+        drop(tx);
+
+        let mut loaded = Vec::with_capacity(vendors.len());
+        for item in rx {
+            loaded.push(item);
+        }
+
+        loaded.sort_by_key(|(vendor, _)| vendor.sort_key());
+        loaded
+    })
 }
 
 pub fn load_codex_models() -> Vec<ModelStatus> {

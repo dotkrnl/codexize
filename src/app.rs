@@ -609,30 +609,35 @@ impl App {
 
     fn refresh_models_if_due(&mut self) {
         let mut all_models = self.models.clone();
-        let mut any_refresh = false;
+        let due_vendors = self
+            .vendor_refreshes
+            .iter()
+            .filter(|vendor_refresh| vendor_refresh.is_due())
+            .map(|vendor_refresh| vendor_refresh.vendor)
+            .collect::<Vec<_>>();
 
-        for vendor_refresh in &mut self.vendor_refreshes {
-            if !vendor_refresh.is_due() {
-                continue;
-            }
+        if due_vendors.is_empty() {
+            return;
+        }
 
-            let vendor_models = match vendor_refresh.vendor {
-                VendorKind::Claude => selection::load_claude_models(),
-                VendorKind::Codex => selection::load_codex_models(),
-                VendorKind::Gemini => selection::load_gemini_models(),
-                VendorKind::Kimi => selection::load_kimi_models(),
-            };
+        let refreshed = selection::load_models_for_vendors(&due_vendors);
+        let refreshed_at = Instant::now();
 
-            vendor_refresh.last_refresh = Some(Instant::now());
-            any_refresh = true;
-            all_models.retain(|model| model.vendor != vendor_refresh.vendor);
+        for (vendor, vendor_models) in refreshed {
+            all_models.retain(|model| model.vendor != vendor);
             all_models.extend(vendor_models);
+
+            if let Some(vendor_refresh) = self
+                .vendor_refreshes
+                .iter_mut()
+                .find(|vendor_refresh| vendor_refresh.vendor == vendor)
+            {
+                vendor_refresh.last_refresh = Some(refreshed_at);
+            }
         }
 
-        if any_refresh {
-            all_models.sort_by(|left, right| left.name.cmp(&right.name));
-            self.models = all_models;
-        }
+        all_models.sort_by(|left, right| left.name.cmp(&right.name));
+        self.models = all_models;
     }
 
     fn can_focus_input(&self) -> bool {

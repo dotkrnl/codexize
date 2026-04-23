@@ -415,11 +415,7 @@ impl App {
         self.state.agent_error = None;
 
         // Pick best available Codex model by build rank; fall back to default
-        let chosen = self
-            .models
-            .iter()
-            .filter(|m| m.vendor == VendorKind::Codex && m.quota_percent.unwrap_or(0) > 0)
-            .min_by_key(|m| m.build_rank)
+        let chosen = selection::select(&self.models, selection::TaskKind::Build)
             .map(|m| (m.name.clone(), vendor_tag(m.vendor).to_string()))
             .unwrap_or_else(|| ("o4-mini".to_string(), "codex".to_string()));
         let (model, vendor) = chosen;

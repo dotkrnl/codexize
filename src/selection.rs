@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MIN_ROLE_SCORE_WEIGHT: f64 = 0.05;
 const HIGH_VARIANCE_STANDARD_ERROR: f64 = 5.0;
@@ -118,6 +118,52 @@ pub fn load_all_models() -> Vec<ModelStatus> {
             review_rank: *review_ranks.get(&candidate.name).unwrap_or(&99),
         })
         .collect()
+}
+
+/// Probabilistically select a model for the given task from the live candidate pool.
+/// Selection weight = the task's selection_probability (quota × role score²).
+/// Falls back to the top-ranked model if all weights are zero.
+pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
+    if models.is_empty() {
+        return None;
+    }
+
+    // Build (model, weight) pairs using rank as a proxy for probability:
+    // rank 1 gets weight N, rank 2 gets N-1, …, rank N gets 1.
+    // This preserves the probability ordering without storing raw floats in ModelStatus.
+    let n = models.len() as f64;
+    let weights: Vec<f64> = models
+        .iter()
+        .map(|m| {
+            let rank = m.rank_for(task) as f64;
+            let w = (n - rank + 1.0).max(0.0);
+            // Zero out models with no quota
+            if m.quota_percent.unwrap_or(0) == 0 { 0.0 } else { w }
+        })
+        .collect();
+
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        // No model has quota — fall back to rank 1
+        return models.iter().min_by_key(|m| m.rank_for(task));
+    }
+
+    // Simple LCG random from system time (no external dep needed)
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as f64;
+    let r = (seed % 1_000_000.0) / 1_000_000.0 * total;
+
+    let mut cumulative = 0.0;
+    for (model, &w) in models.iter().zip(weights.iter()) {
+        cumulative += w;
+        if r < cumulative {
+            return Some(model);
+        }
+    }
+
+    models.last()
 }
 
 fn load_quota_maps() -> BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> {

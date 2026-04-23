@@ -1425,23 +1425,23 @@ fn vendor_from_str(s: &str) -> Option<VendorKind> {
 
 fn spec_review_prompt(spec_path: &str, review_path: &str) -> String {
     format!(
-        r#"Invoke your brainstorming skill now — specifically its spec review mode.
+        r#"You are reviewing a spec written by another agent. This is a NON-INTERACTIVE run —
+the operator is NOT available. Do not ask clarifying questions; make your best
+judgement based only on the spec. Do NOT modify any code in the repository; write
+ONLY the review file.
 
-You are reviewing a spec written by another agent. Read the spec at:
+Read the spec at:
 {spec_path}
 
 Your task:
 1. Read the spec carefully.
-2. Ask the operator clarifying questions if anything is ambiguous or underspecified.
-3. Evaluate: is the spec clear, complete, and buildable? What risks or gaps do you see?
-4. Write your review to: {review_path}
+2. Evaluate: is the spec clear, complete, and buildable? What risks or gaps do you see?
+3. Write your review to: {review_path}
 
 The review must cover:
 - Overall verdict (approve / approve-with-changes / reject)
 - Specific issues found (if any), each with a suggested fix
 - Open risks the spec does not address
-
-The operator is here and ready to discuss.
 "#
     )
 }
@@ -1458,6 +1458,10 @@ The idea to brainstorm:
 
 When the brainstorming skill asks you to write the design doc, write it to:
 {spec_path}
+
+IMPORTANT: this is a spec-only phase. Do NOT write or modify any code in the
+repository. Your only output should be the spec file. Implementation happens
+in a later phase.
 
 The operator is here and ready to respond to your questions.
 "#

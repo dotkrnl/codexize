@@ -67,7 +67,10 @@ enum SectionStatus {
 
 #[derive(Debug)]
 enum ModelRefreshState {
-    Fetching(mpsc::Receiver<(Vec<ModelStatus>, Vec<QuotaError>)>),
+    Fetching {
+        rx: mpsc::Receiver<(Vec<ModelStatus>, Vec<QuotaError>)>,
+        started_at: Instant,
+    },
     Idle(Instant),
 }
 
@@ -81,13 +84,13 @@ impl App {
         let (models, quota_errors, model_refresh) = match cache::load() {
             Some((cached, errors, expired)) => {
                 let refresh = if expired {
-                    ModelRefreshState::Fetching(spawn_refresh())
+                    ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() }
                 } else {
                     ModelRefreshState::Idle(Instant::now())
                 };
                 (cached, errors, refresh)
             }
-            None => (Vec::new(), Vec::new(), ModelRefreshState::Fetching(spawn_refresh())),
+            None => (Vec::new(), Vec::new(), ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() }),
         };
 
         Self {
@@ -307,7 +310,7 @@ impl App {
     }
 
     fn force_refresh_models(&mut self) {
-        self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+        self.model_refresh = ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() };
     }
 
     fn editable_artifact(&self) -> Option<std::path::PathBuf> {
@@ -792,7 +795,7 @@ impl App {
                         " — retrying...".to_string()
                     }
                 }
-                ModelRefreshState::Fetching(_) => " — retrying now".to_string(),
+                ModelRefreshState::Fetching { .. } => " — retrying now".to_string(),
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -1064,18 +1067,39 @@ impl App {
 
     fn refresh_models_if_due(&mut self) {
         match &self.model_refresh {
-            ModelRefreshState::Fetching(rx) => {
-                if let Ok((models, errors)) = rx.try_recv() {
-                    let _ = cache::save(&models, &errors);
-                    self.models = models;
-                    if errors.is_empty() {
-                        self.quota_retry_delay = Duration::from_secs(60);
-                    } else {
-                        // Exponential back-off, cap at TTL
-                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
+            ModelRefreshState::Fetching { rx, started_at } => {
+                match rx.try_recv() {
+                    Ok((models, errors)) => {
+                        // Preserve old models on failure: only replace if the
+                        // refresh returned real data
+                        if !models.is_empty() {
+                            self.models = models;
+                            let _ = cache::save(&self.models, &errors);
+                        }
+                        if errors.is_empty() {
+                            self.quota_retry_delay = Duration::from_secs(60);
+                        } else {
+                            self.quota_retry_delay =
+                                (self.quota_retry_delay * 2).min(cache::TTL);
+                        }
+                        self.quota_errors = errors;
+                        self.model_refresh = ModelRefreshState::Idle(Instant::now());
                     }
-                    self.quota_errors = errors;
-                    self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // Still running — but give up after 60s to avoid a
+                        // hung background thread freezing the refresh forever
+                        if started_at.elapsed() >= Duration::from_secs(60) {
+                            self.quota_retry_delay =
+                                (self.quota_retry_delay * 2).min(cache::TTL);
+                            self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // Background thread died without sending — treat as failure
+                        self.quota_retry_delay =
+                            (self.quota_retry_delay * 2).min(cache::TTL);
+                        self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                    }
                 }
             }
             ModelRefreshState::Idle(refreshed_at) => {
@@ -1085,7 +1109,10 @@ impl App {
                     self.quota_retry_delay
                 };
                 if refreshed_at.elapsed() >= due_after {
-                    self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+                    self.model_refresh = ModelRefreshState::Fetching {
+                        rx: spawn_refresh(),
+                        started_at: Instant::now(),
+                    };
                 }
             }
         }

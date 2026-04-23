@@ -5,7 +5,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -71,12 +71,29 @@ fn resolve_api_key() -> Result<String> {
             .as_secs_f64();
 
         if expires_at > 0.0 && expires_at < now + 60.0 {
-            // Token is expired or nearly expired — run kimi non-interactively
-            // to trigger a credential refresh, then re-read the file.
-            let _ = Command::new("kimi")
-                .args(["--yolo", "--print", ""])
+            // Token is expired or nearly expired — run kimi briefly to trigger
+            // a credential refresh. Close stdin so kimi sees EOF and exits;
+            // kill after 10s if it somehow keeps running.
+            if let Ok(mut child) = Command::new("kimi")
+                .args(["--yolo", "--print"])
                 .env("KIMI_CLI_NO_AUTO_UPDATE", "1")
-                .output();
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                loop {
+                    if matches!(child.try_wait(), Ok(Some(_))) {
+                        break;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
 
             // Re-read after potential refresh
             if let Ok(refreshed) = fs::read_to_string(&creds_file) {

@@ -944,27 +944,18 @@ fn build_sections(state: &RunState) -> Vec<PipelineSection> {
 
 fn brainstorm_prompt(idea: &str, spec_path: &str) -> String {
     format!(
-        r#"You are a senior software architect running a brainstorm session with the operator.
+        r#"Invoke your brainstorming skill now.
 
-The operator has described the following idea:
+The idea to brainstorm:
 
 ---
 {idea}
 ---
 
-Your job is to produce a tight spec at: {spec_path}
+When the brainstorming skill asks you to write the design doc, write it to:
+{spec_path}
 
-**How to work:**
-1. Start by asking the operator focused clarifying questions — goals, constraints, non-negotiables, what success looks like. Ask them one batch at a time, not one by one.
-2. Listen to the answers and probe anything still unclear.
-3. Once you have enough to write a good spec, tell the operator and ask for their go-ahead.
-4. Write the spec to {spec_path} as a markdown file covering:
-   - Purpose and goals
-   - Non-negotiable constraints
-   - Key design decisions and rationale
-   - Open risks
-
-Do not write the spec until you have asked your questions and received answers. The operator is here and ready to respond.
+The operator is here and ready to respond to your questions.
 "#
     )
 }

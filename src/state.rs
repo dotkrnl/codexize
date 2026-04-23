@@ -45,6 +45,12 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseModel {
+    pub model: String,
+    pub vendor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunState {
     pub run_id: String,
     pub current_phase: Phase,
@@ -54,6 +60,9 @@ pub struct RunState {
     pub selected_model: Option<String>,
     #[serde(default)]
     pub agent_error: Option<String>,
+    /// Model used per phase, keyed by phase label string
+    #[serde(default)]
+    pub phase_models: std::collections::BTreeMap<String, PhaseModel>,
 }
 
 impl RunState {
@@ -64,6 +73,7 @@ impl RunState {
             idea_text: None,
             selected_model: None,
             agent_error: None,
+            phase_models: std::collections::BTreeMap::new(),
         }
     }
 

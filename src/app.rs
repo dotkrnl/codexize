@@ -415,13 +415,14 @@ impl App {
         self.state.agent_error = None;
 
         // Pick best available Codex model by build rank; fall back to default
-        let model = self
+        let chosen = self
             .models
             .iter()
             .filter(|m| m.vendor == VendorKind::Codex && m.quota_percent.unwrap_or(0) > 0)
             .min_by_key(|m| m.build_rank)
-            .map(|m| m.name.clone())
-            .unwrap_or_else(|| "o4-mini".to_string());
+            .map(|m| (m.name.clone(), vendor_tag(m.vendor).to_string()))
+            .unwrap_or_else(|| ("o4-mini".to_string(), "codex".to_string()));
+        let (model, vendor) = chosen;
 
         let run_id = &self.state.run_id;
         let prompt_path = state::run_dir(run_id).join("prompts").join("brainstorm.md");
@@ -453,6 +454,10 @@ impl App {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
+                self.state.phase_models.insert(
+                    "brainstorm".to_string(),
+                    state::PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
                 self.window_launched = true;
                 self.sections = build_sections(&self.state, self.window_launched);
@@ -955,6 +960,14 @@ impl SectionStatus {
     }
 }
 
+fn phase_model_line(state: &RunState, phase: &str) -> Vec<String> {
+    state
+        .phase_models
+        .get(phase)
+        .map(|pm| vec![format!("model: {} ({})", pm.model, pm.vendor)])
+        .unwrap_or_default()
+}
+
 fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSection> {
     let phase = state.current_phase;
     vec![
@@ -1011,7 +1024,7 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             _ => PipelineSection::done(
                 "Brainstorm",
                 "spec written",
-                Vec::<String>::new(),
+                phase_model_line(state, "brainstorm"),
                 Vec::<String>::new(),
             ),
         },
@@ -1027,7 +1040,7 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             _ => PipelineSection::done(
                 "Spec Review",
                 "review complete",
-                Vec::<String>::new(),
+                phase_model_line(state, "spec-review"),
                 Vec::<String>::new(),
             ),
         },
@@ -1043,7 +1056,7 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             _ => PipelineSection::done(
                 "Planning",
                 "plan drafted",
-                Vec::<String>::new(),
+                phase_model_line(state, "planning"),
                 Vec::<String>::new(),
             ),
         },

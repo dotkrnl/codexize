@@ -448,7 +448,8 @@ impl App {
             artifact_paths: vec![spec_path.clone()],
         };
 
-        match launch_interactive("[Brainstorm]", &run, &CodexAdapter) {
+        let fresh_start = self.state.current_phase == Phase::IdeaInput;
+        match launch_interactive("[Brainstorm]", &run, &CodexAdapter, fresh_start) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());

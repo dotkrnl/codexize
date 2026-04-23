@@ -493,12 +493,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "spec-review".to_string(),
-            role: "spec-review".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![review_path.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -596,12 +592,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "coder".to_string(),
-            role: "coder".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![commit_file.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -671,12 +663,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "reviewer".to_string(),
-            role: "reviewer".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![review_path.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -738,12 +726,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "sharding".to_string(),
-            role: "sharding".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![tasks_path.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -810,12 +794,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "planning".to_string(),
-            role: "planning".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![plan_path.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -1081,12 +1061,8 @@ impl App {
         }
 
         let run = AgentRun {
-            run_id: run_id.clone(),
-            phase: "brainstorm".to_string(),
-            role: "brainstorm".to_string(),
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            artifact_paths: vec![spec_path.clone()],
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -1992,16 +1968,6 @@ fn builder_queue_lines(state: &RunState) -> Vec<String> {
         lines.push("  (no tasks loaded yet)".to_string());
     }
     lines
-}
-
-fn vendor_from_str(s: &str) -> Option<VendorKind> {
-    match s {
-        "claude" => Some(VendorKind::Claude),
-        "codex" => Some(VendorKind::Codex),
-        "gemini" => Some(VendorKind::Gemini),
-        "kimi" => Some(VendorKind::Kimi),
-        _ => None,
-    }
 }
 
 fn spec_review_prompt(spec_path: &str, review_path: &str) -> String {

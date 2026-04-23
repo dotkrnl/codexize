@@ -10,7 +10,7 @@ use std::{
 };
 
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
 
 #[derive(Debug, Clone)]
 pub struct LiveModel {

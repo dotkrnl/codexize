@@ -18,7 +18,7 @@ pub struct LiveModel {
     pub quota_percent: Option<u8>,
 }
 
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
 
 #[derive(Debug, Deserialize, Default)]
 struct CodexConfig {

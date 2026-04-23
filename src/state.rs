@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{BufRead, Write},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -133,29 +133,6 @@ impl RunState {
         fs::write(&path, text)
             .with_context(|| format!("failed to write run state to {}", path.display()))?;
         Ok(())
-    }
-
-    pub fn load_events(&self) -> Result<Vec<Event>> {
-        let path = run_dir(&self.run_id).join("events.jsonl");
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let file = fs::File::open(&path)?;
-        let reader = std::io::BufReader::new(file);
-        let mut events = Vec::new();
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let event: Event = serde_json::from_str(&line)
-                .with_context(|| format!("failed to parse event line: {}", line))?;
-            events.push(event);
-        }
-
-        Ok(events)
     }
 
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {

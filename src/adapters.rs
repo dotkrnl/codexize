@@ -5,12 +5,8 @@ use std::process::Command;
 use crate::selection::VendorKind;
 
 pub struct AgentRun {
-    pub run_id: String,
-    pub phase: String,
-    pub role: String,
     pub model: String,
     pub prompt_path: PathBuf,
-    pub artifact_paths: Vec<PathBuf>,
 }
 
 pub trait AgentAdapter: Send + Sync {

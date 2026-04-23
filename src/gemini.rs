@@ -11,7 +11,7 @@ use std::{
 };
 
 const QUOTA_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
 
 #[derive(Debug, Clone)]
 pub struct LiveModel {

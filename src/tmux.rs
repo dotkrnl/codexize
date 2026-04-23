@@ -60,28 +60,4 @@ pub fn window_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn create_window(name: &str, command: &str) -> Result<()> {
-    let status = Command::new("tmux")
-        .args(["new-window", "-n", name, command])
-        .status()
-        .context("failed to run tmux new-window")?;
 
-    if !status.success() {
-        bail!("tmux new-window failed");
-    }
-
-    Ok(())
-}
-
-pub fn switch_to_window(name: &str) -> Result<()> {
-    let status = Command::new("tmux")
-        .args(["select-window", "-t", name])
-        .status()
-        .context("failed to run tmux select-window")?;
-
-    if !status.success() {
-        bail!("tmux select-window failed");
-    }
-
-    Ok(())
-}

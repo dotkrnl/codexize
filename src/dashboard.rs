@@ -6,7 +6,7 @@ use std::time::Duration;
 
 pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
 pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
 
 #[derive(Debug, Clone)]
 pub struct DashboardModel {

@@ -7,7 +7,7 @@ use std::{process::Command, time::Duration};
 const BASE_URL: &str = "https://api.anthropic.com";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const BETA_HEADER: &str = "oauth-2025-04-20";
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+
 
 #[derive(Debug, Clone)]
 pub struct LiveModel {

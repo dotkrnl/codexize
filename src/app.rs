@@ -179,7 +179,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame<'_>) {
-        let model_height = self.models.len() as u16 + 2;
+        let model_height = (self.models.len() as u16).max(1) + 2;
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -360,37 +360,73 @@ impl App {
     }
 
     fn model_strip(&self) -> Paragraph<'static> {
-        let lines = self
-            .models
-            .iter()
-            .map(|model| {
+        // Group models by vendor, preserving existing order within each vendor
+        let mut vendor_order: Vec<VendorKind> = Vec::new();
+        let mut by_vendor: std::collections::BTreeMap<VendorKind, Vec<&ModelStatus>> =
+            std::collections::BTreeMap::new();
+        for model in &self.models {
+            if !vendor_order.contains(&model.vendor) {
+                vendor_order.push(model.vendor);
+            }
+            by_vendor.entry(model.vendor).or_default().push(model);
+        }
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for vendor in &vendor_order {
+            let tag = vendor_tag(*vendor);
+            let tag_color = vendor_color(*vendor);
+            let prefix = vendor_prefix(*vendor);
+            let models = &by_vendor[vendor];
+
+            for (i, model) in models.iter().enumerate() {
+                let short_name = model
+                    .name
+                    .strip_prefix(prefix)
+                    .unwrap_or(&model.name)
+                    .to_string();
+
                 let stupid_level = model
                     .stupid_level
-                    .map(|value| format!("{value:>2}"))
+                    .map(|v| format!("{v:>2}"))
                     .unwrap_or_else(|| "--".to_string());
-                let quota_percent = model
+                let quota = model
                     .quota_percent
-                    .map(|value| format!("{value:>3}%"))
-                    .unwrap_or_else(|| "--%".to_string());
+                    .map(|v| format!("{v:>3}%"))
+                    .unwrap_or_else(|| " --".to_string());
 
-                Line::from(vec![
+                // Vendor tag only on first row of each group; blank pad on rest
+                let tag_span = if i == 0 {
                     Span::styled(
-                        format!("{:<20}", model.name),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
+                        format!("{:<6}", tag),
+                        Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw("      ")
+                };
+
+                lines.push(Line::from(vec![
+                    tag_span,
+                    Span::styled(
+                        format!("{:<28}", short_name),
+                        Style::default().fg(Color::Cyan),
                     ),
-                    Span::raw(": "),
                     Span::styled(stupid_level, Style::default().fg(Color::Yellow)),
-                    Span::raw(" "),
-                    Span::styled(quota_percent, Style::default().fg(Color::Green)),
-                    Span::raw(format!(
-                        " I:{:>2} P:{:>2} B:{:>2} R:{:>2}",
-                        model.idea_rank, model.planning_rank, model.build_rank, model.review_rank
-                    )),
-                ])
-            })
-            .collect::<Vec<_>>();
+                    Span::raw("  "),
+                    Span::styled(quota, Style::default().fg(Color::Green)),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!(
+                            "I:{:>2} P:{:>2} B:{:>2} R:{:>2}",
+                            model.idea_rank,
+                            model.planning_rank,
+                            model.build_rank,
+                            model.review_rank
+                        ),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
 
         Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))
     }
@@ -735,6 +771,33 @@ impl VendorRefresh {
         self.last_refresh
             .map(|instant| instant.elapsed() >= self.vendor.refresh_interval())
             .unwrap_or(true)
+    }
+}
+
+fn vendor_tag(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Claude => "claude",
+        VendorKind::Codex => "codex",
+        VendorKind::Gemini => "gemini",
+        VendorKind::Kimi => "kimi",
+    }
+}
+
+fn vendor_color(vendor: VendorKind) -> Color {
+    match vendor {
+        VendorKind::Claude => Color::Magenta,
+        VendorKind::Codex => Color::Green,
+        VendorKind::Gemini => Color::Blue,
+        VendorKind::Kimi => Color::Yellow,
+    }
+}
+
+fn vendor_prefix(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Claude => "claude-",
+        VendorKind::Codex => "gpt-",
+        VendorKind::Gemini => "gemini-",
+        VendorKind::Kimi => "kimi-",
     }
 }
 

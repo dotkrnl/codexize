@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{AgentRun, adapter_for_vendor, launch_interactive},
+    adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache,
     selection::{self, ModelStatus, QuotaError, VendorKind, select_preferring_different_vendor},
     state::{self, Phase, PhaseModel, RunState},
@@ -436,7 +436,7 @@ impl App {
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
-        match launch_interactive("[Spec Review]", &run, adapter.as_ref(), false) {
+        match launch_noninteractive("[Spec Review]", &run, adapter.as_ref()) {
             Ok(()) => {
                 // Record model now so the running section can show it;
                 // phase transition only happens in poll_agent_window after

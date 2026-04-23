@@ -13,12 +13,12 @@ pub struct AgentRun {
     pub artifact_paths: Vec<PathBuf>,
 }
 
-/// An adapter builds the shell command fragment that runs the agent interactively.
-/// `model` is the selected model name; some adapters ignore it if the CLI
-/// does not support per-invocation model selection.
 pub trait AgentAdapter: Send + Sync {
     fn detect(&self) -> bool;
-    fn window_command(&self, model: &str, prompt_path: &str) -> String;
+    /// Interactive command — agent keeps the session open for user input.
+    fn interactive_command(&self, model: &str, prompt_path: &str) -> String;
+    /// Non-interactive command — agent reads prompt, writes artifact, and exits.
+    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String;
 }
 
 // ── Codex ────────────────────────────────────────────────────────────────────
@@ -27,16 +27,22 @@ pub struct CodexAdapter;
 
 impl AgentAdapter for CodexAdapter {
     fn detect(&self) -> bool {
-        Command::new("codex")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("codex").arg("--version").output()
+            .map(|o| o.status.success()).unwrap_or(false)
     }
 
-    fn window_command(&self, model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
             r#"codex --yolo -m {model} "$(cat {prompt_path})""#,
+            model = shell_escape(model),
+            prompt_path = shell_escape(prompt_path),
+        )
+    }
+
+    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+        // codex exec reads prompt from stdin and exits when done
+        format!(
+            r#"codex exec -m {model} - < {prompt_path}"#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -49,16 +55,21 @@ pub struct ClaudeAdapter;
 
 impl AgentAdapter for ClaudeAdapter {
     fn detect(&self) -> bool {
-        Command::new("claude")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("claude").arg("--version").output()
+            .map(|o| o.status.success()).unwrap_or(false)
     }
 
-    fn window_command(&self, model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
             r#"claude --dangerously-skip-permissions --model {model} "$(cat {prompt_path})""#,
+            model = shell_escape(model),
+            prompt_path = shell_escape(prompt_path),
+        )
+    }
+
+    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+        format!(
+            r#"claude --dangerously-skip-permissions --print --model {model} "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -71,16 +82,20 @@ pub struct KimiAdapter;
 
 impl AgentAdapter for KimiAdapter {
     fn detect(&self) -> bool {
-        Command::new("kimi")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("kimi").arg("--version").output()
+            .map(|o| o.status.success()).unwrap_or(false)
     }
 
-    fn window_command(&self, _model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, _model: &str, prompt_path: &str) -> String {
         format!(
             r#"kimi --yolo -p "$(cat {prompt_path})""#,
+            prompt_path = shell_escape(prompt_path),
+        )
+    }
+
+    fn noninteractive_command(&self, _model: &str, prompt_path: &str) -> String {
+        format!(
+            r#"kimi --yolo --print -p "$(cat {prompt_path})""#,
             prompt_path = shell_escape(prompt_path),
         )
     }
@@ -92,16 +107,22 @@ pub struct GeminiAdapter;
 
 impl AgentAdapter for GeminiAdapter {
     fn detect(&self) -> bool {
-        Command::new("gemini")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        Command::new("gemini").arg("--version").output()
+            .map(|o| o.status.success()).unwrap_or(false)
     }
 
-    fn window_command(&self, model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
             r#"gemini --yolo -m {model} "$(cat {prompt_path})""#,
+            model = shell_escape(model),
+            prompt_path = shell_escape(prompt_path),
+        )
+    }
+
+    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+        // -p runs gemini in non-interactive (headless) mode
+        format!(
+            r#"gemini --yolo -m {model} -p "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -122,7 +143,6 @@ pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {
 // ── Launch ───────────────────────────────────────────────────────────────────
 
 /// Create a named tmux window running the agent interactively.
-/// The prompt file is injected via `$(cat <path>)` shell expansion.
 /// `switch`: if true, switch the operator to the new window immediately.
 pub fn launch_interactive(
     window_name: &str,
@@ -130,15 +150,36 @@ pub fn launch_interactive(
     adapter: &dyn AgentAdapter,
     switch: bool,
 ) -> Result<()> {
+    let prompt_path = run.prompt_path.to_string_lossy();
+    let cmd = adapter.interactive_command(&run.model, &prompt_path);
+    launch_in_window(window_name, &cmd, adapter, switch)
+}
+
+/// Create a named tmux window running the agent non-interactively.
+/// The window stays open after exit so the user can read the output.
+/// Never switches focus.
+pub fn launch_noninteractive(
+    window_name: &str,
+    run: &AgentRun,
+    adapter: &dyn AgentAdapter,
+) -> Result<()> {
+    let prompt_path = run.prompt_path.to_string_lossy();
+    let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
+    launch_in_window(window_name, &cmd, adapter, false)
+}
+
+fn launch_in_window(
+    window_name: &str,
+    agent_cmd: &str,
+    adapter: &dyn AgentAdapter,
+    switch: bool,
+) -> Result<()> {
     if !adapter.detect() {
         bail!("agent CLI not found — install it first");
     }
 
-    let prompt_path = run.prompt_path.to_string_lossy();
-    let agent_cmd = adapter.window_command(&run.model, &prompt_path);
-
     let shell_cmd = format!(
-        r#"{agent_cmd} || {{ echo; echo '--- agent exited, press enter to close ---'; read; }}"#,
+        r#"{agent_cmd}; echo; echo '--- done, press enter to close ---'; read"#,
     );
 
     let status = Command::new("tmux")

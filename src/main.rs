@@ -2,6 +2,7 @@ mod app;
 mod artifacts;
 mod claude;
 mod codex;
+mod dashboard;
 mod gemini;
 mod kimi;
 mod runner;

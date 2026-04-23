@@ -608,36 +608,23 @@ impl App {
     }
 
     fn refresh_models_if_due(&mut self) {
-        let mut all_models = self.models.clone();
-        let due_vendors = self
+        let due = self
             .vendor_refreshes
             .iter()
-            .filter(|vendor_refresh| vendor_refresh.is_due())
-            .map(|vendor_refresh| vendor_refresh.vendor)
-            .collect::<Vec<_>>();
+            .any(|vendor_refresh| vendor_refresh.is_due());
 
-        if due_vendors.is_empty() {
+        if !due {
             return;
         }
 
-        let refreshed = selection::load_models_for_vendors(&due_vendors);
+        let refreshed = selection::load_all_models();
         let refreshed_at = Instant::now();
 
-        for (vendor, vendor_models) in refreshed {
-            all_models.retain(|model| model.vendor != vendor);
-            all_models.extend(vendor_models);
-
-            if let Some(vendor_refresh) = self
-                .vendor_refreshes
-                .iter_mut()
-                .find(|vendor_refresh| vendor_refresh.vendor == vendor)
-            {
-                vendor_refresh.last_refresh = Some(refreshed_at);
-            }
+        for vendor_refresh in &mut self.vendor_refreshes {
+            vendor_refresh.last_refresh = Some(refreshed_at);
         }
 
-        all_models.sort_by(|left, right| left.name.cmp(&right.name));
-        self.models = all_models;
+        self.models = refreshed;
     }
 
     fn can_focus_input(&self) -> bool {

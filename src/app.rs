@@ -180,19 +180,23 @@ impl App {
                 false
             }
             KeyCode::Enter => {
-                // Phases that just need Enter pressed (no text input)
-                if self.state.current_phase == Phase::BrainstormRunning
-                    && (self.state.agent_error.is_some() || !self.window_launched)
-                {
-                    let idea = self.state.idea_text.clone().unwrap_or_default();
-                    self.launch_brainstorm(idea);
-                    return false;
-                }
-                if self.state.current_phase == Phase::SpecReviewRunning
-                    && (self.state.agent_error.is_some() || !self.window_launched)
-                {
-                    self.launch_spec_review();
-                    return false;
+                let on_current = self.selected == self.current_section();
+                // Phases that just need Enter pressed (no text input) —
+                // only fire when the user is focused on the active phase section
+                if on_current {
+                    if self.state.current_phase == Phase::BrainstormRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        let idea = self.state.idea_text.clone().unwrap_or_default();
+                        self.launch_brainstorm(idea);
+                        return false;
+                    }
+                    if self.state.current_phase == Phase::SpecReviewRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_spec_review();
+                        return false;
+                    }
                 }
                 if self.can_focus_input() {
                     self.input_mode = true;
@@ -379,6 +383,13 @@ impl App {
     fn launch_spec_review(&mut self) {
         self.state.agent_error = None;
 
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+
         let run_id = self.state.run_id.clone();
         let spec_path = state::run_dir(&run_id).join("artifacts").join("spec.md");
         let review_path = state::run_dir(&run_id).join("artifacts").join("spec-review.md");
@@ -493,10 +504,21 @@ impl App {
     fn launch_brainstorm(&mut self, idea: String) {
         self.state.agent_error = None;
 
-        // Pick best available Codex model by build rank; fall back to default
-        let chosen = selection::select(&self.models, selection::TaskKind::Build)
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+
+        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Build)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-            .unwrap_or_else(|| ("o4-mini".to_string(), VendorKind::Codex, "codex".to_string()));
+        else {
+            self.state.agent_error = Some("no model available with quota — check model strip".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        };
         let (model, vendor_kind, vendor) = chosen;
 
         let run_id = &self.state.run_id;

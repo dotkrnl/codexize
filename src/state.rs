@@ -14,9 +14,9 @@ pub enum Phase {
     SpecReviewPaused,
     PlanningRunning,
     ShardingRunning,
-    PlanReviewRunning,
-    AwaitingPlanApproval,
+    /// Coder agent is working on the current task in round N.
     ImplementationRound(u32),
+    /// Reviewer agent is checking the current task's work in round N.
     ReviewRound(u32),
     Done,
     BlockedNeedsUser,
@@ -31,10 +31,8 @@ impl Phase {
             Phase::SpecReviewPaused => "Spec Review".to_string(),
             Phase::PlanningRunning => "Planning".to_string(),
             Phase::ShardingRunning => "Sharding".to_string(),
-            Phase::PlanReviewRunning => "Plan Review".to_string(),
-            Phase::AwaitingPlanApproval => "Awaiting Approval".to_string(),
-            Phase::ImplementationRound(r) => format!("Implementation (Round {r})"),
-            Phase::ReviewRound(r) => format!("Review (Round {r})"),
+            Phase::ImplementationRound(r) => format!("Builder: coder r{r}"),
+            Phase::ReviewRound(r) => format!("Builder: reviewer r{r}"),
             Phase::Done => "Done".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
         }
@@ -54,6 +52,36 @@ pub struct PhaseModel {
     pub vendor: String,
 }
 
+/// Tracks the builder loop — which tasks are pending, done, what iteration
+/// we're on, and enough state to resume a killed session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BuilderState {
+    /// Task IDs still to do, in order.
+    #[serde(default)]
+    pub pending: Vec<u32>,
+    /// Task IDs already accepted (reviewer said "done").
+    #[serde(default)]
+    pub done: Vec<u32>,
+    /// The task being worked on right now (None between rounds or at end).
+    #[serde(default)]
+    pub current_task: Option<u32>,
+    /// Global iteration counter — one coder+reviewer cycle is one iteration.
+    #[serde(default)]
+    pub iteration: u32,
+    /// True if we've launched the coder for the current iteration at least
+    /// once — subsequent launches use the CLI's --continue flag to resume
+    /// the session rather than start fresh.
+    #[serde(default)]
+    pub coder_started: bool,
+    /// Same, for the reviewer.
+    #[serde(default)]
+    pub reviewer_started: bool,
+    /// Last reviewer verdict status ("done", "revise", "blocked") — used to
+    /// decide where to resume on restart.
+    #[serde(default)]
+    pub last_verdict: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunState {
     pub run_id: String,
@@ -70,6 +98,9 @@ pub struct RunState {
     /// All spec reviewers in order (may be multiple rounds)
     #[serde(default)]
     pub spec_reviewers: Vec<PhaseModel>,
+    /// Builder loop state (empty until sharding completes)
+    #[serde(default)]
+    pub builder: BuilderState,
 }
 
 impl RunState {
@@ -82,6 +113,7 @@ impl RunState {
             agent_error: None,
             phase_models: std::collections::BTreeMap::new(),
             spec_reviewers: Vec::new(),
+            builder: BuilderState::default(),
         }
     }
 

@@ -18,10 +18,6 @@ pub fn validate_phase_artifacts(run_id: &str, phase: state::Phase) -> Result<()>
         state::Phase::PlanningRunning => {
             validate_exists(&dir.join("plan.md"))?;
         }
-        state::Phase::PlanReviewRunning => {
-            validate_exists(&dir.join("plan-review-1.md"))?;
-            validate_exists(&dir.join("plan-review-2.md"))?;
-        }
         state::Phase::ImplementationRound(r) => {
             let round_dir = state::run_dir(run_id).join("rounds").join(format!("{:03}", r));
             validate_exists(&round_dir.join("commit.txt"))?;

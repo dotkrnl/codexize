@@ -1,6 +1,7 @@
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache,
+    review,
     selection::{self, ModelStatus, QuotaError, VendorKind, select_for_review},
     state::{self, Phase, PhaseModel, RunState},
     tasks,
@@ -224,6 +225,18 @@ impl App {
                         self.launch_sharding();
                         return false;
                     }
+                    if matches!(self.state.current_phase, Phase::ImplementationRound(_))
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_coder();
+                        return false;
+                    }
+                    if matches!(self.state.current_phase, Phase::ReviewRound(_))
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_reviewer();
+                        return false;
+                    }
                 }
                 if self.can_focus_input() {
                     self.input_mode = true;
@@ -338,9 +351,7 @@ impl App {
             Phase::BrainstormRunning
             | Phase::SpecReviewRunning
             | Phase::SpecReviewPaused => artifacts.join("spec.md"),
-            Phase::PlanningRunning
-            | Phase::PlanReviewRunning
-            | Phase::AwaitingPlanApproval => artifacts.join("plan.md"),
+            Phase::PlanningRunning => artifacts.join("plan.md"),
             Phase::ShardingRunning => artifacts.join("tasks.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
                 run_dir.join("rounds").join(format!("{r:03}")).join("task.md")
@@ -404,21 +415,13 @@ impl App {
                 self.state.phase_models.remove("sharding");
                 let _ = self.state.transition_to(Phase::PlanningRunning);
             }
-            Phase::PlanReviewRunning => {
-                kill_window("[Plan Review 1]");
-                kill_window("[Plan Review 2]");
-                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
-                let _ = fs::remove_file(artifacts.join("plan-review-2.md"));
-                let _ = self.state.transition_to(Phase::PlanningRunning);
-            }
-            Phase::AwaitingPlanApproval => {
-                let _ = self.state.transition_to(Phase::PlanReviewRunning);
-            }
             Phase::ImplementationRound(r) => {
                 kill_window(&format!("[Coder r{r}]"));
                 let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
-                    Phase::AwaitingPlanApproval
+                    // Rewind to Sharding so the user can adjust tasks.toml if needed
+                    self.state.builder = state::BuilderState::default();
+                    Phase::ShardingRunning
                 } else {
                     Phase::ReviewRound(r - 1)
                 };
@@ -516,6 +519,179 @@ impl App {
             }
             Err(e) => {
                 self.sections[self.selected].events.push(format!("failed to launch spec review: {e}"));
+            }
+        }
+    }
+
+    /// Ensure builder.current_task is set (pop the head of pending if needed)
+    /// and create the rounds/NNN directory. Returns the round number or None
+    /// if no tasks remain.
+    fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
+        if self.state.builder.current_task.is_none() {
+            if let Some(id) = self.state.builder.pending.first().copied() {
+                self.state.builder.pending.remove(0);
+                self.state.builder.current_task = Some(id);
+            } else {
+                return None;
+            }
+        }
+        self.state.builder.iteration = round;
+        let round_dir = state::run_dir(&self.state.run_id)
+            .join("rounds").join(format!("{round:03}"));
+        let _ = std::fs::create_dir_all(&round_dir);
+        self.state.builder.current_task
+    }
+
+    fn launch_coder(&mut self) {
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+        let Phase::ImplementationRound(r) = self.state.current_phase else { return };
+
+        let Some(task_id) = self.ensure_builder_task_for_round(r) else {
+            self.state.agent_error = Some("no pending tasks".to_string());
+            let _ = self.state.save();
+            return;
+        };
+
+        let run_id = self.state.run_id.clone();
+        let run_dir = state::run_dir(&run_id);
+        let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+        let task_file = round_dir.join("task.md");
+        let commit_file = round_dir.join("commit.txt");
+
+        // Write the task description file if not already present for this round
+        if !task_file.exists() {
+            let body = task_body_for(&run_dir, task_id).unwrap_or_else(|e| {
+                format!("(task body could not be loaded: {e})\n\nTask id: {task_id}\n")
+            });
+            let _ = std::fs::write(&task_file, body);
+        }
+
+        // Always start fresh by removing commit.txt (proof-of-completion signal)
+        let _ = std::fs::remove_file(&commit_file);
+
+        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Build)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let prompt_path = run_dir.join("prompts").join(format!("coder-r{r}.md"));
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let resume = self.state.builder.coder_started;
+        let prompt = coder_prompt(&run_dir, task_id, r, &task_file, &commit_file, resume);
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "coder".to_string(),
+            role: "coder".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![commit_file.clone()],
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        match launch_interactive(&format!("[Coder r{r}]"), &run, adapter.as_ref(), true) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    format!("coder-r{r}"),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                self.state.builder.coder_started = true;
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch coder: {e}"));
+            }
+        }
+    }
+
+    fn launch_reviewer(&mut self) {
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+        let Phase::ReviewRound(r) = self.state.current_phase else { return };
+        let Some(task_id) = self.state.builder.current_task else {
+            self.state.agent_error = Some("no current task".to_string());
+            let _ = self.state.save();
+            return;
+        };
+
+        let run_id = self.state.run_id.clone();
+        let run_dir = state::run_dir(&run_id);
+        let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+        let review_path = round_dir.join("review.toml");
+        let commit_file = round_dir.join("commit.txt");
+        let task_file = round_dir.join("task.md");
+
+        let _ = std::fs::remove_file(&review_path);
+
+        // Prefer a different vendor from the coder where possible
+        let coder_pm = self.state.phase_models.get(&format!("coder-r{r}")).cloned();
+        let excluded = coder_pm.into_iter().collect::<Vec<_>>();
+        let Some(chosen) = select_for_review(&self.models, &excluded)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available for review".to_string());
+            let _ = self.state.save();
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let prompt_path = run_dir.join("prompts").join(format!("reviewer-r{r}.md"));
+        let prompt = reviewer_prompt(&run_dir, task_id, r, &task_file, &commit_file, &review_path);
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "reviewer".to_string(),
+            role: "reviewer".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![review_path.clone()],
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        match launch_noninteractive(&format!("[Review r{r}]"), &run, adapter.as_ref()) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    format!("reviewer-r{r}"),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                self.state.builder.reviewer_started = true;
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch reviewer: {e}"));
             }
         }
     }
@@ -666,11 +842,20 @@ impl App {
             self.agent_line_count = 0;
             return;
         }
-        let window_name = match self.state.current_phase {
+        let window_name_owned;
+        let window_name: &str = match self.state.current_phase {
             Phase::BrainstormRunning => "[Brainstorm]",
             Phase::SpecReviewRunning => "[Spec Review]",
             Phase::PlanningRunning => "[Planning]",
             Phase::ShardingRunning => "[Sharding]",
+            Phase::ImplementationRound(r) => {
+                window_name_owned = format!("[Coder r{r}]");
+                &window_name_owned
+            }
+            Phase::ReviewRound(r) => {
+                window_name_owned = format!("[Review r{r}]");
+                &window_name_owned
+            }
             _ => return,
         };
         let output = std::process::Command::new("tmux")
@@ -709,8 +894,29 @@ impl App {
             Phase::ShardingRunning => (
                 "[Sharding]",
                 run_dir.join("artifacts").join("tasks.toml"),
-                Phase::AwaitingPlanApproval,
+                Phase::ImplementationRound(1),
             ),
+            Phase::ImplementationRound(r) => {
+                let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+                // Coder's "artifact" is the commit.txt written by the end-of-round
+                // script; if missing after the window closes we pause without
+                // advancing so the user can retry (session resumes via --continue).
+                (
+                    "[Coder]",
+                    round_dir.join("commit.txt"),
+                    Phase::ReviewRound(r),
+                )
+            }
+            Phase::ReviewRound(r) => {
+                let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+                (
+                    "[Reviewer]",
+                    round_dir.join("review.toml"),
+                    // Next phase decided by the review verdict below; placeholder
+                    // ImplementationRound(r+1) is refined after parsing review.
+                    Phase::ImplementationRound(r + 1),
+                )
+            }
             _ => return,
         };
 
@@ -722,15 +928,22 @@ impl App {
         // Window is gone — check if the required artifact was produced
         self.window_launched = false;
         if artifact_path.exists() {
-            // For Sharding, additionally validate the TOML structure before accepting
+            // For Sharding, validate TOML structure and seed the builder queue
             if self.state.current_phase == Phase::ShardingRunning {
                 match tasks::validate(&artifact_path) {
                     Ok(file) => {
                         self.state.agent_error = None;
-                        // Surface how many tasks were produced in the section events
-                        // by stashing a message in agent_error-free state; the done
-                        // header already shows the model so nothing else to do.
-                        let _ = file;
+                        // Initialise builder state from the validated tasks
+                        let ids: Vec<u32> = file.tasks.iter().map(|t| t.id).collect();
+                        self.state.builder = state::BuilderState {
+                            pending: ids,
+                            done: Vec::new(),
+                            current_task: None,
+                            iteration: 0,
+                            coder_started: false,
+                            reviewer_started: false,
+                            last_verdict: None,
+                        };
                     }
                     Err(e) => {
                         self.state.agent_error = Some(format!(
@@ -752,7 +965,60 @@ impl App {
                     self.state.spec_reviewers.push(pm);
                 }
             }
-            let _ = self.state.transition_to(next_phase);
+
+            // Builder-loop transitions: parse the review verdict and route
+            // accordingly (done → pop task, revise → new iteration same task,
+            // blocked → BlockedNeedsUser). Also validate review TOML.
+            let resolved_next = if let Phase::ReviewRound(r) = self.state.current_phase {
+                match review::validate(&artifact_path) {
+                    Ok(v) => {
+                        self.state.builder.last_verdict = Some(match v.status {
+                            review::ReviewStatus::Done => "done",
+                            review::ReviewStatus::Revise => "revise",
+                            review::ReviewStatus::Blocked => "blocked",
+                        }.to_string());
+                        self.state.builder.reviewer_started = false;
+                        match v.status {
+                            review::ReviewStatus::Done => {
+                                if let Some(id) = self.state.builder.current_task.take() {
+                                    self.state.builder.done.push(id);
+                                }
+                                // Append any new tasks suggested by the review
+                                for t in v.new_tasks {
+                                    self.state.builder.pending.push(t.id);
+                                }
+                                if self.state.builder.pending.is_empty() {
+                                    Phase::Done
+                                } else {
+                                    self.state.builder.coder_started = false;
+                                    Phase::ImplementationRound(r + 1)
+                                }
+                            }
+                            review::ReviewStatus::Revise => {
+                                self.state.builder.coder_started = true; // continue session
+                                Phase::ImplementationRound(r + 1)
+                            }
+                            review::ReviewStatus::Blocked => Phase::BlockedNeedsUser,
+                        }
+                    }
+                    Err(e) => {
+                        self.state.agent_error = Some(format!("review TOML invalid: {e}"));
+                        let _ = self.state.save();
+                        self.sections = build_sections(&self.state, self.window_launched);
+                        self.section_scroll.resize(self.sections.len(), usize::MAX);
+                        self.selected = current_section_index(&self.sections);
+                        return;
+                    }
+                }
+            } else if matches!(self.state.current_phase, Phase::ImplementationRound(_)) {
+                // Coder round finished (commit.txt exists) → move to reviewer
+                self.state.builder.coder_started = false;
+                next_phase
+            } else {
+                next_phase
+            };
+
+            let _ = self.state.transition_to(resolved_next);
         } else {
             let error = format!(
                 "agent window closed without producing {}",
@@ -1644,39 +1910,80 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                 Vec::<String>::new(),
             ),
         },
+        // Builder Loop section — coder + reviewer cycles per task
         match phase {
-            Phase::AwaitingPlanApproval => PipelineSection::waiting_user(
-                "Plan Approval",
-                "approval needed",
-                vec!["plan is ready for review".to_string()],
-                Vec::<String>::new(),
-                "approve to start implementation",
-            ),
-            Phase::ImplementationRound(_) | Phase::ReviewRound(_) | Phase::Done => {
-                PipelineSection::done(
-                    "Plan Approval",
-                    "approved",
-                    Vec::<String>::new(),
-                    Vec::<String>::new(),
-                )
+            Phase::IdeaInput
+            | Phase::BrainstormRunning
+            | Phase::SpecReviewRunning
+            | Phase::SpecReviewPaused
+            | Phase::PlanningRunning
+            | Phase::ShardingRunning => {
+                PipelineSection::pending("Builder Loop", "blocked on sharding")
             }
-            _ => PipelineSection::pending("Plan Approval", "blocked on planning"),
-        },
-        match phase {
-            Phase::ImplementationRound(r) => PipelineSection::running(
-                "Builder Loop",
-                &format!("round {r} running"),
-                vec![format!("coder round {r} in progress")],
-            ),
             Phase::Done => PipelineSection::done(
                 "Builder Loop",
                 "complete",
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-            _ => PipelineSection::pending("Builder Loop", "blocked on approval"),
+            Phase::BlockedNeedsUser => PipelineSection::action(
+                "Builder Loop",
+                "blocked — needs user",
+                builder_queue_lines(state),
+            ),
+            Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
+                let (role, window) = match phase {
+                    Phase::ImplementationRound(_) => ("coder", format!("[Coder r{r}]")),
+                    _ => ("reviewer", format!("[Review r{r}]")),
+                };
+                let mut events = builder_queue_lines(state);
+                events.push(String::new());
+                events.push(format!("current round: {r}  ({role})"));
+                if window_launched {
+                    PipelineSection::running(
+                        "Builder Loop",
+                        format!("round {r} · {role} running in {window}"),
+                        events,
+                    )
+                } else if let Some(err) = &state.agent_error {
+                    events.insert(0, format!("error: {err}"));
+                    PipelineSection::action(
+                        "Builder Loop",
+                        format!("round {r} · {role} failed — Enter to retry"),
+                        events,
+                    )
+                } else {
+                    let verdict_hint = state.builder.last_verdict.as_deref()
+                        .map(|v| format!(" (last verdict: {v})"))
+                        .unwrap_or_default();
+                    PipelineSection::action(
+                        "Builder Loop",
+                        format!("round {r} · Enter to start {role}{verdict_hint}"),
+                        events,
+                    )
+                }
+            }
         },
     ]
+}
+
+/// Lines describing the current task queue for display in the Builder section.
+fn builder_queue_lines(state: &RunState) -> Vec<String> {
+    let b = &state.builder;
+    let mut lines = Vec::new();
+    for id in &b.done {
+        lines.push(format!("  ✓ task {id}"));
+    }
+    if let Some(id) = b.current_task {
+        lines.push(format!("  → task {id}  (current)"));
+    }
+    for id in &b.pending {
+        lines.push(format!("  ⋯ task {id}"));
+    }
+    if lines.is_empty() {
+        lines.push("  (no tasks loaded yet)".to_string());
+    }
+    lines
 }
 
 fn vendor_from_str(s: &str) -> Option<VendorKind> {
@@ -1861,6 +2168,162 @@ will cause rejection. Do not emit any prose around the TOML.
         spec = spec_path.display(),
         plan = plan_path.display(),
         tasks = tasks_path.display(),
+    )
+}
+
+/// Render the full body of a task entry from tasks.toml for injection into
+/// the coder / reviewer prompt.
+fn task_body_for(run_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let tasks_path = run_dir.join("artifacts").join("tasks.toml");
+    let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;
+    let task = parsed.tasks.iter().find(|t| t.id == task_id)
+        .ok_or_else(|| anyhow::anyhow!("task id {task_id} not found"))?;
+    let refs = |rs: &[crate::tasks::Ref]| -> String {
+        if rs.is_empty() {
+            "(none)".to_string()
+        } else {
+            rs.iter().map(|r| format!("  - {} lines {}", r.path, r.lines))
+                .collect::<Vec<_>>().join("\n")
+        }
+    };
+    Ok(format!(
+        "# Task {id}: {title}\n\n## Description\n{desc}\n\n## Test\n{test}\n\n## Spec refs\n{specs}\n\n## Plan refs\n{plans}\n\nEstimated effort: ~{tokens} tokens\n",
+        id = task.id,
+        title = task.title,
+        desc = task.description,
+        test = task.test,
+        specs = refs(&task.spec_refs),
+        plans = refs(&task.plan_refs),
+        tokens = task.estimated_tokens,
+    ))
+}
+
+fn coder_prompt(
+    run_dir: &std::path::Path,
+    task_id: u32,
+    round: u32,
+    task_file: &std::path::Path,
+    commit_file: &std::path::Path,
+    resume: bool,
+) -> String {
+    let spec = run_dir.join("artifacts/spec.md");
+    let plan = run_dir.join("artifacts/plan.md");
+    let prev_review = if round > 1 {
+        let p = run_dir.join("rounds").join(format!("{:03}", round - 1)).join("review.toml");
+        if p.exists() {
+            format!("\nPrevious reviewer feedback (round {}): {}\nRead it first and address every feedback item.\n", round - 1, p.display())
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+    let resume_hint = if resume {
+        "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n"
+    } else {
+        ""
+    };
+    format!(
+        r#"You are the coder for task {task_id}, round {round}.
+
+Task spec:      {task}
+Spec (design):  {spec}
+Plan:           {plan}
+{prev_review}{resume_hint}
+Your job:
+  1. Read the task file first. It lists what to do, what to test, and line
+     refs into the spec and plan for background.
+  2. Implement the task end-to-end on the current branch.
+  3. Make the tests described in the task pass.
+  4. Commit your work with a clear message.
+  5. When finished, write the commit SHA to: {commit}
+     (just the short SHA, one line). This is the signal that the round is
+     complete — the TUI polls for this file.
+
+Hard rules:
+  - Stay within the scope of this one task. If you uncover follow-up work,
+    do NOT do it yourself — note it for the reviewer instead.
+  - Do NOT force-push, rebase history, or delete branches.
+  - Do NOT proceed to the next task; one task per round.
+
+You are interactive — the operator is here if you need a design decision.
+"#,
+        task_id = task_id,
+        round = round,
+        task = task_file.display(),
+        spec = spec.display(),
+        plan = plan.display(),
+        prev_review = prev_review,
+        resume_hint = resume_hint,
+        commit = commit_file.display(),
+    )
+}
+
+fn reviewer_prompt(
+    run_dir: &std::path::Path,
+    task_id: u32,
+    round: u32,
+    task_file: &std::path::Path,
+    commit_file: &std::path::Path,
+    review_file: &std::path::Path,
+) -> String {
+    let spec = run_dir.join("artifacts/spec.md");
+    let plan = run_dir.join("artifacts/plan.md");
+    format!(
+        r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
+the operator is NOT available. Do NOT modify code. Write ONLY the review TOML.
+
+Inputs:
+  Task:         {task}
+  Spec:         {spec}
+  Plan:         {plan}
+  Commit SHA:   {commit}
+
+Review the change carefully:
+  1. `git show $(cat {commit})` to see what was actually committed.
+  2. Verify the task's test description passes (run it, inspect code).
+  3. Check for issues: correctness, missing edge cases, broken contracts,
+     bad error handling, test gaps.
+
+Emit the verdict to: {review}
+in EXACTLY this TOML shape (double-quoted strings; triple-quoted for
+multi-line; arrays of inline tables for any new task refs):
+
+    status  = "done" | "revise" | "blocked"
+    summary = "One-paragraph summary of what was done and your verdict."
+    feedback = [
+      "Specific thing to fix, if status is revise/blocked.",
+      "One item per string.",
+    ]
+
+    # Optional: follow-up tasks to add to the queue when you find work
+    # that is genuinely out-of-scope for this task but needed later.
+    [[new_tasks]]
+    id = 100
+    title = "…"
+    description = """…"""
+    test = """…"""
+    estimated_tokens = 150000
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-30" }}]
+    plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
+
+Rules:
+  - status = "done"    → the task is complete and meets its tests.
+  - status = "revise"  → the coder must iterate; feedback MUST list the
+                          specific issues.
+  - status = "blocked" → human judgement is required; feedback MUST explain
+                          what's unclear or stuck.
+  - Do NOT leave feedback empty for revise/blocked.
+  - Do NOT emit prose outside the TOML.
+"#,
+        task_id = task_id,
+        round = round,
+        task = task_file.display(),
+        spec = spec.display(),
+        plan = plan.display(),
+        commit = commit_file.display(),
+        review = review_file.display(),
     )
 }
 

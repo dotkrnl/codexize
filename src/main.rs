@@ -7,6 +7,7 @@ mod codex;
 mod dashboard;
 mod gemini;
 mod kimi;
+mod review;
 mod runner;
 mod selection;
 mod state;

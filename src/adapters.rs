@@ -152,7 +152,7 @@ pub fn launch_interactive(
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.interactive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, switch)
+    launch_in_window(window_name, &cmd, adapter, switch, /* wait_on_exit */ true)
 }
 
 pub fn launch_noninteractive(
@@ -162,7 +162,7 @@ pub fn launch_noninteractive(
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, false)
+    launch_in_window(window_name, &cmd, adapter, false, /* wait_on_exit */ false)
 }
 
 fn launch_in_window(
@@ -170,13 +170,22 @@ fn launch_in_window(
     agent_cmd: &str,
     adapter: &dyn AgentAdapter,
     switch: bool,
+    wait_on_exit: bool,
 ) -> Result<()> {
     if !adapter.detect() {
         bail!("agent CLI not found — install it first");
     }
 
+    // Non-interactive runs close the window as soon as the agent exits so
+    // poll_agent_window sees the exit promptly. Interactive runs pause on
+    // exit so the user can read any final messages.
+    let tail = if wait_on_exit {
+        r#"; echo; echo '--- done, press enter to close ---'; read"#
+    } else {
+        ""
+    };
     let shell_cmd = format!(
-        r#"printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}; {agent_cmd}; echo; echo '--- done, press enter to close ---'; read"#,
+        r#"printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}; {agent_cmd}{tail}"#,
         name = shell_escape(window_name),
     );
 

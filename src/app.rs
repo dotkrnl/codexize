@@ -1,4 +1,5 @@
 use crate::{
+    cache,
     selection::{self, ModelStatus, VendorKind},
     state::RunState,
     tmux::TmuxContext,
@@ -15,6 +16,8 @@ use ratatui::{
 };
 use std::{
     collections::BTreeSet,
+    sync::mpsc,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -26,6 +29,7 @@ pub struct App {
     state: RunState,
     sections: Vec<PipelineSection>,
     models: Vec<ModelStatus>,
+    model_refresh: ModelRefreshState,
     selected: usize,
     expanded: BTreeSet<usize>,
     transcript_open: BTreeSet<usize>,
@@ -33,7 +37,6 @@ pub struct App {
     body_inner_height: usize,
     input_mode: bool,
     input_buffer: String,
-    vendor_refreshes: Vec<VendorRefresh>,
 }
 
 #[derive(Debug)]
@@ -54,9 +57,11 @@ enum SectionStatus {
 }
 
 #[derive(Debug)]
-struct VendorRefresh {
-    vendor: VendorKind,
-    last_refresh: Option<Instant>,
+enum ModelRefreshState {
+    /// Background fetch is running; receiver will deliver results
+    Fetching(mpsc::Receiver<Vec<ModelStatus>>),
+    /// Last completed refresh; re-trigger after TTL
+    Idle(Instant),
 }
 
 impl App {
@@ -140,13 +145,26 @@ impl App {
         ];
 
         let current = current_section_index(&sections);
-        let models = selection::load_all_models();
+
+        // Load cached models immediately so the UI is populated on first frame
+        let (models, model_refresh) = match cache::load() {
+            Some((cached, expired)) => {
+                let refresh = if expired {
+                    ModelRefreshState::Fetching(spawn_refresh())
+                } else {
+                    ModelRefreshState::Idle(Instant::now())
+                };
+                (cached, refresh)
+            }
+            None => (Vec::new(), ModelRefreshState::Fetching(spawn_refresh())),
+        };
 
         Self {
             tmux,
             state,
             sections,
             models,
+            model_refresh,
             selected: current,
             expanded: BTreeSet::new(),
             transcript_open: BTreeSet::new(),
@@ -154,12 +172,6 @@ impl App {
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
-            vendor_refreshes: vec![
-                VendorRefresh::new(VendorKind::Codex),
-                VendorRefresh::new(VendorKind::Claude),
-                VendorRefresh::new(VendorKind::Gemini),
-                VendorRefresh::new(VendorKind::Kimi),
-            ],
         }
     }
 
@@ -293,9 +305,7 @@ impl App {
     }
 
     fn force_refresh_models(&mut self) {
-        for vendor_refresh in &mut self.vendor_refreshes {
-            vendor_refresh.last_refresh = None;
-        }
+        self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
     }
 
     fn header(&self) -> Paragraph<'_> {
@@ -644,23 +654,21 @@ impl App {
     }
 
     fn refresh_models_if_due(&mut self) {
-        let due = self
-            .vendor_refreshes
-            .iter()
-            .any(|vendor_refresh| vendor_refresh.is_due());
-
-        if !due {
-            return;
+        match &self.model_refresh {
+            ModelRefreshState::Fetching(rx) => {
+                // Non-blocking check: take results if the background thread finished
+                if let Ok(models) = rx.try_recv() {
+                    let _ = cache::save(&models);
+                    self.models = models;
+                    self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                }
+            }
+            ModelRefreshState::Idle(refreshed_at) => {
+                if refreshed_at.elapsed() >= cache::TTL {
+                    self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+                }
+            }
         }
-
-        let refreshed = selection::load_all_models();
-        let refreshed_at = Instant::now();
-
-        for vendor_refresh in &mut self.vendor_refreshes {
-            vendor_refresh.last_refresh = Some(refreshed_at);
-        }
-
-        self.models = refreshed;
     }
 
     fn can_focus_input(&self) -> bool {
@@ -759,19 +767,13 @@ impl SectionStatus {
     }
 }
 
-impl VendorRefresh {
-    fn new(vendor: VendorKind) -> Self {
-        Self {
-            vendor,
-            last_refresh: None,
-        }
-    }
-
-    fn is_due(&self) -> bool {
-        self.last_refresh
-            .map(|instant| instant.elapsed() >= self.vendor.refresh_interval())
-            .unwrap_or(true)
-    }
+fn spawn_refresh() -> mpsc::Receiver<Vec<ModelStatus>> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let models = selection::load_all_models();
+        let _ = tx.send(models);
+    });
+    rx
 }
 
 fn vendor_tag(vendor: VendorKind) -> &'static str {

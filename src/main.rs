@@ -1,5 +1,6 @@
 mod app;
 mod artifacts;
+mod cache;
 mod claude;
 mod codex;
 mod dashboard;

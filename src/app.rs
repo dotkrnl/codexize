@@ -70,7 +70,7 @@ enum ModelRefreshState {
 
 impl App {
     pub fn new(tmux: TmuxContext, state: RunState) -> Self {
-        let sections = build_sections(&state);
+        let sections = build_sections(&state, false);
         let section_count = sections.len();
         let current = current_section_index(&sections);
 
@@ -239,9 +239,9 @@ impl App {
                         return false;
                     }
 
-                    // BrainstormRunning + error: retry
+                    // BrainstormRunning + error or not yet launched: (re)start
                     if self.state.current_phase == Phase::BrainstormRunning
-                        && self.state.agent_error.is_some()
+                        && (self.state.agent_error.is_some() || !self.window_launched)
                     {
                         self.input_buffer.clear();
                         self.input_mode = false;
@@ -366,7 +366,7 @@ impl App {
         self.state.agent_error = None;
         self.window_launched = false;
         let _ = self.state.save();
-        self.sections = build_sections(&self.state);
+        self.sections = build_sections(&self.state, self.window_launched);
         self.section_scroll.resize(self.sections.len(), usize::MAX);
         self.selected = current_section_index(&self.sections);
     }
@@ -406,7 +406,7 @@ impl App {
             let _ = self.state.save();
         }
 
-        self.sections = build_sections(&self.state);
+        self.sections = build_sections(&self.state, self.window_launched);
         self.section_scroll.resize(self.sections.len(), usize::MAX);
         self.selected = current_section_index(&self.sections);
     }
@@ -454,7 +454,7 @@ impl App {
                 self.state.selected_model = Some(model.clone());
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
                 self.window_launched = true;
-                self.sections = build_sections(&self.state);
+                self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
             }
@@ -954,7 +954,7 @@ impl SectionStatus {
     }
 }
 
-fn build_sections(state: &RunState) -> Vec<PipelineSection> {
+fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSection> {
     let phase = state.current_phase;
     vec![
         match phase {
@@ -978,28 +978,32 @@ fn build_sections(state: &RunState) -> Vec<PipelineSection> {
                 if let Some(err) = &state.agent_error {
                     PipelineSection::waiting_user(
                         "Brainstorm",
-                        "agent failed — retry?",
+                        "failed — press Enter to retry",
                         vec![
                             format!("error: {err}"),
-                            format!(
-                                "model: {}",
-                                state.selected_model.as_deref().unwrap_or("unknown")
-                            ),
+                            format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
                         ],
                         Vec::<String>::new(),
                         "press Enter to retry brainstorm",
                     )
-                } else {
+                } else if window_launched {
                     PipelineSection::running(
                         "Brainstorm",
                         "agent running in [Brainstorm] window",
                         vec![
-                            format!(
-                                "model: {}",
-                                state.selected_model.as_deref().unwrap_or("unknown")
-                            ),
+                            format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
                             "waiting for spec.md artifact".to_string(),
                         ],
+                    )
+                } else {
+                    PipelineSection::waiting_user(
+                        "Brainstorm",
+                        "ready — press Enter to run",
+                        vec![
+                            format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
+                        ],
+                        Vec::<String>::new(),
+                        "press Enter to start brainstorm",
                     )
                 }
             }

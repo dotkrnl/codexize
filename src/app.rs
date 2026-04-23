@@ -407,11 +407,11 @@ impl App {
                 // Vendor tag only on first row of each group; blank pad on rest
                 let tag_span = if i == 0 {
                     Span::styled(
-                        format!("{:<6}", tag),
+                        format!("{:<8}", tag),
                         Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    Span::raw("      ")
+                    Span::raw("        ")
                 };
 
                 lines.push(Line::from(vec![

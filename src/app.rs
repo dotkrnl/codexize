@@ -877,6 +877,8 @@ impl App {
         }
 
         let run_dir = state::run_dir(&self.state.run_id);
+        let coder_window: String;
+        let reviewer_window: String;
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
             Phase::BrainstormRunning => (
                 "[Brainstorm]",
@@ -904,16 +906,18 @@ impl App {
                 // Coder's "artifact" is the commit.txt written by the end-of-round
                 // script; if missing after the window closes we pause without
                 // advancing so the user can retry (session resumes via --continue).
+                coder_window = format!("[Coder r{r}]");
                 (
-                    "[Coder]",
+                    coder_window.as_str(),
                     round_dir.join("commit.txt"),
                     Phase::ReviewRound(r),
                 )
             }
             Phase::ReviewRound(r) => {
                 let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+                reviewer_window = format!("[Review r{r}]");
                 (
-                    "[Reviewer]",
+                    reviewer_window.as_str(),
                     round_dir.join("review.toml"),
                     // Next phase decided by the review verdict below; placeholder
                     // ImplementationRound(r+1) is refined after parsing review.

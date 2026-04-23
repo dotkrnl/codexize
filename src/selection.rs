@@ -172,29 +172,42 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
     models.last()
 }
 
-/// Extract the first `\d+-\d+` tuple from a model name as a comparable version.
-/// Returns None if no such pattern exists.
+/// Extract the first `xx[-yy]` version from a model name where each component
+/// is at most 2 digits. Longer digit runs (e.g. dates like 20250514) are skipped.
+/// Returns (major, minor) if both components found, or (major, 0) for major-only.
 fn extract_version(name: &str) -> Option<(u32, u32)> {
-    let chars: Vec<char> = name.chars().collect();
+    let bytes = name.as_bytes();
     let mut i = 0;
-    while i < chars.len() {
-        if chars[i].is_ascii_digit() {
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            // Measure the digit run length
             let start = i;
-            while i < chars.len() && chars[i].is_ascii_digit() {
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
                 i += 1;
             }
-            if i < chars.len() && chars[i] == '-' {
+            let run = i - start;
+            if run > 2 {
+                // Too many digits (e.g. date) — skip and continue
+                continue;
+            }
+            let major: u32 = name[start..i].parse().ok()?;
+
+            // Optionally consume a `-yy` minor component (1-2 digits)
+            if i < bytes.len() && bytes[i] == b'-' {
                 let j = i + 1;
-                if j < chars.len() && chars[j].is_ascii_digit() {
+                if j < bytes.len() && bytes[j].is_ascii_digit() {
                     let mut k = j;
-                    while k < chars.len() && chars[k].is_ascii_digit() {
+                    while k < bytes.len() && bytes[k].is_ascii_digit() {
                         k += 1;
                     }
-                    let major: u32 = name[start..i].parse().ok()?;
-                    let minor: u32 = name[j..k].parse().ok()?;
-                    return Some((major, minor));
+                    if k - j <= 2 {
+                        let minor: u32 = name[j..k].parse().ok()?;
+                        return Some((major, minor));
+                    }
+                    // Minor has too many digits — return major-only
                 }
             }
+            return Some((major, 0));
         } else {
             i += 1;
         }

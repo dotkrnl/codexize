@@ -1005,12 +1005,11 @@ impl SectionStatus {
     }
 }
 
-fn phase_model_line(state: &RunState, phase: &str) -> Vec<String> {
-    state
-        .phase_models
-        .get(phase)
-        .map(|pm| vec![format!("model: {} ({})", pm.model, pm.vendor)])
-        .unwrap_or_default()
+fn phase_done_summary(state: &RunState, phase: &str, label: &str) -> String {
+    match state.phase_models.get(phase) {
+        Some(pm) => format!("{label} · {} ({})", pm.model, pm.vendor),
+        None => label.to_string(),
+    }
 }
 
 fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSection> {
@@ -1068,8 +1067,8 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             }
             _ => PipelineSection::done(
                 "Brainstorm",
-                "spec written",
-                phase_model_line(state, "brainstorm"),
+                phase_done_summary(state, "brainstorm", "spec written"),
+                Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
         },
@@ -1084,8 +1083,8 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
             _ => PipelineSection::done(
                 "Spec Review",
-                "review complete",
-                phase_model_line(state, "spec-review"),
+                phase_done_summary(state, "spec-review", "review complete"),
+                Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
         },
@@ -1100,8 +1099,8 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
             _ => PipelineSection::done(
                 "Planning",
-                "plan drafted",
-                phase_model_line(state, "planning"),
+                phase_done_summary(state, "planning", "plan drafted"),
+                Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
         },

@@ -39,6 +39,7 @@ pub struct App {
     input_mode: bool,
     input_buffer: String,
     confirm_back: bool,
+    window_launched: bool,
 }
 
 #[derive(Debug)]
@@ -100,6 +101,7 @@ impl App {
             input_mode: false,
             input_buffer: String::new(),
             confirm_back: false,
+            window_launched: false,
         }
     }
 
@@ -362,6 +364,7 @@ impl App {
         }
 
         self.state.agent_error = None;
+        self.window_launched = false;
         let _ = self.state.save();
         self.sections = build_sections(&self.state);
         self.section_scroll.resize(self.sections.len(), usize::MAX);
@@ -369,6 +372,10 @@ impl App {
     }
 
     fn poll_agent_window(&mut self) {
+        if !self.window_launched {
+            return;
+        }
+
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
             Phase::BrainstormRunning => (
                 "[Brainstorm]",
@@ -386,6 +393,7 @@ impl App {
         }
 
         // Window is gone — check if the required artifact was produced
+        self.window_launched = false;
         if artifact_path.exists() {
             self.state.agent_error = None;
             let _ = self.state.transition_to(next_phase);
@@ -445,6 +453,7 @@ impl App {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
+                self.window_launched = true;
                 self.sections = build_sections(&self.state);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);

@@ -2119,13 +2119,18 @@ Inputs:
 Read both carefully before sharding.
 
 Rules:
-  1. Decompose the plan into a sequence of tasks. Each task must be
-     self-contained (buildable by one coding agent session without
-     requiring another task to have shipped first, unless explicitly
-     listed as a dependency in the task's description).
+  1. Decompose the plan into a sequence of tasks ONLY if the plan is
+     large enough to warrant it. If the whole plan can reasonably be
+     implemented by one coding session at ~200k tokens, a single-task
+     tasks.toml is the correct answer — do NOT force artificial splits.
+     Each task must be self-contained (buildable by one coding agent
+     session without requiring another task to have shipped first,
+     unless explicitly listed as a dependency in the task's description).
   2. Size each task at roughly 200_000 tokens of implementation effort —
      small enough that a coding agent can finish it in one session
-     without context compaction, large enough to be meaningful.
+     without context compaction, large enough to be meaningful. For a
+     small plan this means exactly one task; for a bigger plan, split
+     along natural seams (by subsystem, by layer, by phase).
   3. Each task MUST include:
        - id             sequential integer starting at 1
        - title          one-line summary

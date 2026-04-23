@@ -13,7 +13,8 @@ pub struct AgentRun {
 
 pub trait AgentAdapter {
     fn detect(&self) -> bool;
-    fn build_command(&self, run: &AgentRun) -> Vec<String>;
+    // Returns (program, args) — prompt is delivered via stdin redirect, not args
+    fn exec_args(&self, run: &AgentRun) -> Vec<String>;
 }
 
 pub struct CodexAdapter;
@@ -27,13 +28,16 @@ impl AgentAdapter for CodexAdapter {
             .unwrap_or(false)
     }
 
-    fn build_command(&self, run: &AgentRun) -> Vec<String> {
+    fn exec_args(&self, run: &AgentRun) -> Vec<String> {
+        // codex exec -m <model> -
+        // The `-` tells codex to read the prompt from stdin.
+        // The caller redirects stdin from the prompt file.
         vec![
             "codex".to_string(),
-            "--model".to_string(),
+            "exec".to_string(),
+            "-m".to_string(),
             run.model.clone(),
-            "--quiet".to_string(),
-            format!("@{}", run.prompt_path.display()),
+            "-".to_string(),
         ]
     }
 }
@@ -47,17 +51,14 @@ pub fn launch_in_window(
         bail!("codex CLI not found — install it first");
     }
 
-    let agent_cmd = adapter.build_command(run);
+    let exec_args = adapter.exec_args(run);
     let artifact_args: Vec<String> = run
         .artifact_paths
         .iter()
         .flat_map(|p| ["--artifact".to_string(), p.display().to_string()])
         .collect();
 
-    // Full command run inside the tmux window:
-    //   codexize agent-run --run-id X --phase Y --role Z \
-    //     --artifact <path> ... \
-    //     -- <adapter command>
+    // Assemble the wrapper invocation
     let mut wrapper: Vec<String> = vec![
         "codexize".to_string(),
         "agent-run".to_string(),
@@ -70,9 +71,15 @@ pub fn launch_in_window(
     ];
     wrapper.extend(artifact_args);
     wrapper.push("--".to_string());
-    wrapper.extend(agent_cmd);
+    wrapper.extend(exec_args);
 
-    let shell_cmd = shell_escape_join(&wrapper);
+    // Build the full shell command with stdin redirect from the prompt file
+    // and a read-pause on failure so the window stays visible for diagnosis.
+    let wrapper_str = shell_escape_join(&wrapper);
+    let prompt_path = shell_escape(run.prompt_path.to_string_lossy().as_ref());
+    let shell_cmd = format!(
+        "{wrapper_str} < {prompt_path} || {{ echo; echo '--- agent-run failed, press enter to close ---'; read; }}"
+    );
 
     let status = Command::new("tmux")
         .args(["new-window", "-n", window_name, &shell_cmd])
@@ -95,15 +102,14 @@ pub fn launch_in_window(
     Ok(())
 }
 
+fn shell_escape(s: &str) -> String {
+    if s.chars().all(|c| c.is_alphanumeric() || "-_./@=:".contains(c)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 fn shell_escape_join(args: &[String]) -> String {
-    args.iter()
-        .map(|arg| {
-            if arg.chars().all(|c| c.is_alphanumeric() || "-_./@=:".contains(c)) {
-                arg.clone()
-            } else {
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    args.iter().map(|a| shell_escape(a)).collect::<Vec<_>>().join(" ")
 }

@@ -23,6 +23,14 @@ struct CachedModel {
     planning_rank: u8,
     build_rank: u8,
     review_rank: u8,
+    #[serde(default)]
+    idea_weight: f64,
+    #[serde(default)]
+    planning_weight: f64,
+    #[serde(default)]
+    build_weight: f64,
+    #[serde(default)]
+    review_weight: f64,
 }
 
 fn cache_path() -> PathBuf {
@@ -63,6 +71,10 @@ pub fn load() -> Option<(Vec<ModelStatus>, bool)> {
                 planning_rank: m.planning_rank,
                 build_rank: m.build_rank,
                 review_rank: m.review_rank,
+                idea_weight: m.idea_weight,
+                planning_weight: m.planning_weight,
+                build_weight: m.build_weight,
+                review_weight: m.review_weight,
             })
         })
         .collect::<Vec<_>>();
@@ -93,6 +105,10 @@ pub fn save(models: &[ModelStatus]) -> Result<()> {
                 planning_rank: m.planning_rank,
                 build_rank: m.build_rank,
                 review_rank: m.review_rank,
+                idea_weight: m.idea_weight,
+                planning_weight: m.planning_weight,
+                build_weight: m.build_weight,
+                review_weight: m.review_weight,
             })
             .collect(),
     };

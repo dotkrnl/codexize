@@ -33,6 +33,10 @@ pub struct ModelStatus {
     pub planning_rank: u8,
     pub build_rank: u8,
     pub review_rank: u8,
+    pub idea_weight: f64,
+    pub planning_weight: f64,
+    pub build_weight: f64,
+    pub review_weight: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +120,10 @@ pub fn load_all_models() -> Vec<ModelStatus> {
             planning_rank: *planning_ranks.get(&candidate.name).unwrap_or(&99),
             build_rank: *build_ranks.get(&candidate.name).unwrap_or(&99),
             review_rank: *review_ranks.get(&candidate.name).unwrap_or(&99),
+            idea_weight: candidate.idea_probability,
+            planning_weight: candidate.planning_probability,
+            build_weight: candidate.build_probability,
+            review_weight: candidate.review_probability,
         })
         .collect()
 }
@@ -128,17 +136,13 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
         return None;
     }
 
-    // Build (model, weight) pairs using rank as a proxy for probability:
-    // rank 1 gets weight N, rank 2 gets N-1, …, rank N gets 1.
-    // This preserves the probability ordering without storing raw floats in ModelStatus.
-    let n = models.len() as f64;
     let weights: Vec<f64> = models
         .iter()
-        .map(|m| {
-            let rank = m.rank_for(task) as f64;
-            let w = (n - rank + 1.0).max(0.0);
-            // Zero out models with no quota
-            if m.quota_percent.unwrap_or(0) == 0 { 0.0 } else { w }
+        .map(|m| match task {
+            TaskKind::Idea => m.idea_weight,
+            TaskKind::Planning => m.planning_weight,
+            TaskKind::Build => m.build_weight,
+            TaskKind::Review => m.review_weight,
         })
         .collect();
 

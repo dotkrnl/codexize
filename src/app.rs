@@ -211,6 +211,12 @@ impl App {
                         self.launch_spec_review();
                         return false;
                     }
+                    if self.state.current_phase == Phase::PlanningRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_planning();
+                        return false;
+                    }
                 }
                 if self.can_focus_input() {
                     self.input_mode = true;
@@ -499,6 +505,78 @@ impl App {
         }
     }
 
+    fn launch_planning(&mut self) {
+        self.state.agent_error = None;
+
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+
+        let run_id = self.state.run_id.clone();
+        let run_dir = state::run_dir(&run_id);
+        let spec_path = run_dir.join("artifacts").join("spec.md");
+        let plan_path = run_dir.join("artifacts").join("plan.md");
+
+        // Collect all spec review artifact paths
+        let review_paths: Vec<std::path::PathBuf> = (1..=self.state.spec_reviewers.len())
+            .map(|i| run_dir.join("artifacts").join(format!("spec-review-{i}.md")))
+            .filter(|p| p.exists())
+            .collect();
+
+        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let _ = std::fs::remove_file(&plan_path);
+
+        let prompt_path = run_dir.join("prompts").join("planning.md");
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let prompt = planning_prompt(&spec_path, &review_paths, &plan_path);
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "planning".to_string(),
+            role: "planning".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![plan_path.clone()],
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        // Planning is interactive — switch to the window so the user can engage
+        match launch_interactive("[Planning]", &run, adapter.as_ref(), true) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    "planning".to_string(),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch planning: {e}"));
+            }
+        }
+    }
+
     /// Count non-empty lines in the agent's tmux window to drive the progress
     /// spinner. Each new line → spinner advances one step.
     fn update_agent_progress(&mut self) {
@@ -509,6 +587,7 @@ impl App {
         let window_name = match self.state.current_phase {
             Phase::BrainstormRunning => "[Brainstorm]",
             Phase::SpecReviewRunning => "[Spec Review]",
+            Phase::PlanningRunning => "[Planning]",
             _ => return,
         };
         let output = std::process::Command::new("tmux")
@@ -538,6 +617,11 @@ impl App {
                 run_dir.join("artifacts")
                     .join(format!("spec-review-{}.md", self.state.spec_reviewers.len() + 1)),
                 Phase::SpecReviewPaused,
+            ),
+            Phase::PlanningRunning => (
+                "[Planning]",
+                run_dir.join("artifacts").join("plan.md"),
+                Phase::AwaitingPlanApproval,
             ),
             _ => return,
         };
@@ -1386,11 +1470,27 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             | Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
                 PipelineSection::pending("Planning", "blocked on spec review")
             }
-            Phase::PlanningRunning => PipelineSection::running(
+            Phase::PlanningRunning if window_launched => PipelineSection::running(
                 "Planning",
-                "agent running",
-                vec!["drafting plan artifact".to_string()],
+                "agent running in [Planning] window",
+                vec!["waiting for plan.md artifact".to_string()],
             ),
+            Phase::PlanningRunning => {
+                if let Some(err) = &state.agent_error {
+                    PipelineSection::action(
+                        "Planning",
+                        "failed — press Enter to retry",
+                        vec![format!("error: {err}")],
+                    )
+                } else {
+                    let n = state.spec_reviewers.len();
+                    PipelineSection::action(
+                        "Planning",
+                        "press Enter to run",
+                        vec![format!("inputs: spec + {n} review{}", if n == 1 { "" } else { "s" })],
+                    )
+                }
+            }
             _ => PipelineSection::done(
                 "Planning",
                 phase_done_summary(state, "planning", "plan drafted"),
@@ -1485,6 +1585,53 @@ in a later phase.
 
 The operator is here and ready to respond to your questions.
 "#
+    )
+}
+
+fn planning_prompt(
+    spec_path: &std::path::Path,
+    review_paths: &[std::path::PathBuf],
+    plan_path: &std::path::Path,
+) -> String {
+    let reviews_block = if review_paths.is_empty() {
+        "(no spec reviews available — work from the spec alone)".to_string()
+    } else {
+        review_paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("  - review {}: {}", i + 1, p.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!(
+        r#"Invoke your writing-plans skill now (superpowers:writing-plans).
+
+You are turning an approved spec — plus any spec reviews — into a concrete
+implementation plan.
+
+Inputs to read first:
+  - Spec:    {spec}
+  - Reviews:
+{reviews}
+
+Triage the reviews before planning:
+  - Reviews may contradict each other. Read each one and decide which
+    feedback to incorporate, which to reject, and why.
+  - If the triage involves a real trade-off or a decision you cannot
+    confidently make alone, ASK the operator — this is an interactive
+    session.
+
+When the writing-plans skill reaches the point of writing the plan
+document, write it to: {plan}
+
+IMPORTANT: Do NOT write or modify any code in the repository. Your only
+output is the plan file. Implementation happens in a later phase.
+
+The operator is here and ready to respond to your questions.
+"#,
+        spec = spec_path.display(),
+        reviews = reviews_block,
+        plan = plan_path.display(),
     )
 }
 

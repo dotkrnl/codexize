@@ -38,6 +38,7 @@ pub struct App {
     body_inner_height: usize,
     input_mode: bool,
     input_buffer: String,
+    confirm_back: bool,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,7 @@ impl App {
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
+            confirm_back: false,
         }
     }
 
@@ -145,9 +147,24 @@ impl App {
             return self.handle_input_key(key);
         }
 
+        // Any key other than 'b' cancels a pending back-confirmation
+        if self.confirm_back && key.code != KeyCode::Char('b') {
+            self.confirm_back = false;
+            return false;
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('b') => {
+                if self.confirm_back {
+                    self.confirm_back = false;
+                    self.go_back();
+                } else if self.can_go_back() {
+                    self.confirm_back = true;
+                }
+                false
+            }
             KeyCode::Up => {
                 self.selected = self.selected.saturating_sub(1);
                 false
@@ -252,6 +269,70 @@ impl App {
 
     fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+    }
+
+    fn can_go_back(&self) -> bool {
+        !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
+    }
+
+    fn go_back(&mut self) {
+        use std::fs;
+
+        let run_dir = state::run_dir(&self.state.run_id);
+        let artifacts = run_dir.join("artifacts");
+        let prompts = run_dir.join("prompts");
+
+        match self.state.current_phase {
+            Phase::BrainstormRunning => {
+                kill_window("[Brainstorm]");
+                let _ = fs::remove_file(artifacts.join("spec.md"));
+                let _ = fs::remove_file(prompts.join("brainstorm.md"));
+                self.state.agent_error = None;
+                let _ = self.state.transition_to(Phase::IdeaInput);
+            }
+            Phase::SpecReviewRunning => {
+                kill_window("[Spec Review]");
+                let _ = fs::remove_file(artifacts.join("spec-review.md"));
+                let _ = self.state.transition_to(Phase::BrainstormRunning);
+            }
+            Phase::PlanningRunning => {
+                kill_window("[Planning]");
+                let _ = fs::remove_file(artifacts.join("plan.md"));
+                let _ = self.state.transition_to(Phase::SpecReviewRunning);
+            }
+            Phase::PlanReviewRunning => {
+                kill_window("[Plan Review 1]");
+                kill_window("[Plan Review 2]");
+                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
+                let _ = fs::remove_file(artifacts.join("plan-review-2.md"));
+                let _ = self.state.transition_to(Phase::PlanningRunning);
+            }
+            Phase::AwaitingPlanApproval => {
+                let _ = self.state.transition_to(Phase::PlanReviewRunning);
+            }
+            Phase::ImplementationRound(r) => {
+                kill_window(&format!("[Coder r{r}]"));
+                let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
+                let prev = if r <= 1 {
+                    Phase::AwaitingPlanApproval
+                } else {
+                    Phase::ReviewRound(r - 1)
+                };
+                let _ = self.state.transition_to(prev);
+            }
+            Phase::ReviewRound(r) => {
+                kill_window(&format!("[Review r{r}]"));
+                let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
+                let _ = self.state.transition_to(Phase::ImplementationRound(r));
+            }
+            Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
+        }
+
+        self.state.agent_error = None;
+        let _ = self.state.save();
+        self.sections = build_sections(&self.state);
+        self.section_scroll.resize(self.sections.len(), usize::MAX);
+        self.selected = current_section_index(&self.sections);
     }
 
     fn poll_agent_window(&mut self) {
@@ -362,7 +443,7 @@ impl App {
                 self.tmux.session_name, self.tmux.window_index, self.tmux.window_name
             )),
             Span::styled(
-                " | Up/Down Enter t PgUp/PgDn q",
+                " | Up/Down Enter t PgUp/PgDn b q",
                 Style::default().fg(Color::DarkGray),
             ),
         ]))
@@ -483,6 +564,7 @@ impl App {
         section: &PipelineSection,
     ) -> Line<'static> {
         let marker = if expanded { "v" } else { ">" };
+        let is_current = index == current_section_index(&self.sections);
         let style = if index == self.selected {
             Style::default()
                 .bg(Color::DarkGray)
@@ -491,15 +573,23 @@ impl App {
             Style::default()
         };
 
-        Line::from(vec![
+        let mut spans = vec![
             Span::raw(format!("{marker} ")),
             Span::raw(section.name.clone()),
             Span::raw(" | "),
             Span::styled(section.status.label(), section.status.style()),
             Span::raw(" | "),
             Span::styled(section.summary.clone(), Style::default().fg(Color::Gray)),
-        ])
-        .style(style)
+        ];
+
+        if self.confirm_back && is_current {
+            spans.push(Span::styled(
+                "  [b again to go back and clean up — any other key to cancel]",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        Line::from(spans).style(style)
     }
 
     fn section_body(&self, index: usize) -> Vec<Line<'static>> {
@@ -958,6 +1048,12 @@ When the brainstorming skill asks you to write the design doc, write it to:
 The operator is here and ready to respond to your questions.
 "#
     )
+}
+
+fn kill_window(name: &str) {
+    let _ = std::process::Command::new("tmux")
+        .args(["kill-window", "-t", name])
+        .output();
 }
 
 fn spawn_refresh() -> mpsc::Receiver<Vec<ModelStatus>> {

@@ -1086,8 +1086,9 @@ impl App {
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
-        let fresh_start = self.state.current_phase == Phase::IdeaInput;
-        match launch_interactive("[Brainstorm]", &run, adapter.as_ref(), fresh_start) {
+        // Interactive session: always switch to the window on launch — the
+        // user explicitly pressed Enter to start it and expects to be there
+        match launch_interactive("[Brainstorm]", &run, adapter.as_ref(), true) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());

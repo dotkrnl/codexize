@@ -1,3 +1,4 @@
+use crate::warmup;
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -49,6 +50,7 @@ struct ModelQuota {
 }
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
+    dummy_invoke()?;
     let config = read_config().unwrap_or_default();
     let default_model = config
         .model
@@ -101,6 +103,17 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
     }
 
     Ok(models)
+}
+
+fn dummy_invoke() -> Result<()> {
+    warmup::run(warmup::WarmupSpec {
+        program: "codex",
+        args: &[],
+        script: "/status\n/exit\n",
+        env: &[],
+        settle_timeout: Duration::from_secs(2),
+    })
+    .context("Codex dummy invoke failed")
 }
 
 fn read_config() -> Result<CodexConfig> {

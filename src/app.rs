@@ -250,8 +250,25 @@ impl App {
                 false
             }
             KeyCode::Enter => {
-                let trimmed = self.input_buffer.trim();
+                let trimmed = self.input_buffer.trim().to_string();
                 if !trimmed.is_empty() {
+                    if trimmed == "/exit" {
+                        return true;
+                    }
+
+                    if trimmed == "/stats" || trimmed == "/status" || trimmed == "/usage" {
+                        self.force_refresh_models();
+                        self.sections[self.selected]
+                            .transcript
+                            .push(format!("> {trimmed}"));
+                        self.sections[self.selected]
+                            .transcript
+                            .push("< refreshing model quotas...".to_string());
+                        self.input_buffer.clear();
+                        self.input_mode = false;
+                        return false;
+                    }
+
                     self.sections[self.selected]
                         .transcript
                         .push(format!("> {trimmed}"));
@@ -272,6 +289,12 @@ impl App {
                 false
             }
             _ => false,
+        }
+    }
+
+    fn force_refresh_models(&mut self) {
+        for vendor_refresh in &mut self.vendor_refreshes {
+            vendor_refresh.last_refresh = None;
         }
     }
 

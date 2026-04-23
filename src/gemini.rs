@@ -1,3 +1,4 @@
+use crate::warmup;
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -6,7 +7,6 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 
@@ -64,19 +64,14 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    let output = Command::new("gemini")
-        .arg("--version")
-        .output()
-        .context("failed to run Gemini dummy invoke")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = first_line(&stderr)
-            .or_else(|| first_line(&stdout))
-            .unwrap_or("unknown error");
-        bail!("Gemini dummy invoke failed: {detail}");
-    }
-    Ok(())
+    warmup::run(warmup::WarmupSpec {
+        program: "gemini",
+        args: &["--yolo"],
+        script: "/stats\n/exit\n",
+        env: &[],
+        settle_timeout: Duration::from_secs(2),
+    })
+    .context("Gemini dummy invoke failed")
 }
 
 fn resolve_access_token() -> Result<String> {
@@ -154,8 +149,4 @@ fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
 fn home_dir() -> Result<PathBuf> {
     let home = env::var_os("HOME").context("HOME is not set")?;
     Ok(Path::new(&home).to_path_buf())
-}
-
-fn first_line(text: &str) -> Option<&str> {
-    text.lines().map(str::trim).find(|line| !line.is_empty())
 }

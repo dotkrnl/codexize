@@ -1,3 +1,4 @@
+use crate::warmup;
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
@@ -44,20 +45,14 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    let output = Command::new("claude")
-        .args(["auth", "status"])
-        .env("CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP", "1")
-        .output()
-        .context("failed to run Claude dummy invoke")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = first_line(&stderr)
-            .or_else(|| first_line(&stdout))
-            .unwrap_or("unknown error");
-        bail!("Claude dummy invoke failed: {detail}");
-    }
-    Ok(())
+    warmup::run(warmup::WarmupSpec {
+        program: "claude",
+        args: &["--dangerously-skip-permissions"],
+        script: "/stats\n/exit\n",
+        env: &[("CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP", "1")],
+        settle_timeout: Duration::from_secs(2),
+    })
+    .context("Claude dummy invoke failed")
 }
 
 fn resolve_access_token() -> Result<String> {
@@ -118,8 +113,4 @@ fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
         .context("Claude usage request failed")?
         .json::<Value>()
         .context("Claude usage response was not valid JSON")
-}
-
-fn first_line(text: &str) -> Option<&str> {
-    text.lines().map(str::trim).find(|line| !line.is_empty())
 }

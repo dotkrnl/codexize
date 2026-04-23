@@ -1,4 +1,5 @@
 use crate::{claude, codex, gemini, kimi};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,10 +45,26 @@ pub fn ranks_for_model(name: &str) -> (u8, u8, u8, u8) {
     match name.to_ascii_lowercase().as_str() {
         "gpt-5.4" => (1, 2, 1, 2),
         "gpt-5.2" => (2, 1, 3, 1),
-        "gpt-5.3-codex-spark" => (3, 3, 2, 4),
+        "gpt-5.4-mini" => (4, 4, 4, 5),
+        "gpt-5.3-codex" => (3, 3, 2, 3),
+        "gpt-5.3-codex-spark" => (5, 5, 5, 4),
+        "claude-opus-4.1" => (1, 1, 4, 2),
+        "claude-sonnet-4-5-20250929" => (2, 2, 2, 1),
+        "claude-haiku-3.5" => (6, 6, 6, 6),
+        "gemini-3-pro-preview" => (4, 4, 5, 5),
+        "kimi-latest" => (5, 5, 3, 4),
         _ => (9, 9, 9, 9),
     }
 }
+
+const CODEX_SHARED_MODELS: &[&str] = &["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"];
+const CLAUDE_SHARED_MODELS: &[&str] = &[
+    "claude-opus-4.1",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-3.5",
+];
+const GEMINI_CANONICAL_MODELS: &[&str] = &["gemini-3-pro-preview"];
+const KIMI_CANONICAL_MODELS: &[&str] = &["kimi-latest"];
 
 impl ModelStatus {
     pub fn new(
@@ -94,23 +111,23 @@ pub fn load_all_models() -> Vec<ModelStatus> {
 
 pub fn load_codex_models() -> Vec<ModelStatus> {
     match codex::load_live_models() {
-        Ok(models) if !models.is_empty() => models
-            .into_iter()
-            .map(|model| {
-                let (idea_rank, planning_rank, build_rank, review_rank) =
-                    ranks_for_model(&model.name);
-                ModelStatus::new(
-                    VendorKind::Codex,
-                    model.name,
-                    None,
-                    model.quota_percent,
-                    idea_rank,
-                    planning_rank,
-                    build_rank,
-                    review_rank,
-                )
-            })
-            .collect(),
+        Ok(models) if !models.is_empty() => {
+            let live = live_map(models);
+            let shared_quota = CODEX_SHARED_MODELS
+                .iter()
+                .find_map(|name| live.get(*name).copied().flatten());
+            let mut rows = CODEX_SHARED_MODELS
+                .iter()
+                .map(|name| model_status(VendorKind::Codex, name, shared_quota))
+                .collect::<Vec<_>>();
+
+            rows.push(model_status(
+                VendorKind::Codex,
+                "gpt-5.3-codex-spark",
+                live.get("gpt-5.3-codex-spark").copied().flatten(),
+            ));
+            rows
+        }
         Ok(_) => vec![ModelStatus::new(
             VendorKind::Codex,
             "codex",
@@ -136,70 +153,136 @@ pub fn load_codex_models() -> Vec<ModelStatus> {
 
 pub fn load_claude_models() -> Vec<ModelStatus> {
     match claude::load_live_models() {
-        Ok(models) if !models.is_empty() => models
-            .into_iter()
-            .map(|model| {
-                let (idea_rank, planning_rank, build_rank, review_rank) =
-                    ranks_for_model(&model.name);
-                ModelStatus::new(
-                    VendorKind::Claude,
-                    model.name,
-                    None,
-                    model.quota_percent,
-                    idea_rank,
-                    planning_rank,
-                    build_rank,
-                    review_rank,
-                )
-            })
-            .collect(),
+        Ok(models) if !models.is_empty() => {
+            let live = live_map(models);
+            let shared_quota = live
+                .iter()
+                .find(|(name, _)| name.contains("sonnet"))
+                .map(|(_, quota)| *quota)
+                .flatten()
+                .or_else(|| live.get("seven_day").copied().flatten())
+                .or_else(|| live.get("five_hour").copied().flatten());
+
+            CLAUDE_SHARED_MODELS
+                .iter()
+                .map(|name| model_status(VendorKind::Claude, name, shared_quota))
+                .collect()
+        }
         _ => Vec::new(),
     }
 }
 
 pub fn load_gemini_models() -> Vec<ModelStatus> {
     match gemini::load_live_models() {
-        Ok(models) if !models.is_empty() => models
-            .into_iter()
-            .map(|model| {
-                let (idea_rank, planning_rank, build_rank, review_rank) =
-                    ranks_for_model(&model.name);
-                ModelStatus::new(
-                    VendorKind::Gemini,
-                    model.name,
-                    None,
-                    model.quota_percent,
-                    idea_rank,
-                    planning_rank,
-                    build_rank,
-                    review_rank,
-                )
-            })
-            .collect(),
+        Ok(models) if !models.is_empty() => {
+            let live = live_map(models);
+            GEMINI_CANONICAL_MODELS
+                .iter()
+                .map(|name| {
+                    let quota = live
+                        .get(*name)
+                        .copied()
+                        .flatten()
+                        .or_else(|| find_first_matching_quota(&live, "gemini-3-pro"))
+                        .or_else(|| find_first_matching_quota(&live, "gemini-2.5-pro"));
+                    model_status(VendorKind::Gemini, name, quota)
+                })
+                .collect()
+        }
         _ => Vec::new(),
     }
 }
 
 pub fn load_kimi_models() -> Vec<ModelStatus> {
     match kimi::load_live_models() {
-        Ok(models) if !models.is_empty() => models
-            .into_iter()
-            .map(|model| {
-                let (idea_rank, planning_rank, build_rank, review_rank) =
-                    ranks_for_model(&model.name);
-                ModelStatus::new(
-                    VendorKind::Kimi,
-                    model.name,
-                    None,
-                    model.quota_percent,
-                    idea_rank,
-                    planning_rank,
-                    build_rank,
-                    review_rank,
-                )
-            })
-            .collect(),
+        Ok(models) if !models.is_empty() => {
+            let live = live_map(models);
+            KIMI_CANONICAL_MODELS
+                .iter()
+                .map(|name| {
+                    let quota = live
+                        .get(*name)
+                        .copied()
+                        .flatten()
+                        .or_else(|| find_first_matching_quota(&live, "kimi-latest"))
+                        .or_else(|| live.get("kimi").copied().flatten());
+                    model_status(VendorKind::Kimi, name, quota)
+                })
+                .collect()
+        }
         _ => Vec::new(),
+    }
+}
+
+fn live_map(models: Vec<impl LiveModelLike>) -> BTreeMap<String, Option<u8>> {
+    models
+        .into_iter()
+        .map(|model| (model.name().to_ascii_lowercase(), model.quota_percent()))
+        .collect()
+}
+
+fn find_first_matching_quota(live: &BTreeMap<String, Option<u8>>, needle: &str) -> Option<u8> {
+    live.iter()
+        .find(|(name, _)| name.contains(needle))
+        .and_then(|(_, quota)| *quota)
+}
+
+fn model_status(vendor: VendorKind, name: &str, quota_percent: Option<u8>) -> ModelStatus {
+    let (idea_rank, planning_rank, build_rank, review_rank) = ranks_for_model(name);
+    ModelStatus::new(
+        vendor,
+        name,
+        None,
+        quota_percent,
+        idea_rank,
+        planning_rank,
+        build_rank,
+        review_rank,
+    )
+}
+
+trait LiveModelLike {
+    fn name(&self) -> &str;
+    fn quota_percent(&self) -> Option<u8>;
+}
+
+impl LiveModelLike for codex::LiveModel {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn quota_percent(&self) -> Option<u8> {
+        self.quota_percent
+    }
+}
+
+impl LiveModelLike for claude::LiveModel {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn quota_percent(&self) -> Option<u8> {
+        self.quota_percent
+    }
+}
+
+impl LiveModelLike for gemini::LiveModel {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn quota_percent(&self) -> Option<u8> {
+        self.quota_percent
+    }
+}
+
+impl LiveModelLike for kimi::LiveModel {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn quota_percent(&self) -> Option<u8> {
+        self.quota_percent
     }
 }
 

@@ -9,6 +9,7 @@ mod selection;
 mod state;
 mod tmux;
 mod tui;
+mod warmup;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

@@ -1,3 +1,4 @@
+use crate::warmup;
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
@@ -5,7 +6,6 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 
@@ -58,19 +58,14 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    let output = Command::new("kimi")
-        .arg("info")
-        .output()
-        .context("failed to run Kimi dummy invoke")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = first_line(&stderr)
-            .or_else(|| first_line(&stdout))
-            .unwrap_or("unknown error");
-        bail!("Kimi dummy invoke failed: {detail}");
-    }
-    Ok(())
+    warmup::run(warmup::WarmupSpec {
+        program: "kimi",
+        args: &["--yolo"],
+        script: "/usage\n/exit\n",
+        env: &[("KIMI_CLI_NO_AUTO_UPDATE", "1")],
+        settle_timeout: Duration::from_secs(2),
+    })
+    .context("Kimi dummy invoke failed")
 }
 
 fn resolve_api_key() -> Result<String> {
@@ -156,8 +151,4 @@ fn read_f64(value: Option<&Value>) -> Option<f64> {
 fn home_dir() -> Result<PathBuf> {
     let home = env::var_os("HOME").context("HOME is not set")?;
     Ok(Path::new(&home).to_path_buf())
-}
-
-fn first_line(text: &str) -> Option<&str> {
-    text.lines().map(str::trim).find(|line| !line.is_empty())
 }

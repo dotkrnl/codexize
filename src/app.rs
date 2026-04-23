@@ -1,4 +1,4 @@
-use crate::{tmux::TmuxContext, tui::AppTerminal};
+use crate::{codex, tmux::TmuxContext, tui::AppTerminal};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -8,7 +8,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
 
 const PREVIEW_LINES: usize = 3;
 
@@ -24,6 +27,7 @@ pub struct App {
     body_inner_height: usize,
     input_mode: bool,
     input_buffer: String,
+    vendor_refreshes: Vec<VendorRefresh>,
 }
 
 #[derive(Debug)]
@@ -45,13 +49,24 @@ enum SectionStatus {
 
 #[derive(Debug)]
 struct ModelStatus {
-    name: &'static str,
-    stupid_level: u8,
-    quota_percent: u8,
+    name: String,
+    stupid_level: Option<u8>,
+    quota_percent: Option<u8>,
     idea_rank: u8,
     planning_rank: u8,
     build_rank: u8,
     review_rank: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VendorKind {
+    Codex,
+}
+
+#[derive(Debug)]
+struct VendorRefresh {
+    vendor: VendorKind,
+    last_refresh: Option<Instant>,
 }
 
 impl App {
@@ -134,13 +149,8 @@ impl App {
             PipelineSection::pending("Builder Loop", "blocked on approval"),
         ];
 
-        let models = vec![
-            ModelStatus::new("gpt-5.4", 12, 78, 1, 2, 1, 2),
-            ModelStatus::new("gpt-5.4-mini", 33, 92, 3, 3, 2, 4),
-            ModelStatus::new("gpt-5.3-codex", 9, 61, 2, 1, 3, 1),
-        ];
-
         let current = current_section_index(&sections);
+        let models = load_live_models();
 
         Self {
             tmux,
@@ -153,11 +163,13 @@ impl App {
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
+            vendor_refreshes: vec![VendorRefresh::new(VendorKind::Codex)],
         }
     }
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         loop {
+            self.refresh_models_if_due();
             terminal.draw(|frame| self.draw(frame))?;
 
             if event::poll(Duration::from_millis(250))? {
@@ -328,23 +340,26 @@ impl App {
             .models
             .iter()
             .map(|model| {
+                let stupid_level = model
+                    .stupid_level
+                    .map(|value| format!("{value:>2}"))
+                    .unwrap_or_else(|| "--".to_string());
+                let quota_percent = model
+                    .quota_percent
+                    .map(|value| format!("{value:>3}%"))
+                    .unwrap_or_else(|| "--%".to_string());
+
                 Line::from(vec![
                     Span::styled(
-                        format!("{:<13}", model.name),
+                        format!("{:<20}", model.name),
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(": "),
-                    Span::styled(
-                        format!("{:>2}", model.stupid_level),
-                        Style::default().fg(Color::Yellow),
-                    ),
+                    Span::styled(stupid_level, Style::default().fg(Color::Yellow)),
                     Span::raw(" "),
-                    Span::styled(
-                        format!("{:>3}%", model.quota_percent),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(quota_percent, Style::default().fg(Color::Green)),
                     Span::raw(format!(
                         " I:{:>2} P:{:>2} B:{:>2} R:{:>2}",
                         model.idea_rank, model.planning_rank, model.build_rank, model.review_rank
@@ -568,6 +583,29 @@ impl App {
         current_section_index(&self.sections)
     }
 
+    fn refresh_models_if_due(&mut self) {
+        let mut refreshed_models = None;
+
+        for vendor_refresh in &mut self.vendor_refreshes {
+            if !vendor_refresh.is_due() {
+                continue;
+            }
+
+            let vendor_models = match vendor_refresh.vendor {
+                VendorKind::Codex => load_live_models(),
+            };
+
+            vendor_refresh.last_refresh = Some(Instant::now());
+            refreshed_models
+                .get_or_insert_with(Vec::new)
+                .extend(vendor_models);
+        }
+
+        if let Some(models) = refreshed_models {
+            self.models = models;
+        }
+    }
+
     fn can_focus_input(&self) -> bool {
         self.is_expanded(self.selected) && self.sections[self.selected].input_placeholder.is_some()
     }
@@ -666,16 +704,16 @@ impl SectionStatus {
 
 impl ModelStatus {
     fn new(
-        name: &'static str,
-        stupid_level: u8,
-        quota_percent: u8,
+        name: impl Into<String>,
+        stupid_level: Option<u8>,
+        quota_percent: Option<u8>,
         idea_rank: u8,
         planning_rank: u8,
         build_rank: u8,
         review_rank: u8,
     ) -> Self {
         Self {
-            name,
+            name: name.into(),
             stupid_level,
             quota_percent,
             idea_rank,
@@ -683,6 +721,71 @@ impl ModelStatus {
             build_rank,
             review_rank,
         }
+    }
+}
+
+impl VendorRefresh {
+    fn new(vendor: VendorKind) -> Self {
+        Self {
+            vendor,
+            last_refresh: None,
+        }
+    }
+
+    fn is_due(&self) -> bool {
+        self.last_refresh
+            .map(|instant| instant.elapsed() >= codex::REFRESH_INTERVAL)
+            .unwrap_or(true)
+    }
+}
+
+fn load_live_models() -> Vec<ModelStatus> {
+    match codex::load_live_models() {
+        Ok(models) if !models.is_empty() => models
+            .into_iter()
+            .map(|model| {
+                let (idea_rank, planning_rank, build_rank, review_rank) =
+                    ranks_for_model(&model.name);
+                ModelStatus::new(
+                    model.name,
+                    None,
+                    model.quota_percent,
+                    idea_rank,
+                    planning_rank,
+                    build_rank,
+                    review_rank,
+                )
+            })
+            .collect(),
+        Ok(_) => vec![ModelStatus::new("codex", None, None, 9, 9, 9, 9)],
+        Err(error) => vec![ModelStatus::new(
+            format!("codex: {}", truncate_error(&error.to_string(), 9)),
+            None,
+            None,
+            9,
+            9,
+            9,
+            9,
+        )],
+    }
+}
+
+fn ranks_for_model(name: &str) -> (u8, u8, u8, u8) {
+    match name.to_ascii_lowercase().as_str() {
+        "gpt-5.4" => (1, 2, 1, 2),
+        "gpt-5.2" => (2, 1, 3, 1),
+        "gpt-5.3-codex-spark" => (3, 3, 2, 4),
+        _ => (9, 9, 9, 9),
+    }
+}
+
+fn truncate_error(text: &str, max_len: usize) -> String {
+    let mut chars = text.chars();
+    let truncated = chars.by_ref().take(max_len).collect::<String>();
+    if chars.next().is_some() {
+        truncated
+    } else {
+        text.to_string()
     }
 }
 

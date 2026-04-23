@@ -1,4 +1,5 @@
 mod app;
+mod codex;
 mod tmux;
 mod tui;
 

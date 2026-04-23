@@ -1336,16 +1336,22 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             Phase::SpecReviewRunning => {
                 if let Some(err) = &state.agent_error {
                     let n_done = state.spec_reviewers.len();
-                    let footer = if n_done > 0 {
-                        format!("[Enter] retry  ·  [n] proceed with {n_done} review{}", if n_done == 1 {""} else {"s"})
+                    let mut events = Vec::new();
+                    for (i, r) in state.spec_reviewers.iter().enumerate() {
+                        events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
+                    }
+                    if n_done > 0 {
+                        events.push(String::new());
+                    }
+                    events.push(format!("  ✗ round {} failed: {err}", n_done + 1));
+                    events.push(String::new());
+                    events.push(if n_done > 0 {
+                        format!("[Enter] retry  ·  [n] proceed with {n_done} review{}",
+                            if n_done == 1 { "" } else { "s" })
                     } else {
                         "[Enter] retry  ·  [n] skip review, proceed to planning".to_string()
-                    };
-                    PipelineSection::action(
-                        "Spec Review",
-                        "failed",
-                        vec![format!("error: {err}"), String::new(), footer],
-                    )
+                    });
+                    PipelineSection::action("Spec Review", "failed", events)
                 } else {
                     PipelineSection::action(
                         "Spec Review",

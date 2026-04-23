@@ -858,40 +858,47 @@ impl App {
         }
 
         if let Some(placeholder) = &section.input_placeholder {
+            let active = self.input_mode && index == self.selected;
+            let frame_color = if active { Color::Yellow } else { Color::DarkGray };
+            let width = 64usize;
+
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  input",
-                if self.input_mode && index == self.selected {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Yellow)
-                },
-            )));
-            let text = if self.input_buffer.is_empty() {
-                placeholder.to_string()
+
+            // Top border with label
+            let label = if active { " typing " } else { " input " };
+            let fill = width.saturating_sub(label.len() + 2);
+            let top = format!(
+                "  ╭{label}{}╮",
+                "─".repeat(fill),
+            );
+            lines.push(Line::from(Span::styled(top, Style::default().fg(frame_color))));
+
+            // Content row
+            let (text, text_style) = if self.input_buffer.is_empty() {
+                (placeholder.clone(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
             } else {
-                self.input_buffer.clone()
+                (self.input_buffer.clone(), Style::default().fg(Color::White))
             };
+            let cursor = if active { "▌" } else { "" };
+            let content_visible_len = text.chars().count() + cursor.chars().count();
+            let inner_width = width.saturating_sub(2); // minus the two ╴ frame chars
+            let padding = inner_width.saturating_sub(content_visible_len);
             lines.push(Line::from(vec![
+                Span::styled("  │ ", Style::default().fg(frame_color)),
+                Span::styled(text, text_style),
                 Span::styled(
-                    if self.input_mode && index == self.selected {
-                        "  * "
-                    } else {
-                        "  > "
-                    },
-                    Style::default().fg(Color::Yellow),
+                    cursor.to_string(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK),
                 ),
-                Span::styled(
-                    text,
-                    if self.input_buffer.is_empty() {
-                        Style::default().fg(Color::Gray)
-                    } else {
-                        Style::default().fg(Color::White)
-                    },
-                ),
+                Span::raw(" ".repeat(padding.saturating_sub(2))),
+                Span::styled(" │", Style::default().fg(frame_color)),
             ]));
+
+            // Bottom border with hint
+            let hint = if active { " Enter: submit · Esc: cancel " } else { " Enter to type " };
+            let fill = width.saturating_sub(hint.len() + 2);
+            let bottom = format!("  ╰{}{hint}╯", "─".repeat(fill));
+            lines.push(Line::from(Span::styled(bottom, Style::default().fg(frame_color))));
         }
 
         lines

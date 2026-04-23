@@ -1,5 +1,5 @@
 use crate::{
-    adapters::{AgentRun, CodexAdapter, launch_interactive},
+    adapters::{AgentRun, adapter_for_vendor, launch_interactive},
     cache,
     selection::{self, ModelStatus, QuotaError, VendorKind},
     state::{self, Phase, RunState},
@@ -418,9 +418,9 @@ impl App {
 
         // Pick best available Codex model by build rank; fall back to default
         let chosen = selection::select(&self.models, selection::TaskKind::Build)
-            .map(|m| (m.name.clone(), vendor_tag(m.vendor).to_string()))
-            .unwrap_or_else(|| ("o4-mini".to_string(), "codex".to_string()));
-        let (model, vendor) = chosen;
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+            .unwrap_or_else(|| ("o4-mini".to_string(), VendorKind::Codex, "codex".to_string()));
+        let (model, vendor_kind, vendor) = chosen;
 
         let run_id = &self.state.run_id;
         let prompt_path = state::run_dir(run_id).join("prompts").join("brainstorm.md");
@@ -447,8 +447,9 @@ impl App {
             artifact_paths: vec![spec_path.clone()],
         };
 
+        let adapter = adapter_for_vendor(vendor_kind);
         let fresh_start = self.state.current_phase == Phase::IdeaInput;
-        match launch_interactive("[Brainstorm]", &run, &CodexAdapter, fresh_start) {
+        match launch_interactive("[Brainstorm]", &run, adapter.as_ref(), fresh_start) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());

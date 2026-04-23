@@ -401,6 +401,10 @@ impl App {
         let (model, vendor_kind, vendor) = chosen
             .unwrap_or_else(|| ("o4-mini".to_string(), VendorKind::Codex, "codex".to_string()));
 
+        // Delete any leftover artifact from a previous run so poll_agent_window
+        // only advances when the current agent actually produces the file.
+        let _ = std::fs::remove_file(&review_path);
+
         let prompt_path = state::run_dir(&run_id).join("prompts").join("spec-review.md");
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -423,6 +427,9 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_interactive("[Spec Review]", &run, adapter.as_ref(), false) {
             Ok(()) => {
+                // Record model now so the running section can show it;
+                // phase transition only happens in poll_agent_window after
+                // the artifact is verified to exist.
                 self.state.phase_models.insert(
                     "spec-review".to_string(),
                     PhaseModel { model: model.clone(), vendor: vendor.clone() },
@@ -496,7 +503,10 @@ impl App {
         let prompt_path = state::run_dir(run_id).join("prompts").join("brainstorm.md");
         let spec_path = state::run_dir(run_id).join("artifacts").join("spec.md");
 
-        // Write prompt file
+        // Delete any leftover artifact so poll_agent_window only advances
+        // when this run's agent actually produces the file.
+        let _ = std::fs::remove_file(&spec_path);
+
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

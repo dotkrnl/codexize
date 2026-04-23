@@ -42,6 +42,9 @@ pub struct App {
     window_launched: bool,
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,
+    /// Number of non-empty lines in the agent window; used to drive a
+    /// looping progress spinner that advances as the agent streams output.
+    agent_line_count: usize,
 }
 
 #[derive(Debug)]
@@ -104,6 +107,7 @@ impl App {
             window_launched: false,
             quota_errors,
             quota_retry_delay: Duration::from_secs(60),
+            agent_line_count: 0,
         }
     }
 
@@ -111,6 +115,7 @@ impl App {
         loop {
             self.refresh_models_if_due();
             self.poll_agent_window();
+            self.update_agent_progress();
             terminal.draw(|frame| self.draw(frame))?;
 
             if event::poll(Duration::from_millis(250))? {
@@ -486,6 +491,28 @@ impl App {
         }
     }
 
+    /// Count non-empty lines in the agent's tmux window to drive the progress
+    /// spinner. Each new line → spinner advances one step.
+    fn update_agent_progress(&mut self) {
+        if !self.window_launched {
+            self.agent_line_count = 0;
+            return;
+        }
+        let window_name = match self.state.current_phase {
+            Phase::BrainstormRunning => "[Brainstorm]",
+            Phase::SpecReviewRunning => "[Spec Review]",
+            _ => return,
+        };
+        let output = std::process::Command::new("tmux")
+            .args(["capture-pane", "-t", window_name, "-p", "-J"])
+            .output();
+        if let Ok(out) = output {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let lines = text.lines().filter(|l| !l.trim().is_empty()).count();
+            self.agent_line_count = lines;
+        }
+    }
+
     fn poll_agent_window(&mut self) {
         if !self.window_launched {
             return;
@@ -830,6 +857,31 @@ impl App {
             })
             .collect::<Vec<_>>();
 
+        // Live progress spinner + model for running phases
+        if section.status == SectionStatus::Running && self.window_launched {
+            let phase_key = match self.state.current_phase {
+                Phase::BrainstormRunning => Some("brainstorm"),
+                Phase::SpecReviewRunning => Some("spec-review"),
+                _ => None,
+            };
+            if let Some(key) = phase_key {
+                let model_label = self.state.phase_models.get(key)
+                    .map(|pm| format!("{} ({})", pm.model, pm.vendor))
+                    .unwrap_or_else(|| "unknown model".to_string());
+                let spin = spinner_frame(self.agent_line_count);
+                lines.insert(0, Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(spin, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw("  "),
+                    Span::styled(model_label, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" · {} lines", self.agent_line_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
+        }
+
         if section.events.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  - no events yet",
@@ -1166,6 +1218,12 @@ impl SectionStatus {
             Self::Done => Style::default().fg(Color::Green),
         }
     }
+}
+
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+fn spinner_frame(count: usize) -> &'static str {
+    SPINNER[count % SPINNER.len()]
 }
 
 fn phase_done_summary(state: &RunState, phase: &str, label: &str) -> String {

@@ -96,8 +96,9 @@ impl AgentAdapter for KimiAdapter {
     }
 
     fn noninteractive_command(&self, _model: &str, prompt_path: &str) -> String {
+        // Kimi's --print mode requires input via stdin, not -p
         format!(
-            r#"kimi --yolo --print -p "$(cat {prompt_path})""#,
+            r#"kimi --yolo --print < {prompt_path}"#,
             prompt_path = shell_escape(prompt_path),
         )
     }
@@ -122,9 +123,8 @@ impl AgentAdapter for GeminiAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // --debug forces progress output instead of buffering until completion
         format!(
-            r#"gemini --yolo --debug -m {model} -p "$(cat {prompt_path})""#,
+            r#"gemini --yolo -m {model} -p "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )

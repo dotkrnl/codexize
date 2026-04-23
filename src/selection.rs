@@ -24,6 +24,12 @@ pub enum VendorKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct QuotaError {
+    pub vendor: VendorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ModelStatus {
     pub vendor: VendorKind,
     pub name: String,
@@ -83,20 +89,20 @@ impl ModelStatus {
     }
 }
 
-pub fn load_all_models() -> Vec<ModelStatus> {
+pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     let dashboard_models = match dashboard::load_models() {
         Ok(models) => models,
-        Err(_) => return Vec::new(),
+        Err(_) => return (Vec::new(), Vec::new()),
     };
 
-    let quotas = load_quota_maps();
+    let (quotas, errors) = load_quota_maps();
     let mut candidates = dashboard_models
         .into_iter()
         .filter_map(|model| build_candidate(model, &quotas))
         .collect::<Vec<_>>();
 
     if candidates.is_empty() {
-        return Vec::new();
+        return (Vec::new(), errors);
     }
 
     let retained_names = top_model_union(&candidates);
@@ -130,7 +136,7 @@ pub fn load_all_models() -> Vec<ModelStatus> {
         .collect();
 
     statuses.sort_by_key(|m| m.build_rank);
-    statuses
+    (statuses, errors)
 }
 
 /// Probabilistically select a model for the given task from the live candidate pool.
@@ -247,7 +253,7 @@ fn apply_version_penalties(candidates: &mut Vec<Candidate>) {
     }
 }
 
-fn load_quota_maps() -> BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> {
+fn load_quota_maps() -> (BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>, Vec<QuotaError>) {
     let (tx, rx) = mpsc::channel();
     thread::scope(|scope| {
         for vendor in [
@@ -262,24 +268,32 @@ fn load_quota_maps() -> BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> {
             });
         }
         drop(tx);
-        rx.into_iter().collect()
+        let mut maps = BTreeMap::new();
+        let mut errors = Vec::new();
+        for (vendor, result) in rx {
+            match result {
+                Ok(map) => { maps.insert(vendor, map); }
+                Err(e) => errors.push(QuotaError { vendor, message: e }),
+            }
+        }
+        (maps, errors)
     })
 }
 
-fn load_quota_map_for_vendor(vendor: VendorKind) -> BTreeMap<String, Option<u8>> {
+fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<BTreeMap<String, Option<u8>>, String> {
     match vendor {
         VendorKind::Codex => codex::load_live_models()
             .map(live_map_codex)
-            .unwrap_or_default(),
+            .map_err(|e| e.to_string()),
         VendorKind::Claude => claude::load_live_models()
             .map(live_map_claude)
-            .unwrap_or_default(),
+            .map_err(|e| e.to_string()),
         VendorKind::Gemini => gemini::load_live_models()
             .map(live_map_direct)
-            .unwrap_or_default(),
+            .map_err(|e| e.to_string()),
         VendorKind::Kimi => kimi::load_live_models()
             .map(live_map_kimi)
-            .unwrap_or_default(),
+            .map_err(|e| e.to_string()),
     }
 }
 

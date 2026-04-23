@@ -1,7 +1,7 @@
 use crate::{
     adapters::{AgentRun, CodexAdapter, launch_interactive},
     cache,
-    selection::{self, ModelStatus, VendorKind},
+    selection::{self, ModelStatus, QuotaError, VendorKind},
     state::{self, Phase, RunState},
     tmux::{self, TmuxContext},
     tui::AppTerminal,
@@ -40,6 +40,8 @@ pub struct App {
     input_buffer: String,
     confirm_back: bool,
     window_launched: bool,
+    quota_errors: Vec<QuotaError>,
+    quota_retry_delay: Duration,
 }
 
 #[derive(Debug)]
@@ -62,9 +64,7 @@ enum SectionStatus {
 
 #[derive(Debug)]
 enum ModelRefreshState {
-    /// Background fetch is running; receiver will deliver results
-    Fetching(mpsc::Receiver<Vec<ModelStatus>>),
-    /// Last completed refresh; re-trigger after TTL
+    Fetching(mpsc::Receiver<(Vec<ModelStatus>, Vec<QuotaError>)>),
     Idle(Instant),
 }
 
@@ -102,6 +102,8 @@ impl App {
             input_buffer: String::new(),
             confirm_back: false,
             window_launched: false,
+            quota_errors: Vec::new(),
+            quota_retry_delay: Duration::from_secs(60),
         }
     }
 
@@ -122,7 +124,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame<'_>) {
-        let model_height = (self.models.len() as u16).max(1) + 2;
+        let model_height = (self.models.len() + self.quota_errors.len()).max(1) as u16 + 2;
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -601,6 +603,41 @@ impl App {
             }
         }
 
+        // Quota fetch error warnings (only shown when present)
+        for err in &self.quota_errors {
+            let tag = vendor_tag(err.vendor);
+            // Truncate error message to keep it on one line
+            let msg = if err.message.len() > 60 {
+                format!("{}...", &err.message[..60])
+            } else {
+                err.message.clone()
+            };
+            // Compute next retry time
+            let retry_in = match &self.model_refresh {
+                ModelRefreshState::Idle(at) => {
+                    let elapsed = at.elapsed();
+                    let due = self.quota_retry_delay;
+                    if elapsed < due {
+                        let secs = (due - elapsed).as_secs();
+                        format!(" — retry in {}m{}s", secs / 60, secs % 60)
+                    } else {
+                        " — retrying...".to_string()
+                    }
+                }
+                ModelRefreshState::Fetching(_) => " — retrying now".to_string(),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  ⚠ {:<6}  ", tag),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    format!("{msg}{retry_in}"),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+
         Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))
     }
 
@@ -828,15 +865,26 @@ impl App {
     fn refresh_models_if_due(&mut self) {
         match &self.model_refresh {
             ModelRefreshState::Fetching(rx) => {
-                // Non-blocking check: take results if the background thread finished
-                if let Ok(models) = rx.try_recv() {
+                if let Ok((models, errors)) = rx.try_recv() {
                     let _ = cache::save(&models);
                     self.models = models;
+                    if errors.is_empty() {
+                        self.quota_retry_delay = Duration::from_secs(60);
+                    } else {
+                        // Exponential back-off, cap at TTL
+                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
+                    }
+                    self.quota_errors = errors;
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
                 }
             }
             ModelRefreshState::Idle(refreshed_at) => {
-                if refreshed_at.elapsed() >= cache::TTL {
+                let due_after = if self.quota_errors.is_empty() {
+                    cache::TTL
+                } else {
+                    self.quota_retry_delay
+                };
+                if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
                 }
             }
@@ -1115,11 +1163,10 @@ fn kill_window(name: &str) {
         .output();
 }
 
-fn spawn_refresh() -> mpsc::Receiver<Vec<ModelStatus>> {
+fn spawn_refresh() -> mpsc::Receiver<(Vec<ModelStatus>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let models = selection::load_all_models();
-        let _ = tx.send(models);
+        let _ = tx.send(selection::load_all_models());
     });
     rx
 }

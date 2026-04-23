@@ -48,6 +48,10 @@ pub struct Event {
 pub struct RunState {
     pub run_id: String,
     pub current_phase: Phase,
+    #[serde(default)]
+    pub idea_text: Option<String>,
+    #[serde(default)]
+    pub selected_model: Option<String>,
 }
 
 impl RunState {
@@ -55,6 +59,8 @@ impl RunState {
         Self {
             run_id,
             current_phase: Phase::IdeaInput,
+            idea_text: None,
+            selected_model: None,
         }
     }
 

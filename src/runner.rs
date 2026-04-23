@@ -2,11 +2,18 @@ use anyhow::{Context, Result, bail};
 use std::{
     fs,
     io::{BufRead, BufReader, Write},
+    path::PathBuf,
     process::{Command, Stdio},
 };
 use crate::state;
 
-pub fn run(run_id: String, phase: String, role: String, command: Vec<String>) -> Result<()> {
+pub fn run(
+    run_id: String,
+    phase: String,
+    role: String,
+    artifacts: Vec<String>,
+    command: Vec<String>,
+) -> Result<()> {
     if command.is_empty() {
         bail!("no command provided to agent-run");
     }
@@ -20,38 +27,35 @@ pub fn run(run_id: String, phase: String, role: String, command: Vec<String>) ->
         .append(true)
         .open(&log_path)?;
 
-    writeln!(log_file, "--- Agent Run Started: phase={}, role={} ---", phase, role)?;
-    writeln!(log_file, "Command: {:?}", command)?;
+    writeln!(log_file, "--- Agent Run Started: phase={phase}, role={role} ---")?;
+    writeln!(log_file, "Command: {command:?}")?;
+    if !artifacts.is_empty() {
+        writeln!(log_file, "Required artifacts: {artifacts:?}")?;
+    }
 
     let mut child = Command::new(&command[0])
         .args(&command[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("failed to spawn agent command: {:?}", command))?;
+        .with_context(|| format!("failed to spawn: {:?}", command))?;
 
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
-    let mut log_file_clone = log_file.try_clone()?;
+    let mut log_out = log_file.try_clone()?;
     let stdout_handle = std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                println!("{}", line);
-                let _ = writeln!(log_file_clone, "[OUT] {}", line);
-            }
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            println!("{line}");
+            let _ = writeln!(log_out, "[OUT] {line}");
         }
     });
 
-    let mut log_file_clone = log_file.try_clone()?;
+    let mut log_err = log_file.try_clone()?;
     let stderr_handle = std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                eprintln!("{}", line);
-                let _ = writeln!(log_file_clone, "[ERR] {}", line);
-            }
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            eprintln!("{line}");
+            let _ = writeln!(log_err, "[ERR] {line}");
         }
     });
 
@@ -59,11 +63,27 @@ pub fn run(run_id: String, phase: String, role: String, command: Vec<String>) ->
     let _ = stdout_handle.join();
     let _ = stderr_handle.join();
 
-    writeln!(log_file, "--- Agent Run Finished: status={} ---", status)?;
+    writeln!(log_file, "--- Agent Run Finished: status={status} ---")?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("agent command failed with status: {}", status)
+    // Validate required artifacts regardless of exit status
+    let mut missing: Vec<&str> = Vec::new();
+    for path in &artifacts {
+        if !PathBuf::from(path).exists() {
+            missing.push(path);
+            writeln!(log_file, "[MISSING ARTIFACT] {path}")?;
+        }
     }
+
+    if !missing.is_empty() {
+        bail!(
+            "agent exited but required artifacts are missing:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    if !status.success() {
+        bail!("agent command failed with status: {status}");
+    }
+
+    Ok(())
 }

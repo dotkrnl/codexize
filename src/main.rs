@@ -1,3 +1,4 @@
+mod adapters;
 mod app;
 mod artifacts;
 mod cache;
@@ -35,6 +36,9 @@ enum Commands {
         phase: String,
         #[arg(long)]
         role: String,
+        /// Required artifact paths — agent is blocked from stopping until all exist
+        #[arg(long = "artifact")]
+        artifacts: Vec<String>,
         #[arg(last = true)]
         command: Vec<String>,
     },
@@ -48,8 +52,9 @@ fn main() -> Result<()> {
             run_id,
             phase,
             role,
+            artifacts,
             command,
-        }) => runner::run(run_id, phase, role, command),
+        }) => runner::run(run_id, phase, role, artifacts, command),
         None => {
             let tmux = tmux::current_context()?;
             let state = load_or_create_state()?;

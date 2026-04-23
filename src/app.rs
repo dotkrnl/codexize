@@ -1,7 +1,8 @@
 use crate::{
+    adapters::{AgentRun, CodexAdapter, launch_in_window},
     cache,
     selection::{self, ModelStatus, VendorKind},
-    state::RunState,
+    state::{self, Phase, RunState},
     tmux::TmuxContext,
     tui::AppTerminal,
 };
@@ -52,6 +53,7 @@ struct PipelineSection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SectionStatus {
     Pending,
+    Running,
     WaitingUser,
     Done,
 }
@@ -66,84 +68,8 @@ enum ModelRefreshState {
 
 impl App {
     pub fn new(tmux: TmuxContext, state: RunState) -> Self {
-        let sections = vec![
-            PipelineSection::done(
-                "Idea",
-                "idea captured",
-                vec![
-                    "operator described the Rust TUI rewrite",
-                    "scope narrowed to pipeline-first control",
-                    "tmux windows chosen over split panes",
-                ],
-                vec![
-                    "> let's completely rewrite it into a Rust TUI",
-                    "< captured tmux-first orchestration goals",
-                ],
-            ),
-            PipelineSection::done(
-                "Brainstorm",
-                "spec written",
-                vec![
-                    "brainstorm agent flow simplified",
-                    "artifact-first control approved",
-                    "spec written to plans/2026-04-23-codexize-rust-tui-design.md",
-                ],
-                vec![
-                    "> pure tmux control, no ACP",
-                    "> compiled adapter",
-                    "< spec updated with wrapper-owned execution",
-                ],
-            ),
-            PipelineSection::done(
-                "Spec Review",
-                "2 issues resolved",
-                vec![
-                    "reviewer requested stricter stop-gate ownership",
-                    "runtime state moved under .codexize/runs/<run-id>",
-                    "spec review closed",
-                ],
-                vec![
-                    "< stop hooks must never advance the pipeline",
-                    "> yes - hooks lookup the states here to decide allow it to stop or not",
-                ],
-            ),
-            PipelineSection::done(
-                "Planning",
-                "plan drafted",
-                vec![
-                    "mvp reduced to real tmux + real provider CLI",
-                    "Rust TUI shell prioritized before adapters",
-                    "runtime and controller work queued next",
-                ],
-                vec![
-                    "< implementation loop split into scaffold, state, tmux, adapter",
-                    "> work on this together one piece by one piece",
-                ],
-            ),
-            PipelineSection::done(
-                "Plan Reviews",
-                "both reviews passed",
-                vec![
-                    "review 1 accepted pipeline-first summary",
-                    "review 2 accepted compiled adapter direction",
-                    "awaiting explicit approval gate",
-                ],
-                vec!["< both plan reviews converged on the same MVP slice"],
-            ),
-            PipelineSection::waiting_user(
-                "Plan Approval",
-                "approval needed",
-                vec![
-                    "layout refactor proposal approved in chat",
-                    "single-column accordion selected",
-                    "waiting for operator input before advancing",
-                ],
-                vec!["> implement it"],
-                "type approval or next instruction here",
-            ),
-            PipelineSection::pending("Builder Loop", "blocked on approval"),
-        ];
-
+        let sections = build_sections(&state);
+        let section_count = sections.len();
         let current = current_section_index(&sections);
 
         // Load cached models immediately so the UI is populated on first frame
@@ -168,7 +94,7 @@ impl App {
             selected: current,
             expanded: BTreeSet::new(),
             transcript_open: BTreeSet::new(),
-            section_scroll: vec![usize::MAX; 7],
+            section_scroll: vec![usize::MAX; section_count],
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
@@ -281,6 +207,14 @@ impl App {
                         return false;
                     }
 
+                    // IdeaInput phase: submit idea and launch brainstorm
+                    if self.state.current_phase == Phase::IdeaInput {
+                        self.input_buffer.clear();
+                        self.input_mode = false;
+                        self.launch_brainstorm(trimmed);
+                        return false;
+                    }
+
                     self.sections[self.selected]
                         .transcript
                         .push(format!("> {trimmed}"));
@@ -306,6 +240,58 @@ impl App {
 
     fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching(spawn_refresh());
+    }
+
+    fn launch_brainstorm(&mut self, idea: String) {
+        // Pick best available Codex model by build rank; fall back to default
+        let model = self
+            .models
+            .iter()
+            .filter(|m| m.vendor == VendorKind::Codex && m.quota_percent.unwrap_or(0) > 0)
+            .min_by_key(|m| m.build_rank)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| "o4-mini".to_string());
+
+        let run_id = &self.state.run_id;
+        let prompt_path = state::run_dir(run_id).join("prompts").join("brainstorm.md");
+        let spec_path = state::run_dir(run_id).join("artifacts").join("spec.md");
+
+        // Write prompt file
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let prompt = brainstorm_prompt(&idea, &spec_path.display().to_string());
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected]
+                .events
+                .push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "brainstorm".to_string(),
+            role: "brainstorm".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![spec_path.clone()],
+        };
+
+        match launch_in_window("[Brainstorm]", &run, &CodexAdapter) {
+            Ok(()) => {
+                self.state.idea_text = Some(idea.clone());
+                self.state.selected_model = Some(model.clone());
+                let _ = self.state.transition_to(Phase::BrainstormRunning);
+                self.sections = build_sections(&self.state);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected]
+                    .events
+                    .push(format!("failed to launch brainstorm: {e}"));
+            }
+        }
     }
 
     fn header(&self) -> Paragraph<'_> {
@@ -747,12 +733,28 @@ impl PipelineSection {
             input_placeholder: None,
         }
     }
+
+    fn running(
+        name: impl Into<String>,
+        summary: impl Into<String>,
+        events: Vec<impl Into<String>>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            status: SectionStatus::Running,
+            summary: summary.into(),
+            events: events.into_iter().map(Into::into).collect(),
+            transcript: Vec::new(),
+            input_placeholder: None,
+        }
+    }
 }
 
 impl SectionStatus {
     fn label(self) -> &'static str {
         match self {
             Self::Pending => "pending",
+            Self::Running => "running",
             Self::WaitingUser => "waiting-user",
             Self::Done => "done",
         }
@@ -761,10 +763,142 @@ impl SectionStatus {
     fn style(self) -> Style {
         match self {
             Self::Pending => Style::default().fg(Color::DarkGray),
+            Self::Running => Style::default().fg(Color::Cyan),
             Self::WaitingUser => Style::default().fg(Color::Yellow),
             Self::Done => Style::default().fg(Color::Green),
         }
     }
+}
+
+fn build_sections(state: &RunState) -> Vec<PipelineSection> {
+    let phase = state.current_phase;
+    vec![
+        match phase {
+            Phase::IdeaInput => PipelineSection::waiting_user(
+                "Idea",
+                "waiting for idea",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+                "describe what you want to build",
+            ),
+            _ => PipelineSection::done(
+                "Idea",
+                state.idea_text.as_deref().unwrap_or("idea captured"),
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        },
+        match phase {
+            Phase::IdeaInput => PipelineSection::pending("Brainstorm", "waiting for idea"),
+            Phase::BrainstormRunning => PipelineSection::running(
+                "Brainstorm",
+                "agent running in [Brainstorm] window",
+                vec![
+                    format!(
+                        "model: {}",
+                        state.selected_model.as_deref().unwrap_or("unknown")
+                    ),
+                    "waiting for spec.md artifact".to_string(),
+                ],
+            ),
+            _ => PipelineSection::done(
+                "Brainstorm",
+                "spec written",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        },
+        match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning => {
+                PipelineSection::pending("Spec Review", "blocked on brainstorm")
+            }
+            Phase::SpecReviewRunning => PipelineSection::running(
+                "Spec Review",
+                "agent running",
+                vec!["reviewing spec artifact".to_string()],
+            ),
+            _ => PipelineSection::done(
+                "Spec Review",
+                "review complete",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        },
+        match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
+                PipelineSection::pending("Planning", "blocked on spec review")
+            }
+            Phase::PlanningRunning => PipelineSection::running(
+                "Planning",
+                "agent running",
+                vec!["drafting plan artifact".to_string()],
+            ),
+            _ => PipelineSection::done(
+                "Planning",
+                "plan drafted",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        },
+        match phase {
+            Phase::AwaitingPlanApproval => PipelineSection::waiting_user(
+                "Plan Approval",
+                "approval needed",
+                vec!["plan is ready for review".to_string()],
+                Vec::<String>::new(),
+                "approve to start implementation",
+            ),
+            Phase::ImplementationRound(_) | Phase::ReviewRound(_) | Phase::Done => {
+                PipelineSection::done(
+                    "Plan Approval",
+                    "approved",
+                    Vec::<String>::new(),
+                    Vec::<String>::new(),
+                )
+            }
+            _ => PipelineSection::pending("Plan Approval", "blocked on planning"),
+        },
+        match phase {
+            Phase::ImplementationRound(r) => PipelineSection::running(
+                "Builder Loop",
+                &format!("round {r} running"),
+                vec![format!("coder round {r} in progress")],
+            ),
+            Phase::Done => PipelineSection::done(
+                "Builder Loop",
+                "complete",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+            _ => PipelineSection::pending("Builder Loop", "blocked on approval"),
+        },
+    ]
+}
+
+fn brainstorm_prompt(idea: &str, spec_path: &str) -> String {
+    format!(
+        r#"You are a senior software architect doing a brainstorm session.
+
+The operator has described the following idea:
+
+---
+{idea}
+---
+
+Your task:
+1. Explore the idea thoroughly — identify goals, constraints, risks, and open questions.
+2. Propose a clear technical approach.
+3. Write a concise spec to: {spec_path}
+
+The spec must be a markdown file covering:
+- Purpose and goals
+- Non-negotiable constraints
+- Key design decisions and rationale
+- Open risks
+
+Write the spec now. Do not ask clarifying questions — make reasonable assumptions and note them.
+"#
+    )
 }
 
 fn spawn_refresh() -> mpsc::Receiver<Vec<ModelStatus>> {
@@ -806,11 +940,12 @@ fn vendor_prefix(vendor: VendorKind) -> &'static str {
 fn current_section_index(sections: &[PipelineSection]) -> usize {
     sections
         .iter()
-        .position(|section| section.status == SectionStatus::WaitingUser)
+        .position(|s| s.status == SectionStatus::WaitingUser || s.status == SectionStatus::Running)
         .or_else(|| {
             sections
                 .iter()
-                .position(|section| section.status != SectionStatus::Pending)
+                .position(|s| s.status == SectionStatus::Done)
+                .map(|i| i.min(sections.len().saturating_sub(1)))
         })
         .unwrap_or(0)
 }

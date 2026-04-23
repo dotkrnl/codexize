@@ -6,47 +6,153 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
+
+const PREVIEW_LINES: usize = 3;
 
 #[derive(Debug)]
 pub struct App {
     tmux: TmuxContext,
-    phase: PipelinePhase,
-    steps: Vec<PipelineStep>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum PipelinePhase {
-    Idle,
+    sections: Vec<PipelineSection>,
+    models: Vec<ModelStatus>,
+    selected: usize,
+    expanded: BTreeSet<usize>,
+    transcript_open: BTreeSet<usize>,
+    section_scroll: Vec<usize>,
+    body_inner_height: usize,
+    input_mode: bool,
+    input_buffer: String,
 }
 
 #[derive(Debug)]
-struct PipelineStep {
+struct PipelineSection {
     name: &'static str,
-    status: StepStatus,
+    status: SectionStatus,
+    summary: &'static str,
+    events: Vec<&'static str>,
+    transcript: Vec<&'static str>,
+    input_placeholder: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum StepStatus {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SectionStatus {
     Pending,
+    WaitingUser,
+    Done,
+}
+
+#[derive(Debug)]
+struct ModelStatus {
+    name: &'static str,
+    stupid_level: u8,
+    quota_percent: u8,
+    idea_rank: u8,
+    planning_rank: u8,
+    build_rank: u8,
+    review_rank: u8,
 }
 
 impl App {
     pub fn new(tmux: TmuxContext) -> Self {
+        let sections = vec![
+            PipelineSection::done(
+                "Idea",
+                "idea captured",
+                vec![
+                    "operator described the Rust TUI rewrite",
+                    "scope narrowed to pipeline-first control",
+                    "tmux windows chosen over split panes",
+                ],
+                vec![
+                    "> let's completely rewrite it into a Rust TUI",
+                    "< captured tmux-first orchestration goals",
+                ],
+            ),
+            PipelineSection::done(
+                "Brainstorm",
+                "spec written",
+                vec![
+                    "brainstorm agent flow simplified",
+                    "artifact-first control approved",
+                    "spec written to plans/2026-04-23-codexize-rust-tui-design.md",
+                ],
+                vec![
+                    "> pure tmux control, no ACP",
+                    "> compiled adapter",
+                    "< spec updated with wrapper-owned execution",
+                ],
+            ),
+            PipelineSection::done(
+                "Spec Review",
+                "2 issues resolved",
+                vec![
+                    "reviewer requested stricter stop-gate ownership",
+                    "runtime state moved under .codexize/runs/<run-id>",
+                    "spec review closed",
+                ],
+                vec![
+                    "< stop hooks must never advance the pipeline",
+                    "> yes - hooks lookup the states here to decide allow it to stop or not",
+                ],
+            ),
+            PipelineSection::done(
+                "Planning",
+                "plan drafted",
+                vec![
+                    "mvp reduced to real tmux + real provider CLI",
+                    "Rust TUI shell prioritized before adapters",
+                    "runtime and controller work queued next",
+                ],
+                vec![
+                    "< implementation loop split into scaffold, state, tmux, adapter",
+                    "> work on this together one piece by one piece",
+                ],
+            ),
+            PipelineSection::done(
+                "Plan Reviews",
+                "both reviews passed",
+                vec![
+                    "review 1 accepted pipeline-first summary",
+                    "review 2 accepted compiled adapter direction",
+                    "awaiting explicit approval gate",
+                ],
+                vec!["< both plan reviews converged on the same MVP slice"],
+            ),
+            PipelineSection::waiting_user(
+                "Plan Approval",
+                "approval needed",
+                vec![
+                    "layout refactor proposal approved in chat",
+                    "single-column accordion selected",
+                    "waiting for operator input before advancing",
+                ],
+                vec!["> implement it"],
+                "type approval or next instruction here",
+            ),
+            PipelineSection::pending("Builder Loop", "blocked on approval"),
+        ];
+
+        let models = vec![
+            ModelStatus::new("gpt-5.4", 12, 78, 1, 2, 1, 2),
+            ModelStatus::new("gpt-5.4-mini", 33, 92, 3, 3, 2, 4),
+            ModelStatus::new("gpt-5.3-codex", 9, 61, 2, 1, 3, 1),
+        ];
+
+        let current = current_section_index(&sections);
+
         Self {
             tmux,
-            phase: PipelinePhase::Idle,
-            steps: vec![
-                PipelineStep::pending("Idea"),
-                PipelineStep::pending("Brainstorm"),
-                PipelineStep::pending("Spec Review"),
-                PipelineStep::pending("Planning"),
-                PipelineStep::pending("Plan Reviews"),
-                PipelineStep::pending("Plan Approval"),
-                PipelineStep::pending("Implementation Loop"),
-            ],
+            sections,
+            models,
+            selected: current,
+            expanded: BTreeSet::new(),
+            transcript_open: BTreeSet::new(),
+            section_scroll: vec![usize::MAX; 7],
+            body_inner_height: 0,
+            input_mode: false,
+            input_buffer: String::new(),
         }
     }
 
@@ -56,7 +162,7 @@ impl App {
 
             if event::poll(Duration::from_millis(250))? {
                 if let Event::Key(key) = event::read()? {
-                    if should_quit(key) {
+                    if self.handle_key(key) {
                         return Ok(());
                     }
                 }
@@ -64,202 +170,530 @@ impl App {
         }
     }
 
-    fn draw(&self, frame: &mut Frame<'_>) {
+    fn draw(&mut self, frame: &mut Frame<'_>) {
+        let model_height = self.models.len() as u16 + 2;
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
-                Constraint::Min(10),
                 Constraint::Length(1),
+                Constraint::Min(8),
+                Constraint::Length(model_height),
             ])
             .split(frame.area());
 
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
-            .split(root[1]);
-
-        let left = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(7), Constraint::Min(8)])
-            .split(body[0]);
-
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(body[1]);
+        self.body_inner_height = root[1].height.saturating_sub(2) as usize;
+        self.clamp_scroll();
 
         frame.render_widget(self.header(), root[0]);
-        frame.render_widget(self.status(), left[0]);
-        frame.render_widget(self.pipeline(), left[1]);
-        frame.render_widget(self.models(), right[0]);
-        frame.render_widget(self.rankings(), right[1]);
-        frame.render_widget(self.footer(), root[2]);
+        frame.render_widget(self.pipeline_view(), root[1]);
+        frame.render_widget(self.model_strip(), root[2]);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        if key.kind != KeyEventKind::Press {
+            return false;
+        }
+
+        if self.input_mode {
+            return self.handle_input_key(key);
+        }
+
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Up => {
+                self.selected = self.selected.saturating_sub(1);
+                false
+            }
+            KeyCode::Down => {
+                if self.selected + 1 < self.sections.len() {
+                    self.selected += 1;
+                }
+                false
+            }
+            KeyCode::Enter => {
+                if self.can_focus_input() {
+                    self.input_mode = true;
+                } else {
+                    self.toggle_selected_section();
+                }
+                false
+            }
+            KeyCode::Char('t') => {
+                self.toggle_transcript();
+                false
+            }
+            KeyCode::PageUp => {
+                self.scroll_selected(-(self.page_step() as isize));
+                false
+            }
+            KeyCode::PageDown => {
+                self.scroll_selected(self.page_step() as isize);
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_input_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc => {
+                self.input_mode = false;
+                false
+            }
+            KeyCode::Enter => {
+                let trimmed = self.input_buffer.trim();
+                if !trimmed.is_empty() {
+                    self.sections[self.selected]
+                        .transcript
+                        .push(Box::leak(format!("> {trimmed}").into_boxed_str()));
+                    self.input_buffer.clear();
+                }
+                self.input_mode = false;
+                false
+            }
+            KeyCode::Backspace => {
+                self.input_buffer.pop();
+                false
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.input_buffer.push(c);
+                false
+            }
+            _ => false,
+        }
     }
 
     fn header(&self) -> Paragraph<'_> {
-        let title = Line::from(vec![
+        Paragraph::new(Line::from(vec![
             Span::styled(
                 "Codexize",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  "),
+            Span::raw(" | "),
+            Span::raw(format!(
+                "{}:{} {}",
+                self.tmux.session_name, self.tmux.window_index, self.tmux.window_name
+            )),
             Span::styled(
-                "tmux-owned agent pipeline",
-                Style::default().fg(Color::Gray),
+                " | Up/Down Enter t PgUp/PgDn q",
+                Style::default().fg(Color::DarkGray),
             ),
-        ]);
-
-        Paragraph::new(title).block(Block::default().borders(Borders::BOTTOM))
+        ]))
     }
 
-    fn status(&self) -> Paragraph<'_> {
-        let lines = vec![
-            Line::from(vec![
-                Span::styled("Phase: ", Style::default().fg(Color::Gray)),
-                Span::styled(self.phase.label(), Style::default().fg(Color::Yellow)),
-            ]),
-            Line::from(vec![
-                Span::styled("Tmux:  ", Style::default().fg(Color::Gray)),
-                Span::raw(format!(
-                    "{}:{} {}",
-                    self.tmux.session_name, self.tmux.window_index, self.tmux.window_name
-                )),
-            ]),
-            Line::from(vec![
-                Span::styled("Run:   ", Style::default().fg(Color::Gray)),
-                Span::raw("none"),
-            ]),
-            Line::from(vec![
-                Span::styled("State: ", Style::default().fg(Color::Gray)),
-                Span::raw("waiting for an idea"),
-            ]),
-        ];
+    fn pipeline_view(&self) -> Paragraph<'static> {
+        let mut lines = Vec::new();
+        let current = self.current_section();
+        let selected_limit = self.selected_body_limit();
+        let mut selected_header_line = 0usize;
+
+        for (index, section) in self.sections.iter().enumerate() {
+            let expanded = self.is_expanded(index);
+            if index == self.selected {
+                selected_header_line = lines.len();
+            }
+
+            lines.push(self.section_header(index, expanded, section));
+
+            if expanded {
+                let body_lines = self.section_body(index);
+                if index == self.selected {
+                    let visible = self.visible_selected_body(&body_lines, selected_limit, index);
+                    lines.extend(visible);
+                } else {
+                    lines.extend(self.preview_body(&body_lines));
+                }
+            } else if index > current && section.status == SectionStatus::Pending {
+                // keep pending future phases terse
+            }
+        }
+
+        let viewport = self.body_inner_height;
+        let max_scroll = lines.len().saturating_sub(viewport);
+        let scroll = selected_header_line.saturating_sub(1).min(max_scroll) as u16;
 
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title("Current Status")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: true })
+            .block(Block::default().title("Pipeline").borders(Borders::ALL))
+            .scroll((scroll, 0))
     }
 
-    fn pipeline(&self) -> List<'_> {
-        let items = self
-            .steps
+    fn model_strip(&self) -> Paragraph<'static> {
+        let lines = self
+            .models
             .iter()
-            .map(|step| {
-                let marker = step.status.marker();
-                ListItem::new(Line::from(vec![
-                    Span::styled(marker, Style::default().fg(step.status.color())),
+            .map(|model| {
+                Line::from(vec![
+                    Span::styled(
+                        format!("{:<13}", model.name),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(": "),
+                    Span::styled(
+                        format!("{:>2}", model.stupid_level),
+                        Style::default().fg(Color::Yellow),
+                    ),
                     Span::raw(" "),
-                    Span::raw(step.name),
-                ]))
+                    Span::styled(
+                        format!("{:>3}%", model.quota_percent),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::raw(format!(
+                        " I:{:>2} P:{:>2} B:{:>2} R:{:>2}",
+                        model.idea_rank, model.planning_rank, model.build_rank, model.review_rank
+                    )),
+                ])
             })
             .collect::<Vec<_>>();
 
-        List::new(items).block(Block::default().title("Pipeline").borders(Borders::ALL))
+        Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))
     }
 
-    fn models(&self) -> Paragraph<'_> {
-        let lines = vec![
-            Line::from(vec![
-                Span::styled("Available models: ", Style::default().fg(Color::Gray)),
-                Span::raw("not loaded"),
-            ]),
-            Line::from(vec![
-                Span::styled("Stupid level:     ", Style::default().fg(Color::Gray)),
-                Span::raw("unknown"),
-            ]),
-            Line::from(vec![
-                Span::styled("Remaining quota:  ", Style::default().fg(Color::Gray)),
-                Span::raw("unknown"),
-            ]),
-            Line::from(""),
-            Line::from("No provider adapter has reported telemetry."),
-        ];
+    fn section_header(
+        &self,
+        index: usize,
+        expanded: bool,
+        section: &PipelineSection,
+    ) -> Line<'static> {
+        let marker = if expanded { "v" } else { ">" };
+        let style = if index == self.selected {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
 
-        Paragraph::new(lines)
-            .block(Block::default().title("Models").borders(Borders::ALL))
-            .wrap(Wrap { trim: true })
+        Line::from(vec![
+            Span::raw(format!("{marker} ")),
+            Span::raw(section.name),
+            Span::raw(" | "),
+            Span::styled(section.status.label(), section.status.style()),
+            Span::raw(" | "),
+            Span::styled(section.summary, Style::default().fg(Color::Gray)),
+        ])
+        .style(style)
     }
 
-    fn rankings(&self) -> Paragraph<'_> {
-        let lines = vec![
-            Line::from(vec![
-                Span::styled("Brainstorm: ", Style::default().fg(Color::Gray)),
-                Span::raw("unranked"),
-            ]),
-            Line::from(vec![
-                Span::styled("Planning:   ", Style::default().fg(Color::Gray)),
-                Span::raw("unranked"),
-            ]),
-            Line::from(vec![
-                Span::styled("Coding:     ", Style::default().fg(Color::Gray)),
-                Span::raw("unranked"),
-            ]),
-            Line::from(vec![
-                Span::styled("Review:     ", Style::default().fg(Color::Gray)),
-                Span::raw("unranked"),
-            ]),
-        ];
+    fn section_body(&self, index: usize) -> Vec<Line<'static>> {
+        let section = &self.sections[index];
+        let mut lines = section
+            .events
+            .iter()
+            .map(|event| {
+                Line::from(vec![
+                    Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(*event),
+                ])
+            })
+            .collect::<Vec<_>>();
 
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title("Selection Rank")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: true })
+        if section.events.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  - no events yet",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        if !section.transcript.is_empty() {
+            if self.transcript_open.contains(&index) {
+                lines.push(Line::from(Span::styled(
+                    "  transcript",
+                    Style::default().fg(Color::Magenta),
+                )));
+                lines.extend(section.transcript.iter().map(|line| {
+                    Line::from(vec![
+                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(*line),
+                    ])
+                }));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    format!("  [t] transcript hidden ({})", section.transcript.len()),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+
+        if let Some(placeholder) = section.input_placeholder {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  input",
+                if self.input_mode && index == self.selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                },
+            )));
+            let text = if self.input_buffer.is_empty() {
+                placeholder.to_string()
+            } else {
+                self.input_buffer.clone()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if self.input_mode && index == self.selected {
+                        "  * "
+                    } else {
+                        "  > "
+                    },
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(
+                    text,
+                    if self.input_buffer.is_empty() {
+                        Style::default().fg(Color::Gray)
+                    } else {
+                        Style::default().fg(Color::White)
+                    },
+                ),
+            ]));
+        }
+
+        lines
     }
 
-    fn footer(&self) -> Paragraph<'_> {
-        Paragraph::new("q / Esc / Ctrl-C quit")
+    fn visible_selected_body(
+        &self,
+        body_lines: &[Line<'static>],
+        limit: usize,
+        index: usize,
+    ) -> Vec<Line<'static>> {
+        if body_lines.is_empty() {
+            return Vec::new();
+        }
+
+        let max_offset = body_lines.len().saturating_sub(limit);
+        let offset = self.section_scroll_offset(index, body_lines.len(), limit);
+        let end = (offset + limit).min(body_lines.len());
+        let mut visible = Vec::new();
+
+        if offset > 0 {
+            visible.push(Line::from(Span::styled(
+                "  ... older ...",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        visible.extend(body_lines[offset..end].iter().cloned());
+
+        if offset < max_offset {
+            visible.push(Line::from(Span::styled(
+                "  ... newer ...",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        visible
+    }
+
+    fn preview_body(&self, body_lines: &[Line<'static>]) -> Vec<Line<'static>> {
+        if body_lines.is_empty() {
+            return Vec::new();
+        }
+
+        let start = body_lines.len().saturating_sub(PREVIEW_LINES);
+        let mut visible = Vec::new();
+
+        if start > 0 {
+            visible.push(Line::from(Span::styled(
+                "  ...",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        visible.extend(body_lines[start..].iter().cloned());
+        visible
+    }
+
+    fn toggle_selected_section(&mut self) {
+        let current = self.current_section();
+        if self.selected == current {
+            return;
+        }
+
+        if self.sections[self.selected].status == SectionStatus::Pending {
+            return;
+        }
+
+        if !self.expanded.insert(self.selected) {
+            self.expanded.remove(&self.selected);
+            self.transcript_open.remove(&self.selected);
+        }
+    }
+
+    fn toggle_transcript(&mut self) {
+        if !self.is_expanded(self.selected) || self.sections[self.selected].transcript.is_empty() {
+            return;
+        }
+
+        if !self.transcript_open.insert(self.selected) {
+            self.transcript_open.remove(&self.selected);
+        }
+    }
+
+    fn scroll_selected(&mut self, delta: isize) {
+        if !self.is_expanded(self.selected) {
+            return;
+        }
+
+        let limit = self.selected_body_limit();
+        let total = self.section_body(self.selected).len();
+        let max_offset = total.saturating_sub(limit) as isize;
+        let current = self.section_scroll_offset(self.selected, total, limit) as isize;
+        let next = (current + delta).clamp(0, max_offset);
+        self.section_scroll[self.selected] = next as usize;
+    }
+
+    fn clamp_scroll(&mut self) {
+        let limit = self.selected_body_limit();
+        let total = self.section_body(self.selected).len();
+        let max_offset = total.saturating_sub(limit);
+
+        if self.section_scroll[self.selected] != usize::MAX {
+            self.section_scroll[self.selected] = self.section_scroll[self.selected].min(max_offset);
+        }
+    }
+
+    fn current_section(&self) -> usize {
+        current_section_index(&self.sections)
+    }
+
+    fn can_focus_input(&self) -> bool {
+        self.is_expanded(self.selected) && self.sections[self.selected].input_placeholder.is_some()
+    }
+
+    fn is_expanded(&self, index: usize) -> bool {
+        index == self.current_section() || self.expanded.contains(&index)
+    }
+
+    fn page_step(&self) -> usize {
+        self.selected_body_limit().saturating_sub(2).max(1)
+    }
+
+    fn selected_body_limit(&self) -> usize {
+        let expanded_preview_count = self
+            .expanded
+            .iter()
+            .filter(|index| **index != self.selected)
+            .count();
+        let reserved = self.sections.len() + expanded_preview_count * PREVIEW_LINES;
+        self.body_inner_height.saturating_sub(reserved).max(6)
+    }
+
+    fn section_scroll_offset(&self, index: usize, total: usize, limit: usize) -> usize {
+        let max_offset = total.saturating_sub(limit);
+        if self.section_scroll[index] == usize::MAX {
+            max_offset
+        } else {
+            self.section_scroll[index].min(max_offset)
+        }
     }
 }
 
-impl PipelineStep {
-    fn pending(name: &'static str) -> Self {
+impl PipelineSection {
+    fn done(
+        name: &'static str,
+        summary: &'static str,
+        events: Vec<&'static str>,
+        transcript: Vec<&'static str>,
+    ) -> Self {
         Self {
             name,
-            status: StepStatus::Pending,
+            status: SectionStatus::Done,
+            summary,
+            events,
+            transcript,
+            input_placeholder: None,
+        }
+    }
+
+    fn waiting_user(
+        name: &'static str,
+        summary: &'static str,
+        events: Vec<&'static str>,
+        transcript: Vec<&'static str>,
+        input_placeholder: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            status: SectionStatus::WaitingUser,
+            summary,
+            events,
+            transcript,
+            input_placeholder: Some(input_placeholder),
+        }
+    }
+
+    fn pending(name: &'static str, summary: &'static str) -> Self {
+        Self {
+            name,
+            status: SectionStatus::Pending,
+            summary,
+            events: Vec::new(),
+            transcript: Vec::new(),
+            input_placeholder: None,
         }
     }
 }
 
-impl PipelinePhase {
+impl SectionStatus {
     fn label(self) -> &'static str {
         match self {
-            Self::Idle => "idle",
+            Self::Pending => "pending",
+            Self::WaitingUser => "waiting-user",
+            Self::Done => "done",
+        }
+    }
+
+    fn style(self) -> Style {
+        match self {
+            Self::Pending => Style::default().fg(Color::DarkGray),
+            Self::WaitingUser => Style::default().fg(Color::Yellow),
+            Self::Done => Style::default().fg(Color::Green),
         }
     }
 }
 
-impl StepStatus {
-    fn marker(self) -> &'static str {
-        match self {
-            Self::Pending => "[ ]",
-        }
-    }
-
-    fn color(self) -> Color {
-        match self {
-            Self::Pending => Color::DarkGray,
+impl ModelStatus {
+    fn new(
+        name: &'static str,
+        stupid_level: u8,
+        quota_percent: u8,
+        idea_rank: u8,
+        planning_rank: u8,
+        build_rank: u8,
+        review_rank: u8,
+    ) -> Self {
+        Self {
+            name,
+            stupid_level,
+            quota_percent,
+            idea_rank,
+            planning_rank,
+            build_rank,
+            review_rank,
         }
     }
 }
 
-fn should_quit(key: KeyEvent) -> bool {
-    if key.kind != KeyEventKind::Press {
-        return false;
-    }
-
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => true,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
-        _ => false,
-    }
+fn current_section_index(sections: &[PipelineSection]) -> usize {
+    sections
+        .iter()
+        .position(|section| section.status == SectionStatus::WaitingUser)
+        .or_else(|| {
+            sections
+                .iter()
+                .position(|section| section.status != SectionStatus::Pending)
+        })
+        .unwrap_or(0)
 }

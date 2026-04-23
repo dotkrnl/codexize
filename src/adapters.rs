@@ -187,24 +187,20 @@ fn launch_in_window(
         name = shell_escape(window_name),
     );
 
+    // tmux new-window switches to the new window by default — add -d to
+    // keep the operator focused where they are when switch=false
+    let args: Vec<&str> = if switch {
+        vec!["new-window", "-n", window_name, &shell_cmd]
+    } else {
+        vec!["new-window", "-d", "-n", window_name, &shell_cmd]
+    };
     let status = Command::new("tmux")
-        .args(["new-window", "-n", window_name, &shell_cmd])
+        .args(&args)
         .status()
         .context("failed to create tmux window")?;
 
     if !status.success() {
         bail!("tmux new-window failed");
-    }
-
-    if switch {
-        let status = Command::new("tmux")
-            .args(["select-window", "-t", window_name])
-            .status()
-            .context("failed to switch to agent window")?;
-
-        if !status.success() {
-            bail!("tmux select-window failed");
-        }
     }
 
     Ok(())

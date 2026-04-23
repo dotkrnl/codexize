@@ -105,6 +105,22 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
         return (Vec::new(), errors);
     }
 
+    // Collapse all Kimi candidates into a single "kimi-latest" entry using
+    // the best-scoring kimi as the source (the kimi CLI only has one model).
+    let best_kimi_idx = candidates.iter()
+        .enumerate()
+        .filter(|(_, c)| c.vendor == VendorKind::Kimi)
+        .max_by(|(_, a), (_, b)| {
+            a.overall_score.partial_cmp(&b.overall_score).unwrap_or(Ordering::Equal)
+        })
+        .map(|(i, _)| i);
+    if let Some(i) = best_kimi_idx {
+        let mut canonical = candidates[i].clone();
+        canonical.name = "kimi-latest".to_string();
+        candidates.retain(|c| c.vendor != VendorKind::Kimi);
+        candidates.push(canonical);
+    }
+
     let retained_names = top_model_union(&candidates);
     candidates.retain(|candidate| retained_names.contains(&candidate.name));
 

@@ -212,12 +212,15 @@ impl App {
                 false
             }
             KeyCode::Char('n') => {
-                // Proceed to next phase from a paused review state
+                // Proceed to next phase from a paused review state; move cursor
+                // to the Planning section so the user sees what's next
                 if self.state.current_phase == Phase::SpecReviewPaused {
                     let _ = self.state.transition_to(Phase::PlanningRunning);
                     self.sections = build_sections(&self.state, self.window_launched);
                     self.section_scroll.resize(self.sections.len(), usize::MAX);
-                    self.selected = current_section_index(&self.sections);
+                    self.selected = self.sections.iter()
+                        .position(|s| s.name == "Planning")
+                        .unwrap_or_else(|| current_section_index(&self.sections));
                 }
                 false
             }
@@ -531,6 +534,7 @@ impl App {
 
         self.sections = build_sections(&self.state, self.window_launched);
         self.section_scroll.resize(self.sections.len(), usize::MAX);
+        // Keep the cursor on the active phase section so the user sees its new state
         self.selected = current_section_index(&self.sections);
     }
 
@@ -1246,16 +1250,15 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             }
             Phase::SpecReviewPaused => {
                 let n = state.spec_reviewers.len();
-                let reviewers: Vec<String> = state.spec_reviewers.iter()
-                    .enumerate()
-                    .map(|(i, r)| format!("review {}: {} ({})", i + 1, r.model, r.vendor))
-                    .collect();
-                let mut events = reviewers;
-                events.push("Enter: add another review  ·  n: proceed to planning".to_string());
+                let mut events = Vec::new();
+                for (i, r) in state.spec_reviewers.iter().enumerate() {
+                    events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
+                }
+                events.push(String::new());
+                events.push(format!("[Enter] add another review · [n] proceed to planning"));
                 PipelineSection::action(
                     "Spec Review",
-                    format!("{n} review{} done — Enter for more, n to proceed",
-                        if n == 1 { "" } else { "s" }),
+                    format!("{n} review{} done", if n == 1 { "" } else { "s" }),
                     events,
                 )
             }

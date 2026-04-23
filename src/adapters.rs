@@ -40,9 +40,10 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // codex exec reads prompt from stdin and exits when done
+        // codex exec reads prompt from stdin and exits when done.
+        // --yolo suppresses permission prompts so it can run headless.
         format!(
-            r#"codex exec -m {model} - < {prompt_path}"#,
+            r#"codex exec --yolo -m {model} - < {prompt_path}"#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -68,8 +69,9 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+        // --verbose forces interim progress to stdout instead of buffering
         format!(
-            r#"claude --dangerously-skip-permissions --print --model {model} "$(cat {prompt_path})""#,
+            r#"claude --dangerously-skip-permissions --print --verbose --model {model} "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -120,9 +122,9 @@ impl AgentAdapter for GeminiAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // -p runs gemini in non-interactive (headless) mode
+        // --debug forces progress output instead of buffering until completion
         format!(
-            r#"gemini --yolo -m {model} -p "$(cat {prompt_path})""#,
+            r#"gemini --yolo --debug -m {model} -p "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )
@@ -178,8 +180,11 @@ fn launch_in_window(
         bail!("agent CLI not found — install it first");
     }
 
+    // Echo what's starting so the user has immediate feedback even if the
+    // agent takes a while before producing its first output line.
     let shell_cmd = format!(
-        r#"{agent_cmd}; echo; echo '--- done, press enter to close ---'; read"#,
+        r#"printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}; {agent_cmd}; echo; echo '--- done, press enter to close ---'; read"#,
+        name = shell_escape(window_name),
     );
 
     let status = Command::new("tmux")

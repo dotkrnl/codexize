@@ -111,7 +111,7 @@ pub fn load_all_models() -> Vec<ModelStatus> {
 
     candidates.sort_by(|left, right| compare_candidates(left, right));
 
-    candidates
+    let mut statuses: Vec<ModelStatus> = candidates
         .into_iter()
         .map(|candidate| ModelStatus {
             vendor: candidate.vendor,
@@ -127,7 +127,10 @@ pub fn load_all_models() -> Vec<ModelStatus> {
             build_weight: candidate.build_probability,
             review_weight: candidate.review_probability,
         })
-        .collect()
+        .collect();
+
+    statuses.sort_by_key(|m| m.build_rank);
+    statuses
 }
 
 /// Probabilistically select a model for the given task from the live candidate pool.

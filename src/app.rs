@@ -220,9 +220,14 @@ impl App {
                 false
             }
             KeyCode::Char('n') => {
-                // Proceed to next phase from a paused review state; move cursor
-                // to the Planning section so the user sees what's next
-                if self.state.current_phase == Phase::SpecReviewPaused {
+                // Proceed to planning from either:
+                //   - SpecReviewPaused (reviews done, user chooses to move on)
+                //   - SpecReviewRunning with error (skip a failed review)
+                let can_skip = self.state.current_phase == Phase::SpecReviewPaused
+                    || (self.state.current_phase == Phase::SpecReviewRunning
+                        && self.state.agent_error.is_some());
+                if can_skip {
+                    self.state.agent_error = None;
                     let _ = self.state.transition_to(Phase::PlanningRunning);
                     self.sections = build_sections(&self.state, self.window_launched);
                     self.section_scroll.resize(self.sections.len(), usize::MAX);
@@ -661,7 +666,10 @@ impl App {
             Span::styled(
                 {
                     let e = if self.editable_artifact().is_some() { " e" } else { "" };
-                    let n = if self.state.current_phase == Phase::SpecReviewPaused { " n" } else { "" };
+                    let show_n = self.state.current_phase == Phase::SpecReviewPaused
+                        || (self.state.current_phase == Phase::SpecReviewRunning
+                            && self.state.agent_error.is_some());
+                    let n = if show_n { " n" } else { "" };
                     format!(" | Up/Down Enter t PgUp/PgDn b{e}{n} q")
                 },
                 Style::default().fg(Color::DarkGray),
@@ -1327,10 +1335,16 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
             Phase::SpecReviewRunning => {
                 if let Some(err) = &state.agent_error {
+                    let n_done = state.spec_reviewers.len();
+                    let footer = if n_done > 0 {
+                        format!("[Enter] retry  ·  [n] proceed with {n_done} review{}", if n_done == 1 {""} else {"s"})
+                    } else {
+                        "[Enter] retry  ·  [n] skip review, proceed to planning".to_string()
+                    };
                     PipelineSection::action(
                         "Spec Review",
-                        "failed — press Enter to retry",
-                        vec![format!("error: {err}")],
+                        "failed",
+                        vec![format!("error: {err}"), String::new(), footer],
                     )
                 } else {
                     PipelineSection::action(

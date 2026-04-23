@@ -139,15 +139,42 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     (statuses, errors)
 }
 
-/// Probabilistically select a model for the given task from the live candidate pool.
-/// Selection weight = the task's selection_probability (quota × role score²).
-/// Falls back to the top-ranked model if all weights are zero.
-pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
-    if models.is_empty() {
-        return None;
+/// Select excluding a specific vendor — tries a different vendor first.
+/// Falls back to same vendor (excluding the specific model) if nothing else available.
+/// Falls back to any model if all else fails.
+pub fn select_preferring_different_vendor<'a>(
+    models: &'a [ModelStatus],
+    task: TaskKind,
+    excluded_vendor: VendorKind,
+    excluded_model: &str,
+) -> Option<&'a ModelStatus> {
+    // 1. Different vendor
+    let different_vendor: Vec<&ModelStatus> = models
+        .iter()
+        .filter(|m| m.vendor != excluded_vendor)
+        .collect();
+    if let Some(m) = weighted_sample(&different_vendor, task) {
+        return Some(m);
     }
 
-    let weights: Vec<f64> = models
+    // 2. Same vendor but different model
+    let different_model: Vec<&ModelStatus> = models
+        .iter()
+        .filter(|m| m.name != excluded_model)
+        .collect();
+    if let Some(m) = weighted_sample(&different_model, task) {
+        return Some(m);
+    }
+
+    // 3. Anything at all
+    select(models, task)
+}
+
+fn weighted_sample<'a>(candidates: &[&'a ModelStatus], task: TaskKind) -> Option<&'a ModelStatus> {
+    if candidates.is_empty() {
+        return None;
+    }
+    let weights: Vec<f64> = candidates
         .iter()
         .map(|m| match task {
             TaskKind::Idea => m.idea_weight,
@@ -156,29 +183,29 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
             TaskKind::Review => m.review_weight,
         })
         .collect();
-
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
-        // No model has quota — fall back to rank 1
-        return models.iter().min_by_key(|m| m.rank_for(task));
+        return candidates.iter().min_by_key(|m| m.rank_for(task)).copied();
     }
-
-    // Simple LCG random from system time (no external dep needed)
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .subsec_nanos() as f64;
     let r = (seed % 1_000_000.0) / 1_000_000.0 * total;
-
     let mut cumulative = 0.0;
-    for (model, &w) in models.iter().zip(weights.iter()) {
+    for (model, &w) in candidates.iter().zip(weights.iter()) {
         cumulative += w;
         if r < cumulative {
             return Some(model);
         }
     }
+    candidates.last().copied()
+}
 
-    models.last()
+/// Probabilistically select a model for the given task using weighted probabilities.
+pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
+    let all: Vec<&ModelStatus> = models.iter().collect();
+    weighted_sample(&all, task)
 }
 
 /// Extract the first `xx[-yy]` version from a model name where each component

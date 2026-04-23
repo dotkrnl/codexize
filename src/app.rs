@@ -1,8 +1,8 @@
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive},
     cache,
-    selection::{self, ModelStatus, QuotaError, VendorKind},
-    state::{self, Phase, RunState},
+    selection::{self, ModelStatus, QuotaError, VendorKind, select_preferring_different_vendor},
+    state::{self, Phase, PhaseModel, RunState},
     tmux::{self, TmuxContext},
     tui::AppTerminal,
 };
@@ -252,6 +252,16 @@ impl App {
                         return false;
                     }
 
+                    // SpecReviewRunning + error or not yet launched: (re)start
+                    if self.state.current_phase == Phase::SpecReviewRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.input_buffer.clear();
+                        self.input_mode = false;
+                        self.launch_spec_review();
+                        return false;
+                    }
+
                     self.sections[self.selected]
                         .transcript
                         .push(format!("> {trimmed}"));
@@ -373,18 +383,85 @@ impl App {
         self.selected = current_section_index(&self.sections);
     }
 
+    fn launch_spec_review(&mut self) {
+        self.state.agent_error = None;
+
+        let run_id = self.state.run_id.clone();
+        let spec_path = state::run_dir(&run_id).join("artifacts").join("spec.md");
+        let review_path = state::run_dir(&run_id).join("artifacts").join("spec-review.md");
+
+        // Determine which vendor/model was used for brainstorm to avoid repeating it
+        let prior_vendor = self.state.phase_models.get("brainstorm")
+            .and_then(|pm| vendor_from_str(&pm.vendor));
+        let prior_model = self.state.phase_models.get("brainstorm")
+            .map(|pm| pm.model.clone())
+            .unwrap_or_default();
+
+        let chosen = if let Some(pv) = prior_vendor {
+            select_preferring_different_vendor(&self.models, selection::TaskKind::Review, pv, &prior_model)
+                .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        } else {
+            selection::select(&self.models, selection::TaskKind::Review)
+                .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        };
+
+        let (model, vendor_kind, vendor) = chosen
+            .unwrap_or_else(|| ("o4-mini".to_string(), VendorKind::Codex, "codex".to_string()));
+
+        let prompt_path = state::run_dir(&run_id).join("prompts").join("spec-review.md");
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let prompt = spec_review_prompt(&spec_path.display().to_string(), &review_path.display().to_string());
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "spec-review".to_string(),
+            role: "spec-review".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![review_path.clone()],
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        match launch_interactive("[Spec Review]", &run, adapter.as_ref(), false) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    "spec-review".to_string(),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch spec review: {e}"));
+            }
+        }
+    }
+
     fn poll_agent_window(&mut self) {
         if !self.window_launched {
             return;
         }
 
+        let run_dir = state::run_dir(&self.state.run_id);
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
             Phase::BrainstormRunning => (
                 "[Brainstorm]",
-                state::run_dir(&self.state.run_id)
-                    .join("artifacts")
-                    .join("spec.md"),
+                run_dir.join("artifacts").join("spec.md"),
                 Phase::SpecReviewRunning,
+            ),
+            Phase::SpecReviewRunning => (
+                "[Spec Review]",
+                run_dir.join("artifacts").join("spec-review.md"),
+                Phase::PlanningRunning,
             ),
             _ => return,
         };
@@ -1072,37 +1149,74 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                 Vec::<String>::new(),
             ),
         },
-        match phase {
-            Phase::IdeaInput | Phase::BrainstormRunning => {
-                PipelineSection::pending("Spec Review", "blocked on brainstorm")
-            }
-            Phase::SpecReviewRunning => PipelineSection::running(
-                "Spec Review",
-                "agent running",
-                vec!["reviewing spec artifact".to_string()],
-            ),
-            _ => PipelineSection::done(
+        if state.phase_models.contains_key("spec-review") {
+            PipelineSection::done(
                 "Spec Review",
                 phase_done_summary(state, "spec-review", "review complete"),
                 Vec::<String>::new(),
                 Vec::<String>::new(),
-            ),
-        },
-        match phase {
-            Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
-                PipelineSection::pending("Planning", "blocked on spec review")
+            )
+        } else {
+            match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning => {
+                PipelineSection::pending("Spec Review", "blocked on brainstorm")
             }
-            Phase::PlanningRunning => PipelineSection::running(
-                "Planning",
-                "agent running",
-                vec!["drafting plan artifact".to_string()],
+            Phase::SpecReviewRunning if window_launched => PipelineSection::running(
+                "Spec Review",
+                "agent running in [Spec Review] window",
+                vec!["waiting for spec-review.md artifact".to_string()],
             ),
+            Phase::SpecReviewRunning => {
+                if let Some(err) = &state.agent_error {
+                    PipelineSection::waiting_user(
+                        "Spec Review",
+                        "failed — press Enter to retry",
+                        vec![format!("error: {err}")],
+                        Vec::<String>::new(),
+                        "press Enter to retry spec review",
+                    )
+                } else {
+                    PipelineSection::waiting_user(
+                        "Spec Review",
+                        "ready — press Enter to run",
+                        Vec::<String>::new(),
+                        Vec::<String>::new(),
+                        "press Enter to start spec review",
+                    )
+                }
+            }
             _ => PipelineSection::done(
+                "Spec Review",
+                "review complete",
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+            }
+        },
+        if state.phase_models.contains_key("planning") {
+            PipelineSection::done(
                 "Planning",
                 phase_done_summary(state, "planning", "plan drafted"),
                 Vec::<String>::new(),
                 Vec::<String>::new(),
-            ),
+            )
+        } else {
+            match phase {
+                Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
+                    PipelineSection::pending("Planning", "blocked on spec review")
+                }
+                Phase::PlanningRunning => PipelineSection::running(
+                    "Planning",
+                    "agent running",
+                    vec!["drafting plan artifact".to_string()],
+                ),
+                _ => PipelineSection::done(
+                    "Planning",
+                    "plan drafted",
+                    Vec::<String>::new(),
+                    Vec::<String>::new(),
+                ),
+            }
         },
         match phase {
             Phase::AwaitingPlanApproval => PipelineSection::waiting_user(
@@ -1137,6 +1251,39 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             _ => PipelineSection::pending("Builder Loop", "blocked on approval"),
         },
     ]
+}
+
+fn vendor_from_str(s: &str) -> Option<VendorKind> {
+    match s {
+        "claude" => Some(VendorKind::Claude),
+        "codex" => Some(VendorKind::Codex),
+        "gemini" => Some(VendorKind::Gemini),
+        "kimi" => Some(VendorKind::Kimi),
+        _ => None,
+    }
+}
+
+fn spec_review_prompt(spec_path: &str, review_path: &str) -> String {
+    format!(
+        r#"Invoke your brainstorming skill now — specifically its spec review mode.
+
+You are reviewing a spec written by another agent. Read the spec at:
+{spec_path}
+
+Your task:
+1. Read the spec carefully.
+2. Ask the operator clarifying questions if anything is ambiguous or underspecified.
+3. Evaluate: is the spec clear, complete, and buildable? What risks or gaps do you see?
+4. Write your review to: {review_path}
+
+The review must cover:
+- Overall verdict (approve / approve-with-changes / reject)
+- Specific issues found (if any), each with a suggested fix
+- Open risks the spec does not address
+
+The operator is here and ready to discuss.
+"#
+    )
 }
 
 fn brainstorm_prompt(idea: &str, spec_path: &str) -> String {

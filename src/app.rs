@@ -180,6 +180,20 @@ impl App {
                 false
             }
             KeyCode::Enter => {
+                // Phases that just need Enter pressed (no text input)
+                if self.state.current_phase == Phase::BrainstormRunning
+                    && (self.state.agent_error.is_some() || !self.window_launched)
+                {
+                    let idea = self.state.idea_text.clone().unwrap_or_default();
+                    self.launch_brainstorm(idea);
+                    return false;
+                }
+                if self.state.current_phase == Phase::SpecReviewRunning
+                    && (self.state.agent_error.is_some() || !self.window_launched)
+                {
+                    self.launch_spec_review();
+                    return false;
+                }
                 if self.can_focus_input() {
                     self.input_mode = true;
                 } else {
@@ -238,27 +252,6 @@ impl App {
                         self.input_buffer.clear();
                         self.input_mode = false;
                         self.launch_brainstorm(trimmed);
-                        return false;
-                    }
-
-                    // BrainstormRunning + error or not yet launched: (re)start
-                    if self.state.current_phase == Phase::BrainstormRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.input_buffer.clear();
-                        self.input_mode = false;
-                        let idea = self.state.idea_text.clone().unwrap_or_default();
-                        self.launch_brainstorm(idea);
-                        return false;
-                    }
-
-                    // SpecReviewRunning + error or not yet launched: (re)start
-                    if self.state.current_phase == Phase::SpecReviewRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.input_buffer.clear();
-                        self.input_mode = false;
-                        self.launch_spec_review();
                         return false;
                     }
 
@@ -1131,14 +1124,12 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                         ],
                     )
                 } else {
-                    PipelineSection::waiting_user(
+                    PipelineSection::running(
                         "Brainstorm",
                         "ready — press Enter to run",
                         vec![
                             format!("model: {}", state.selected_model.as_deref().unwrap_or("unknown")),
                         ],
-                        Vec::<String>::new(),
-                        "press Enter to start brainstorm",
                     )
                 }
             }
@@ -1149,15 +1140,7 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
                 Vec::<String>::new(),
             ),
         },
-        if state.phase_models.contains_key("spec-review") {
-            PipelineSection::done(
-                "Spec Review",
-                phase_done_summary(state, "spec-review", "review complete"),
-                Vec::<String>::new(),
-                Vec::<String>::new(),
-            )
-        } else {
-            match phase {
+        match phase {
             Phase::IdeaInput | Phase::BrainstormRunning => {
                 PipelineSection::pending("Spec Review", "blocked on brainstorm")
             }
@@ -1168,55 +1151,41 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
             Phase::SpecReviewRunning => {
                 if let Some(err) = &state.agent_error {
-                    PipelineSection::waiting_user(
+                    PipelineSection::running(
                         "Spec Review",
                         "failed — press Enter to retry",
                         vec![format!("error: {err}")],
-                        Vec::<String>::new(),
-                        "press Enter to retry spec review",
                     )
                 } else {
-                    PipelineSection::waiting_user(
+                    PipelineSection::running(
                         "Spec Review",
                         "ready — press Enter to run",
                         Vec::<String>::new(),
-                        Vec::<String>::new(),
-                        "press Enter to start spec review",
                     )
                 }
             }
             _ => PipelineSection::done(
                 "Spec Review",
-                "review complete",
+                phase_done_summary(state, "spec-review", "review complete"),
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-            }
         },
-        if state.phase_models.contains_key("planning") {
-            PipelineSection::done(
+        match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
+                PipelineSection::pending("Planning", "blocked on spec review")
+            }
+            Phase::PlanningRunning => PipelineSection::running(
+                "Planning",
+                "agent running",
+                vec!["drafting plan artifact".to_string()],
+            ),
+            _ => PipelineSection::done(
                 "Planning",
                 phase_done_summary(state, "planning", "plan drafted"),
                 Vec::<String>::new(),
                 Vec::<String>::new(),
-            )
-        } else {
-            match phase {
-                Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning => {
-                    PipelineSection::pending("Planning", "blocked on spec review")
-                }
-                Phase::PlanningRunning => PipelineSection::running(
-                    "Planning",
-                    "agent running",
-                    vec!["drafting plan artifact".to_string()],
-                ),
-                _ => PipelineSection::done(
-                    "Planning",
-                    "plan drafted",
-                    Vec::<String>::new(),
-                    Vec::<String>::new(),
-                ),
-            }
+            ),
         },
         match phase {
             Phase::AwaitingPlanApproval => PipelineSection::waiting_user(

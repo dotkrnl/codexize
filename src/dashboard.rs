@@ -1,8 +1,10 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::Duration;
 
+pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
 pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
@@ -19,21 +21,89 @@ pub struct DashboardModel {
 
 pub fn load_models() -> Result<Vec<DashboardModel>> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .build()
-        .context("failed to build dashboard HTTP client")?;
+        .context("failed to build HTTP client")?;
+
+    // Load both sources in parallel via two requests
+    let inventory = load_inventory(&client);
+    let scores = load_scores(&client);
+
+    match (inventory, scores) {
+        (Ok(inv), Ok(sc)) => Ok(merge(inv, sc)),
+        (Ok(inv), Err(_)) => Ok(inv_only(inv)),
+        (Err(_), Ok(sc)) => Ok(scores_only(sc)),
+        (Err(e1), Err(e2)) => {
+            anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
+        }
+    }
+}
+
+// A lightweight model entry from the /api/models inventory
+struct InventoryEntry {
+    name: String,
+    vendor: String,
+    display_order: usize,
+}
+
+// A model entry from the dashboard with score data
+struct ScoreEntry {
+    name: String,
+    vendor: String,
+    overall_score: f64,
+    current_score: f64,
+    standard_error: f64,
+    axes: Vec<(String, f64)>,
+    display_order: usize,
+}
+
+fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
+    let payload = client
+        .get(MODELS_LIST_URL)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .context("models list request failed")?
+        .json::<Value>()
+        .context("models list was not valid JSON")?;
+
+    let arr = payload
+        .as_array()
+        .context("models list is not a JSON array")?;
+
+    let mut entries = Vec::new();
+    for (i, item) in arr.iter().enumerate() {
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        let vendor = item
+            .get("vendor")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        entries.push(InventoryEntry { name, vendor, display_order: i });
+    }
+
+    anyhow::ensure!(!entries.is_empty(), "models list returned no entries");
+    Ok(entries)
+}
+
+fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
     let payload = client
         .get(DASHBOARD_URL)
         .send()
-        .and_then(|response| response.error_for_status())
+        .and_then(|r| r.error_for_status())
         .context("dashboard request failed")?
         .json::<Value>()
         .context("dashboard response was not valid JSON")?;
-    parse_models(&payload)
-}
 
-fn parse_models(payload: &Value) -> Result<Vec<DashboardModel>> {
-    let data = payload.get("data").unwrap_or(payload);
+    let data = payload.get("data").unwrap_or(&payload);
     let model_scores = data
         .get("modelScores")
         .or_else(|| payload.get("modelScores"))
@@ -44,8 +114,8 @@ fn parse_models(payload: &Value) -> Result<Vec<DashboardModel>> {
         .or_else(|| payload.get("historyMap"))
         .and_then(Value::as_object);
 
-    let mut models = Vec::with_capacity(model_scores.len());
-    for (index, item) in model_scores.iter().enumerate() {
+    let mut entries = Vec::new();
+    for (i, item) in model_scores.iter().enumerate() {
         let name = item
             .get("name")
             .or_else(|| item.get("model"))
@@ -57,16 +127,13 @@ fn parse_models(payload: &Value) -> Result<Vec<DashboardModel>> {
             continue;
         }
 
-        let model_id = item
-            .get("id")
-            .map(value_to_string)
-            .unwrap_or_default();
+        let model_id = item.get("id").map(value_to_string).unwrap_or_default();
         let axes = history_map
             .and_then(|map| map.get(&model_id))
             .and_then(latest_axes)
             .unwrap_or_default();
 
-        models.push(DashboardModel {
+        entries.push(ScoreEntry {
             name,
             vendor: item
                 .get("vendor")
@@ -80,20 +147,108 @@ fn parse_models(payload: &Value) -> Result<Vec<DashboardModel>> {
                 .or_else(|| value_to_f64(item.get("score")))
                 .unwrap_or(0.0),
             standard_error: value_to_f64(
-                item.get("standardError")
-                    .or_else(|| item.get("standard_error")),
+                item.get("standardError").or_else(|| item.get("standard_error")),
             )
             .unwrap_or(0.0),
             axes,
-            display_order: index,
+            display_order: i,
         });
     }
 
-    if models.is_empty() {
-        bail!("dashboard returned no models");
+    anyhow::ensure!(!entries.is_empty(), "dashboard returned no models");
+    Ok(entries)
+}
+
+// Merge inventory (full model list) with score data.
+// Inventory drives the universe; scores enrich it where available.
+fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
+    let score_map: HashMap<String, &ScoreEntry> = scores
+        .iter()
+        .map(|s| (s.name.clone(), s))
+        .collect();
+
+    // Also build a map keyed by score display_order for final sort
+    let mut models: Vec<DashboardModel> = inventory
+        .into_iter()
+        .map(|inv| {
+            if let Some(sc) = score_map.get(&inv.name) {
+                DashboardModel {
+                    name: inv.name,
+                    vendor: if !inv.vendor.is_empty() { inv.vendor } else { sc.vendor.clone() },
+                    overall_score: sc.overall_score,
+                    current_score: sc.current_score,
+                    standard_error: sc.standard_error,
+                    axes: sc.axes.clone(),
+                    display_order: sc.display_order,
+                }
+            } else {
+                // Model is in the inventory but not yet scored — include with zeroed scores
+                DashboardModel {
+                    name: inv.name,
+                    vendor: inv.vendor,
+                    overall_score: 0.0,
+                    current_score: 0.0,
+                    standard_error: 0.0,
+                    axes: Vec::new(),
+                    display_order: inv.display_order + 10_000,
+                }
+            }
+        })
+        .collect();
+
+    // Also add scored models not in the inventory (edge case)
+    let inv_names: std::collections::HashSet<String> = models
+        .iter()
+        .map(|m| m.name.clone())
+        .collect();
+    for sc in &scores {
+        if !inv_names.contains(&sc.name) {
+            models.push(DashboardModel {
+                name: sc.name.clone(),
+                vendor: sc.vendor.clone(),
+                overall_score: sc.overall_score,
+                current_score: sc.current_score,
+                standard_error: sc.standard_error,
+                axes: sc.axes.clone(),
+                display_order: sc.display_order,
+            });
+        }
     }
 
-    Ok(models)
+    models.sort_by_key(|m| m.display_order);
+    models
+}
+
+// Fallback when inventory is unavailable: scores only
+fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
+    scores
+        .into_iter()
+        .map(|sc| DashboardModel {
+            name: sc.name,
+            vendor: sc.vendor,
+            overall_score: sc.overall_score,
+            current_score: sc.current_score,
+            standard_error: sc.standard_error,
+            axes: sc.axes,
+            display_order: sc.display_order,
+        })
+        .collect()
+}
+
+// Fallback when scores are unavailable: inventory only, zeroed scores
+fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
+    inventory
+        .into_iter()
+        .map(|inv| DashboardModel {
+            name: inv.name,
+            vendor: inv.vendor,
+            overall_score: 0.0,
+            current_score: 0.0,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            display_order: inv.display_order,
+        })
+        .collect()
 }
 
 fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {
@@ -101,23 +256,23 @@ fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {
     let axes = latest.get("axes")?.as_object()?;
     Some(
         axes.iter()
-            .map(|(key, value)| (key.to_ascii_lowercase(), value_to_f64(Some(value)).unwrap_or(0.0)))
+            .map(|(k, v)| (k.to_ascii_lowercase(), value_to_f64(Some(v)).unwrap_or(0.0)))
             .collect(),
     )
 }
 
 fn value_to_f64(value: Option<&Value>) -> Option<f64> {
     match value {
-        Some(Value::Number(number)) => number.as_f64(),
-        Some(Value::String(text)) => text.parse().ok(),
-        Some(Value::Bool(boolean)) => Some(if *boolean { 1.0 } else { 0.0 }),
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.parse().ok(),
+        Some(Value::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
         _ => None,
     }
 }
 
 fn value_to_string(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
+        Value::String(s) => s.clone(),
         other => other.to_string(),
     }
 }

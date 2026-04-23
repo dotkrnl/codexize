@@ -161,11 +161,15 @@ fn build_candidate(
     quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
 ) -> Option<Candidate> {
     let vendor = vendor_for_dashboard_model(&model)?;
+
+    // Try exact match first
     let quota_percent = quotas
         .get(&vendor)
         .and_then(|models| models.get(&model.name))
         .copied()
-        .flatten();
+        .flatten()
+        // If no exact match, use heuristics to find appropriate quota
+        .or_else(|| find_quota_by_heuristic(&model.name, vendor, quotas));
 
     let idea_probability = selection_probability(&model, quota_percent, IDEA_AXES);
     let planning_probability = selection_probability(&model, quota_percent, PLAN_AXES);
@@ -186,21 +190,90 @@ fn build_candidate(
     })
 }
 
+fn find_quota_by_heuristic(
+    model_name: &str,
+    vendor: VendorKind,
+    quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+) -> Option<u8> {
+    let vendor_quotas = quotas.get(&vendor)?;
+
+    // For unknown models, try to find a similar model's quota
+    match vendor {
+        VendorKind::Codex => {
+            // Check if it's a spark variant
+            if model_name.contains("spark") || model_name.contains("mini") {
+                vendor_quotas.iter()
+                    .find(|(name, _)| name.contains("spark"))
+                    .and_then(|(_, quota)| *quota)
+            } else {
+                // Use any non-spark model's quota as shared quota
+                vendor_quotas.iter()
+                    .find(|(name, _)| !name.contains("spark"))
+                    .and_then(|(_, quota)| *quota)
+            }
+        }
+        VendorKind::Claude => {
+            // All Claude models typically share quota
+            vendor_quotas.values().find_map(|q| *q)
+        }
+        VendorKind::Gemini => {
+            // Check for pro vs flash variants
+            if model_name.contains("flash") || model_name.contains("nano") {
+                vendor_quotas.iter()
+                    .find(|(name, _)| name.contains("flash") || name.contains("nano"))
+                    .and_then(|(_, quota)| *quota)
+            } else {
+                vendor_quotas.iter()
+                    .find(|(name, _)| name.contains("pro") || name.contains("ultra"))
+                    .and_then(|(_, quota)| *quota)
+                    .or_else(|| vendor_quotas.values().find_map(|q| *q))
+            }
+        }
+        VendorKind::Kimi => {
+            // All Kimi models typically share quota
+            vendor_quotas.values().find_map(|q| *q)
+        }
+    }
+}
+
 fn vendor_for_dashboard_model(model: &dashboard::DashboardModel) -> Option<VendorKind> {
+    let name = model.name.as_str();
     let vendor = model.vendor.as_str();
-    if model.name.starts_with("claude-") || vendor == "anthropic" {
+
+    // Check by model name patterns first
+    if name.starts_with("claude-") || name.contains("claude") {
         return Some(VendorKind::Claude);
     }
-    if model.name.starts_with("gpt-") || vendor == "openai" {
+    if name.starts_with("gpt-") || name.starts_with("o1-") || name.contains("gpt") || name.contains("codex") {
         return Some(VendorKind::Codex);
     }
-    if model.name.starts_with("gemini-") || vendor == "google" {
+    if name.starts_with("gemini-") || name.contains("gemini") || name.contains("bison") || name.contains("gecko") {
         return Some(VendorKind::Gemini);
     }
-    if model.name.starts_with("kimi-") || vendor == "kimi" || vendor == "moonshotai" {
+    if name.starts_with("kimi-") || name.contains("kimi") || name.contains("moonshot") {
         return Some(VendorKind::Kimi);
     }
-    None
+
+    // Check by vendor name
+    match vendor {
+        "anthropic" | "claude" => Some(VendorKind::Claude),
+        "openai" | "microsoft" | "azure" => Some(VendorKind::Codex),
+        "google" | "deepmind" => Some(VendorKind::Gemini),
+        "kimi" | "moonshotai" | "moonshot" => Some(VendorKind::Kimi),
+        _ => {
+            // Additional heuristics for unknown models
+            if name.contains("opus") || name.contains("sonnet") || name.contains("haiku") {
+                Some(VendorKind::Claude)
+            } else if name.contains("turbo") || name.contains("davinci") || name.contains("curie") {
+                Some(VendorKind::Codex)
+            } else if name.contains("palm") || name.contains("lamda") || name.contains("bison") {
+                Some(VendorKind::Gemini)
+            } else {
+                // Unknown vendor/model — skip rather than misassign quota
+                None
+            }
+        }
+    }
 }
 
 fn selection_probability(
@@ -252,6 +325,30 @@ fn apply_variance_penalty(score: f64, standard_error: f64) -> f64 {
 
 fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
     let mut retained = BTreeSet::new();
+
+    // First, ensure at least one model per vendor
+    for vendor in [
+        VendorKind::Claude,
+        VendorKind::Codex,
+        VendorKind::Gemini,
+        VendorKind::Kimi,
+    ] {
+        // Find the best model for this vendor by overall score
+        if let Some(best) = candidates
+            .iter()
+            .filter(|c| c.vendor == vendor)
+            .max_by(|a, b| {
+                a.overall_score
+                    .partial_cmp(&b.overall_score)
+                    .unwrap_or(Ordering::Equal)
+                    .then_with(|| b.display_order.cmp(&a.display_order))
+            })
+        {
+            retained.insert(best.name.clone());
+        }
+    }
+
+    // Then add top-3 models for each task type
     for selector in [
         |candidate: &Candidate| candidate.idea_probability,
         |candidate: &Candidate| candidate.planning_probability,
@@ -264,6 +361,7 @@ fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
             retained.insert(candidate.name.clone());
         }
     }
+
     retained
 }
 
@@ -312,17 +410,45 @@ fn live_map_codex(models: Vec<codex::LiveModel>) -> BTreeMap<String, Option<u8>>
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
         .collect::<BTreeMap<_, _>>();
+
+    // Find shared quota from any non-spark model that has quota
     let shared = raw
         .iter()
         .filter(|(name, _)| !name.contains("spark"))
         .find_map(|(_, quota)| *quota);
-    let spark = raw.get("gpt-5.3-codex-spark").copied().flatten();
 
+    // Find spark quota
+    let spark = raw.get("gpt-5.3-codex-spark").copied().flatten()
+        .or_else(|| raw.iter().find(|(name, _)| name.contains("spark")).and_then(|(_, quota)| *quota));
+
+    // Map all known Codex models to appropriate quota
     let mut mapped = BTreeMap::new();
+
+    // Add models we found in live probe
     for name in raw.keys() {
         let quota = if name.contains("spark") { spark } else { shared };
         mapped.insert(name.clone(), quota);
     }
+
+    // Add additional known Codex models that might appear from dashboard
+    for known_model in &[
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-nova",
+        "gpt-5.3-codex-terra",
+        "gpt-5.3-codex-spark",
+        "gpt-5.2-codex",
+        "gpt-5-64k",
+        "gpt-5",
+        "gpt-4o-2025-01-20",
+        "gpt-4o-latest",
+    ] {
+        let model_name = known_model.to_string();
+        if !mapped.contains_key(&model_name) {
+            let quota = if model_name.contains("spark") { spark } else { shared };
+            mapped.insert(model_name, quota);
+        }
+    }
+
     mapped
 }
 
@@ -331,18 +457,46 @@ fn live_map_claude(models: Vec<claude::LiveModel>) -> BTreeMap<String, Option<u8
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
         .collect::<BTreeMap<_, _>>();
+
+    // Find shared quota from any Claude model or fallback keys
     let shared = raw
         .iter()
-        .find(|(name, _)| name.contains("sonnet"))
+        .find(|(name, _)| name.contains("sonnet") || name.contains("opus") || name.contains("haiku"))
         .and_then(|(_, quota)| *quota)
         .or_else(|| raw.get("seven_day").copied().flatten())
-        .or_else(|| raw.get("five_hour").copied().flatten());
+        .or_else(|| raw.get("five_hour").copied().flatten())
+        .or_else(|| raw.values().find_map(|q| *q));
 
-    BTreeMap::from([
-        ("claude-opus-4.1".to_string(), shared),
-        ("claude-sonnet-4-5-20250929".to_string(), shared),
-        ("claude-haiku-3.5".to_string(), shared),
-    ])
+    // Map all known Claude models to shared quota
+    let mut mapped = BTreeMap::new();
+
+    // Add models we found in live probe
+    for name in raw.keys() {
+        if name.starts_with("claude-") {
+            mapped.insert(name.clone(), shared);
+        }
+    }
+
+    // Add all known Claude models that might appear from dashboard
+    for known_model in &[
+        "claude-opus-4.7",
+        "claude-opus-4.1",
+        "claude-sonnet-4.6",
+        "claude-sonnet-4-5-20250929",
+        "claude-sonnet-3.5",
+        "claude-haiku-4.5",
+        "claude-haiku-3.5",
+        "claude-3-opus",
+        "claude-3-sonnet",
+        "claude-3-haiku",
+    ] {
+        let model_name = known_model.to_string();
+        if !mapped.contains_key(&model_name) {
+            mapped.insert(model_name, shared);
+        }
+    }
+
+    mapped
 }
 
 fn live_map_direct<T: LiveModelLike>(models: Vec<T>) -> BTreeMap<String, Option<u8>> {

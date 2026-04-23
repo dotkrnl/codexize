@@ -1767,13 +1767,26 @@ Triage the reviews before planning:
     confidently make alone, ASK the operator — this is an interactive
     session.
 
-When the writing-plans skill reaches the point of writing the plan
-document, write it to: {plan}
+When every trade-off is resolved, do TWO things in this order:
 
-IMPORTANT: Do NOT write or modify any code in the repository. Your only
-output is the plan file. Implementation happens in a later phase.
+  1. UPDATE the spec file in place ({spec}) so it reflects the
+     accepted review feedback and every decision you just made. The
+     spec must end up representing the final, agreed-on design —
+     another agent reading only the spec should not be surprised by
+     anything in the plan.
+  2. Write the plan to: {plan}
 
-The operator is here and ready to respond to your questions.
+Hard rules:
+  - Do NOT write or modify any code (source files, configs, build
+    scripts). You may only edit the spec and write the plan.
+  - Do NOT ask the operator whether to start implementing, whether to
+    jump straight to coding, or whether to skip any downstream phase.
+    Implementation is a separate later phase handled by a different
+    agent — your job ends once the plan is written.
+  - Do NOT offer to run tests, commit, or push anything.
+
+The operator is here and ready to respond to clarifying questions
+about the design itself.
 "#,
         spec = spec_path.display(),
         reviews = reviews_block,

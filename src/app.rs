@@ -3,6 +3,7 @@ use crate::{
     cache,
     selection::{self, ModelStatus, QuotaError, VendorKind, select_for_review},
     state::{self, Phase, PhaseModel, RunState},
+    tasks,
     tmux::{self, TmuxContext},
     tui::AppTerminal,
 };
@@ -217,6 +218,12 @@ impl App {
                         self.launch_planning();
                         return false;
                     }
+                    if self.state.current_phase == Phase::ShardingRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_sharding();
+                        return false;
+                    }
                 }
                 if self.can_focus_input() {
                     self.input_mode = true;
@@ -334,6 +341,7 @@ impl App {
             Phase::PlanningRunning
             | Phase::PlanReviewRunning
             | Phase::AwaitingPlanApproval => artifacts.join("plan.md"),
+            Phase::ShardingRunning => artifacts.join("tasks.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
                 run_dir.join("rounds").join(format!("{r:03}")).join("task.md")
             }
@@ -388,6 +396,13 @@ impl App {
                 kill_window("[Planning]");
                 let _ = fs::remove_file(artifacts.join("plan.md"));
                 let _ = self.state.transition_to(Phase::SpecReviewRunning);
+            }
+            Phase::ShardingRunning => {
+                kill_window("[Sharding]");
+                let _ = fs::remove_file(artifacts.join("tasks.toml"));
+                let _ = fs::remove_file(prompts.join("sharding.md"));
+                self.state.phase_models.remove("sharding");
+                let _ = self.state.transition_to(Phase::PlanningRunning);
             }
             Phase::PlanReviewRunning => {
                 kill_window("[Plan Review 1]");
@@ -505,6 +520,73 @@ impl App {
         }
     }
 
+    fn launch_sharding(&mut self) {
+        self.state.agent_error = None;
+
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+
+        let run_id = self.state.run_id.clone();
+        let run_dir = state::run_dir(&run_id);
+        let spec_path = run_dir.join("artifacts").join("spec.md");
+        let plan_path = run_dir.join("artifacts").join("plan.md");
+        let tasks_path = run_dir.join("artifacts").join("tasks.toml");
+
+        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let _ = std::fs::remove_file(&tasks_path);
+
+        let prompt_path = run_dir.join("prompts").join("sharding.md");
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path);
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            run_id: run_id.clone(),
+            phase: "sharding".to_string(),
+            role: "sharding".to_string(),
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+            artifact_paths: vec![tasks_path.clone()],
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        // Non-interactive — structured output, no user questions needed
+        match launch_noninteractive("[Sharding]", &run, adapter.as_ref()) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    "sharding".to_string(),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch sharding: {e}"));
+            }
+        }
+    }
+
     fn launch_planning(&mut self) {
         self.state.agent_error = None;
 
@@ -588,6 +670,7 @@ impl App {
             Phase::BrainstormRunning => "[Brainstorm]",
             Phase::SpecReviewRunning => "[Spec Review]",
             Phase::PlanningRunning => "[Planning]",
+            Phase::ShardingRunning => "[Sharding]",
             _ => return,
         };
         let output = std::process::Command::new("tmux")
@@ -621,6 +704,11 @@ impl App {
             Phase::PlanningRunning => (
                 "[Planning]",
                 run_dir.join("artifacts").join("plan.md"),
+                Phase::ShardingRunning,
+            ),
+            Phase::ShardingRunning => (
+                "[Sharding]",
+                run_dir.join("artifacts").join("tasks.toml"),
                 Phase::AwaitingPlanApproval,
             ),
             _ => return,
@@ -634,7 +722,30 @@ impl App {
         // Window is gone — check if the required artifact was produced
         self.window_launched = false;
         if artifact_path.exists() {
-            self.state.agent_error = None;
+            // For Sharding, additionally validate the TOML structure before accepting
+            if self.state.current_phase == Phase::ShardingRunning {
+                match tasks::validate(&artifact_path) {
+                    Ok(file) => {
+                        self.state.agent_error = None;
+                        // Surface how many tasks were produced in the section events
+                        // by stashing a message in agent_error-free state; the done
+                        // header already shows the model so nothing else to do.
+                        let _ = file;
+                    }
+                    Err(e) => {
+                        self.state.agent_error = Some(format!(
+                            "tasks.toml invalid: {e} — retry or edit the file"
+                        ));
+                        let _ = self.state.save();
+                        self.sections = build_sections(&self.state, self.window_launched);
+                        self.section_scroll.resize(self.sections.len(), usize::MAX);
+                        self.selected = current_section_index(&self.sections);
+                        return;
+                    }
+                }
+            } else {
+                self.state.agent_error = None;
+            }
             // Record the reviewer before transitioning
             if self.state.current_phase == Phase::SpecReviewRunning {
                 if let Some(pm) = self.state.phase_models.get("spec-review").cloned() {
@@ -957,6 +1068,8 @@ impl App {
             let phase_key = match self.state.current_phase {
                 Phase::BrainstormRunning => Some("brainstorm"),
                 Phase::SpecReviewRunning => Some("spec-review"),
+                Phase::PlanningRunning => Some("planning"),
+                Phase::ShardingRunning => Some("sharding"),
                 _ => None,
             };
             if let Some(key) = phase_key {
@@ -1499,6 +1612,39 @@ fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSectio
             ),
         },
         match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning
+            | Phase::SpecReviewRunning | Phase::SpecReviewPaused
+            | Phase::PlanningRunning => {
+                PipelineSection::pending("Sharding", "blocked on planning")
+            }
+            Phase::ShardingRunning if window_launched => PipelineSection::running(
+                "Sharding",
+                "agent running in [Sharding] window",
+                vec!["waiting for tasks.toml artifact".to_string()],
+            ),
+            Phase::ShardingRunning => {
+                if let Some(err) = &state.agent_error {
+                    PipelineSection::action(
+                        "Sharding",
+                        "failed — press Enter to retry",
+                        vec![format!("error: {err}")],
+                    )
+                } else {
+                    PipelineSection::action(
+                        "Sharding",
+                        "press Enter to run",
+                        vec!["splits plan into ~200k-token tasks → tasks.toml".to_string()],
+                    )
+                }
+            }
+            _ => PipelineSection::done(
+                "Sharding",
+                phase_done_summary(state, "sharding", "tasks.toml written"),
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        },
+        match phase {
             Phase::AwaitingPlanApproval => PipelineSection::waiting_user(
                 "Plan Approval",
                 "approval needed",
@@ -1632,6 +1778,76 @@ The operator is here and ready to respond to your questions.
         spec = spec_path.display(),
         reviews = reviews_block,
         plan = plan_path.display(),
+    )
+}
+
+fn sharding_prompt(
+    spec_path: &std::path::Path,
+    plan_path: &std::path::Path,
+    tasks_path: &std::path::Path,
+) -> String {
+    format!(
+        r#"You are splitting an approved plan into actionable, self-contained,
+testable tasks. This is a NON-INTERACTIVE run — the operator is NOT
+available. Do NOT modify any code in the repository; your ONLY output
+is the tasks TOML file.
+
+Inputs:
+  - Spec: {spec}
+  - Plan: {plan}
+
+Read both carefully before sharding.
+
+Rules:
+  1. Decompose the plan into a sequence of tasks. Each task must be
+     self-contained (buildable by one coding agent session without
+     requiring another task to have shipped first, unless explicitly
+     listed as a dependency in the task's description).
+  2. Size each task at roughly 200_000 tokens of implementation effort —
+     small enough that a coding agent can finish it in one session
+     without context compaction, large enough to be meaningful.
+  3. Each task MUST include:
+       - id             sequential integer starting at 1
+       - title          one-line summary
+       - description    detailed what-to-do (multi-line TOML string allowed)
+       - test           concrete verification steps (how will we know it's done)
+       - estimated_tokens  your integer estimate (target ~200_000)
+       - spec_refs      array of {{ path, lines }} pointing into the spec
+       - plan_refs      array of {{ path, lines }} pointing into the plan
+     The `lines` field is a range like "12-45" or a single number.
+
+Output: write the TOML to {tasks}
+in EXACTLY this shape (double quotes for strings, triple quotes for
+multi-line, arrays of inline tables for refs):
+
+    [[tasks]]
+    id = 1
+    title = "Scaffold the worker pool"
+    description = """
+    Wire up a Tokio worker pool in src/pool.rs. …
+    """
+    test = """
+    Run `cargo test pool::` — the new tests must pass.
+    """
+    estimated_tokens = 180000
+    spec_refs = [
+      {{ path = "artifacts/spec.md", lines = "10-45" }},
+    ]
+    plan_refs = [
+      {{ path = "artifacts/plan.md", lines = "22-60" }},
+      {{ path = "artifacts/plan.md", lines = "110-125" }},
+    ]
+
+    [[tasks]]
+    id = 2
+    …
+
+The file will be validated programmatically — missing or empty fields
+will cause rejection. Do not emit any prose around the TOML.
+"#,
+        spec = spec_path.display(),
+        plan = plan_path.display(),
+        tasks = tasks_path.display(),
     )
 }
 

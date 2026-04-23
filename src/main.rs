@@ -10,6 +10,7 @@ mod kimi;
 mod runner;
 mod selection;
 mod state;
+mod tasks;
 mod tmux;
 mod tui;
 mod warmup;

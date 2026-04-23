@@ -15,9 +15,7 @@ pub struct AgentRun {
 
 pub trait AgentAdapter: Send + Sync {
     fn detect(&self) -> bool;
-    /// Interactive command — agent keeps the session open for user input.
     fn interactive_command(&self, model: &str, prompt_path: &str) -> String;
-    /// Non-interactive command — agent reads prompt, writes artifact, and exits.
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String;
 }
 
@@ -40,8 +38,6 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // codex exec reads prompt from stdin and exits when done.
-        // --yolo suppresses permission prompts so it can run headless.
         format!(
             r#"codex exec --yolo -m {model} - < {prompt_path}"#,
             model = shell_escape(model),
@@ -69,14 +65,16 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
-        // Claude's --print text mode does not emit partial chunks — only the
-        // final response. stream-json + --include-partial-messages is the
-        // only way to get live token streaming; pipe through jq to recover
-        // plain text. Reading the prompt from stdin avoids ARG_MAX issues.
+        // stream-json + --include-partial-messages emits live token/tool/thinking
+        // events. The jq filter formats each type with a coloured marker so the
+        // operator can distinguish text, thinking, and tool use in real time.
+        // ANSI codes use jq's  Unicode escape (ESC byte).
+        let filter = r##"if .type=="content_block_start" then (if .content_block.type=="thinking" then "\n[2;35m💭 thinking[0m\n[2;35m" elif .content_block.type=="tool_use" then "\n[1;33m🔧 \(.content_block.name)[0m\n[33m" elif .content_block.type=="text" then "[0m\n" else "" end) elif .type=="content_block_delta" then (.delta.text // .delta.thinking // .delta.partial_json // empty) elif .type=="content_block_stop" then "[0m\n" elif .type=="message_stop" then "\n" else empty end"##;
         format!(
-            r#"claude --dangerously-skip-permissions --print --output-format stream-json --include-partial-messages --verbose --model {model} < {prompt_path} | jq -jr --unbuffered '(.delta.text // .message.content[0].text // empty)'"#,
+            r#"claude --dangerously-skip-permissions --print --output-format stream-json --include-partial-messages --verbose --model {model} < {prompt_path} | jq -jr --unbuffered '{filter}'"#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
+            filter = filter,
         )
     }
 }
@@ -99,7 +97,6 @@ impl AgentAdapter for KimiAdapter {
     }
 
     fn noninteractive_command(&self, _model: &str, prompt_path: &str) -> String {
-        // Kimi's --print mode requires input via stdin, not -p
         format!(
             r#"kimi --yolo --print < {prompt_path}"#,
             prompt_path = shell_escape(prompt_path),
@@ -147,8 +144,6 @@ pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {
 
 // ── Launch ───────────────────────────────────────────────────────────────────
 
-/// Create a named tmux window running the agent interactively.
-/// `switch`: if true, switch the operator to the new window immediately.
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
@@ -160,9 +155,6 @@ pub fn launch_interactive(
     launch_in_window(window_name, &cmd, adapter, switch)
 }
 
-/// Create a named tmux window running the agent non-interactively.
-/// The window stays open after exit so the user can read the output.
-/// Never switches focus.
 pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
@@ -183,15 +175,11 @@ fn launch_in_window(
         bail!("agent CLI not found — install it first");
     }
 
-    // Echo what's starting so the user has immediate feedback even if the
-    // agent takes a while before producing its first output line.
     let shell_cmd = format!(
         r#"printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}; {agent_cmd}; echo; echo '--- done, press enter to close ---'; read"#,
         name = shell_escape(window_name),
     );
 
-    // tmux new-window switches to the new window by default — add -d to
-    // keep the operator focused where they are when switch=false
     let args: Vec<&str> = if switch {
         vec!["new-window", "-n", window_name, &shell_cmd]
     } else {

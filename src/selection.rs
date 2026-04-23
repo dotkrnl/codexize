@@ -102,6 +102,8 @@ pub fn load_all_models() -> Vec<ModelStatus> {
     let retained_names = top_model_union(&candidates);
     candidates.retain(|candidate| retained_names.contains(&candidate.name));
 
+    apply_version_penalties(&mut candidates);
+
     let idea_ranks = rank_map(&candidates, |candidate| candidate.idea_probability);
     let planning_ranks = rank_map(&candidates, |candidate| candidate.planning_probability);
     let build_ranks = rank_map(&candidates, |candidate| candidate.build_probability);
@@ -168,6 +170,65 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
     }
 
     models.last()
+}
+
+/// Extract the first `\d+-\d+` tuple from a model name as a comparable version.
+/// Returns None if no such pattern exists.
+fn extract_version(name: &str) -> Option<(u32, u32)> {
+    let chars: Vec<char> = name.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i < chars.len() && chars[i] == '-' {
+                let j = i + 1;
+                if j < chars.len() && chars[j].is_ascii_digit() {
+                    let mut k = j;
+                    while k < chars.len() && chars[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    let major: u32 = name[start..i].parse().ok()?;
+                    let minor: u32 = name[j..k].parse().ok()?;
+                    return Some((major, minor));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Apply a 0.7-per-version-step penalty to all probability weights.
+/// Unique versions are ranked newest-first; same version = same penalty.
+fn apply_version_penalties(candidates: &mut Vec<Candidate>) {
+    let versions: Vec<Option<(u32, u32)>> = candidates
+        .iter()
+        .map(|c| extract_version(&c.name))
+        .collect();
+
+    // Collect unique versions, sort descending (newest first)
+    let mut unique: Vec<(u32, u32)> = versions.iter().filter_map(|v| *v).collect();
+    unique.sort_unstable_by(|a, b| b.cmp(a));
+    unique.dedup();
+
+    if unique.len() <= 1 {
+        return; // nothing to penalise
+    }
+
+    for (candidate, version) in candidates.iter_mut().zip(versions.iter()) {
+        let rank = version
+            .and_then(|v| unique.iter().position(|u| *u == v))
+            .unwrap_or(0);
+        let penalty = 0.7f64.powi(rank as i32);
+        candidate.idea_probability *= penalty;
+        candidate.planning_probability *= penalty;
+        candidate.build_probability *= penalty;
+        candidate.review_probability *= penalty;
+    }
 }
 
 fn load_quota_maps() -> BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> {

@@ -605,7 +605,10 @@ impl App {
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
-        match launch_interactive(&format!("[Coder r{r}]"), &run, adapter.as_ref(), true) {
+        // Coder is non-interactive: given the task, spec, and plan, it should
+        // implement autonomously and commit. User interrupts are handled
+        // by the reviewer's structured verdict, not mid-session questions.
+        match launch_noninteractive(&format!("[Coder r{r}]"), &run, adapter.as_ref()) {
             Ok(()) => {
                 self.state.phase_models.insert(
                     format!("coder-r{r}"),
@@ -2230,7 +2233,11 @@ fn coder_prompt(
         ""
     };
     format!(
-        r#"You are the coder for task {task_id}, round {round}.
+        r#"You are the coder for task {task_id}, round {round}. This is a
+NON-INTERACTIVE run — the operator is NOT available during coding.
+Make your own judgement calls, document them in the commit message,
+and flag anything genuinely ambiguous in a line comment for the
+reviewer to catch.
 
 Task spec:      {task}
 Spec (design):  {spec}
@@ -2247,12 +2254,11 @@ Your job:
      complete — the TUI polls for this file.
 
 Hard rules:
+  - Do NOT ask clarifying questions; work from the task + spec + plan.
   - Stay within the scope of this one task. If you uncover follow-up work,
     do NOT do it yourself — note it for the reviewer instead.
   - Do NOT force-push, rebase history, or delete branches.
   - Do NOT proceed to the next task; one task per round.
-
-You are interactive — the operator is here if you need a design decision.
 "#,
         task_id = task_id,
         round = round,

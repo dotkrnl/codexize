@@ -115,8 +115,11 @@ impl AgentAdapter for GeminiAdapter {
     }
 
     fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
+        // -i / --prompt-interactive explicitly executes the prompt and
+        // continues in interactive mode (vs a bare positional which could
+        // be interpreted as a subcommand name in some shells)
         format!(
-            r#"gemini --yolo -m {model} "$(cat {prompt_path})""#,
+            r#"gemini --yolo -m {model} -i "$(cat {prompt_path})""#,
             model = shell_escape(model),
             prompt_path = shell_escape(prompt_path),
         )

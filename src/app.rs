@@ -1,4 +1,9 @@
-use crate::{codex, tmux::TmuxContext, tui::AppTerminal};
+use crate::{
+    selection::{self, ModelStatus, VendorKind},
+    state::RunState,
+    tmux::TmuxContext,
+    tui::AppTerminal,
+};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
@@ -18,6 +23,7 @@ const PREVIEW_LINES: usize = 3;
 #[derive(Debug)]
 pub struct App {
     tmux: TmuxContext,
+    state: RunState,
     sections: Vec<PipelineSection>,
     models: Vec<ModelStatus>,
     selected: usize,
@@ -32,12 +38,12 @@ pub struct App {
 
 #[derive(Debug)]
 struct PipelineSection {
-    name: &'static str,
+    name: String,
     status: SectionStatus,
-    summary: &'static str,
-    events: Vec<&'static str>,
-    transcript: Vec<&'static str>,
-    input_placeholder: Option<&'static str>,
+    summary: String,
+    events: Vec<String>,
+    transcript: Vec<String>,
+    input_placeholder: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,29 +54,13 @@ enum SectionStatus {
 }
 
 #[derive(Debug)]
-struct ModelStatus {
-    name: String,
-    stupid_level: Option<u8>,
-    quota_percent: Option<u8>,
-    idea_rank: u8,
-    planning_rank: u8,
-    build_rank: u8,
-    review_rank: u8,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum VendorKind {
-    Codex,
-}
-
-#[derive(Debug)]
 struct VendorRefresh {
     vendor: VendorKind,
     last_refresh: Option<Instant>,
 }
 
 impl App {
-    pub fn new(tmux: TmuxContext) -> Self {
+    pub fn new(tmux: TmuxContext, state: RunState) -> Self {
         let sections = vec![
             PipelineSection::done(
                 "Idea",
@@ -150,10 +140,11 @@ impl App {
         ];
 
         let current = current_section_index(&sections);
-        let models = load_live_models();
+        let models = selection::load_all_models();
 
         Self {
             tmux,
+            state,
             sections,
             models,
             selected: current,
@@ -163,7 +154,12 @@ impl App {
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
-            vendor_refreshes: vec![VendorRefresh::new(VendorKind::Codex)],
+            vendor_refreshes: vec![
+                VendorRefresh::new(VendorKind::Codex),
+                VendorRefresh::new(VendorKind::Claude),
+                VendorRefresh::new(VendorKind::Gemini),
+                VendorRefresh::new(VendorKind::Kimi),
+            ],
         }
     }
 
@@ -258,7 +254,7 @@ impl App {
                 if !trimmed.is_empty() {
                     self.sections[self.selected]
                         .transcript
-                        .push(Box::leak(format!("> {trimmed}").into_boxed_str()));
+                        .push(format!("> {trimmed}"));
                     self.input_buffer.clear();
                 }
                 self.input_mode = false;
@@ -286,6 +282,11 @@ impl App {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(" #{} ", self.state.run_id)),
+            Span::styled(
+                format!("[{}]", self.state.current_phase.label()),
+                Style::default().fg(Color::Yellow),
             ),
             Span::raw(" | "),
             Span::raw(format!(
@@ -388,11 +389,11 @@ impl App {
 
         Line::from(vec![
             Span::raw(format!("{marker} ")),
-            Span::raw(section.name),
+            Span::raw(section.name.clone()),
             Span::raw(" | "),
             Span::styled(section.status.label(), section.status.style()),
             Span::raw(" | "),
-            Span::styled(section.summary, Style::default().fg(Color::Gray)),
+            Span::styled(section.summary.clone(), Style::default().fg(Color::Gray)),
         ])
         .style(style)
     }
@@ -405,7 +406,7 @@ impl App {
             .map(|event| {
                 Line::from(vec![
                     Span::styled("  - ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(*event),
+                    Span::raw(event.clone()),
                 ])
             })
             .collect::<Vec<_>>();
@@ -426,7 +427,7 @@ impl App {
                 lines.extend(section.transcript.iter().map(|line| {
                     Line::from(vec![
                         Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(*line),
+                        Span::raw(line.clone()),
                     ])
                 }));
             } else {
@@ -437,7 +438,7 @@ impl App {
             }
         }
 
-        if let Some(placeholder) = section.input_placeholder {
+        if let Some(placeholder) = &section.input_placeholder {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  input",
@@ -584,7 +585,8 @@ impl App {
     }
 
     fn refresh_models_if_due(&mut self) {
-        let mut refreshed_models = None;
+        let mut all_models = self.models.clone();
+        let mut any_refresh = false;
 
         for vendor_refresh in &mut self.vendor_refreshes {
             if !vendor_refresh.is_due() {
@@ -592,17 +594,21 @@ impl App {
             }
 
             let vendor_models = match vendor_refresh.vendor {
-                VendorKind::Codex => load_live_models(),
+                VendorKind::Claude => selection::load_claude_models(),
+                VendorKind::Codex => selection::load_codex_models(),
+                VendorKind::Gemini => selection::load_gemini_models(),
+                VendorKind::Kimi => selection::load_kimi_models(),
             };
 
             vendor_refresh.last_refresh = Some(Instant::now());
-            refreshed_models
-                .get_or_insert_with(Vec::new)
-                .extend(vendor_models);
+            any_refresh = true;
+            all_models.retain(|model| model.vendor != vendor_refresh.vendor);
+            all_models.extend(vendor_models);
         }
 
-        if let Some(models) = refreshed_models {
-            self.models = models;
+        if any_refresh {
+            all_models.sort_by(|left, right| left.name.cmp(&right.name));
+            self.models = all_models;
         }
     }
 
@@ -640,43 +646,43 @@ impl App {
 
 impl PipelineSection {
     fn done(
-        name: &'static str,
-        summary: &'static str,
-        events: Vec<&'static str>,
-        transcript: Vec<&'static str>,
+        name: impl Into<String>,
+        summary: impl Into<String>,
+        events: Vec<impl Into<String>>,
+        transcript: Vec<impl Into<String>>,
     ) -> Self {
         Self {
-            name,
+            name: name.into(),
             status: SectionStatus::Done,
-            summary,
-            events,
-            transcript,
+            summary: summary.into(),
+            events: events.into_iter().map(Into::into).collect(),
+            transcript: transcript.into_iter().map(Into::into).collect(),
             input_placeholder: None,
         }
     }
 
     fn waiting_user(
-        name: &'static str,
-        summary: &'static str,
-        events: Vec<&'static str>,
-        transcript: Vec<&'static str>,
-        input_placeholder: &'static str,
+        name: impl Into<String>,
+        summary: impl Into<String>,
+        events: Vec<impl Into<String>>,
+        transcript: Vec<impl Into<String>>,
+        input_placeholder: impl Into<String>,
     ) -> Self {
         Self {
-            name,
+            name: name.into(),
             status: SectionStatus::WaitingUser,
-            summary,
-            events,
-            transcript,
-            input_placeholder: Some(input_placeholder),
+            summary: summary.into(),
+            events: events.into_iter().map(Into::into).collect(),
+            transcript: transcript.into_iter().map(Into::into).collect(),
+            input_placeholder: Some(input_placeholder.into()),
         }
     }
 
-    fn pending(name: &'static str, summary: &'static str) -> Self {
+    fn pending(name: impl Into<String>, summary: impl Into<String>) -> Self {
         Self {
-            name,
+            name: name.into(),
             status: SectionStatus::Pending,
-            summary,
+            summary: summary.into(),
             events: Vec::new(),
             transcript: Vec::new(),
             input_placeholder: None,
@@ -702,28 +708,6 @@ impl SectionStatus {
     }
 }
 
-impl ModelStatus {
-    fn new(
-        name: impl Into<String>,
-        stupid_level: Option<u8>,
-        quota_percent: Option<u8>,
-        idea_rank: u8,
-        planning_rank: u8,
-        build_rank: u8,
-        review_rank: u8,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            stupid_level,
-            quota_percent,
-            idea_rank,
-            planning_rank,
-            build_rank,
-            review_rank,
-        }
-    }
-}
-
 impl VendorRefresh {
     fn new(vendor: VendorKind) -> Self {
         Self {
@@ -734,58 +718,8 @@ impl VendorRefresh {
 
     fn is_due(&self) -> bool {
         self.last_refresh
-            .map(|instant| instant.elapsed() >= codex::REFRESH_INTERVAL)
+            .map(|instant| instant.elapsed() >= self.vendor.refresh_interval())
             .unwrap_or(true)
-    }
-}
-
-fn load_live_models() -> Vec<ModelStatus> {
-    match codex::load_live_models() {
-        Ok(models) if !models.is_empty() => models
-            .into_iter()
-            .map(|model| {
-                let (idea_rank, planning_rank, build_rank, review_rank) =
-                    ranks_for_model(&model.name);
-                ModelStatus::new(
-                    model.name,
-                    None,
-                    model.quota_percent,
-                    idea_rank,
-                    planning_rank,
-                    build_rank,
-                    review_rank,
-                )
-            })
-            .collect(),
-        Ok(_) => vec![ModelStatus::new("codex", None, None, 9, 9, 9, 9)],
-        Err(error) => vec![ModelStatus::new(
-            format!("codex: {}", truncate_error(&error.to_string(), 9)),
-            None,
-            None,
-            9,
-            9,
-            9,
-            9,
-        )],
-    }
-}
-
-fn ranks_for_model(name: &str) -> (u8, u8, u8, u8) {
-    match name.to_ascii_lowercase().as_str() {
-        "gpt-5.4" => (1, 2, 1, 2),
-        "gpt-5.2" => (2, 1, 3, 1),
-        "gpt-5.3-codex-spark" => (3, 3, 2, 4),
-        _ => (9, 9, 9, 9),
-    }
-}
-
-fn truncate_error(text: &str, max_len: usize) -> String {
-    let mut chars = text.chars();
-    let truncated = chars.by_ref().take(max_len).collect::<String>();
-    if chars.next().is_some() {
-        truncated
-    } else {
-        text.to_string()
     }
 }
 

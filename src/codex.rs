@@ -172,7 +172,7 @@ fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
     };
 
     let client = Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
         .build()
         .context("failed to build Codex HTTP client")?;
 

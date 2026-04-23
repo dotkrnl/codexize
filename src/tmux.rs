@@ -50,9 +50,13 @@ pub fn current_context() -> Result<TmuxContext> {
 
 pub fn window_exists(name: &str) -> bool {
     Command::new("tmux")
-        .args(["select-window", "-t", name])
+        .args(["list-windows", "-F", "#{window_name}"])
         .output()
-        .map(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|line| line == name)
+        })
         .unwrap_or(false)
 }
 

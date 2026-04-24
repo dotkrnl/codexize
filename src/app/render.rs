@@ -6,16 +6,16 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::{
-    selection::VendorKind,
-    state::{MessageKind, NodeStatus, Phase, RunStatus},
-};
+use chrono::Offset;
+use crate::state::{NodeStatus, Phase};
 
 use super::{
     App, PREVIEW_LINES,
+    chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
     state::ModelRefreshState,
 };
+use crate::selection::VendorKind;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -178,7 +178,11 @@ impl App {
             )),
             Span::styled(
                 {
-                    let e = if self.editable_artifact().is_some() { " e" } else { "" };
+                    let e = if self.editable_artifact().is_some() {
+                        " e"
+                    } else {
+                        ""
+                    };
                     let show_n = self.state.current_phase == Phase::SpecReviewPaused
                         || (self.state.current_phase == Phase::SpecReviewRunning
                             && self.state.agent_error.is_some());
@@ -228,8 +232,10 @@ impl App {
 
     fn model_strip(&self) -> Paragraph<'static> {
         let mut vendor_order: Vec<VendorKind> = Vec::new();
-        let mut by_vendor: std::collections::BTreeMap<VendorKind, Vec<&crate::selection::ModelStatus>> =
-            std::collections::BTreeMap::new();
+        let mut by_vendor: std::collections::BTreeMap<
+            VendorKind,
+            Vec<&crate::selection::ModelStatus>,
+        > = std::collections::BTreeMap::new();
         for model in &self.models {
             if !vendor_order.contains(&model.vendor) {
                 vendor_order.push(model.vendor);
@@ -400,54 +406,20 @@ impl App {
         let run_id = node.run_id.or(node.leaf_run_id);
         if let Some(id) = run_id {
             if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
-                let msgs: Vec<_> = self.messages.iter().filter(|m| m.run_id == id).collect();
-                return self.render_chat(&msgs, run);
+                let msgs: Vec<_> = self.messages.iter().filter(|m| m.run_id == id).cloned().collect();
+                let local_offset = chrono::Local::now().fixed_offset().offset().fix();
+                return chat_widget::chat_lines(
+                    &msgs,
+                    run,
+                    usize::MAX, // no scroll clipping at this layer; visible_selected_body handles it
+                    &local_offset,
+                    self.agent_line_count,
+                    80, // nominal width; actual clipping is done by ratatui
+                    usize::MAX,
+                );
             }
         }
         self.render_compact_node(node, index)
-    }
-
-    fn render_chat(&self, messages: &[&crate::state::Message], run: &crate::state::RunRecord) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        for msg in messages {
-            let timestamp = msg.ts.format("%H:%M:%S").to_string();
-            let vendor_kind = match run.vendor.as_str() {
-                "claude" | "anthropic" => VendorKind::Claude,
-                "codex" | "openai" => VendorKind::Codex,
-                "gemini" => VendorKind::Gemini,
-                "kimi" => VendorKind::Kimi,
-                _ => VendorKind::Claude,
-            };
-            let vcolor = vendor_color(vendor_kind);
-            let prefix = if msg.kind == MessageKind::End {
-                if run.status == RunStatus::Done { "✓" } else { "✗" }
-            } else {
-                " "
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} {}  ", prefix, timestamp),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{} ({})", run.model, run.vendor),
-                    Style::default().fg(vcolor),
-                ),
-            ]));
-            for text_line in msg.text.lines() {
-                lines.push(Line::from(text_line.to_string()));
-            }
-            lines.push(Line::from(""));
-        }
-        let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
-        if run.status == RunStatus::Running && !has_end {
-            let spin = spinner_frame(self.agent_line_count);
-            lines.push(Line::from(Span::styled(
-                format!("{} typing...", spin),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-        lines
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
@@ -456,7 +428,12 @@ impl App {
             let spin = spinner_frame(self.agent_line_count);
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(spin, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    spin,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("  running · {} lines", self.agent_line_count),
                     Style::default().fg(Color::DarkGray),
@@ -468,7 +445,10 @@ impl App {
             for child in &node.children {
                 lines.push(Line::from(vec![
                     Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("{} ", child.label), Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{} ", child.label),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(format!("({})", child.status.label()), child.status.style()),
                     Span::styled(" ──", Style::default().fg(Color::DarkGray)),
                 ]));
@@ -477,16 +457,28 @@ impl App {
         // Input box for Idea stage
         if node.label == "Idea" && node.status == NodeStatus::WaitingUser {
             let active = self.input_mode && index == self.selected;
-            let frame_color = if active { Color::Yellow } else { Color::DarkGray };
+            let frame_color = if active {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            };
             let width = 64usize;
             lines.push(Line::from(""));
             let label = if active { " typing " } else { " input " };
             let fill = width.saturating_sub(label.len() + 2);
             let top = format!("  ╭{label}{}╮", "─".repeat(fill));
-            lines.push(Line::from(Span::styled(top, Style::default().fg(frame_color))));
+            lines.push(Line::from(Span::styled(
+                top,
+                Style::default().fg(frame_color),
+            )));
             let placeholder = "describe what you want to build";
             let (text, text_style) = if self.input_buffer.is_empty() {
-                (placeholder.to_string(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+                (
+                    placeholder.to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )
             } else {
                 (self.input_buffer.clone(), Style::default().fg(Color::White))
             };
@@ -503,15 +495,27 @@ impl App {
                 lines.push(Line::from(vec![
                     Span::styled("  │ ", Style::default().fg(frame_color)),
                     Span::styled(chunk.clone(), text_style),
-                    Span::styled(cursor.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
+                    Span::styled(
+                        cursor.to_string(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::SLOW_BLINK),
+                    ),
                     Span::raw(" ".repeat(padding)),
                     Span::styled(" │", Style::default().fg(frame_color)),
                 ]));
             }
-            let hint = if active { " Enter: submit · Esc: cancel " } else { " Enter to type " };
+            let hint = if active {
+                " Enter: submit · Esc: cancel "
+            } else {
+                " Enter to type "
+            };
             let fill = width.saturating_sub(hint.len() + 2);
             let bottom = format!("  ╰{}{hint}╯", "─".repeat(fill));
-            lines.push(Line::from(Span::styled(bottom, Style::default().fg(frame_color))));
+            lines.push(Line::from(Span::styled(
+                bottom,
+                Style::default().fg(frame_color),
+            )));
         }
         lines
     }

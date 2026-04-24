@@ -1,3 +1,4 @@
+pub mod chat_widget;
 mod events;
 mod models;
 mod render;

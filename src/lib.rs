@@ -9,6 +9,7 @@ pub mod review;
 pub mod runner;
 pub mod selection;
 pub mod state;
+pub mod synthetic_artifacts;
 pub mod tasks;
 pub mod tmux;
 pub mod tui;

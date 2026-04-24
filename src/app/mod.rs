@@ -2587,7 +2587,9 @@ Only emit this when the spec genuinely needs no further breakdown. When in
 doubt, omit the file — the normal spec-review → planning → sharding pipeline
 is the default. If you emit `"proposed": true`, the rationale MUST be a
 non-empty, <=500 character explanation the operator will read before
-accepting.
+accepting. When proposing the skip, keep the spec concise — just enough for a
+coder to implement directly (goal, edit sites, acceptance check); skip the
+long-form sections a planning phase would normally expand.
 
 HARD rules — override anything the superpowers / brainstorming skill suggests:
   - Do NOT `git add`, `git commit`, `git stash`, or touch version control. The

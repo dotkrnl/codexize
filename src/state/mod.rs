@@ -75,6 +75,29 @@ pub enum NodeStatus {
     Failed,
 }
 
+impl NodeStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::WaitingUser => "waiting-user",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn style(self) -> ratatui::style::Style {
+        use ratatui::style::{Color, Style};
+        match self {
+            Self::Pending => Style::default().fg(Color::DarkGray),
+            Self::Running => Style::default().fg(Color::Cyan),
+            Self::WaitingUser => Style::default().fg(Color::Yellow),
+            Self::Done => Style::default().fg(Color::Green),
+            Self::Failed => Style::default().fg(Color::Red),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Node {
     pub label: String,
@@ -84,19 +107,6 @@ pub struct Node {
     pub children: Vec<Node>,
     pub run_id: Option<u64>,
     pub leaf_run_id: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AttemptStatus {
-    Done,
-    Failed,
-}
-
-/// Model selected for a specific phase.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PhaseModel {
-    pub model: String,
-    pub vendor: String,
 }
 
 /// Tracks the builder loop — which tasks are pending, done, what iteration
@@ -267,6 +277,36 @@ impl SessionState {
         }
 
         Ok(messages)
+    }
+
+    /// Create a new RunRecord, push it to agent_runs, and return its id.
+    pub fn create_run_record(
+        &mut self,
+        stage: String,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+        model: String,
+        vendor: String,
+        window_name: String,
+    ) -> u64 {
+        let id = self.next_agent_run_id();
+        let run = RunRecord {
+            id,
+            stage,
+            task_id,
+            round,
+            attempt,
+            model,
+            vendor,
+            window_name,
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        };
+        self.agent_runs.push(run);
+        id
     }
 
     /// Return the next available agent_run_id (monotonic within session).

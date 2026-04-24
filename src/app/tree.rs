@@ -1,0 +1,496 @@
+use crate::state::{Node, NodeKind, NodeStatus, Phase, RunRecord, RunStatus, SessionState};
+
+pub fn build_tree(state: &SessionState) -> Vec<Node> {
+    let mut nodes = Vec::new();
+    nodes.push(build_idea_node(state));
+    nodes.push(build_simple_stage(state, "brainstorm", "Brainstorm"));
+    nodes.push(build_review_stage(state, "spec-review", "Spec Review"));
+    nodes.push(build_simple_stage(state, "planning", "Planning"));
+    nodes.push(build_review_stage(state, "plan-review", "Plan Review"));
+    nodes.push(build_simple_stage(state, "sharding", "Sharding"));
+    nodes.push(build_builder_stage(state));
+    for node in &mut nodes {
+        collapse_tree(node);
+    }
+    nodes
+}
+
+fn build_idea_node(state: &SessionState) -> Node {
+    let (status, summary) = match state.current_phase {
+        Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
+        _ => (
+            NodeStatus::Done,
+            state.idea_text.as_deref().unwrap_or("idea captured").to_string(),
+        ),
+    };
+    Node {
+        label: "Idea".to_string(),
+        kind: NodeKind::Stage,
+        status,
+        summary,
+        children: Vec::new(),
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
+
+fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
+    let runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == stage_key).collect();
+    let status = stage_status_from_runs(&runs, state, stage_key);
+    let summary = stage_summary(state, stage_key, label, &runs);
+    let mut children = Vec::new();
+    for run in runs {
+        children.push(agent_run_node(run));
+    }
+    Node {
+        label: label.to_string(),
+        kind: NodeKind::Stage,
+        status,
+        summary,
+        children,
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
+
+fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
+    let runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == stage_key).collect();
+    let status = stage_status_from_runs(&runs, state, stage_key);
+    let summary = stage_summary(state, stage_key, label, &runs);
+    let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> = std::collections::BTreeMap::new();
+    for run in &runs {
+        rounds.entry(run.round).or_default().push(*run);
+    }
+    let mut children = Vec::new();
+    for (round_num, round_runs) in rounds {
+        let mut round_children = Vec::new();
+        for run in round_runs {
+            round_children.push(agent_run_node(run));
+        }
+        let round_status = if round_children.iter().any(|c| c.status == NodeStatus::Running) {
+            NodeStatus::Running
+        } else if round_children.iter().all(|c| c.status == NodeStatus::Done) {
+            NodeStatus::Done
+        } else {
+            NodeStatus::Failed
+        };
+        children.push(Node {
+            label: format!("Round {}", round_num),
+            kind: NodeKind::Round,
+            status: round_status,
+            summary: String::new(),
+            children: round_children,
+            run_id: None,
+            leaf_run_id: None,
+        });
+    }
+    Node {
+        label: label.to_string(),
+        kind: NodeKind::Stage,
+        status,
+        summary,
+        children,
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
+
+fn build_builder_stage(state: &SessionState) -> Node {
+    let coder_runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == "coder").collect();
+    let reviewer_runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == "reviewer").collect();
+    let status = builder_status(state, &coder_runs, &reviewer_runs);
+    let summary = builder_summary(state, &coder_runs, &reviewer_runs);
+    let mut all_task_ids = std::collections::BTreeSet::new();
+    for run in &coder_runs { if let Some(id) = run.task_id { all_task_ids.insert(id); } }
+    for run in &reviewer_runs { if let Some(id) = run.task_id { all_task_ids.insert(id); } }
+    for id in &state.builder.done { all_task_ids.insert(*id); }
+    if let Some(id) = state.builder.current_task { all_task_ids.insert(id); }
+    for id in &state.builder.pending { all_task_ids.insert(*id); }
+    let mut children = Vec::new();
+    for task_id in all_task_ids {
+        let task_coder: Vec<&RunRecord> = coder_runs.iter().filter(|r| r.task_id == Some(task_id)).copied().collect();
+        let task_reviewer: Vec<&RunRecord> = reviewer_runs.iter().filter(|r| r.task_id == Some(task_id)).copied().collect();
+        let mut rounds: std::collections::BTreeMap<u32, (Vec<&RunRecord>, Vec<&RunRecord>)> = std::collections::BTreeMap::new();
+        for run in &task_coder { rounds.entry(run.round).or_default().0.push(*run); }
+        for run in &task_reviewer { rounds.entry(run.round).or_default().1.push(*run); }
+        if rounds.is_empty() { rounds.insert(state.builder.iteration.max(1), (Vec::new(), Vec::new())); }
+        let mut round_nodes = Vec::new();
+        for (round_num, (c_runs, r_runs)) in rounds {
+            let mut run_nodes = Vec::new();
+            for run in c_runs { run_nodes.push(agent_run_node(run)); }
+            for run in r_runs { run_nodes.push(agent_run_node(run)); }
+            let round_status = if run_nodes.iter().any(|c| c.status == NodeStatus::Running) {
+                NodeStatus::Running
+            } else if run_nodes.is_empty() {
+                NodeStatus::Pending
+            } else if run_nodes.iter().all(|c| c.status == NodeStatus::Done) {
+                NodeStatus::Done
+            } else {
+                NodeStatus::Failed
+            };
+            round_nodes.push(Node {
+                label: format!("Round {}", round_num),
+                kind: NodeKind::Round,
+                status: round_status,
+                summary: String::new(),
+                children: run_nodes,
+                run_id: None,
+                leaf_run_id: None,
+            });
+        }
+        let task_status = if round_nodes.iter().any(|c| c.status == NodeStatus::Running) {
+            NodeStatus::Running
+        } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
+            NodeStatus::Done
+        } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+            NodeStatus::Failed
+        } else {
+            NodeStatus::Pending
+        };
+        children.push(Node {
+            label: format!("Task {}", task_id),
+            kind: NodeKind::Task,
+            status: task_status,
+            summary: String::new(),
+            children: round_nodes,
+            run_id: None,
+            leaf_run_id: None,
+        });
+    }
+    Node {
+        label: "Builder Loop".to_string(),
+        kind: NodeKind::Stage,
+        status,
+        summary,
+        children,
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
+
+fn agent_run_node(run: &RunRecord) -> Node {
+    Node {
+        label: format!("{} · {}", role_label(&run.stage), run.model),
+        kind: NodeKind::AgentRun,
+        status: run_status_to_node(run.status),
+        summary: String::new(),
+        children: Vec::new(),
+        run_id: Some(run.id),
+        leaf_run_id: None,
+    }
+}
+
+fn role_label(stage: &str) -> &str {
+    match stage {
+        "brainstorm" => "Brainstorm",
+        "spec-review" => "Reviewer",
+        "planning" => "Planning",
+        "plan-review" => "Reviewer",
+        "sharding" => "Sharding",
+        "coder" => "Coder",
+        "reviewer" => "Reviewer",
+        _ => stage,
+    }
+}
+
+fn run_status_to_node(status: RunStatus) -> NodeStatus {
+    match status {
+        RunStatus::Running => NodeStatus::Running,
+        RunStatus::Done => NodeStatus::Done,
+        RunStatus::Failed => NodeStatus::Failed,
+    }
+}
+
+fn stage_status_from_runs(runs: &[&RunRecord], state: &SessionState, stage_key: &str) -> NodeStatus {
+    if runs.iter().any(|r| r.status == RunStatus::Running) {
+        return NodeStatus::Running;
+    }
+    let phase_matches = match (stage_key, state.current_phase) {
+        ("brainstorm", Phase::BrainstormRunning) => true,
+        ("spec-review", Phase::SpecReviewRunning) => true,
+        ("spec-review", Phase::SpecReviewPaused) => true,
+        ("planning", Phase::PlanningRunning) => true,
+        ("plan-review", Phase::PlanReviewRunning) => true,
+        ("plan-review", Phase::PlanReviewPaused) => true,
+        ("sharding", Phase::ShardingRunning) => true,
+        ("coder", Phase::ImplementationRound(_)) => true,
+        ("reviewer", Phase::ReviewRound(_)) => true,
+        _ => false,
+    };
+    if phase_matches && state.agent_error.is_some() {
+        return NodeStatus::Failed;
+    }
+    if phase_matches && !runs.is_empty() && runs.iter().all(|r| r.status == RunStatus::Done) {
+        return match (stage_key, state.current_phase) {
+            ("spec-review", Phase::SpecReviewPaused) => NodeStatus::WaitingUser,
+            ("plan-review", Phase::PlanReviewPaused) => NodeStatus::WaitingUser,
+            _ => NodeStatus::WaitingUser,
+        };
+    }
+    if phase_matches {
+        return NodeStatus::Running;
+    }
+    if runs.is_empty() {
+        let is_pending = match (stage_key, state.current_phase) {
+            ("brainstorm", Phase::IdeaInput) => true,
+            ("spec-review", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning),
+            ("planning", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused),
+            ("plan-review", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused | Phase::PlanningRunning),
+            ("sharding", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused | Phase::PlanningRunning | Phase::PlanReviewRunning | Phase::PlanReviewPaused),
+            _ => false,
+        };
+        if is_pending {
+            return NodeStatus::Pending;
+        }
+        return NodeStatus::Done;
+    }
+    if runs.iter().all(|r| r.status == RunStatus::Done) {
+        NodeStatus::Done
+    } else if runs.iter().any(|r| r.status == RunStatus::Failed) {
+        NodeStatus::Failed
+    } else {
+        NodeStatus::Pending
+    }
+}
+
+fn stage_summary(_state: &SessionState, _stage_key: &str, label: &str, runs: &[&RunRecord]) -> String {
+    if runs.is_empty() {
+        return String::new();
+    }
+    if let Some(last) = runs.last() {
+        if runs.len() == 1 && last.status == RunStatus::Done {
+            return format!("{} complete", label.to_lowercase());
+        }
+        if last.status == RunStatus::Running {
+            return format!("{} running", label.to_lowercase());
+        }
+    }
+    String::new()
+}
+
+fn builder_status(state: &SessionState, coder_runs: &[&RunRecord], reviewer_runs: &[&RunRecord]) -> NodeStatus {
+    if coder_runs.iter().any(|r| r.status == RunStatus::Running) || reviewer_runs.iter().any(|r| r.status == RunStatus::Running) {
+        return NodeStatus::Running;
+    }
+    match state.current_phase {
+        Phase::ImplementationRound(_) | Phase::ReviewRound(_) => {
+            if state.agent_error.is_some() {
+                NodeStatus::Failed
+            } else {
+                NodeStatus::Running
+            }
+        }
+        Phase::BlockedNeedsUser => NodeStatus::WaitingUser,
+        Phase::Done => NodeStatus::Done,
+        _ => NodeStatus::Pending,
+    }
+}
+
+fn builder_summary(state: &SessionState, _coder_runs: &[&RunRecord], _reviewer_runs: &[&RunRecord]) -> String {
+    let total = state.builder.done.len()
+        + state.builder.current_task.iter().len()
+        + state.builder.pending.len();
+    if total == 0 {
+        return String::new();
+    }
+    let done = state.builder.done.len();
+    if done == total {
+        return "all tasks complete".to_string();
+    }
+    format!("{} of {} tasks done", done, total)
+}
+
+/// Collapse single-child Task/Round/AgentRun layers.
+/// When a parent has exactly one child, the child is "skipped":
+/// the parent's children become the child's children (or leaf_run_id).
+/// Stage nodes are never removed, but their children may be hoisted.
+pub fn collapse_tree(node: &mut Node) {
+    for child in &mut node.children {
+        collapse_tree(child);
+    }
+    if node.children.len() == 1 {
+        let child = node.children.pop().unwrap();
+        if child.kind == NodeKind::AgentRun {
+            node.leaf_run_id = child.run_id;
+        } else {
+            node.children = child.children;
+            node.leaf_run_id = child.leaf_run_id;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
+        RunRecord {
+            id,
+            stage: stage.to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Test]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn test_build_tree_single_stage() {
+        let mut state = SessionState::new("test".to_string());
+        state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
+        let nodes = build_tree(&state);
+        assert_eq!(nodes.len(), 7); // Idea + 6 stages
+        let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
+        assert_eq!(brainstorm.kind, NodeKind::Stage);
+        assert_eq!(brainstorm.status, NodeStatus::Done);
+    }
+
+    #[test]
+    fn test_collapse_single_child_layers() {
+        let mut stage = Node {
+            label: "Brainstorm".to_string(),
+            kind: NodeKind::Stage,
+            status: NodeStatus::Done,
+            summary: "".to_string(),
+            children: vec![
+                Node {
+                    label: "Task 1".to_string(),
+                    kind: NodeKind::Task,
+                    status: NodeStatus::Done,
+                    summary: "".to_string(),
+                    children: vec![
+                        Node {
+                            label: "Round 1".to_string(),
+                            kind: NodeKind::Round,
+                            status: NodeStatus::Done,
+                            summary: "".to_string(),
+                            children: vec![
+                                Node {
+                                    label: "Coder".to_string(),
+                                    kind: NodeKind::AgentRun,
+                                    status: NodeStatus::Done,
+                                    summary: "".to_string(),
+                                    children: vec![],
+                                    run_id: Some(1),
+                                    leaf_run_id: None,
+                                }
+                            ],
+                            run_id: None,
+                            leaf_run_id: None,
+                        }
+                    ],
+                    run_id: None,
+                    leaf_run_id: None,
+                }
+            ],
+            run_id: None,
+            leaf_run_id: None,
+        };
+        collapse_tree(&mut stage);
+        assert_eq!(stage.children.len(), 0);
+        assert_eq!(stage.leaf_run_id, Some(1));
+    }
+
+    #[test]
+    fn test_collapse_preserves_multi_child() {
+        let mut stage = Node {
+            label: "Spec Review".to_string(),
+            kind: NodeKind::Stage,
+            status: NodeStatus::Done,
+            summary: "".to_string(),
+            children: vec![
+                Node {
+                    label: "Round 1 · gpt-5".to_string(),
+                    kind: NodeKind::AgentRun,
+                    status: NodeStatus::Done,
+                    summary: "".to_string(),
+                    children: vec![],
+                    run_id: Some(1),
+                    leaf_run_id: None,
+                },
+                Node {
+                    label: "Round 2 · o3".to_string(),
+                    kind: NodeKind::AgentRun,
+                    status: NodeStatus::Done,
+                    summary: "".to_string(),
+                    children: vec![],
+                    run_id: Some(2),
+                    leaf_run_id: None,
+                }
+            ],
+            run_id: None,
+            leaf_run_id: None,
+        };
+        collapse_tree(&mut stage);
+        assert_eq!(stage.children.len(), 2);
+        assert_eq!(stage.leaf_run_id, None);
+    }
+
+    #[test]
+    fn test_collapse_review_single_round_multiple_attempts() {
+        let mut state = SessionState::new("test".to_string());
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review r1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("quota exceeded".to_string()),
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 2,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review r1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        let nodes = build_tree(&state);
+        let spec_review = nodes.iter().find(|n| n.label == "Spec Review").unwrap();
+        // Round collapsed (only one round) → its AgentRun children hoisted to Stage.
+        // AgentRun preserved because two runs.
+        assert!(spec_review.children.iter().all(|c| c.kind == NodeKind::AgentRun));
+        assert_eq!(spec_review.children.len(), 2);
+    }
+
+    #[test]
+    fn test_collapsed_stage_leaf_run_id() {
+        let mut state = SessionState::new("test".to_string());
+        state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
+        let nodes = build_tree(&state);
+        let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
+        assert_eq!(brainstorm.leaf_run_id, Some(1));
+        assert!(brainstorm.children.is_empty());
+    }
+}
+
+pub fn current_node_index(nodes: &[Node]) -> usize {
+    nodes
+        .iter()
+        .position(|n| n.status == NodeStatus::Running || n.status == NodeStatus::WaitingUser)
+        .or_else(|| {
+            nodes
+                .iter()
+                .position(|n| n.status == NodeStatus::Done)
+                .map(|i| i.min(nodes.len().saturating_sub(1)))
+        })
+        .unwrap_or(0)
+}

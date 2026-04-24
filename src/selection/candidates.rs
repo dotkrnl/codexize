@@ -80,7 +80,7 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
 /// Returns None only if every available model has already reviewed.
 pub fn select_for_review<'a>(
     models: &'a [ModelStatus],
-    used: &[crate::state::PhaseModel],
+    used: &[crate::state::RunRecord],
 ) -> Option<&'a ModelStatus> {
     let used_vendors: Vec<VendorKind> = used.iter()
         .filter_map(|r| vendor::str_to_vendor(&r.vendor))

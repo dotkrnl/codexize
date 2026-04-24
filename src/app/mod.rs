@@ -1,15 +1,17 @@
 mod events;
 mod models;
 mod render;
-mod sections;
 mod state;
+mod tree;
 
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache,
+    review,
     selection::{self, ModelStatus, QuotaError, select_for_review},
-    state::{self as session_state, Phase, SessionState},
+    state::{self as session_state, Message, MessageKind, Node, Phase, RunStatus, SessionState},
     tasks,
+    tmux,
     tmux::TmuxContext,
     tui::AppTerminal,
 };
@@ -18,12 +20,14 @@ use crossterm::event::{self, Event};
 
 use self::{
     models::{spawn_refresh, vendor_tag},
-    sections::{build_sections, current_section_index},
-    state::{ModelRefreshState, PipelineSection},
+    tree::{build_tree, current_node_index},
+    state::ModelRefreshState,
 };
 
+use notify::Watcher;
 use std::{
     collections::BTreeSet,
+    sync::mpsc,
     time::{Duration, Instant},
 };
 
@@ -33,13 +37,12 @@ const PREVIEW_LINES: usize = 3;
 pub struct App {
     tmux: TmuxContext,
     state: SessionState,
-    sections: Vec<PipelineSection>,
+    nodes: Vec<Node>,
     models: Vec<ModelStatus>,
     model_refresh: ModelRefreshState,
     selected: usize,
     expanded: BTreeSet<usize>,
-    transcript_open: BTreeSet<usize>,
-    section_scroll: Vec<usize>,
+    node_scroll: Vec<usize>,
     body_inner_height: usize,
     input_mode: bool,
     input_buffer: String,
@@ -48,51 +51,78 @@ pub struct App {
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,
     agent_line_count: usize,
-    live_summary: String,
+    live_summary_watcher: Option<notify::RecommendedWatcher>,
+    live_summary_change_rx: Option<mpsc::Receiver<()>>,
     live_summary_path: Option<std::path::PathBuf>,
-    live_summary_mtime: Option<std::time::SystemTime>,
+    live_summary_cached_text: String,
+    live_summary_cached_mtime: Option<std::time::SystemTime>,
+    current_run_id: Option<u64>,
+    messages: Vec<Message>,
 }
 
 impl App {
     pub fn new(tmux: TmuxContext, state: SessionState) -> Self {
-        let sections = build_sections(&state, false);
-        let section_count = sections.len();
-        let current = current_section_index(&sections);
-
-        let (models, quota_errors, model_refresh) = match cache::load() {
-            Some((cached, errors, expired)) => {
-                let refresh = if expired {
-                    ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() }
-                } else {
-                    ModelRefreshState::Idle(Instant::now())
-                };
-                (cached, errors, refresh)
-            }
-            None => (Vec::new(), Vec::new(), ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() }),
-        };
-
-        Self {
+        let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
+        let nodes = build_tree(&state);
+        let node_count = nodes.len();
+        let current = current_node_index(&nodes);
+        let mut app = Self {
             tmux,
             state,
-            sections,
-            models,
-            model_refresh,
+            nodes,
+            models: Vec::new(),
+            model_refresh: ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() },
             selected: current,
             expanded: BTreeSet::new(),
-            transcript_open: BTreeSet::new(),
-            section_scroll: vec![usize::MAX; section_count],
+            node_scroll: vec![usize::MAX; node_count],
             body_inner_height: 0,
             input_mode: false,
             input_buffer: String::new(),
             confirm_back: false,
             window_launched: false,
-            quota_errors,
+            quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
-            live_summary: String::new(),
             live_summary_path: None,
-            live_summary_mtime: None,
+            live_summary_watcher: None,
+            live_summary_change_rx: None,
+            live_summary_cached_text: String::new(),
+            live_summary_cached_mtime: None,
+            current_run_id: None,
+            messages,
+        };
+        // Load cached models if available
+        if let Some((cached, errors, expired)) = cache::load() {
+            app.models = cached;
+            app.quota_errors = errors;
+            app.model_refresh = if expired {
+                ModelRefreshState::Fetching { rx: spawn_refresh(), started_at: Instant::now() }
+            } else {
+                ModelRefreshState::Idle(Instant::now())
+            };
         }
+        if let Ok(output) = std::process::Command::new("tmux")
+            .args(["list-windows", "-F", "#{window_name}"])
+            .output()
+        {
+            let live_windows = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if let Ok(run_id) = app.state.resume_running_runs(&live_windows) {
+                app.current_run_id = run_id;
+                app.window_launched = run_id.is_some();
+                if run_id.is_some() {
+                    app.live_summary_path = Some(session_state::session_dir(&app.state.session_id).join("artifacts").join("live_summary.txt"));
+                    app.read_live_summary_pipeline();
+                }
+                app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+                app.nodes = build_tree(&app.state);
+                app.selected = current_node_index(&app.nodes);
+            }
+        }
+        let _ = app.setup_watcher();
+        app
     }
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
@@ -101,7 +131,7 @@ impl App {
             self.poll_agent_window();
             self.maybe_auto_launch();
             self.update_agent_progress();
-            self.poll_live_summary();
+            self.process_live_summary_changes();
             terminal.draw(|frame| self.draw(frame))?;
 
             if event::poll(Duration::from_millis(250))?
@@ -113,16 +143,18 @@ impl App {
         }
     }
 
-    fn current_section(&self) -> usize {
-        current_section_index(&self.sections)
+    fn current_node(&self) -> usize {
+        current_node_index(&self.nodes)
     }
 
     fn can_focus_input(&self) -> bool {
-        self.is_expanded(self.selected) && self.sections[self.selected].input_placeholder.is_some()
+        self.is_expanded(self.selected)
+            && self.state.current_phase == Phase::IdeaInput
+            && self.nodes[self.selected].label == "Idea"
     }
 
     fn is_expanded(&self, index: usize) -> bool {
-        index == self.current_section() || self.expanded.contains(&index)
+        index == self.current_node() || self.expanded.contains(&index)
     }
 
     fn page_step(&self) -> usize {
@@ -135,16 +167,16 @@ impl App {
             .iter()
             .filter(|index| **index != self.selected)
             .count();
-        let reserved = self.sections.len() + expanded_preview_count * PREVIEW_LINES;
+        let reserved = self.nodes.len() + expanded_preview_count * PREVIEW_LINES;
         self.body_inner_height.saturating_sub(reserved).max(6)
     }
 
-    fn section_scroll_offset(&self, index: usize, total: usize, limit: usize) -> usize {
+    fn node_scroll_offset(&self, index: usize, total: usize, limit: usize) -> usize {
         let max_offset = total.saturating_sub(limit);
-        if self.section_scroll[index] == usize::MAX {
+        if self.node_scroll[index] == usize::MAX {
             max_offset
         } else {
-            self.section_scroll[index].min(max_offset)
+            self.node_scroll[index].min(max_offset)
         }
     }
 
@@ -267,87 +299,92 @@ impl App {
 
         self.state.agent_error = None;
         self.window_launched = false;
+        self.current_run_id = None;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
         let _ = self.state.save();
-        self.sections = build_sections(&self.state, self.window_launched);
-        self.section_scroll.resize(self.sections.len(), usize::MAX);
-        self.selected = current_section_index(&self.sections);
+        self.nodes = build_tree(&self.state);
+        self.node_scroll.resize(self.nodes.len(), usize::MAX);
+        self.selected = current_node_index(&self.nodes);
     }
 
-    fn record_attempt(&mut self, _status: crate::state::AttemptStatus) {
-        // TODO(Task 2): restore attempt persistence against the RunRecord/message model.
+    fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
+        self.state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == stage && run.task_id == task_id && run.round == round)
+            .map(|run| run.attempt)
+            .max()
+            .unwrap_or(0)
+            + 1
     }
 
-    fn poll_live_summary(&mut self) {
-        if !self.window_launched {
-            self.live_summary.clear();
-            self.live_summary_mtime = None;
-            return;
+    fn completed_rounds(&self, stage: &str) -> u32 {
+        self.state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == stage && run.status == RunStatus::Done)
+            .map(|run| run.round)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn running_run(&self) -> Option<&crate::state::RunRecord> {
+        self.current_run_id.and_then(|run_id| {
+            self.state
+                .agent_runs
+                .iter()
+                .find(|run| run.id == run_id && run.status == RunStatus::Running)
+        })
+    }
+
+    fn start_run_tracking(
+        &mut self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        model: String,
+        vendor: String,
+        window_name: String,
+    ) {
+        let attempt = self.attempt_for(stage, task_id, round);
+        let run_id = self.state.create_run_record(
+            stage.to_string(),
+            task_id,
+            round,
+            attempt,
+            model,
+            vendor,
+            window_name,
+        );
+        self.current_run_id = Some(run_id);
+        self.window_launched = true;
+        self.live_summary_path = Some(
+            session_state::session_dir(&self.state.session_id)
+                .join("artifacts")
+                .join("live_summary.txt"),
+        );
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        if let Err(err) = self.state.save() {
+            let _ = self
+                .state
+                .log_event(format!("failed to save session after launch: {err}"));
         }
-
-        let Some(path) = self.live_summary_path.clone() else {
-            self.live_summary.clear();
-            return;
-        };
-
-        let Ok(meta) = std::fs::metadata(&path) else {
-            self.live_summary.clear();
-            self.live_summary_mtime = None;
-            return;
-        };
-
-        let Ok(mtime) = meta.modified() else {
-            return;
-        };
-
-        let stale = mtime
-            .elapsed()
-            .map(|d| d > std::time::Duration::from_secs(60))
-            .unwrap_or(true);
-
-        if stale {
-            self.live_summary.clear();
-            return;
-        }
-
-        let should_read = match self.live_summary_mtime {
-            None => true,
-            Some(cached) => mtime > cached,
-        };
-
-        if should_read && let Ok(content) = std::fs::read_to_string(&path) {
-            self.live_summary = content.trim().to_string();
-            self.live_summary_mtime = Some(mtime);
-        }
+        self.read_live_summary_pipeline();
+        self.messages = SessionState::load_messages(&self.state.session_id).unwrap_or_default();
+        self.nodes = build_tree(&self.state);
+        self.node_scroll.resize(self.nodes.len(), usize::MAX);
+        self.selected = current_node_index(&self.nodes);
     }
 
     fn update_agent_progress(&mut self) {
-        if !self.window_launched {
+        let Some(run) = self.running_run() else {
             self.agent_line_count = 0;
             return;
-        }
-        let window_name_owned;
-        let window_name: &str = match self.state.current_phase {
-            Phase::BrainstormRunning => "[Brainstorm]",
-            Phase::SpecReviewRunning => "[Spec Review]",
-            Phase::PlanReviewRunning => {
-                // TODO(Task 2): resume the precise plan-review window from RunRecord state.
-                window_name_owned = "[Plan Review 1]".to_string();
-                &window_name_owned
-            }
-            Phase::PlanningRunning => "[Planning]",
-            Phase::ShardingRunning => "[Sharding]",
-            Phase::ImplementationRound(r) => {
-                window_name_owned = format!("[Coder r{r}]");
-                &window_name_owned
-            }
-            Phase::ReviewRound(r) => {
-                window_name_owned = format!("[Review r{r}]");
-                &window_name_owned
-            }
-            _ => return,
         };
         let output = std::process::Command::new("tmux")
-            .args(["capture-pane", "-t", window_name, "-p", "-J"])
+            .args(["capture-pane", "-t", &run.window_name, "-p", "-J"])
             .output();
         if let Ok(out) = output {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -378,13 +415,28 @@ impl App {
     }
 
     fn poll_agent_window(&mut self) {
-        if !self.window_launched {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id).cloned() else {
+            return;
+        };
+        if tmux::window_exists(&run.window_name) {
             return;
         }
 
-        // TODO(Task 2): rebuild window polling and artifact validation against RunRecord,
-        // Message, and the tree-based pipeline view. The legacy implementation depended on
-        // removed phase_models/reviewer lists/builder-start flags.
+        self.window_launched = false;
+        self.current_run_id = None;
+        let outcome = self.finalize_current_run(&run);
+        if let Err(err) = outcome {
+            self.state.agent_error = Some(err.to_string());
+            let _ = self
+                .state
+                .log_event(format!("run finalization failed for {}: {err}", run.window_name));
+        }
+        self.nodes = build_tree(&self.state);
+        self.node_scroll.resize(self.nodes.len(), usize::MAX);
+        self.selected = current_node_index(&self.nodes);
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
@@ -403,13 +455,200 @@ impl App {
         self.state.builder.current_task
     }
 
+    fn finalize_run_record(&mut self, run_id: u64, success: bool, error: Option<String>) {
+        let Some(run) = self.state.agent_runs.iter_mut().find(|run| run.id == run_id) else {
+            return;
+        };
+        let ended_at = chrono::Utc::now();
+        run.ended_at = Some(ended_at);
+        run.status = if success {
+            RunStatus::Done
+        } else {
+            RunStatus::Failed
+        };
+        run.error = error.clone();
+
+        let duration = ended_at.signed_duration_since(run.started_at);
+        let total_seconds = duration.num_seconds().max(0);
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+        let text = if success {
+            format!("done in {minutes}m{seconds:02}s")
+        } else {
+            format!(
+                "failed in {minutes}m{seconds:02}s: {}",
+                error.unwrap_or_else(|| "unknown error".to_string())
+            )
+        };
+        let message = Message {
+            ts: ended_at,
+            run_id,
+            kind: MessageKind::End,
+            text,
+        };
+        if let Err(err) = self.state.append_message(&message) {
+            let _ = self
+                .state
+                .log_event(format!("failed to append end message for run {run_id}: {err}"));
+        } else {
+            self.messages.push(message);
+        }
+        if let Err(err) = self.state.save() {
+            let _ = self
+                .state
+                .log_event(format!("failed to save session after finalizing run {run_id}: {err}"));
+        }
+    }
+
+    fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
+        use anyhow::Context;
+
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        match self.state.current_phase {
+            Phase::BrainstormRunning => {
+                let spec_path = session_dir.join("artifacts").join("spec.md");
+                if spec_path.exists() {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.state.transition_to(Phase::SpecReviewRunning)?;
+                } else {
+                    let error = "missing spec artifact".to_string();
+                    self.finalize_run_record(run.id, false, Some(error.clone()));
+                    self.state.agent_error = Some(error);
+                }
+            }
+            Phase::SpecReviewRunning => {
+                let round = run.round;
+                let review_path = session_dir
+                    .join("artifacts")
+                    .join(format!("spec-review-{round}.md"));
+                if review_path.exists() {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.state.transition_to(Phase::SpecReviewPaused)?;
+                } else {
+                    let error = format!("missing {}", review_path.display());
+                    self.finalize_run_record(run.id, false, Some(error.clone()));
+                    self.state.agent_error = Some(error);
+                }
+            }
+            Phase::PlanningRunning => {
+                let plan_path = session_dir.join("artifacts").join("plan.md");
+                if plan_path.exists() {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.state.transition_to(Phase::PlanReviewRunning)?;
+                } else {
+                    let error = "missing plan artifact".to_string();
+                    self.finalize_run_record(run.id, false, Some(error.clone()));
+                    self.state.agent_error = Some(error);
+                }
+            }
+            Phase::PlanReviewRunning => {
+                let round = run.round;
+                let review_path = session_dir
+                    .join("artifacts")
+                    .join(format!("plan-review-{round}.md"));
+                if review_path.exists() {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.state.transition_to(Phase::PlanReviewPaused)?;
+                } else {
+                    let error = format!("missing {}", review_path.display());
+                    self.finalize_run_record(run.id, false, Some(error.clone()));
+                    self.state.agent_error = Some(error);
+                }
+            }
+            Phase::ShardingRunning => {
+                let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+                let parsed = tasks::validate(&tasks_path)
+                    .with_context(|| format!("invalid {}", tasks_path.display()));
+                match parsed {
+                    Ok(parsed) => {
+                        self.state.builder.pending =
+                            parsed.tasks.iter().map(|task| task.id).collect();
+                        self.state.builder.current_task = None;
+                        self.state.builder.done.clear();
+                        self.state.builder.iteration = 0;
+                        self.state.builder.last_verdict = None;
+                        self.finalize_run_record(run.id, true, None);
+                        self.state.agent_error = None;
+                        self.state.transition_to(Phase::ImplementationRound(1))?;
+                    }
+                    Err(err) => {
+                        let error = err.to_string();
+                        self.finalize_run_record(run.id, false, Some(error.clone()));
+                        self.state.agent_error = Some(error);
+                    }
+                }
+            }
+            Phase::ImplementationRound(round) => {
+                let commit_path = session_dir
+                    .join("rounds")
+                    .join(format!("{round:03}"))
+                    .join("commit.txt");
+                if commit_path.exists() {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.state.transition_to(Phase::ReviewRound(round))?;
+                } else {
+                    let error = format!("missing {}", commit_path.display());
+                    self.finalize_run_record(run.id, false, Some(error.clone()));
+                    self.state.agent_error = Some(error);
+                }
+            }
+            Phase::ReviewRound(round) => {
+                let review_path = session_dir
+                    .join("rounds")
+                    .join(format!("{round:03}"))
+                    .join("review.toml");
+                match review::validate(&review_path) {
+                    Ok(verdict) => {
+                        self.finalize_run_record(run.id, true, None);
+                        self.state.agent_error = None;
+                        self.state.builder.last_verdict =
+                            Some(format!("{:?}", verdict.status).to_lowercase());
+                        match verdict.status {
+                            review::ReviewStatus::Done => {
+                                if let Some(task_id) = self.state.builder.current_task.take() {
+                                    self.state.builder.done.push(task_id);
+                                }
+                                if self.state.builder.pending.is_empty() {
+                                    self.state.transition_to(Phase::Done)?;
+                                } else {
+                                    self.state.transition_to(Phase::ImplementationRound(round + 1))?;
+                                }
+                            }
+                            review::ReviewStatus::Revise => {
+                                // REVIEWER: spec does not define whether revise should reuse the
+                                // same round or advance. We advance to the next round to preserve
+                                // round-as-iteration semantics from the builder flow.
+                                self.state.transition_to(Phase::ImplementationRound(round + 1))?;
+                            }
+                            review::ReviewStatus::Blocked => {
+                                self.state.transition_to(Phase::BlockedNeedsUser)?;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        let error = err.to_string();
+                        self.finalize_run_record(run.id, false, Some(error.clone()));
+                        self.state.agent_error = Some(error);
+                    }
+                }
+            }
+            Phase::IdeaInput | Phase::SpecReviewPaused | Phase::PlanReviewPaused | Phase::BlockedNeedsUser | Phase::Done => {}
+        }
+        Ok(())
+    }
+
     fn launch_brainstorm(&mut self, idea: String) {
         self.state.agent_error = None;
 
         if self.models.is_empty() {
             self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         }
 
@@ -418,7 +657,7 @@ impl App {
         else {
             self.state.agent_error = Some("no model available with quota — check model strip".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -435,9 +674,7 @@ impl App {
         let live_summary_path = session_state::session_dir(session_id).join("artifacts").join("live_summary.txt");
         let prompt = brainstorm_prompt(&idea, &spec_path.display().to_string(), &live_summary_path.display().to_string());
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected]
-                .events
-                .push(format!("error writing prompt: {e}"));
+            self.state.agent_error = Some(format!("error writing prompt: {e}"));
             return;
         }
 
@@ -451,31 +688,81 @@ impl App {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
-                let _ = vendor;
-                // TODO(Task 2): persist brainstorm launch metadata via RunRecord.
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
+                self.start_run_tracking(
+                    "brainstorm",
+                    None,
+                    1,
+                    model,
+                    vendor,
+                    "[Brainstorm]".to_string(),
+                );
             }
             Err(e) => {
-                self.sections[self.selected]
-                    .events
-                    .push(format!("failed to launch brainstorm: {e}"));
+                self.state.agent_error = Some(format!("failed to launch brainstorm: {e}"));
             }
         }
     }
 
     fn launch_spec_review(&mut self) {
-        self.state.agent_error = Some(
-            "TODO(Task 2): spec review launch is temporarily disabled until RunRecord-backed review tracking is wired in".to_string(),
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.nodes = build_tree(&self.state);
+            return;
+        }
+
+        let round = match self.state.current_phase {
+            Phase::SpecReviewPaused => self.completed_rounds("spec-review") + 1,
+            _ => self.completed_rounds("spec-review").max(1),
+        };
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let spec_path = session_dir.join("artifacts").join("spec.md");
+        let review_path = session_dir.join("artifacts").join(format!("spec-review-{round}.md"));
+        let prompt_path = session_dir.join("prompts").join(format!("spec-review-{round}.md"));
+
+        let Some(chosen) = select_for_review(
+            &self.models,
+            &self
+                .state
+                .agent_runs
+                .iter()
+                .filter(|run| run.stage == "spec-review" && run.round == round && run.status == RunStatus::Done)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+            self.state.agent_error = Some("no model available for review".to_string());
+            let _ = self.state.save();
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let prompt = spec_review_prompt(
+            &spec_path.display().to_string(),
+            &review_path.display().to_string(),
+            &session_dir.join("artifacts").join("live_summary.txt").display().to_string(),
         );
-        let _ = self.state.save();
-        self.sections = build_sections(&self.state, self.window_launched);
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&prompt_path, prompt) {
+            self.state.agent_error = Some(format!("error writing prompt: {err}"));
+            return;
+        }
+
+        let run = AgentRun { model: model.clone(), prompt_path };
+        let adapter = adapter_for_vendor(vendor_kind);
+        let window_name = format!("[Spec Review {round}]");
+        match launch_noninteractive(&window_name, &run, adapter.as_ref()) {
+            Ok(()) => {
+                self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
+            }
+            Err(err) => {
+                self.state.agent_error = Some(format!("failed to launch spec review: {err}"));
+            }
+        }
     }
 
     fn launch_planning(&mut self) {
@@ -484,7 +771,7 @@ impl App {
         if self.models.is_empty() {
             self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         }
 
@@ -493,15 +780,21 @@ impl App {
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
 
-        // TODO(Task 2): gather completed review artifacts from RunRecord/message state.
-        let review_paths: Vec<std::path::PathBuf> = Vec::new();
+        let review_paths: Vec<std::path::PathBuf> = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == "spec-review" && run.status == RunStatus::Done)
+            .map(|run| session_dir.join("artifacts").join(format!("spec-review-{}.md", run.round)))
+            .filter(|path| path.exists())
+            .collect();
 
         let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -515,7 +808,7 @@ impl App {
         let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
         let prompt = planning_prompt(&spec_path, &review_paths, &plan_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return;
         }
 
@@ -527,29 +820,75 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_interactive("[Planning]", &run, adapter.as_ref(), true) {
             Ok(()) => {
-                let _ = vendor;
-                // TODO(Task 2): persist planning launch metadata via RunRecord.
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
+                self.start_run_tracking("planning", None, 1, model, vendor, "[Planning]".to_string());
             }
             Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch planning: {e}"));
+                let _ = self.state.log_event(format!("failed to launch planning: {e}"));
             }
         }
     }
 
     fn launch_plan_review(&mut self) {
-        self.state.agent_error = Some(
-            "TODO(Task 2): plan review launch is temporarily disabled until RunRecord-backed review tracking is wired in".to_string(),
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.nodes = build_tree(&self.state);
+            return;
+        }
+
+        let round = match self.state.current_phase {
+            Phase::PlanReviewPaused => self.completed_rounds("plan-review") + 1,
+            _ => self.completed_rounds("plan-review").max(1),
+        };
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let spec_path = session_dir.join("artifacts").join("spec.md");
+        let plan_path = session_dir.join("artifacts").join("plan.md");
+        let review_path = session_dir.join("artifacts").join(format!("plan-review-{round}.md"));
+        let prompt_path = session_dir.join("prompts").join(format!("plan-review-{round}.md"));
+
+        let Some(chosen) = select_for_review(
+            &self.models,
+            &self
+                .state
+                .agent_runs
+                .iter()
+                .filter(|run| run.stage == "plan-review" && run.round == round && run.status == RunStatus::Done)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+            self.state.agent_error = Some("no model available for review".to_string());
+            let _ = self.state.save();
+            return;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let prompt = plan_review_prompt(
+            &spec_path.display().to_string(),
+            &plan_path.display().to_string(),
+            &review_path.display().to_string(),
+            &session_dir.join("artifacts").join("live_summary.txt").display().to_string(),
         );
-        let _ = self.state.save();
-        self.sections = build_sections(&self.state, self.window_launched);
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&prompt_path, prompt) {
+            self.state.agent_error = Some(format!("error writing prompt: {err}"));
+            return;
+        }
+
+        let run = AgentRun { model: model.clone(), prompt_path };
+        let adapter = adapter_for_vendor(vendor_kind);
+        let window_name = format!("[Plan Review {round}]");
+        match launch_noninteractive(&window_name, &run, adapter.as_ref()) {
+            Ok(()) => {
+                self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+            }
+            Err(err) => {
+                self.state.agent_error = Some(format!("failed to launch plan review: {err}"));
+            }
+        }
     }
 
     fn launch_sharding(&mut self) {
@@ -558,7 +897,7 @@ impl App {
         if self.models.is_empty() {
             self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         }
 
@@ -573,7 +912,7 @@ impl App {
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -587,7 +926,7 @@ impl App {
         let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
         let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return;
         }
 
@@ -599,19 +938,10 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive("[Sharding]", &run, adapter.as_ref()) {
             Ok(()) => {
-                let _ = vendor;
-                // TODO(Task 2): persist sharding launch metadata via RunRecord.
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
+                self.start_run_tracking("sharding", None, 1, model, vendor, "[Sharding]".to_string());
             }
             Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch sharding: {e}"));
+                let _ = self.state.log_event(format!("failed to launch sharding: {e}"));
             }
         }
     }
@@ -621,7 +951,7 @@ impl App {
         if self.models.is_empty() {
             self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         }
         let Phase::ImplementationRound(r) = self.state.current_phase else { return };
@@ -660,11 +990,14 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        // TODO(Task 2): derive resume state from persisted RunRecord data.
-        let resume = false;
+        let resume = self
+            .state
+            .agent_runs
+            .iter()
+            .any(|run| run.stage == "coder" && run.task_id == Some(task_id) && run.round == r);
         let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &commit_file, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return;
         }
 
@@ -676,19 +1009,10 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive(&format!("[Coder r{r}]"), &run, adapter.as_ref()) {
             Ok(()) => {
-                let _ = vendor;
-                // TODO(Task 2): persist coder launch metadata via RunRecord.
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
+                self.start_run_tracking("coder", Some(task_id), r, model, vendor, format!("[Coder r{r}]"));
             }
             Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch coder: {e}"));
+                let _ = self.state.log_event(format!("failed to launch coder: {e}"));
             }
         }
     }
@@ -698,7 +1022,7 @@ impl App {
         if self.models.is_empty() {
             self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
+            self.nodes = build_tree(&self.state);
             return;
         }
         let Phase::ReviewRound(r) = self.state.current_phase else { return };
@@ -717,9 +1041,17 @@ impl App {
 
         let _ = std::fs::remove_file(&review_path);
 
-        // TODO(Task 2): exclude the active coder model from RunRecord metadata instead of the
-        // removed phase_models map.
-        let excluded = Vec::new();
+        let excluded = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                (run.stage == "reviewer" || run.stage == "coder")
+                    && run.task_id == Some(task_id)
+                    && run.round == r
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let Some(chosen) = select_for_review(&self.models, &excluded)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
@@ -732,7 +1064,7 @@ impl App {
         let prompt_path = session_dir.join("prompts").join(format!("reviewer-r{r}.md"));
         let prompt = reviewer_prompt(&session_dir, task_id, r, &task_file, &commit_file, &review_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return;
         }
 
@@ -744,34 +1076,128 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive(&format!("[Review r{r}]"), &run, adapter.as_ref()) {
             Ok(()) => {
-                let _ = vendor;
-                // TODO(Task 2): persist reviewer launch metadata via RunRecord.
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
+                self.start_run_tracking("reviewer", Some(task_id), r, model, vendor, format!("[Review r{r}]"));
             }
             Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch reviewer: {e}"));
+                let _ = self.state.log_event(format!("failed to launch reviewer: {e}"));
             }
         }
     }
-}
 
-fn phase_attempt_key(phase: Phase) -> String {
-    match phase {
-        Phase::BrainstormRunning => "brainstorm".to_string(),
-        Phase::SpecReviewRunning => "spec-review".to_string(),
-        Phase::PlanningRunning => "planning".to_string(),
-        Phase::PlanReviewRunning => "plan-review".to_string(),
-        Phase::PlanReviewPaused => "plan-review".to_string(),
-        Phase::ShardingRunning => "sharding".to_string(),
-        Phase::ImplementationRound(r) | Phase::ReviewRound(r) => format!("builder-round-{r}"),
-        _ => "unknown".to_string(),
+    fn setup_watcher(&mut self) -> Result<()> {
+        let (tx, rx) = mpsc::channel();
+        let watcher_result = notify::RecommendedWatcher::new(
+            move |res: Result<notify::Event, notify::Error>| {
+                if res.is_ok() {
+                    let _ = tx.send(());
+                }
+            },
+            notify::Config::default(),
+        );
+        match watcher_result {
+            Ok(mut watcher) => {
+                let path = session_state::session_dir(&self.state.session_id)
+                    .join("artifacts")
+                    .join("live_summary.txt");
+                if let Err(e) = watcher.watch(&path, notify::RecursiveMode::NonRecursive) {
+                    let _ = self.state.log_event(format!("watcher setup failed: {}, falling back to poll", e));
+                    return Ok(());
+                }
+                self.live_summary_watcher = Some(watcher);
+                self.live_summary_change_rx = Some(rx);
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.state.log_event(format!("watcher init failed: {}, falling back to poll", e));
+                Ok(())
+            }
+        }
+    }
+
+    fn process_live_summary_changes(&mut self) {
+        if let Some(ref rx) = self.live_summary_change_rx {
+            let mut saw_change = false;
+            while rx.try_recv().is_ok() {
+                saw_change = true;
+            }
+            if saw_change {
+                self.read_live_summary_pipeline();
+            }
+        } else {
+            self.poll_live_summary_fallback();
+        }
+    }
+
+    fn poll_live_summary_fallback(&mut self) {
+        if !self.window_launched {
+            self.live_summary_cached_text.clear();
+            self.live_summary_cached_mtime = None;
+            return;
+        }
+        let Some(path) = self.live_summary_path.clone() else {
+            self.live_summary_cached_text.clear();
+            return;
+        };
+        let Ok(meta) = std::fs::metadata(&path) else {
+            self.live_summary_cached_text.clear();
+            self.live_summary_cached_mtime = None;
+            return;
+        };
+        let Ok(mtime) = meta.modified() else { return };
+        let stale = mtime
+            .elapsed()
+            .map(|d| d > std::time::Duration::from_secs(60))
+            .unwrap_or(true);
+        if stale {
+            self.live_summary_cached_text.clear();
+            return;
+        }
+        let should_read = match self.live_summary_cached_mtime {
+            None => true,
+            Some(cached) => mtime > cached,
+        };
+        if should_read {
+            self.read_live_summary_pipeline();
+        }
+    }
+
+    fn read_live_summary_pipeline(&mut self) {
+        let Some(run_id) = self.current_run_id else { return };
+        let Some(run) = self.running_run() else { return };
+        if !tmux::window_exists(&run.window_name) {
+            return;
+        }
+        let path = session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join("live_summary.txt");
+        let Ok(meta) = std::fs::metadata(&path) else { return };
+        let Ok(mtime) = meta.modified() else { return };
+        if let Some(cached_mtime) = self.live_summary_cached_mtime {
+            if mtime <= cached_mtime { return; }
+        }
+        let stale = mtime.elapsed()
+            .map(|d| d > std::time::Duration::from_secs(60))
+            .unwrap_or(true);
+        if stale { return; }
+        let Ok(content) = std::fs::read_to_string(&path) else { return };
+        let sanitized = render::sanitize_live_summary(&content);
+        if sanitized.is_empty() { return; }
+        if sanitized == self.live_summary_cached_text { return; }
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id,
+            kind: MessageKind::Brief,
+            text: sanitized.clone(),
+        };
+        if let Err(err) = self.state.append_message(&msg) {
+            let _ = self
+                .state
+                .log_event(format!("failed to append brief message for run {run_id}: {err}"));
+        } else {
+            self.messages.push(msg);
+        }
+        self.live_summary_cached_text = sanitized;
+        self.live_summary_cached_mtime = Some(mtime);
     }
 }
 
@@ -779,14 +1205,6 @@ fn kill_window(name: &str) {
     let _ = std::process::Command::new("tmux")
         .args(["kill-window", "-t", name])
         .output();
-}
-
-fn backup_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
-    for (source, dest) in pairs {
-        if source.exists() {
-            let _ = std::fs::copy(source, dest);
-        }
-    }
 }
 
 fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {

@@ -8,13 +8,13 @@ use ratatui::{
 
 use crate::{
     selection::VendorKind,
-    state::Phase,
+    state::{MessageKind, NodeStatus, Phase, RunStatus},
 };
 
 use super::{
     App, PREVIEW_LINES,
     models::{vendor_color, vendor_prefix, vendor_tag},
-    state::{ModelRefreshState, PipelineSection, SectionStatus},
+    state::ModelRefreshState,
 };
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -132,30 +132,10 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
-fn sanitize_live_summary(text: &str) -> String {
+pub fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi_codes(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()
-}
-
-fn hard_wrap(text: &str, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    for paragraph in text.split('\n') {
-        let mut current = String::new();
-        for word in paragraph.split_whitespace() {
-            if !current.is_empty() && current.len() + 1 + word.len() > width {
-                lines.push(std::mem::take(&mut current));
-            }
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
-        }
-        if !current.is_empty() {
-            lines.push(current);
-        }
-    }
-    lines
 }
 
 impl App {
@@ -212,27 +192,27 @@ impl App {
 
     fn pipeline_view(&self) -> Paragraph<'static> {
         let mut lines = Vec::new();
-        let current = self.current_section();
+        let current = self.current_node();
         let selected_limit = self.selected_body_limit();
         let mut selected_header_line = 0usize;
 
-        for (index, section) in self.sections.iter().enumerate() {
+        for (index, node) in self.nodes.iter().enumerate() {
             let expanded = self.is_expanded(index);
             if index == self.selected {
                 selected_header_line = lines.len();
             }
 
-            lines.push(self.section_header(index, expanded, section));
+            lines.push(self.node_header(index, expanded, node));
 
             if expanded {
-                let body_lines = self.section_body(index);
+                let body_lines = self.node_body(index);
                 if index == self.selected {
                     let visible = self.visible_selected_body(&body_lines, selected_limit, index);
                     lines.extend(visible);
                 } else {
                     lines.extend(self.preview_body(&body_lines));
                 }
-            } else if index > current && section.status == SectionStatus::Pending {
+            } else if index > current && node.status == NodeStatus::Pending {
                 // keep pending future phases terse
             }
         }
@@ -380,14 +360,14 @@ impl App {
         Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))
     }
 
-    fn section_header(
+    fn node_header(
         &self,
         index: usize,
         expanded: bool,
-        section: &PipelineSection,
+        node: &crate::state::Node,
     ) -> Line<'static> {
         let marker = if expanded { "v" } else { ">" };
-        let is_current = index == super::sections::current_section_index(&self.sections);
+        let is_current = index == super::tree::current_node_index(&self.nodes);
         let style = if index == self.selected {
             Style::default()
                 .bg(Color::DarkGray)
@@ -398,11 +378,11 @@ impl App {
 
         let mut spans = vec![
             Span::raw(format!("{marker} ")),
-            Span::raw(section.name.clone()),
+            Span::raw(node.label.clone()),
             Span::raw(" | "),
-            Span::styled(section.status.label(), section.status.style()),
+            Span::styled(node.status.label(), node.status.style()),
             Span::raw(" | "),
-            Span::styled(section.summary.clone(), Style::default().fg(Color::Gray)),
+            Span::styled(node.summary.clone(), Style::default().fg(Color::Gray)),
         ];
 
         if self.confirm_back && is_current {
@@ -415,24 +395,66 @@ impl App {
         Line::from(spans).style(style)
     }
 
-    pub(super) fn section_body(&self, index: usize) -> Vec<Line<'static>> {
-        let section = &self.sections[index];
-        let mut lines = section
-            .events
-            .iter()
-            .map(|event| {
-                Line::from(vec![
-                    Span::styled("  - ", Style::default().fg(Color::DarkGray)),
-                    Span::raw(event.clone()),
-                ])
-            })
-            .collect::<Vec<_>>();
+    pub(super) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
+        let node = &self.nodes[index];
+        let run_id = node.run_id.or(node.leaf_run_id);
+        if let Some(id) = run_id {
+            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
+                let msgs: Vec<_> = self.messages.iter().filter(|m| m.run_id == id).collect();
+                return self.render_chat(&msgs, run);
+            }
+        }
+        self.render_compact_node(node, index)
+    }
 
-        if section.status == SectionStatus::Running && self.window_launched {
-            // TODO(Task 2): derive the running label from RunRecord once the tree/chat renderer
-            // replaces the legacy section model.
+    fn render_chat(&self, messages: &[&crate::state::Message], run: &crate::state::RunRecord) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for msg in messages {
+            let timestamp = msg.ts.format("%H:%M:%S").to_string();
+            let vendor_kind = match run.vendor.as_str() {
+                "claude" | "anthropic" => VendorKind::Claude,
+                "codex" | "openai" => VendorKind::Codex,
+                "gemini" => VendorKind::Gemini,
+                "kimi" => VendorKind::Kimi,
+                _ => VendorKind::Claude,
+            };
+            let vcolor = vendor_color(vendor_kind);
+            let prefix = if msg.kind == MessageKind::End {
+                if run.status == RunStatus::Done { "✓" } else { "✗" }
+            } else {
+                " "
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} {}  ", prefix, timestamp),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{} ({})", run.model, run.vendor),
+                    Style::default().fg(vcolor),
+                ),
+            ]));
+            for text_line in msg.text.lines() {
+                lines.push(Line::from(text_line.to_string()));
+            }
+            lines.push(Line::from(""));
+        }
+        let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
+        if run.status == RunStatus::Running && !has_end {
             let spin = spinner_frame(self.agent_line_count);
-            lines.insert(0, Line::from(vec![
+            lines.push(Line::from(Span::styled(
+                format!("{} typing...", spin),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        lines
+    }
+
+    fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        if node.status == NodeStatus::Running && self.window_launched {
+            let spin = spinner_frame(self.agent_line_count);
+            lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
                 Span::styled(spin, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
                 Span::styled(
@@ -441,70 +463,30 @@ impl App {
                 ),
             ]));
         }
-
-        // Live summary for currently running agent
-        if section.status == SectionStatus::Running
-            && self.window_launched
-            && !self.live_summary.is_empty()
-        {
-            let sanitized = sanitize_live_summary(&self.live_summary);
-            let wrapped = hard_wrap(&sanitized, 80);
-            for (i, line) in wrapped.into_iter().enumerate() {
-                lines.insert(
-                    i,
-                    Line::from(vec![
-                        Span::styled("  ", Style::default()),
-                        Span::styled("⦿ ", Style::default().fg(Color::Green)),
-                        Span::raw(line),
-                    ]),
-                );
+        if !node.children.is_empty() {
+            lines.push(Line::from(""));
+            for child in &node.children {
+                lines.push(Line::from(vec![
+                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{} ", child.label), Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("({})", child.status.label()), child.status.style()),
+                    Span::styled(" ──", Style::default().fg(Color::DarkGray)),
+                ]));
             }
         }
-
-        if section.events.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  - no events yet",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        if !section.transcript.is_empty() {
-            if self.transcript_open.contains(&index) {
-                lines.push(Line::from(Span::styled(
-                    "  transcript",
-                    Style::default().fg(Color::Magenta),
-                )));
-                lines.extend(section.transcript.iter().map(|line| {
-                    Line::from(vec![
-                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(line.clone()),
-                    ])
-                }));
-            } else {
-                lines.push(Line::from(Span::styled(
-                    format!("  [t] transcript hidden ({})", section.transcript.len()),
-                    Style::default().fg(Color::DarkGray),
-                )));
-            }
-        }
-
-        if let Some(placeholder) = &section.input_placeholder {
+        // Input box for Idea stage
+        if node.label == "Idea" && node.status == NodeStatus::WaitingUser {
             let active = self.input_mode && index == self.selected;
             let frame_color = if active { Color::Yellow } else { Color::DarkGray };
             let width = 64usize;
-
             lines.push(Line::from(""));
-
             let label = if active { " typing " } else { " input " };
             let fill = width.saturating_sub(label.len() + 2);
-            let top = format!(
-                "  ╭{label}{}╮",
-                "─".repeat(fill),
-            );
+            let top = format!("  ╭{label}{}╮", "─".repeat(fill));
             lines.push(Line::from(Span::styled(top, Style::default().fg(frame_color))));
-
+            let placeholder = "describe what you want to build";
             let (text, text_style) = if self.input_buffer.is_empty() {
-                (placeholder.clone(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
+                (placeholder.to_string(), Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
             } else {
                 (self.input_buffer.clone(), Style::default().fg(Color::White))
             };
@@ -521,68 +503,16 @@ impl App {
                 lines.push(Line::from(vec![
                     Span::styled("  │ ", Style::default().fg(frame_color)),
                     Span::styled(chunk.clone(), text_style),
-                    Span::styled(
-                        cursor.to_string(),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK),
-                    ),
+                    Span::styled(cursor.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::SLOW_BLINK)),
                     Span::raw(" ".repeat(padding)),
                     Span::styled(" │", Style::default().fg(frame_color)),
                 ]));
             }
-
             let hint = if active { " Enter: submit · Esc: cancel " } else { " Enter to type " };
             let fill = width.saturating_sub(hint.len() + 2);
             let bottom = format!("  ╰{}{hint}╯", "─".repeat(fill));
             lines.push(Line::from(Span::styled(bottom, Style::default().fg(frame_color))));
         }
-
-        // Historical attempts
-        if !section.attempts.is_empty() {
-            lines.push(Line::from(""));
-            for attempt in &section.attempts {
-                lines.push(Line::from(vec![
-                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        format!("{} ", attempt.label),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("({})", attempt.status.label()),
-                        attempt.status.style(),
-                    ),
-                    Span::styled(" ──", Style::default().fg(Color::DarkGray)),
-                ]));
-                if !attempt.summary.is_empty() {
-                    lines.push(Line::from(vec![
-                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(attempt.summary.clone(), Style::default().fg(Color::Gray)),
-                    ]));
-                }
-                for event in &attempt.events {
-                    lines.push(Line::from(vec![
-                        Span::styled("      - ", Style::default().fg(Color::DarkGray)),
-                        Span::raw(event.clone()),
-                    ]));
-                }
-                if !attempt.live_summary.is_empty() {
-                    lines.push(Line::from(vec![Span::styled(
-                        "    Final Summary: ",
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    )]));
-                    let sanitized = sanitize_live_summary(&attempt.live_summary);
-                    let wrapped = hard_wrap(&sanitized, 80);
-                    for line in wrapped {
-                        lines.push(Line::from(vec![
-                            Span::styled("      ", Style::default()),
-                            Span::raw(line),
-                        ]));
-                    }
-                }
-            }
-        }
-
         lines
     }
 
@@ -597,7 +527,7 @@ impl App {
         }
 
         let max_offset = body_lines.len().saturating_sub(limit);
-        let offset = self.section_scroll_offset(index, body_lines.len(), limit);
+        let offset = self.node_scroll_offset(index, body_lines.len(), limit);
         let end = (offset + limit).min(body_lines.len());
         let mut visible = Vec::new();
 

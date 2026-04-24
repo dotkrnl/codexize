@@ -1,11 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::state::Phase;
+use crate::state::{NodeStatus, Phase};
 
-use super::{
-    App,
-    sections::{build_sections, current_section_index},
-};
+use super::{App, tree::current_node_index};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -39,13 +36,13 @@ impl App {
                 false
             }
             KeyCode::Down => {
-                if self.selected + 1 < self.sections.len() {
+                if self.selected + 1 < self.nodes.len() {
                     self.selected += 1;
                 }
                 false
             }
             KeyCode::Enter => {
-                let on_current = self.selected == self.current_section();
+                let on_current = self.selected == current_node_index(&self.nodes);
                 if on_current {
                     if self.state.current_phase == Phase::SpecReviewPaused {
                         let _ = self.state.transition_to(Phase::SpecReviewRunning);
@@ -101,10 +98,11 @@ impl App {
                         return false;
                     }
                 }
+
                 if self.can_focus_input() {
                     self.input_mode = true;
                 } else {
-                    self.toggle_selected_section();
+                    self.toggle_selected_node();
                 }
                 false
             }
@@ -118,19 +116,15 @@ impl App {
                 if can_skip_spec {
                     self.state.agent_error = None;
                     let _ = self.state.transition_to(Phase::PlanningRunning);
-                    self.sections = build_sections(&self.state, self.window_launched);
-                    self.section_scroll.resize(self.sections.len(), usize::MAX);
-                    self.selected = self.sections.iter()
-                        .position(|s| s.name == "Planning")
-                        .unwrap_or_else(|| current_section_index(&self.sections));
+                    self.nodes = super::tree::build_tree(&self.state);
+                    self.node_scroll.resize(self.nodes.len(), usize::MAX);
+                    self.selected = current_node_index(&self.nodes);
                 } else if can_skip_plan {
                     self.state.agent_error = None;
                     let _ = self.state.transition_to(Phase::ShardingRunning);
-                    self.sections = build_sections(&self.state, self.window_launched);
-                    self.section_scroll.resize(self.sections.len(), usize::MAX);
-                    self.selected = self.sections.iter()
-                        .position(|s| s.name == "Sharding")
-                        .unwrap_or_else(|| current_section_index(&self.sections));
+                    self.nodes = super::tree::build_tree(&self.state);
+                    self.node_scroll.resize(self.nodes.len(), usize::MAX);
+                    self.selected = current_node_index(&self.nodes);
                 }
                 false
             }
@@ -138,10 +132,7 @@ impl App {
                 self.open_editable_artifact();
                 false
             }
-            KeyCode::Char('t') => {
-                self.toggle_transcript();
-                false
-            }
+            KeyCode::Char('t') => false,
             KeyCode::PageUp => {
                 self.scroll_selected(-(self.page_step() as isize));
                 false
@@ -169,12 +160,6 @@ impl App {
 
                     if trimmed == "/stats" || trimmed == "/status" || trimmed == "/usage" {
                         self.force_refresh_models();
-                        self.sections[self.selected]
-                            .transcript
-                            .push(format!("> {trimmed}"));
-                        self.sections[self.selected]
-                            .transcript
-                            .push("< refreshing model quotas...".to_string());
                         self.input_buffer.clear();
                         self.input_mode = false;
                         return false;
@@ -187,9 +172,6 @@ impl App {
                         return false;
                     }
 
-                    self.sections[self.selected]
-                        .transcript
-                        .push(format!("> {trimmed}"));
                     self.input_buffer.clear();
                 }
                 self.input_mode = false;
@@ -210,29 +192,18 @@ impl App {
         }
     }
 
-    fn toggle_selected_section(&mut self) {
-        let current = self.current_section();
+    fn toggle_selected_node(&mut self) {
+        let current = current_node_index(&self.nodes);
         if self.selected == current {
             return;
         }
 
-        if self.sections[self.selected].status == super::state::SectionStatus::Pending {
+        if self.nodes[self.selected].status == NodeStatus::Pending {
             return;
         }
 
         if !self.expanded.insert(self.selected) {
             self.expanded.remove(&self.selected);
-            self.transcript_open.remove(&self.selected);
-        }
-    }
-
-    fn toggle_transcript(&mut self) {
-        if !self.is_expanded(self.selected) || self.sections[self.selected].transcript.is_empty() {
-            return;
-        }
-
-        if !self.transcript_open.insert(self.selected) {
-            self.transcript_open.remove(&self.selected);
         }
     }
 
@@ -242,20 +213,20 @@ impl App {
         }
 
         let limit = self.selected_body_limit();
-        let total = self.section_body(self.selected).len();
+        let total = self.node_body(self.selected).len();
         let max_offset = total.saturating_sub(limit) as isize;
-        let current = self.section_scroll_offset(self.selected, total, limit) as isize;
+        let current = self.node_scroll_offset(self.selected, total, limit) as isize;
         let next = (current + delta).clamp(0, max_offset);
-        self.section_scroll[self.selected] = next as usize;
+        self.node_scroll[self.selected] = next as usize;
     }
 
     pub(super) fn clamp_scroll(&mut self) {
         let limit = self.selected_body_limit();
-        let total = self.section_body(self.selected).len();
+        let total = self.node_body(self.selected).len();
         let max_offset = total.saturating_sub(limit);
 
-        if self.section_scroll[self.selected] != usize::MAX {
-            self.section_scroll[self.selected] = self.section_scroll[self.selected].min(max_offset);
+        if self.node_scroll[self.selected] != usize::MAX {
+            self.node_scroll[self.selected] = self.node_scroll[self.selected].min(max_offset);
         }
     }
 }

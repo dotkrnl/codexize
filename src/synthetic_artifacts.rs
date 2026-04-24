@@ -1,55 +1,69 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::fs;
 use std::path::Path;
 
 use crate::artifacts::{ArtifactKind, Implementation, Spec};
 use crate::tasks::{Ref, Task, TasksFile};
 
-pub async fn generate_synthetic_artifacts(session_dir: &Path, spec: &Spec) -> Result<()> {
-    // Generate synthetic plan.md
-    let plan_path = session_dir.join(ArtifactKind::Plan.filename());
+/// Write synthetic plan/tasks/implementation artifacts into `<session_dir>/artifacts/`
+/// so the downstream builder flow can proceed as if sharding produced a single task.
+pub fn generate_synthetic_artifacts(session_dir: &Path, spec: &Spec) -> Result<()> {
+    let artifacts_dir = session_dir.join("artifacts");
+    fs::create_dir_all(&artifacts_dir)
+        .with_context(|| format!("creating {}", artifacts_dir.display()))?;
+
+    let plan_path = artifacts_dir.join(ArtifactKind::Plan.filename());
     let plan_content = format!(
-        "# Synthetic Plan for Direct Implementation
-
-This is a synthetic plan generated because the task was deemed simple enough for direct implementation.
-
-## Task 1: Implement according to Spec
-
-- Refer to the spec: {spec_filename}
-",
+        "# Synthetic Plan for Direct Implementation\n\n\
+This plan was generated automatically because the brainstorm agent judged the task \
+simple enough to skip the usual planning and sharding phases.\n\n\
+## Task 1: Implement according to Spec\n\n\
+- Refer to the spec: {spec_filename}\n",
         spec_filename = ArtifactKind::Spec.filename()
     );
-    tokio::fs::write(&plan_path, plan_content.as_bytes()).await?;
+    fs::write(&plan_path, plan_content)
+        .with_context(|| format!("writing {}", plan_path.display()))?;
 
-    // Generate synthetic tasks.toml
-    let tasks_path = session_dir.join(ArtifactKind::Tasks.filename());
+    let tasks_path = artifacts_dir.join(ArtifactKind::Tasks.filename());
+    let spec_refs = if spec.spec_refs.is_empty() {
+        vec![Ref {
+            path: ArtifactKind::Spec.filename().to_string(),
+            lines: "all".to_string(),
+        }]
+    } else {
+        spec.spec_refs
+            .iter()
+            .map(|s| Ref { path: s.clone(), lines: "all".to_string() })
+            .collect()
+    };
     let task = Task {
         id: 1,
         title: "Implement according to Spec".to_string(),
-        description: "Implement the feature described in the spec directly.".to_string(),
-        test: "Run the specified tests.".to_string(), // Placeholder, actual test needs to be determined later
-        estimated_tokens: 1000, // Placeholder
-        spec_refs: spec.spec_refs.iter().map(|s| Ref { path: s.clone(), lines: "all".to_string() }).collect(), // Convert String to Ref
-        plan_refs: vec![Ref { path: ArtifactKind::Plan.filename().to_string(), lines: "1-10".to_string() }], // Reference synthetic plan
+        description:
+            "Implement the feature described in the spec directly; no sharding was performed."
+                .to_string(),
+        test: "Run the tests described in the spec.".to_string(),
+        estimated_tokens: 1000,
+        spec_refs,
+        plan_refs: vec![Ref {
+            path: ArtifactKind::Plan.filename().to_string(),
+            lines: "all".to_string(),
+        }],
     };
-    let tasks_file = TasksFile {
-        tasks: vec![task],
-        remaining_tokens_estimate: 1000, // Placeholder
-        shards_remaining: 1,
-    };
+    let tasks_file = TasksFile { tasks: vec![task] };
     let tasks_content = toml::to_string(&tasks_file)?;
-    tokio::fs::write(&tasks_path, tasks_content.as_bytes()).await?; // write_all requires bytes
+    fs::write(&tasks_path, tasks_content)
+        .with_context(|| format!("writing {}", tasks_path.display()))?;
 
-    // Generate minimal Implementation artifact stub
-    let impl_path = session_dir.join(ArtifactKind::Implementation.filename());
+    let impl_path = artifacts_dir.join(ArtifactKind::Implementation.filename());
     let implementation_stub = Implementation {
-        // Default or empty implementation artifact details
         current_task_id: 1,
         current_round: 1,
-        // ... other fields as needed, can be minimal defaults
-        remaining_tasks: vec![1], // Only task 1 is remaining initially
+        remaining_tasks: vec![1],
     };
     let impl_content = serde_json::to_string_pretty(&implementation_stub)?;
-    tokio::fs::write(&impl_path, impl_content.as_bytes()).await?; // write_all requires bytes
+    fs::write(&impl_path, impl_content)
+        .with_context(|| format!("writing {}", impl_path.display()))?;
 
     Ok(())
 }

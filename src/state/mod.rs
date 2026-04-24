@@ -137,6 +137,26 @@ pub struct BuilderState {
     /// decide where to resume on restart.
     #[serde(default)]
     pub last_verdict: Option<String>,
+    /// Recovery context captured when entering builder recovery.
+    ///
+    /// Orchestrator-owned: the recovery agent may edit artifacts, but it must not
+    /// mutate queue state directly; reconciliation uses this context plus run
+    /// history to enforce invariants.
+    #[serde(default)]
+    pub recovery_trigger_task_id: Option<u32>,
+    /// Maximum task id observed before recovery began (from the pre-recovery tasks.toml).
+    #[serde(default)]
+    pub recovery_prev_max_task_id: Option<u32>,
+    /// Full task id set observed before recovery began.
+    #[serde(default)]
+    pub recovery_prev_task_ids: Vec<u32>,
+    /// Optional human-readable trigger summary (e.g. retry exhaustion details).
+    #[serde(default)]
+    pub recovery_trigger_summary: Option<String>,
+    /// Builder retry reset boundary: failed coder/reviewer runs at or before this
+    /// run id are ignored when rebuilding retry exclusions after restart.
+    #[serde(default)]
+    pub retry_reset_run_id_cutoff: Option<u64>,
 }
 
 /// The persisted state of a single codexize session.
@@ -405,9 +425,7 @@ mod tests {
     use super::*;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = test_fs_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        let _guard = test_fs_lock().lock().unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();
         let cwd = std::env::current_dir().unwrap();
 

@@ -12,7 +12,9 @@ use crate::{
         window_name_with_model,
     },
     cache, review,
-    selection::{self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review},
+    selection::{
+        self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review,
+    },
     state::{
         self as session_state, Message, MessageKind, MessageSender, Node, Phase, RunStatus,
         SessionState,
@@ -165,8 +167,18 @@ impl App {
         state: &SessionState,
     ) -> HashMap<(String, Option<u32>, u32), HashSet<(VendorKind, String)>> {
         let mut failed_models = HashMap::new();
-        for run in state.agent_runs.iter().filter(|run| run.status == RunStatus::Failed) {
+        let cutoff = state.builder.retry_reset_run_id_cutoff;
+        for run in state
+            .agent_runs
+            .iter()
+            .filter(|run| run.status == RunStatus::Failed)
+        {
             if run.error.as_deref() == Some("user_forced_retry") {
+                continue;
+            }
+            if matches!(run.stage.as_str(), "coder" | "reviewer")
+                && cutoff.is_some_and(|cutoff| run.id <= cutoff)
+            {
                 continue;
             }
             let Some(vendor) = selection::vendor::str_to_vendor(&run.vendor) else {
@@ -316,6 +328,7 @@ impl App {
                 artifacts.join("plan.md")
             }
             Phase::ShardingRunning => artifacts.join("tasks.toml"),
+            Phase::BuilderRecovery(_) => artifacts.join("tasks.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => session_dir
                 .join("rounds")
                 .join(format!("{r:03}"))
@@ -422,6 +435,13 @@ impl App {
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let _ = self.transition_to_phase(Phase::ImplementationRound(r));
             }
+            Phase::BuilderRecovery(r) => {
+                kill_window("[Recovery]");
+                let _ = fs::remove_file(prompts.join(format!("recovery-r{r}.md")));
+                // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
+                // the triggering review round so the operator can intervene.
+                let _ = self.transition_to_phase(Phase::ReviewRound(r));
+            }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }
 
@@ -475,26 +495,26 @@ impl App {
         }
         #[cfg(test)]
         {
-        let harness = self.test_launch_harness.as_ref()?.clone();
-        let outcome = harness
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .outcomes
-            .pop_front()
-            .expect("expected queued test launch outcome");
-        Some((|| -> Result<()> {
-            if let Some(parent) = status_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(status_path, outcome.exit_code.to_string())?;
-            if let (Some(path), Some(contents)) = (artifact_path, outcome.artifact_contents) {
-                if let Some(parent) = path.parent() {
+            let harness = self.test_launch_harness.as_ref()?.clone();
+            let outcome = harness
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .outcomes
+                .pop_front()
+                .expect("expected queued test launch outcome");
+            Some((|| -> Result<()> {
+                if let Some(parent) = status_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                std::fs::write(path, contents)?;
-            }
-            Ok(())
-        })())
+                std::fs::write(status_path, outcome.exit_code.to_string())?;
+                if let (Some(path), Some(contents)) = (artifact_path, outcome.artifact_contents) {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(path, contents)?;
+                }
+                Ok(())
+            })())
         }
     }
 
@@ -517,6 +537,7 @@ impl App {
             "planning" => TaskKind::Planning,
             "plan-review" => TaskKind::Review,
             "sharding" => TaskKind::Planning,
+            "recovery" => TaskKind::Planning,
             "coder" => TaskKind::Build,
             "reviewer" => TaskKind::Review,
             _ => TaskKind::Build,
@@ -561,13 +582,7 @@ impl App {
     /// Snapshot the run's immutability state. Non-coder agents must leave the
     /// git tree unchanged; the coder must not edit session control files.
     /// No-op under the test harness (no real git available).
-    fn capture_run_guard(
-        &self,
-        stage: &str,
-        task_id: Option<u32>,
-        round: u32,
-        attempt: u32,
-    ) {
+    fn capture_run_guard(&self, stage: &str, task_id: Option<u32>, round: u32, attempt: u32) {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return;
@@ -626,8 +641,7 @@ impl App {
         let base_file = round_dir.join("base.txt");
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return (!Self::artifact_present(&base_file))
-                .then(|| "base_missing".to_string());
+            return (!Self::artifact_present(&base_file)).then(|| "base_missing".to_string());
         }
         if !Self::artifact_present(&base_file) {
             return Some("base_missing".to_string());
@@ -656,10 +670,7 @@ impl App {
         None
     }
 
-    fn normalized_failure_reason(
-        &self,
-        run: &crate::state::RunRecord,
-    ) -> Result<Option<String>> {
+    fn normalized_failure_reason(&self, run: &crate::state::RunRecord) -> Result<Option<String>> {
         let exit_code = self.read_exit_status_code(run);
         if let Some(code) = exit_code {
             if code != 0 {
@@ -702,10 +713,23 @@ impl App {
                         .map(|err| format!("artifact_invalid: {err}"))
                 }
             }
+            "recovery" => {
+                let spec_path = session_dir.join("artifacts").join("spec.md");
+                let plan_path = session_dir.join("artifacts").join("plan.md");
+                let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+                if !Self::artifact_present(&spec_path)
+                    || !Self::artifact_present(&plan_path)
+                    || !Self::artifact_present(&tasks_path)
+                {
+                    Some("artifact_missing".to_string())
+                } else {
+                    tasks::validate(&tasks_path)
+                        .err()
+                        .map(|err| format!("artifact_invalid: {err}"))
+                }
+            }
             "coder" => {
-                let round_dir = session_dir
-                    .join("rounds")
-                    .join(format!("{:03}", run.round));
+                let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
                 self.coder_gate_reason(&round_dir)
             }
             "reviewer" => {
@@ -745,9 +769,9 @@ impl App {
             text,
         };
         if let Err(err) = self.state.append_message(&message) {
-            let _ = self
-                .state
-                .log_event(format!("failed to append system message for run {run_id}: {err}"));
+            let _ = self.state.log_event(format!(
+                "failed to append system message for run {run_id}: {err}"
+            ));
         } else {
             self.messages.push(message);
         }
@@ -838,6 +862,7 @@ impl App {
             Phase::ShardingRunning => self.launch_sharding(),
             Phase::ImplementationRound(_) => self.launch_coder(),
             Phase::ReviewRound(_) => self.launch_reviewer(),
+            Phase::BuilderRecovery(_) => self.launch_recovery(),
             _ => {}
         }
     }
@@ -888,6 +913,182 @@ impl App {
             .join(format!("{round:03}"));
         let _ = std::fs::create_dir_all(&round_dir);
         self.state.builder.current_task
+    }
+
+    /// Enter builder recovery. This is builder-only and must remain non-interactive:
+    /// it clears `builder.current_task`, preserves `builder.done` and `builder.pending`,
+    /// and records recovery context for validation/reconciliation.
+    ///
+    /// Returns true if recovery was entered (or an attempt was made and recorded) so
+    /// callers can treat it as "handled" like other auto-retry paths.
+    fn enter_builder_recovery(
+        &mut self,
+        triggering_round: u32,
+        trigger_task_id: Option<u32>,
+        trigger_summary: Option<String>,
+    ) -> bool {
+        if self.current_run_id.is_some() || self.window_launched {
+            let _ = self.state.log_event(
+                "enter_builder_recovery called while a run window is still marked active"
+                    .to_string(),
+            );
+        }
+
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+        let (prev_task_ids, prev_max) = tasks::validate(&tasks_path)
+            .ok()
+            .map(|f| {
+                let ids = f.tasks.iter().map(|t| t.id).collect::<Vec<_>>();
+                let max = ids.iter().copied().max();
+                (ids, max)
+            })
+            .unwrap_or_default();
+
+        self.state.builder.recovery_trigger_task_id =
+            trigger_task_id.or(self.state.builder.current_task);
+        self.state.builder.recovery_prev_max_task_id = prev_max;
+        self.state.builder.recovery_prev_task_ids = prev_task_ids;
+        self.state.builder.recovery_trigger_summary = trigger_summary;
+        self.state.builder.current_task = None;
+        self.state.agent_error = None;
+
+        if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
+            self.state.agent_error = Some(format!("failed to enter builder recovery: {err}"));
+            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+        }
+        true
+    }
+
+    fn started_builder_task_ids(&self) -> BTreeSet<u32> {
+        self.state
+            .agent_runs
+            .iter()
+            .filter(|run| matches!(run.stage.as_str(), "coder" | "reviewer"))
+            .filter_map(|run| run.task_id)
+            .collect()
+    }
+
+    fn recovery_notes_document_started_supersession(
+        text: &str,
+        superseded_ids: &BTreeSet<u32>,
+    ) -> Result<()> {
+        if !text.contains("Recovery Notes") {
+            anyhow::bail!("missing required `Recovery Notes` section");
+        }
+        for id in superseded_ids {
+            let needle = id.to_string();
+            let mut found = false;
+            for (idx, _) in text.match_indices(&needle) {
+                // REVIEWER: spec requires superseded ids be explicitly named but does not
+                // prescribe formatting; treat any standalone numeric token match as explicit.
+                let prev = idx
+                    .checked_sub(1)
+                    .and_then(|p| text.as_bytes().get(p).copied())
+                    .map(char::from);
+                let next = text
+                    .as_bytes()
+                    .get(idx + needle.len())
+                    .copied()
+                    .map(char::from);
+                let prev_digit = prev.is_some_and(|ch| ch.is_ascii_digit());
+                let next_digit = next.is_some_and(|ch| ch.is_ascii_digit());
+                if !prev_digit && !next_digit {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                anyhow::bail!("`Recovery Notes` missing superseded started task id {id}");
+            }
+        }
+        Ok(())
+    }
+
+    fn reconcile_builder_recovery(&mut self, recovery_run_id: u64) -> Result<()> {
+        use anyhow::Context;
+
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let spec_path = artifacts.join("spec.md");
+        let plan_path = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let parsed = tasks::validate(&tasks_path)
+            .with_context(|| format!("invalid {}", tasks_path.display()))?;
+
+        let done_ids = self
+            .state
+            .builder
+            .done
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let started_ids = self.started_builder_task_ids();
+        let prev_task_ids = self
+            .state
+            .builder
+            .recovery_prev_task_ids
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let historical_max = self
+            .state
+            .builder
+            .recovery_prev_max_task_id
+            .into_iter()
+            .chain(done_ids.iter().copied())
+            .chain(started_ids.iter().copied())
+            .max()
+            .unwrap_or(0);
+
+        let recovered_ids = parsed.tasks.iter().map(|t| t.id).collect::<Vec<_>>();
+        let recovered_set = recovered_ids.iter().copied().collect::<BTreeSet<_>>();
+
+        if let Some(collision) = recovered_ids.iter().find(|id| done_ids.contains(id)) {
+            anyhow::bail!("recovered unfinished tasks include completed task id {collision}");
+        }
+
+        let historical_ids = prev_task_ids
+            .iter()
+            .copied()
+            .chain(done_ids.iter().copied())
+            .chain(started_ids.iter().copied())
+            .collect::<BTreeSet<_>>();
+        for id in &recovered_ids {
+            if !historical_ids.contains(id) && *id <= historical_max {
+                anyhow::bail!(
+                    "new recovery task id {id} must be greater than prior max id {historical_max}"
+                );
+            }
+        }
+
+        let superseded_started = started_ids
+            .difference(&done_ids)
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .difference(&recovered_set)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if !superseded_started.is_empty() {
+            let spec_text = std::fs::read_to_string(&spec_path)
+                .with_context(|| format!("cannot read {}", spec_path.display()))?;
+            Self::recovery_notes_document_started_supersession(&spec_text, &superseded_started)
+                .with_context(|| format!("invalid {}", spec_path.display()))?;
+
+            let plan_text = std::fs::read_to_string(&plan_path)
+                .with_context(|| format!("cannot read {}", plan_path.display()))?;
+            Self::recovery_notes_document_started_supersession(&plan_text, &superseded_started)
+                .with_context(|| format!("invalid {}", plan_path.display()))?;
+        }
+
+        self.state.builder.pending = recovered_ids;
+        self.state.builder.current_task = None;
+        self.state.builder.retry_reset_run_id_cutoff = Some(recovery_run_id);
+        self.state.builder.recovery_trigger_task_id = None;
+        self.state.builder.recovery_prev_max_task_id = None;
+        self.state.builder.recovery_prev_task_ids.clear();
+        self.state.builder.recovery_trigger_summary = None;
+        Ok(())
     }
 
     fn finalize_run_record(&mut self, run_id: u64, success: bool, error: Option<String>) {
@@ -990,6 +1191,21 @@ impl App {
         let max_attempts = self.models.len() as u32 + 2;
         if failed_run.attempt >= max_attempts {
             let summary = self.retry_exhausted_summary(failed_run);
+            if matches!(failed_run.stage.as_str(), "coder" | "reviewer") {
+                return self.enter_builder_recovery(
+                    failed_run.round,
+                    failed_run.task_id,
+                    Some(summary),
+                );
+            }
+            if failed_run.stage == "recovery" {
+                let summary = format!("builder recovery retry exhausted\n{summary}");
+                self.state.agent_error = Some(summary.clone());
+                let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+                self.append_system_message(failed_run.id, MessageKind::End, summary);
+                return true;
+            }
+
             self.state.agent_error = Some(summary.clone());
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
@@ -1022,6 +1238,21 @@ impl App {
         }
 
         let summary = self.retry_exhausted_summary(failed_run);
+        if matches!(failed_run.stage.as_str(), "coder" | "reviewer") {
+            return self.enter_builder_recovery(
+                failed_run.round,
+                failed_run.task_id,
+                Some(summary),
+            );
+        }
+        if failed_run.stage == "recovery" {
+            let summary = format!("builder recovery retry exhausted\n{summary}");
+            self.state.agent_error = Some(summary.clone());
+            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+            self.append_system_message(failed_run.id, MessageKind::End, summary);
+            return true;
+        }
+
         self.state.agent_error = Some(summary.clone());
         let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
         self.append_system_message(failed_run.id, MessageKind::End, summary);
@@ -1122,13 +1353,41 @@ impl App {
                                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
                             }
                             review::ReviewStatus::Blocked => {
-                                self.transition_to_phase(Phase::BlockedNeedsUser)?;
+                                let summary = verdict.feedback.join("\n");
+                                let trigger_summary =
+                                    (!summary.trim().is_empty()).then_some(summary);
+                                self.enter_builder_recovery(
+                                    round,
+                                    self.state.builder.current_task,
+                                    trigger_summary,
+                                );
                             }
                         }
                     }
                     Err(err) => return Err(err),
                 }
             }
+            Phase::BuilderRecovery(round) => match self.reconcile_builder_recovery(run.id) {
+                Ok(()) => {
+                    self.finalize_run_record(run.id, true, None);
+                    self.state.agent_error = None;
+                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                }
+                Err(err) => {
+                    let reason = format!("recovery_reconcile_failed: {err:#}");
+                    self.finalize_run_record(run.id, false, Some(reason.clone()));
+                    let failed_run = self
+                        .state
+                        .agent_runs
+                        .iter()
+                        .find(|candidate| candidate.id == run.id)
+                        .cloned()
+                        .unwrap_or_else(|| run.clone());
+                    if !self.maybe_auto_retry(&failed_run) {
+                        self.state.agent_error = Some(reason);
+                    }
+                }
+            },
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
@@ -1196,25 +1455,12 @@ impl App {
         self.capture_run_guard("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
-        match launch_interactive(
-            &window_name,
-            &run,
-            adapter.as_ref(),
-            true,
-            &status_path,
-        ) {
+        match launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
-                self.start_run_tracking(
-                    "brainstorm",
-                    None,
-                    1,
-                    model,
-                    vendor,
-                    window_name,
-                );
+                self.start_run_tracking("brainstorm", None, 1, model, vendor, window_name);
             }
             Err(e) => {
                 self.state.agent_error = Some(format!("failed to launch brainstorm: {e}"));
@@ -1238,6 +1484,7 @@ impl App {
             "planning" => self.launch_planning_with_model(Some(chosen), false),
             "plan-review" => self.launch_plan_review_with_model(Some(chosen)),
             "sharding" => self.launch_sharding_with_model(Some(chosen)),
+            "recovery" => self.launch_recovery_with_model(Some(chosen)),
             "coder" => self.launch_coder_with_model(Some(chosen)),
             "reviewer" => self.launch_reviewer_with_model(Some(chosen)),
             _ => false,
@@ -1289,7 +1536,8 @@ impl App {
                         .collect::<Vec<_>>(),
                 )
             })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
             return false;
@@ -1321,12 +1569,13 @@ impl App {
         let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         self.capture_run_guard("spec-review", None, round, attempt);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
-            result
-        } else {
-            let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
@@ -1411,23 +1660,17 @@ impl App {
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
         self.capture_run_guard("planning", None, 1, attempt);
         let window_name = window_name_with_model("[Planning]", &model);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
-            result
-        } else if interactive {
-            launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path)
-        } else {
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
+                result
+            } else if interactive {
+                launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path)
+            } else {
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking(
-                    "planning",
-                    None,
-                    1,
-                    model,
-                    vendor,
-                    window_name,
-                );
+                self.start_run_tracking("planning", None, 1, model, vendor, window_name);
                 true
             }
             Err(e) => {
@@ -1485,7 +1728,8 @@ impl App {
                         .collect::<Vec<_>>(),
                 )
             })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
             return false;
@@ -1518,12 +1762,13 @@ impl App {
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         self.capture_run_guard("plan-review", None, round, attempt);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
-            result
-        } else {
-            let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
@@ -1591,28 +1836,114 @@ impl App {
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         self.capture_run_guard("sharding", None, 1, attempt);
         let window_name = window_name_with_model("[Sharding]", &model);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
-            result
-        } else {
-            let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking(
-                    "sharding",
-                    None,
-                    1,
-                    model,
-                    vendor,
-                    window_name,
-                );
+                self.start_run_tracking("sharding", None, 1, model, vendor, window_name);
                 true
             }
             Err(e) => {
                 let _ = self
                     .state
                     .log_event(format!("failed to launch sharding: {e}"));
+                false
+            }
+        }
+    }
+
+    fn launch_recovery(&mut self) {
+        let _ = self.launch_recovery_with_model(None);
+    }
+
+    fn launch_recovery_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+        use anyhow::Context;
+
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error =
+                Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.nodes = build_tree(&self.state);
+            return false;
+        }
+        let Phase::BuilderRecovery(round) = self.state.current_phase else {
+            return false;
+        };
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let spec_path = artifacts.join("spec.md");
+        let plan_path = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let prompt_path = session_dir
+            .join("prompts")
+            .join(format!("recovery-r{round}.md"));
+
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            self.nodes = build_tree(&self.state);
+            return false;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let completed = self.state.builder.done.clone();
+        let mut started = self
+            .started_builder_task_ids()
+            .into_iter()
+            .collect::<Vec<_>>();
+        started.sort_unstable();
+        let prompt = recovery_prompt(
+            &spec_path,
+            &plan_path,
+            &tasks_path,
+            self.state.builder.recovery_trigger_task_id,
+            self.state.builder.recovery_trigger_summary.as_deref(),
+            &completed,
+            &started,
+            &session_dir.join("artifacts").join("live_summary.txt"),
+        );
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&prompt_path, prompt)
+            .with_context(|| format!("cannot write {}", prompt_path.display()))
+        {
+            self.state.agent_error = Some(err.to_string());
+            return false;
+        }
+
+        let run = AgentRun {
+            model: model.clone(),
+            prompt_path,
+        };
+        let attempt = self.attempt_for("recovery", None, round);
+        let status_path = self.run_status_path_for("recovery", None, round, attempt);
+        self.capture_run_guard("recovery", None, round, attempt);
+        let window_name = window_name_with_model("[Recovery]", &model);
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
+        match launch_result {
+            Ok(()) => {
+                self.start_run_tracking("recovery", None, round, model, vendor, window_name);
+                true
+            }
+            Err(err) => {
+                self.state.agent_error = Some(format!("failed to launch recovery: {err}"));
                 false
             }
         }
@@ -1699,14 +2030,7 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking(
-                    "coder",
-                    Some(task_id),
-                    r,
-                    model,
-                    vendor,
-                    window_name,
-                );
+                self.start_run_tracking("coder", Some(task_id), r, model, vendor, window_name);
                 true
             }
             Err(e) => {
@@ -1815,22 +2139,16 @@ impl App {
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         self.capture_run_guard("reviewer", Some(task_id), r, attempt);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
-            result
-        } else {
-            let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking(
-                    "reviewer",
-                    Some(task_id),
-                    r,
-                    model,
-                    vendor,
-                    window_name,
-                );
+                self.start_run_tracking("reviewer", Some(task_id), r, model, vendor, window_name);
                 true
             }
             Err(e) => {
@@ -2306,6 +2624,74 @@ rejection. Do NOT emit any prose around the TOML.
         spec = spec_path.display(),
         plan = plan_path.display(),
         tasks = tasks_path.display(),
+        instr = instr,
+    )
+}
+
+fn recovery_prompt(
+    spec_path: &std::path::Path,
+    plan_path: &std::path::Path,
+    tasks_path: &std::path::Path,
+    trigger_task_id: Option<u32>,
+    trigger_summary: Option<&str>,
+    completed_task_ids: &[u32],
+    started_task_ids: &[u32],
+    live_summary_path: &std::path::Path,
+) -> String {
+    let instr = live_summary_instruction(live_summary_path);
+    let trigger_task = trigger_task_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "(none)".to_string());
+    let trigger_summary = trigger_summary.unwrap_or("(none recorded)");
+    let completed = if completed_task_ids.is_empty() {
+        "(none)".to_string()
+    } else {
+        completed_task_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let started = if started_task_ids.is_empty() {
+        "(none)".to_string()
+    } else {
+        started_task_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        r#"You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
+
+Your job is to repair builder artifacts so orchestration can reconcile and resume.
+You may edit ONLY:
+  - {spec}
+  - {plan}
+  - {tasks}
+
+Context from orchestrator:
+  - Triggering task id: {trigger_task}
+  - Trigger summary / latest reviewer feedback:
+{trigger_summary}
+  - Completed task ids (must stay completed): {completed}
+  - Started task ids from run history: {started}
+
+Hard requirements:
+  - Keep `tasks.toml` valid and include unfinished work only.
+  - Do NOT include completed ids in recovered `tasks.toml`.
+  - If you supersede/remove started-but-unfinished task ids, add a `Recovery Notes`
+    section in BOTH spec and plan, naming each superseded id and reason.
+  - Keep changes minimal and deterministic.
+  - Do NOT modify source code or version control.
+{instr}"#,
+        spec = spec_path.display(),
+        plan = plan_path.display(),
+        tasks = tasks_path.display(),
+        trigger_task = trigger_task,
+        trigger_summary = trigger_summary,
+        completed = completed,
+        started = started,
         instr = instr,
     )
 }
@@ -2949,7 +3335,10 @@ mod tests {
             });
             state.save().expect("save session");
 
-            let app = App::new(mk_tmux(), SessionState::load(session_id).expect("load session"));
+            let app = App::new(
+                mk_tmux(),
+                SessionState::load(session_id).expect("load session"),
+            );
 
             let key = ("coder".to_string(), Some(7), 3);
             let failed = app
@@ -2957,7 +3346,9 @@ mod tests {
                 .get(&key)
                 .expect("expected failed model set");
             assert!(failed.contains(&(selection::VendorKind::Claude, "claude-sonnet".to_string())));
-            assert!(failed.contains(&(selection::VendorKind::Gemini, "gemini-2.5-pro".to_string())));
+            assert!(
+                failed.contains(&(selection::VendorKind::Gemini, "gemini-2.5-pro".to_string()))
+            );
             assert!(!failed.contains(&(selection::VendorKind::Codex, "gpt-5".to_string())));
             assert!(app.current_run_id.is_none());
         });
@@ -2985,12 +3376,8 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
             };
-            std::fs::create_dir_all(
-                app.run_status_path(&run)
-                    .parent()
-                    .expect("status dir"),
-            )
-            .expect("create status dir");
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
+                .expect("create status dir");
 
             std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
             assert_eq!(
@@ -3006,11 +3393,13 @@ mod tests {
 
             std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
             assert_eq!(
-                app.normalized_failure_reason(&run).expect("missing artifact"),
+                app.normalized_failure_reason(&run)
+                    .expect("missing artifact"),
                 Some("artifact_missing".to_string())
             );
 
-            std::fs::write(session_dir.join("artifacts").join("plan.md"), "").expect("write empty plan");
+            std::fs::write(session_dir.join("artifacts").join("plan.md"), "")
+                .expect("write empty plan");
             assert_eq!(
                 app.normalized_failure_reason(&run).expect("empty artifact"),
                 Some("artifact_missing".to_string())
@@ -3022,9 +3411,11 @@ mod tests {
                 ..run.clone()
             };
             std::fs::write(app.run_status_path(&brainstorm), "0").expect("clean brainstorm exit");
-            std::fs::write(session_dir.join("artifacts").join("spec.md"), "").expect("write empty spec");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "")
+                .expect("write empty spec");
             assert_eq!(
-                app.normalized_failure_reason(&brainstorm).expect("empty spec"),
+                app.normalized_failure_reason(&brainstorm)
+                    .expect("empty spec"),
                 Some("artifact_missing".to_string())
             );
 
@@ -3123,11 +3514,12 @@ mod tests {
     }
 
     #[test]
-    fn coder_retry_exhaustion_blocks_with_summary() {
+    fn coder_retry_exhaustion_enters_builder_recovery() {
         with_temp_root(|| {
             let session_id = "coder-retry-exhaustion";
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
+            state.builder.pending = vec![2, 3];
             state.builder.current_task = Some(1);
             let mut app = idle_app(state);
             app.models = vec![
@@ -3157,16 +3549,364 @@ mod tests {
             }
 
             assert!(app.current_run_id.is_none());
-            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
-            let error = app.state.agent_error.clone().expect("blocked summary");
-            assert!(error.starts_with("retry exhausted (2 attempts)"));
-            assert!(error.contains("attempt 1: claude/claude-sonnet"));
-            assert!(error.contains("attempt 2: gemini/gemini-2.5-pro"));
+            assert_eq!(app.state.current_phase, Phase::BuilderRecovery(1));
+            assert_eq!(app.state.builder.current_task, None);
+            assert_eq!(app.state.builder.pending, vec![2, 3]);
+            let summary = app
+                .state
+                .builder
+                .recovery_trigger_summary
+                .clone()
+                .expect("recovery trigger summary");
+            assert!(summary.starts_with("retry exhausted (2 attempts)"));
+            assert!(summary.contains("attempt 1: claude/claude-sonnet"));
+            assert!(summary.contains("attempt 2: gemini/gemini-2.5-pro"));
+        });
+    }
+
+    #[test]
+    fn non_builder_retry_exhaustion_still_blocks() {
+        let mut state = SessionState::new("non-builder-retry".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Claude,
+            "claude-sonnet",
+            1,
+            10,
+            10,
+        )];
+        let failed = RunRecord {
+            id: 11,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 3,
+            model: "claude-sonnet".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+        };
+        let handled = app.maybe_auto_retry(&failed);
+        assert!(handled);
+        assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+        assert!(!matches!(
+            app.state.current_phase,
+            Phase::BuilderRecovery(_)
+        ));
+    }
+
+    #[test]
+    fn recovery_retry_exhaustion_falls_back_to_blocked() {
+        let mut state = SessionState::new("recovery-retry-cap".to_string());
+        state.current_phase = Phase::BuilderRecovery(2);
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Claude,
+            "claude-sonnet",
+            1,
+            10,
+            10,
+        )];
+        let failed = RunRecord {
+            id: 21,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 2,
+            attempt: 3,
+            model: "claude-sonnet".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("artifact_invalid: x".to_string()),
+        };
+        let handled = app.maybe_auto_retry(&failed);
+        assert!(handled);
+        assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+        assert!(
+            app.state
+                .agent_error
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("builder recovery retry exhausted")
+        );
+    }
+
+    #[test]
+    fn review_blocked_enters_builder_recovery() {
+        with_temp_root(|| {
+            let session_id = "review-blocked-recovery";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("rounds").join("001")).expect("round dir");
+            std::fs::write(
+                session_dir.join("rounds").join("001").join("review.toml"),
+                r#"status = "blocked"
+summary = "needs recovery"
+feedback = ["task 2 is superseded"]
+"#,
+            )
+            .expect("review file");
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            state.builder.current_task = Some(2);
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "reviewer".to_string(),
+                task_id: Some(2),
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Review]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+            let mut app = idle_app(state);
+            let run = app.state.agent_runs[0].clone();
+            app.finalize_current_run(&run).expect("finalize review");
+            assert_eq!(app.state.current_phase, Phase::BuilderRecovery(1));
+            assert_eq!(app.state.builder.current_task, None);
+            assert_eq!(app.state.builder.recovery_trigger_task_id, Some(2));
+        });
+    }
+
+    #[test]
+    fn recovery_reconcile_replaces_pending_and_sets_retry_reset_cutoff() {
+        with_temp_root(|| {
+            let session_id = "recovery-reconcile-success";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::write(
+                artifacts.join("spec.md"),
+                "Spec\n\n## Recovery Notes\n- superseded task 2: split into 5\n",
+            )
+            .expect("spec");
+            std::fs::write(
+                artifacts.join("plan.md"),
+                "Plan\n\n## Recovery Notes\n- superseded task 2: split into 5\n",
+            )
+            .expect("plan");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 2
+title = "Finish task 2"
+description = "do it"
+test = "cargo test"
+estimated_tokens = 10
+
+[[tasks]]
+id = 5
+title = "New follow-up"
+description = "new work"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+            )
+            .expect("tasks");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(2);
+            state.builder.done = vec![1, 4];
+            state.builder.pending = vec![2, 3];
+            state.builder.current_task = Some(2);
+            state.builder.recovery_prev_max_task_id = Some(4);
+            state.builder.recovery_prev_task_ids = vec![1, 2, 3, 4];
+            state.agent_runs.push(RunRecord {
+                id: 7,
+                stage: "coder".to_string(),
+                task_id: Some(2),
+                round: 2,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Done,
+                error: None,
+            });
+            state.agent_runs.push(RunRecord {
+                id: 8,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: 2,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Recovery]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+            let mut app = idle_app(state);
+            let run = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 8)
+                .cloned()
+                .expect("recovery run");
+            app.finalize_current_run(&run).expect("finalize recovery");
+
+            assert_eq!(app.state.current_phase, Phase::ImplementationRound(3));
+            assert_eq!(app.state.builder.done, vec![1, 4]);
+            assert_eq!(app.state.builder.pending, vec![2, 5]);
+            assert_eq!(app.state.builder.current_task, None);
+            assert_eq!(app.state.builder.retry_reset_run_id_cutoff, Some(8));
+        });
+    }
+
+    #[test]
+    fn recovery_reconcile_requires_notes_for_superseded_started_tasks() {
+        with_temp_root(|| {
+            let session_id = "recovery-reconcile-notes";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::write(artifacts.join("spec.md"), "Spec without section").expect("spec");
+            std::fs::write(artifacts.join("plan.md"), "Plan without section").expect("plan");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 6
+title = "Replacement"
+description = "replace task 2"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+            )
+            .expect("tasks");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.builder.done = vec![1];
+            state.builder.recovery_prev_max_task_id = Some(5);
+            state.builder.recovery_prev_task_ids = vec![1, 2, 3, 4, 5];
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(2),
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Done,
+                error: None,
+            });
+            let mut app = idle_app(state);
+            let err = app
+                .reconcile_builder_recovery(99)
+                .expect_err("expected supersession rejection");
+            let text = format!("{err:#}");
+            assert!(text.contains("Recovery Notes"));
+        });
+    }
+
+    #[test]
+    fn app_new_rebuild_failed_models_skips_builder_failures_before_retry_reset_cutoff() {
+        with_temp_root(|| {
+            let session_id = "failed-model-retry-reset";
+            let mut state = SessionState::new(session_id.to_string());
+            state.builder.retry_reset_run_id_cutoff = Some(10);
+            state.agent_runs.push(RunRecord {
+                id: 9,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("exit(1)".to_string()),
+            });
+            state.agent_runs.push(RunRecord {
+                id: 11,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 2,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("exit(1)".to_string()),
+            });
+            state.save().expect("save");
+            let app = App::new(mk_tmux(), SessionState::load(session_id).expect("load"));
+            let key = ("coder".to_string(), Some(1), 1);
+            let failed = app.failed_models.get(&key).expect("failed set");
+            assert_eq!(failed.len(), 1);
+            assert!(failed.contains(&(selection::VendorKind::Codex, "gpt-5".to_string())));
             assert!(
-                app.messages
-                    .iter()
-                    .any(|message| message.kind == MessageKind::End && message.text == error)
+                !failed.contains(&(selection::VendorKind::Claude, "claude-sonnet".to_string()))
             );
+        });
+    }
+
+    #[test]
+    fn recovery_auto_launch_is_idempotent_on_resume() {
+        with_temp_root(|| {
+            let session_id = "recovery-resume-autolaunch";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::write(artifacts.join("spec.md"), "spec").expect("spec");
+            std::fs::write(artifacts.join("plan.md"), "plan").expect("plan");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 1
+title = "Task"
+description = "d"
+test = "t"
+estimated_tokens = 1
+"#,
+            )
+            .expect("tasks");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(1);
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                1,
+                10,
+                10,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            app.maybe_auto_launch();
+            let first_run_count = app.state.agent_runs.len();
+            assert_eq!(first_run_count, 1);
+            assert_eq!(app.state.agent_runs[0].stage, "recovery");
+
+            app.maybe_auto_launch();
+            assert_eq!(app.state.agent_runs.len(), first_run_count);
         });
     }
 
@@ -3199,15 +3939,12 @@ mod tests {
                 1,
                 1,
             )];
-            std::fs::create_dir_all(
-                app.run_status_path(&run)
-                    .parent()
-                    .expect("status dir"),
-            )
-            .expect("create status dir");
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
+                .expect("create status dir");
             std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
 
-            app.finalize_current_run(&run).expect("finalize brainstorm failure");
+            app.finalize_current_run(&run)
+                .expect("finalize brainstorm failure");
             assert!(app.failed_models.is_empty());
             assert_eq!(app.state.agent_runs.len(), 1);
             assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
@@ -3215,17 +3952,15 @@ mod tests {
             assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
 
             let session_dir = session_state::session_dir(session_id);
-            std::fs::create_dir_all(
-                app.run_status_path(&run)
-                    .parent()
-                    .expect("status dir"),
-            )
-            .expect("recreate status dir");
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
+                .expect("recreate status dir");
             std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
-            std::fs::write(session_dir.join("artifacts").join("spec.md"), "spec").expect("write spec");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "spec")
+                .expect("write spec");
             app.state.agent_runs[0].status = RunStatus::Running;
             app.state.agent_runs[0].error = None;
-            app.finalize_current_run(&run).expect("finalize brainstorm success");
+            app.finalize_current_run(&run)
+                .expect("finalize brainstorm success");
             assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
             assert!(app.failed_models.is_empty());
         });

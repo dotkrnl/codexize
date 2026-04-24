@@ -99,11 +99,8 @@ impl SessionPicker {
         } else {
             3
         };
-        let chunks = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(bottom_height),
-        ])
-        .split(area);
+        let chunks =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(bottom_height)]).split(area);
 
         self.draw_list(frame, chunks[0]);
 
@@ -148,15 +145,9 @@ impl SessionPicker {
                     Span::raw(" "),
                     Span::styled(prefix, Style::default().fg(color)),
                     Span::raw(" "),
-                    Span::styled(
-                        format!("{:<12}", badge),
-                        Style::default().fg(color),
-                    ),
+                    Span::styled(format!("{:<12}", badge), Style::default().fg(color)),
                     Span::raw("  "),
-                    Span::styled(
-                        format!("{:<8}", time),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    Span::styled(format!("{:<8}", time), Style::default().fg(Color::DarkGray)),
                     Span::raw("  "),
                     Span::raw(&entry.idea_summary),
                 ]);
@@ -403,8 +394,7 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
             Err(_) => continue,
         };
 
-        let last_modified = fs::metadata(&toml_path)?
-            .modified()?;
+        let last_modified = fs::metadata(&toml_path)?.modified()?;
 
         entries.push(SessionEntry {
             session_id,
@@ -462,6 +452,7 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
         Phase::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
         Phase::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
+        Phase::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
         Phase::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
         Phase::Done => ("done".to_string(), Color::Green, "✓"),
     }

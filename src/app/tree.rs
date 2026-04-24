@@ -20,7 +20,11 @@ fn build_idea_node(state: &SessionState) -> Node {
         Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
         _ => (
             NodeStatus::Done,
-            state.idea_text.as_deref().unwrap_or("idea captured").to_string(),
+            state
+                .idea_text
+                .as_deref()
+                .unwrap_or("idea captured")
+                .to_string(),
         ),
     };
     Node {
@@ -35,7 +39,11 @@ fn build_idea_node(state: &SessionState) -> Node {
 }
 
 fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
-    let runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == stage_key).collect();
+    let runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == stage_key)
+        .collect();
     let status = stage_status_from_runs(&runs, state, stage_key);
     let summary = stage_summary(state, stage_key, label, &runs);
     let mut children = Vec::new();
@@ -54,10 +62,15 @@ fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
 }
 
 fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
-    let runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == stage_key).collect();
+    let runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == stage_key)
+        .collect();
     let status = stage_status_from_runs(&runs, state, stage_key);
     let summary = stage_summary(state, stage_key, label, &runs);
-    let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> = std::collections::BTreeMap::new();
+    let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> =
+        std::collections::BTreeMap::new();
     for run in &runs {
         rounds.entry(run.round).or_default().push(*run);
     }
@@ -67,7 +80,10 @@ fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
         for run in round_runs {
             round_children.push(agent_run_node(run));
         }
-        let round_status = if round_children.iter().any(|c| c.status == NodeStatus::Running) {
+        let round_status = if round_children
+            .iter()
+            .any(|c| c.status == NodeStatus::Running)
+        {
             NodeStatus::Running
         } else if round_children.iter().all(|c| c.status == NodeStatus::Done) {
             NodeStatus::Done
@@ -96,29 +112,72 @@ fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
 }
 
 fn build_builder_stage(state: &SessionState) -> Node {
-    let coder_runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == "coder").collect();
-    let reviewer_runs: Vec<&RunRecord> = state.agent_runs.iter().filter(|r| r.stage == "reviewer").collect();
-    let status = builder_status(state, &coder_runs, &reviewer_runs);
-    let summary = builder_summary(state, &coder_runs, &reviewer_runs);
-    let mut all_task_ids = std::collections::BTreeSet::new();
-    for run in &coder_runs { if let Some(id) = run.task_id { all_task_ids.insert(id); } }
-    for run in &reviewer_runs { if let Some(id) = run.task_id { all_task_ids.insert(id); } }
-    for id in &state.builder.done { all_task_ids.insert(*id); }
-    if let Some(id) = state.builder.current_task { all_task_ids.insert(id); }
-    for id in &state.builder.pending { all_task_ids.insert(*id); }
+    let coder_runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "coder")
+        .collect();
+    let reviewer_runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "reviewer")
+        .collect();
+    let recovery_runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "recovery")
+        .collect();
+    let status = builder_status(state, &coder_runs, &reviewer_runs, &recovery_runs);
+    let summary = builder_summary(state, &recovery_runs);
+    let mut ordered_task_ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for id in &state.builder.done {
+        if seen.insert(*id) {
+            ordered_task_ids.push(*id);
+        }
+    }
+    if let Some(id) = state.builder.current_task
+        && seen.insert(id)
+    {
+        ordered_task_ids.push(id);
+    }
+    for id in &state.builder.pending {
+        if seen.insert(*id) {
+            ordered_task_ids.push(*id);
+        }
+    }
     let mut children = Vec::new();
-    for task_id in all_task_ids {
-        let task_coder: Vec<&RunRecord> = coder_runs.iter().filter(|r| r.task_id == Some(task_id)).copied().collect();
-        let task_reviewer: Vec<&RunRecord> = reviewer_runs.iter().filter(|r| r.task_id == Some(task_id)).copied().collect();
-        let mut rounds: std::collections::BTreeMap<u32, (Vec<&RunRecord>, Vec<&RunRecord>)> = std::collections::BTreeMap::new();
-        for run in &task_coder { rounds.entry(run.round).or_default().0.push(*run); }
-        for run in &task_reviewer { rounds.entry(run.round).or_default().1.push(*run); }
-        if rounds.is_empty() { rounds.insert(state.builder.iteration.max(1), (Vec::new(), Vec::new())); }
+    for task_id in ordered_task_ids {
+        let task_coder: Vec<&RunRecord> = coder_runs
+            .iter()
+            .filter(|r| r.task_id == Some(task_id))
+            .copied()
+            .collect();
+        let task_reviewer: Vec<&RunRecord> = reviewer_runs
+            .iter()
+            .filter(|r| r.task_id == Some(task_id))
+            .copied()
+            .collect();
+        let mut rounds: std::collections::BTreeMap<u32, (Vec<&RunRecord>, Vec<&RunRecord>)> =
+            std::collections::BTreeMap::new();
+        for run in &task_coder {
+            rounds.entry(run.round).or_default().0.push(*run);
+        }
+        for run in &task_reviewer {
+            rounds.entry(run.round).or_default().1.push(*run);
+        }
+        if rounds.is_empty() {
+            rounds.insert(state.builder.iteration.max(1), (Vec::new(), Vec::new()));
+        }
         let mut round_nodes = Vec::new();
         for (round_num, (c_runs, r_runs)) in rounds {
             let mut run_nodes = Vec::new();
-            for run in c_runs { run_nodes.push(agent_run_node(run)); }
-            for run in r_runs { run_nodes.push(agent_run_node(run)); }
+            for run in c_runs {
+                run_nodes.push(agent_run_node(run));
+            }
+            for run in r_runs {
+                run_nodes.push(agent_run_node(run));
+            }
             let round_status = if run_nodes.iter().any(|c| c.status == NodeStatus::Running) {
                 NodeStatus::Running
             } else if run_nodes.is_empty() {
@@ -157,6 +216,62 @@ fn build_builder_stage(state: &SessionState) -> Node {
             leaf_run_id: None,
         });
     }
+    if matches!(state.current_phase, Phase::BuilderRecovery(_)) || !recovery_runs.is_empty() {
+        let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> =
+            std::collections::BTreeMap::new();
+        for run in &recovery_runs {
+            rounds.entry(run.round).or_default().push(*run);
+        }
+        let mut round_nodes = Vec::new();
+        for (round_num, round_runs) in rounds {
+            let mut run_nodes = Vec::new();
+            for run in round_runs {
+                run_nodes.push(agent_run_node(run));
+            }
+            let round_status = if run_nodes.iter().any(|c| c.status == NodeStatus::Running) {
+                NodeStatus::Running
+            } else if run_nodes.iter().all(|c| c.status == NodeStatus::Done) {
+                NodeStatus::Done
+            } else if run_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+                NodeStatus::Failed
+            } else {
+                NodeStatus::Pending
+            };
+            round_nodes.push(Node {
+                label: format!("Round {}", round_num),
+                kind: NodeKind::Round,
+                status: round_status,
+                summary: String::new(),
+                children: run_nodes,
+                run_id: None,
+                leaf_run_id: None,
+            });
+        }
+        let recovery_status = if matches!(state.current_phase, Phase::BuilderRecovery(_)) {
+            if state.agent_error.is_some() {
+                NodeStatus::Failed
+            } else {
+                NodeStatus::Running
+            }
+        } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
+            NodeStatus::Done
+        } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+            NodeStatus::Failed
+        } else {
+            NodeStatus::Pending
+        };
+        let recovery_node = Node {
+            label: "Builder Recovery".to_string(),
+            kind: NodeKind::Task,
+            status: recovery_status,
+            summary: String::new(),
+            children: round_nodes,
+            run_id: None,
+            leaf_run_id: None,
+        };
+        let done_count = state.builder.done.len();
+        children.insert(done_count.min(children.len()), recovery_node);
+    }
     Node {
         label: "Builder Loop".to_string(),
         kind: NodeKind::Stage,
@@ -187,6 +302,7 @@ fn role_label(stage: &str) -> &str {
         "planning" => "Planning",
         "plan-review" => "Reviewer",
         "sharding" => "Sharding",
+        "recovery" => "Recovery",
         "coder" => "Coder",
         "reviewer" => "Reviewer",
         _ => stage,
@@ -201,7 +317,11 @@ fn run_status_to_node(status: RunStatus) -> NodeStatus {
     }
 }
 
-fn stage_status_from_runs(runs: &[&RunRecord], state: &SessionState, stage_key: &str) -> NodeStatus {
+fn stage_status_from_runs(
+    runs: &[&RunRecord],
+    state: &SessionState,
+    stage_key: &str,
+) -> NodeStatus {
     if runs.iter().any(|r| r.status == RunStatus::Running) {
         return NodeStatus::Running;
     }
@@ -234,9 +354,31 @@ fn stage_status_from_runs(runs: &[&RunRecord], state: &SessionState, stage_key: 
         let is_pending = match (stage_key, state.current_phase) {
             ("brainstorm", Phase::IdeaInput) => true,
             ("spec-review", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning),
-            ("planning", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused),
-            ("plan-review", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused | Phase::PlanningRunning),
-            ("sharding", p) => matches!(p, Phase::IdeaInput | Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused | Phase::PlanningRunning | Phase::PlanReviewRunning | Phase::PlanReviewPaused),
+            ("planning", p) => matches!(
+                p,
+                Phase::IdeaInput
+                    | Phase::BrainstormRunning
+                    | Phase::SpecReviewRunning
+                    | Phase::SpecReviewPaused
+            ),
+            ("plan-review", p) => matches!(
+                p,
+                Phase::IdeaInput
+                    | Phase::BrainstormRunning
+                    | Phase::SpecReviewRunning
+                    | Phase::SpecReviewPaused
+                    | Phase::PlanningRunning
+            ),
+            ("sharding", p) => matches!(
+                p,
+                Phase::IdeaInput
+                    | Phase::BrainstormRunning
+                    | Phase::SpecReviewRunning
+                    | Phase::SpecReviewPaused
+                    | Phase::PlanningRunning
+                    | Phase::PlanReviewRunning
+                    | Phase::PlanReviewPaused
+            ),
             _ => false,
         };
         if is_pending {
@@ -253,7 +395,12 @@ fn stage_status_from_runs(runs: &[&RunRecord], state: &SessionState, stage_key: 
     }
 }
 
-fn stage_summary(_state: &SessionState, _stage_key: &str, label: &str, runs: &[&RunRecord]) -> String {
+fn stage_summary(
+    _state: &SessionState,
+    _stage_key: &str,
+    label: &str,
+    runs: &[&RunRecord],
+) -> String {
     if runs.is_empty() {
         return String::new();
     }
@@ -268,12 +415,20 @@ fn stage_summary(_state: &SessionState, _stage_key: &str, label: &str, runs: &[&
     String::new()
 }
 
-fn builder_status(state: &SessionState, coder_runs: &[&RunRecord], reviewer_runs: &[&RunRecord]) -> NodeStatus {
-    if coder_runs.iter().any(|r| r.status == RunStatus::Running) || reviewer_runs.iter().any(|r| r.status == RunStatus::Running) {
+fn builder_status(
+    state: &SessionState,
+    coder_runs: &[&RunRecord],
+    reviewer_runs: &[&RunRecord],
+    recovery_runs: &[&RunRecord],
+) -> NodeStatus {
+    if coder_runs.iter().any(|r| r.status == RunStatus::Running)
+        || reviewer_runs.iter().any(|r| r.status == RunStatus::Running)
+        || recovery_runs.iter().any(|r| r.status == RunStatus::Running)
+    {
         return NodeStatus::Running;
     }
     match state.current_phase {
-        Phase::ImplementationRound(_) | Phase::ReviewRound(_) => {
+        Phase::ImplementationRound(_) | Phase::ReviewRound(_) | Phase::BuilderRecovery(_) => {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -286,7 +441,18 @@ fn builder_status(state: &SessionState, coder_runs: &[&RunRecord], reviewer_runs
     }
 }
 
-fn builder_summary(state: &SessionState, _coder_runs: &[&RunRecord], _reviewer_runs: &[&RunRecord]) -> String {
+fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
+    if matches!(state.current_phase, Phase::BuilderRecovery(_)) {
+        return "builder recovery in progress".to_string();
+    }
+    if !recovery_runs.is_empty()
+        && matches!(
+            state.current_phase,
+            Phase::ImplementationRound(_) | Phase::ReviewRound(_)
+        )
+    {
+        return "builder resumed after recovery".to_string();
+    }
     let total = state.builder.done.len()
         + state.builder.current_task.iter().len()
         + state.builder.pending.len();
@@ -358,37 +524,31 @@ mod tests {
             kind: NodeKind::Stage,
             status: NodeStatus::Done,
             summary: "".to_string(),
-            children: vec![
-                Node {
-                    label: "Task 1".to_string(),
-                    kind: NodeKind::Task,
+            children: vec![Node {
+                label: "Task 1".to_string(),
+                kind: NodeKind::Task,
+                status: NodeStatus::Done,
+                summary: "".to_string(),
+                children: vec![Node {
+                    label: "Round 1".to_string(),
+                    kind: NodeKind::Round,
                     status: NodeStatus::Done,
                     summary: "".to_string(),
-                    children: vec![
-                        Node {
-                            label: "Round 1".to_string(),
-                            kind: NodeKind::Round,
-                            status: NodeStatus::Done,
-                            summary: "".to_string(),
-                            children: vec![
-                                Node {
-                                    label: "Coder".to_string(),
-                                    kind: NodeKind::AgentRun,
-                                    status: NodeStatus::Done,
-                                    summary: "".to_string(),
-                                    children: vec![],
-                                    run_id: Some(1),
-                                    leaf_run_id: None,
-                                }
-                            ],
-                            run_id: None,
-                            leaf_run_id: None,
-                        }
-                    ],
+                    children: vec![Node {
+                        label: "Coder".to_string(),
+                        kind: NodeKind::AgentRun,
+                        status: NodeStatus::Done,
+                        summary: "".to_string(),
+                        children: vec![],
+                        run_id: Some(1),
+                        leaf_run_id: None,
+                    }],
                     run_id: None,
                     leaf_run_id: None,
-                }
-            ],
+                }],
+                run_id: None,
+                leaf_run_id: None,
+            }],
             run_id: None,
             leaf_run_id: None,
         };
@@ -422,7 +582,7 @@ mod tests {
                     children: vec![],
                     run_id: Some(2),
                     leaf_run_id: None,
-                }
+                },
             ],
             run_id: None,
             leaf_run_id: None,
@@ -467,7 +627,12 @@ mod tests {
         let spec_review = nodes.iter().find(|n| n.label == "Spec Review").unwrap();
         // Round collapsed (only one round) → its AgentRun children hoisted to Stage.
         // AgentRun preserved because two runs.
-        assert!(spec_review.children.iter().all(|c| c.kind == NodeKind::AgentRun));
+        assert!(
+            spec_review
+                .children
+                .iter()
+                .all(|c| c.kind == NodeKind::AgentRun)
+        );
         assert_eq!(spec_review.children.len(), 2);
     }
 
@@ -479,6 +644,49 @@ mod tests {
         let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
         assert_eq!(brainstorm.leaf_run_id, Some(1));
         assert!(brainstorm.children.is_empty());
+    }
+
+    #[test]
+    fn builder_stage_orders_done_recovery_current_pending() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::BuilderRecovery(4);
+        state.builder.done = vec![3, 1];
+        state.builder.current_task = Some(9);
+        state.builder.pending = vec![8, 7];
+        state.agent_runs.push(RunRecord {
+            id: 99,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 4,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        let nodes = build_tree(&state);
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let labels = builder
+            .children
+            .iter()
+            .map(|child| child.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            vec![
+                "Task 3",
+                "Task 1",
+                "Builder Recovery",
+                "Task 9",
+                "Task 8",
+                "Task 7",
+            ]
+        );
+        assert_eq!(builder.summary, "builder recovery in progress");
+        assert_eq!(builder.status, NodeStatus::Running);
     }
 }
 

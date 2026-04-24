@@ -14,6 +14,11 @@ pub enum Phase {
     ImplementationRound(u32),
     /// Reviewer agent is checking the current task's work in round N.
     ReviewRound(u32),
+    /// Builder-only recovery stage that repairs artifacts and reconciles queue state.
+    ///
+    /// The stored round is the builder round that triggered recovery; successful recovery
+    /// resumes into the next implementation round (round + 1).
+    BuilderRecovery(u32),
     Done,
     BlockedNeedsUser,
 }
@@ -42,6 +47,7 @@ impl Phase {
             Phase::ShardingRunning => "Sharding".to_string(),
             Phase::ImplementationRound(r) => format!("Builder: coder r{r}"),
             Phase::ReviewRound(r) => format!("Builder: reviewer r{r}"),
+            Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
             Phase::Done => "Done".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
         }
@@ -73,16 +79,21 @@ impl Phase {
             (ShardingRunning, ImplementationRound(1)) => true,
             (ShardingRunning, BlockedNeedsUser) => true,
             (ImplementationRound(r), ReviewRound(r2)) if *r == *r2 => true,
+            (ImplementationRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
             (ImplementationRound(_), BlockedNeedsUser) => true,
             (ReviewRound(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
             (ReviewRound(_), Done) => true,
             (ReviewRound(_), BlockedNeedsUser) => true,
+            (ReviewRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
+            (BuilderRecovery(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
+            (BuilderRecovery(_), BlockedNeedsUser) => true,
             (BlockedNeedsUser, BrainstormRunning) => true,
             (BlockedNeedsUser, SpecReviewRunning) => true,
             (BlockedNeedsUser, PlanningRunning) => true,
             (BlockedNeedsUser, ShardingRunning) => true,
             (BlockedNeedsUser, ImplementationRound(_)) => true,
             (BlockedNeedsUser, ReviewRound(_)) => true,
+            (BlockedNeedsUser, BuilderRecovery(_)) => true,
             // Backward transitions (go_back)
             (BrainstormRunning, IdeaInput) => true,
             (SpecReviewRunning, BrainstormRunning) => true,
@@ -113,6 +124,7 @@ impl Phase {
                 vec![ArtifactKind::Plan, ArtifactKind::Implementation]
             }
             Phase::ReviewRound(_) => vec![ArtifactKind::CodeReview],
+            Phase::BuilderRecovery(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             _ => vec![],
         }
     }
@@ -131,6 +143,7 @@ impl Phase {
             Phase::ShardingRunning => "Splitting plan into actionable tasks",
             Phase::ImplementationRound(_) => "AI agent implementing code",
             Phase::ReviewRound(_) => "AI agent reviewing implementation",
+            Phase::BuilderRecovery(_) => "AI agent repairing builder artifacts",
             Phase::Done => "Run completed successfully",
             Phase::BlockedNeedsUser => "Blocked - requires user intervention",
         }
@@ -141,6 +154,7 @@ impl Phase {
         match self {
             Phase::ImplementationRound(n) => format!("Implementation Round {n}"),
             Phase::ReviewRound(n) => format!("Review Round {n}"),
+            Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
             _ => self.label(),
         }
     }
@@ -189,5 +203,18 @@ mod tests {
         assert_eq!(Phase::PlanReviewPaused.label(), "Plan Review");
         assert_eq!(Phase::PlanReviewRunning.display_name(), "Plan Review");
         assert_eq!(Phase::PlanReviewPaused.display_name(), "Plan Review");
+    }
+
+    #[test]
+    fn builder_recovery_transitions() {
+        assert!(Phase::ImplementationRound(3).can_transition_to(&Phase::BuilderRecovery(3)));
+        assert!(Phase::ReviewRound(3).can_transition_to(&Phase::BuilderRecovery(3)));
+        assert!(Phase::BuilderRecovery(3).can_transition_to(&Phase::ImplementationRound(4)));
+        assert!(Phase::BuilderRecovery(3).can_transition_to(&Phase::BlockedNeedsUser));
+        assert_eq!(Phase::BuilderRecovery(1).label(), "Builder Recovery");
+        assert_eq!(
+            Phase::BuilderRecovery(1).description(),
+            "AI agent repairing builder artifacts"
+        );
     }
 }

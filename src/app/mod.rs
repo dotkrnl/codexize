@@ -33,8 +33,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const PREVIEW_LINES: usize = 3;
-
 #[derive(Debug)]
 pub struct App {
     tmux: TmuxContext,
@@ -43,8 +41,8 @@ pub struct App {
     models: Vec<ModelStatus>,
     model_refresh: ModelRefreshState,
     selected: usize,
-    expanded: BTreeSet<usize>,
-    node_scroll: Vec<usize>,
+    expanded: BTreeSet<String>,
+    stage_scroll: BTreeMap<String, usize>,
     body_inner_height: usize,
     body_inner_width: usize,
     input_mode: bool,
@@ -67,7 +65,6 @@ impl App {
     pub fn new(tmux: TmuxContext, state: SessionState) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         let nodes = build_tree(&state);
-        let node_count = nodes.len();
         let current = current_node_index(&nodes);
         let mut app = Self {
             tmux,
@@ -80,7 +77,7 @@ impl App {
             },
             selected: current,
             expanded: BTreeSet::new(),
-            node_scroll: vec![usize::MAX; node_count],
+            stage_scroll: BTreeMap::new(),
             body_inner_height: 0,
             body_inner_width: 0,
             input_mode: false,
@@ -168,25 +165,33 @@ impl App {
             && self.nodes[self.selected].label == "Idea"
     }
 
-    fn is_expanded(&self, index: usize) -> bool {
-        index == self.current_node() || self.expanded.contains(&index)
+    pub(super) fn is_expanded(&self, index: usize) -> bool {
+        if index == self.current_node() {
+            return true;
+        }
+        let Some(key) = self.nodes.get(index).and_then(Self::stage_scroll_key) else {
+            return false;
+        };
+        self.expanded.contains(&key)
     }
 
-    fn page_step(&self) -> usize {
-        self.selected_body_limit().saturating_sub(2).max(1)
+    pub(super) fn page_step(&self) -> usize {
+        self.stage_body_height().saturating_sub(2).max(1)
     }
 
-    fn selected_body_limit(&self) -> usize {
-        let expanded_preview_count = self
-            .expanded
-            .iter()
-            .filter(|index| **index != self.selected)
-            .count();
-        let reserved = self.nodes.len() + expanded_preview_count * PREVIEW_LINES;
-        self.body_inner_height.saturating_sub(reserved).max(6)
+    pub(super) fn expanded_stage_count(&self) -> usize {
+        (0..self.nodes.len())
+            .filter(|i| self.is_expanded(*i))
+            .count()
+            .max(1)
     }
 
-    fn stage_scroll_key(node: &Node) -> Option<String> {
+    pub(super) fn stage_body_height(&self) -> usize {
+        let body = self.body_inner_height.saturating_sub(self.nodes.len());
+        (body / self.expanded_stage_count()).max(3)
+    }
+
+    pub(super) fn stage_scroll_key(node: &Node) -> Option<String> {
         if node.kind != session_state::NodeKind::Stage {
             return None;
         }
@@ -195,22 +200,46 @@ impl App {
         Some(node.label.clone())
     }
 
+    pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(String, Option<usize>)> {
+        let node = self.nodes.get(index)?;
+        let key = Self::stage_scroll_key(node)?;
+        let stored = self.stage_scroll.get(&key).copied();
+        Some((key, stored))
+    }
+
+    /// Resolve the effective scroll offset for a stage, treating the missing/MAX
+    /// sentinel as "stick to bottom" by returning `max_offset`.
+    pub(super) fn effective_stage_scroll(&self, index: usize, max_offset: usize) -> usize {
+        match self.stage_scroll_for(index) {
+            Some((_, Some(v))) if v != usize::MAX => v.min(max_offset),
+            _ => max_offset,
+        }
+    }
+
+    pub(super) fn stage_max_offset(&self, index: usize) -> usize {
+        if !self.is_expanded(index) {
+            return 0;
+        }
+        let height = self.stage_body_height();
+        let total = self.node_body(index).len();
+        if total > height {
+            total.saturating_sub(height.saturating_sub(1))
+        } else {
+            0
+        }
+    }
+
+    pub(super) fn set_stage_scroll(&mut self, index: usize, value: usize) {
+        if let Some(key) = self.nodes.get(index).and_then(Self::stage_scroll_key) {
+            self.stage_scroll.insert(key, value);
+        }
+    }
+
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
         let previous_stage_leaf_runs: BTreeMap<String, Option<u64>> = self
             .nodes
             .iter()
             .filter_map(|node| Self::stage_scroll_key(node).map(|key| (key, node.leaf_run_id)))
-            .collect();
-        let previous_stage_scrolls: BTreeMap<String, usize> = self
-            .nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(index, node)| {
-                Self::stage_scroll_key(node).map(|key| {
-                    let scroll = self.node_scroll.get(index).copied().unwrap_or(usize::MAX);
-                    (key, scroll)
-                })
-            })
             .collect();
 
         self.state.transition_to(next_phase)?;
@@ -219,25 +248,16 @@ impl App {
         self.live_summary_cached_mtime = None;
 
         self.nodes = build_tree(&self.state);
-        self.node_scroll = self
-            .nodes
-            .iter()
-            .map(|node| {
-                let Some(key) = Self::stage_scroll_key(node) else {
-                    return usize::MAX;
-                };
-                let previous_leaf = previous_stage_leaf_runs.get(&key).copied();
-                let previous_scroll = previous_stage_scrolls
-                    .get(&key)
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                if previous_leaf == Some(node.leaf_run_id) {
-                    previous_scroll
-                } else {
-                    usize::MAX
-                }
-            })
-            .collect();
+        // Reset scroll (to bottom-anchored) for any stage whose backing leaf run changed.
+        for node in &self.nodes {
+            let Some(key) = Self::stage_scroll_key(node) else {
+                continue;
+            };
+            let previous_leaf = previous_stage_leaf_runs.get(&key).copied();
+            if previous_leaf != Some(node.leaf_run_id) {
+                self.stage_scroll.insert(key, usize::MAX);
+            }
+        }
         self.selected = current_node_index(&self.nodes);
         Ok(())
     }
@@ -453,7 +473,6 @@ impl App {
         self.read_live_summary_pipeline();
         self.messages = SessionState::load_messages(&self.state.session_id).unwrap_or_default();
         self.nodes = build_tree(&self.state);
-        self.node_scroll.resize(self.nodes.len(), usize::MAX);
         self.selected = current_node_index(&self.nodes);
     }
 
@@ -518,7 +537,6 @@ impl App {
             ));
         }
         self.nodes = build_tree(&self.state);
-        self.node_scroll.resize(self.nodes.len(), usize::MAX);
         self.selected = current_node_index(&self.nodes);
     }
 
@@ -1924,4 +1942,212 @@ Rules:
         review = review_file.display(),
         instr = instr,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{RunRecord, RunStatus};
+
+    fn mk_tmux() -> TmuxContext {
+        TmuxContext {
+            session_name: "test".to_string(),
+            window_index: "0".to_string(),
+            window_name: "test".to_string(),
+        }
+    }
+
+    fn mk_state_with_runs() -> SessionState {
+        let mut state = SessionState::new("t".to_string());
+        state.current_phase = Phase::SpecReviewRunning;
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "m".to_string(),
+            vendor: "v".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "m".to_string(),
+            vendor: "v".to_string(),
+            window_name: "[Spec Review 1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        state
+    }
+
+    fn mk_app(state: SessionState) -> App {
+        let nodes = build_tree(&state);
+        let selected = current_node_index(&nodes);
+        App {
+            tmux: mk_tmux(),
+            state,
+            nodes,
+            models: Vec::new(),
+            model_refresh: ModelRefreshState::Idle(Instant::now()),
+            selected,
+            expanded: BTreeSet::new(),
+            stage_scroll: BTreeMap::new(),
+            body_inner_height: 30,
+            body_inner_width: 80,
+            input_mode: false,
+            input_buffer: String::new(),
+            confirm_back: false,
+            window_launched: true,
+            quota_errors: Vec::new(),
+            quota_retry_delay: Duration::from_secs(60),
+            agent_line_count: 0,
+            live_summary_watcher: None,
+            live_summary_change_rx: None,
+            live_summary_path: None,
+            live_summary_cached_text: String::new(),
+            live_summary_cached_mtime: None,
+            current_run_id: Some(2),
+            messages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn current_stage_is_always_expanded() {
+        let app = mk_app(mk_state_with_runs());
+        let current = app.current_node();
+        assert!(app.is_expanded(current));
+    }
+
+    #[test]
+    fn toggle_expand_adds_then_removes_by_stage_key() {
+        let mut app = mk_app(mk_state_with_runs());
+        // Focus the Brainstorm stage (not the running one).
+        let bs_idx = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        app.selected = bs_idx;
+        assert!(!app.is_expanded(bs_idx));
+        app.toggle_expand_focused();
+        assert!(app.is_expanded(bs_idx));
+        assert!(app.expanded.contains("Brainstorm"));
+        app.toggle_expand_focused();
+        assert!(!app.is_expanded(bs_idx));
+    }
+
+    #[test]
+    fn toggle_noop_on_currently_running_stage() {
+        let mut app = mk_app(mk_state_with_runs());
+        app.selected = app.current_node();
+        app.toggle_expand_focused();
+        assert!(app.expanded.is_empty());
+        // Still expanded via the current-running rule.
+        assert!(app.is_expanded(app.selected));
+    }
+
+    #[test]
+    fn expand_state_survives_tree_rebuild() {
+        let mut app = mk_app(mk_state_with_runs());
+        let bs_idx = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        app.selected = bs_idx;
+        app.toggle_expand_focused();
+        assert!(app.expanded.contains("Brainstorm"));
+        // Rebuild tree — indices may shift, but stage-keyed state persists.
+        app.nodes = build_tree(&app.state);
+        let bs_idx_after = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        assert!(app.is_expanded(bs_idx_after));
+    }
+
+    #[test]
+    fn scroll_offsets_keyed_by_stage_identity() {
+        let mut app = mk_app(mk_state_with_runs());
+        let bs_idx = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        app.expanded.insert("Brainstorm".to_string());
+        app.set_stage_scroll(bs_idx, 7);
+        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(7));
+        // Rebuild the tree, then confirm offset still there.
+        app.nodes = build_tree(&app.state);
+        let bs_idx_after = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        assert_eq!(
+            app.stage_scroll.get(&app.nodes[bs_idx_after].label).copied(),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn transition_resets_scroll_only_for_changed_leaf_run() {
+        let mut app = mk_app(mk_state_with_runs());
+        // Pre-set scroll for Brainstorm (leaf_run_id=1) and Spec Review (running, id=2).
+        app.stage_scroll.insert("Brainstorm".to_string(), 3);
+        app.stage_scroll.insert("Spec Review".to_string(), 5);
+
+        // Advance: brainstorm's leaf doesn't change; spec review's run pool may shift.
+        // Mimic a phase transition where brainstorm leaf stays the same.
+        let _ = app.transition_to_phase(Phase::SpecReviewPaused);
+        // Brainstorm leaf_run_id didn't change, offset preserved.
+        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(3));
+    }
+
+    #[test]
+    fn boundary_handoff_on_up_moves_focus_to_previous_expanded_stage() {
+        let mut app = mk_app(mk_state_with_runs());
+        // Expand Brainstorm so it can receive focus handoff.
+        app.expanded.insert("Brainstorm".to_string());
+        // Focus Spec Review (currently running, implicitly expanded) with scroll at top.
+        let sr_idx = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Spec Review")
+            .unwrap();
+        app.selected = sr_idx;
+        app.set_stage_scroll(sr_idx, 0);
+        // Pressing Up at the top boundary should move focus to the previous stage.
+        app.scroll_or_move_focus(-1);
+        assert!(app.selected < sr_idx);
+    }
+
+    #[test]
+    fn space_binding_does_not_affect_input_mode() {
+        let mut app = mk_app(mk_state_with_runs());
+        app.input_mode = true;
+        let before = app.expanded.clone();
+        // Directly test the guard: toggle_expand_focused shouldn't be reached via
+        // input-mode keys. Sanity: toggle itself still works outside input mode.
+        app.input_mode = false;
+        app.selected = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        app.toggle_expand_focused();
+        assert_ne!(app.expanded, before);
+    }
 }

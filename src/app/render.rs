@@ -11,8 +11,7 @@ use chrono::Offset;
 use crate::state::{NodeStatus, Phase};
 
 use super::{
-    App, PREVIEW_LINES,
-    chat_widget,
+    App, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
     state::ModelRefreshState,
 };
@@ -34,47 +33,23 @@ impl Widget for PipelineWidget<'_> {
         }
 
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        let selected_limit = self.app.selected_body_limit();
-        let current = self.app.current_node();
+        let expanded_count = self
+            .app
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.app.is_expanded(*i))
+            .count();
+        let header_rows = self.app.nodes.len();
+        let body_avail = (inner.height as usize).saturating_sub(header_rows);
+        let per_stage = if expanded_count == 0 {
+            0
+        } else {
+            (body_avail / expanded_count).max(3)
+        };
 
-        // First pass: determine how many lines exist, and where the selected header lands.
-        let mut total_lines = 0usize;
-        let mut selected_header_line = 0usize;
-        let mut preview_cache: Vec<Option<Vec<Line<'static>>>> = vec![None; self.app.nodes.len()];
-
-        for (index, node) in self.app.nodes.iter().enumerate() {
-            let expanded = self.app.is_expanded(index);
-            if index == self.app.selected {
-                selected_header_line = total_lines;
-            }
-            total_lines += 1; // header
-
-            if expanded {
-                if index == self.app.selected {
-                    total_lines += selected_limit;
-                } else {
-                    // REVIEWER: retain the existing "preview the last few lines" behavior for
-                    // non-selected expanded nodes to avoid changing navigation semantics here.
-                    let body = self
-                        .app
-                        .node_body_with_offset(index, inner.width as usize, &local_offset);
-                    let preview = self.app.preview_body(&body);
-                    total_lines += preview.len();
-                    preview_cache[index] = Some(preview);
-                }
-            } else if index > current && node.status == NodeStatus::Pending {
-                // keep pending future phases terse
-            }
-        }
-
-        let viewport = inner.height as usize;
-        let max_scroll = total_lines.saturating_sub(viewport);
-        let scroll = selected_header_line.saturating_sub(1).min(max_scroll);
-
-        // Second pass: render only what fits in the viewport.
-        let mut line_idx = 0usize;
-        let mut cursor_y = inner.y;
         let bottom_y = inner.y.saturating_add(inner.height);
+        let mut cursor_y = inner.y;
 
         for (index, node) in self.app.nodes.iter().enumerate() {
             if cursor_y >= bottom_y {
@@ -83,49 +58,29 @@ impl Widget for PipelineWidget<'_> {
 
             let expanded = self.app.is_expanded(index);
             let header = self.app.node_header(index, expanded, node);
-            if line_idx >= scroll {
-                buf.set_line(inner.x, cursor_y, &header, inner.width);
-                cursor_y += 1;
-                if cursor_y >= bottom_y {
-                    break;
-                }
+            buf.set_line(inner.x, cursor_y, &header, inner.width);
+            cursor_y += 1;
+            if cursor_y >= bottom_y {
+                break;
             }
-            line_idx += 1;
 
             if expanded {
-                if index == self.app.selected {
-                    let body_height = selected_limit.min((bottom_y - cursor_y) as usize) as u16;
-                    if body_height == 0 {
-                        break;
-                    }
-
-                    let body_area = ratatui::layout::Rect {
-                        x: inner.x,
-                        y: cursor_y,
-                        width: inner.width,
-                        height: body_height,
-                    };
-
-                    self.app.render_selected_chat_body(body_area, buf, &local_offset, index);
-                    cursor_y += body_height;
-                    line_idx += selected_limit;
-                } else {
-                    let preview = preview_cache[index]
-                        .take()
-                        .unwrap_or_else(|| Vec::new());
-                    for line in preview {
-                        if cursor_y >= bottom_y {
-                            break;
-                        }
-                        if line_idx >= scroll {
-                            buf.set_line(inner.x, cursor_y, &line, inner.width);
-                            cursor_y += 1;
-                        }
-                        line_idx += 1;
-                    }
+                let remaining = (bottom_y - cursor_y) as usize;
+                let body_height = per_stage.min(remaining) as u16;
+                if body_height == 0 {
+                    continue;
                 }
-            } else if index > current && node.status == NodeStatus::Pending {
-                // keep pending future phases terse
+
+                let body_area = ratatui::layout::Rect {
+                    x: inner.x,
+                    y: cursor_y,
+                    width: inner.width,
+                    height: body_height,
+                };
+
+                self.app
+                    .render_stage_body(body_area, buf, &local_offset, index);
+                cursor_y += body_height;
             }
         }
     }
@@ -300,14 +255,14 @@ impl App {
                         || (self.state.current_phase == Phase::SpecReviewRunning
                             && self.state.agent_error.is_some());
                     let n = if show_n { " n" } else { "" };
-                    format!(" | Up/Down Enter t PgUp/PgDn b{e}{n} q")
+                    format!(" | Up/Down Space Enter t PgUp/PgDn b{e}{n} q")
                 },
                 Style::default().fg(Color::DarkGray),
             ),
         ]))
     }
 
-    fn render_selected_chat_body(
+    fn render_stage_body(
         &self,
         area: ratatui::layout::Rect,
         buf: &mut Buffer,
@@ -324,7 +279,10 @@ impl App {
                     .filter(|m| m.run_id == id)
                     .cloned()
                     .collect();
-                let scroll_offset = self.node_scroll.get(index).copied().unwrap_or(usize::MAX);
+                let scroll_offset = self
+                    .stage_scroll_for(index)
+                    .and_then(|(_, stored)| stored)
+                    .unwrap_or(usize::MAX);
                 let widget = chat_widget::ChatWidget::new(
                     &msgs,
                     run,
@@ -648,22 +606,4 @@ impl App {
         lines
     }
 
-    fn preview_body(&self, body_lines: &[Line<'static>]) -> Vec<Line<'static>> {
-        if body_lines.is_empty() {
-            return Vec::new();
-        }
-
-        let start = body_lines.len().saturating_sub(PREVIEW_LINES);
-        let mut visible = Vec::new();
-
-        if start > 0 {
-            visible.push(Line::from(Span::styled(
-                "  ...",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        visible.extend(body_lines[start..].iter().cloned());
-        visible
-    }
 }

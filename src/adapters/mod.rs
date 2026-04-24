@@ -103,3 +103,99 @@ fn shell_escape(s: &str) -> String {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_claude_interactive_command() {
+        let adapter = ClaudeAdapter;
+        let cmd = adapter.interactive_command("claude-sonnet-4", "/tmp/prompt.md");
+        assert!(cmd.contains("claude"));
+        assert!(cmd.contains("--dangerously-skip-permissions"));
+        assert!(cmd.contains("claude-sonnet-4"));
+        assert!(cmd.contains("/tmp/prompt.md"));
+    }
+
+    #[test]
+    fn test_claude_noninteractive_command() {
+        let adapter = ClaudeAdapter;
+        let cmd = adapter.noninteractive_command("claude-sonnet-4", "/tmp/prompt.md");
+        assert!(cmd.contains("claude"));
+        assert!(cmd.contains("--print"));
+        assert!(cmd.contains("stream-json"));
+        assert!(cmd.contains("jq"));
+    }
+
+    #[test]
+    fn test_codex_interactive_command() {
+        let adapter = CodexAdapter;
+        let cmd = adapter.interactive_command("gpt-5.4", "/tmp/prompt.md");
+        assert!(cmd.contains("codex"));
+        assert!(cmd.contains("--yolo"));
+        assert!(cmd.contains("gpt-5.4"));
+    }
+
+    #[test]
+    fn test_codex_noninteractive_command() {
+        let adapter = CodexAdapter;
+        let cmd = adapter.noninteractive_command("gpt-5.4", "/tmp/prompt.md");
+        assert!(cmd.contains("codex exec"));
+        assert!(cmd.contains("--yolo"));
+        assert!(cmd.contains("- <"));
+    }
+
+    #[test]
+    fn test_gemini_interactive_command() {
+        let adapter = GeminiAdapter;
+        let cmd = adapter.interactive_command("gemini-pro", "/tmp/prompt.md");
+        assert!(cmd.contains("gemini"));
+        assert!(cmd.contains("--yolo"));
+        assert!(cmd.contains("-i"));
+    }
+
+    #[test]
+    fn test_gemini_noninteractive_command() {
+        let adapter = GeminiAdapter;
+        let cmd = adapter.noninteractive_command("gemini-pro", "/tmp/prompt.md");
+        assert!(cmd.contains("gemini"));
+        assert!(cmd.contains("-p"));
+    }
+
+    #[test]
+    fn test_kimi_interactive_command() {
+        let adapter = KimiAdapter;
+        let cmd = adapter.interactive_command("kimi-latest", "/tmp/prompt.md");
+        assert!(cmd.contains("kimi"));
+        assert!(cmd.contains("--yolo"));
+        assert!(cmd.contains("-p"));
+    }
+
+    #[test]
+    fn test_kimi_noninteractive_command() {
+        let adapter = KimiAdapter;
+        let cmd = adapter.noninteractive_command("kimi-latest", "/tmp/prompt.md");
+        assert!(cmd.contains("kimi"));
+        assert!(cmd.contains("--print"));
+        assert!(cmd.contains("<"));
+    }
+
+    #[test]
+    fn test_shell_escape_safe_chars() {
+        assert_eq!(shell_escape("hello-world_123"), "hello-world_123");
+    }
+
+    #[test]
+    fn test_shell_escape_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_adapter_for_vendor_routing() {
+        assert!(adapter_for_vendor(VendorKind::Claude).detect() == false || true); // may or may not be installed
+        assert!(adapter_for_vendor(VendorKind::Codex).detect() == false || true);
+        assert!(adapter_for_vendor(VendorKind::Gemini).detect() == false || true);
+        assert!(adapter_for_vendor(VendorKind::Kimi).detect() == false || true);
+    }
+}

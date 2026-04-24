@@ -1,23 +1,16 @@
 use crate::warmup;
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     env, fs,
-    path::{Path, PathBuf},
     time::Duration,
 };
 
+use super::{LiveModel, build_http_client, home_dir, parse_json_response, send_request};
+
 const QUOTA_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
-
-
-#[derive(Debug, Clone)]
-pub struct LiveModel {
-    pub name: String,
-    pub quota_percent: Option<u8>,
-}
 
 #[derive(Debug, Deserialize)]
 struct OAuthCreds {
@@ -124,29 +117,17 @@ fn resolve_project_id() -> Result<String> {
 }
 
 fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .context("failed to build Gemini HTTP client")?;
+    let client = build_http_client(5)?;
 
-    let response = client
+    let request = client
         .post(QUOTA_ENDPOINT)
         .bearer_auth(token)
-        .json(&json!({ "project": project_id }))
-        .send()
-        .and_then(|response| response.error_for_status())
-        .context("Gemini quota request failed")?;
+        .json(&json!({ "project": project_id }));
 
-    let payload = response
-        .json::<Value>()
-        .context("Gemini quota response was not valid JSON")?;
+    let response = send_request(request, "Gemini")?;
+    let payload = parse_json_response(response, "Gemini")?;
     if payload.get("error").is_some() {
         bail!("Gemini quota response contained an error");
     }
     Ok(payload)
-}
-
-fn home_dir() -> Result<PathBuf> {
-    let home = env::var_os("HOME").context("HOME is not set")?;
-    Ok(Path::new(&home).to_path_buf())
 }

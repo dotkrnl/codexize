@@ -51,3 +51,54 @@ pub fn resume_run(state: &mut RunState) -> Result<(), ResumeError> {
         .map_err(|e| ResumeError::InvalidState(format!("Failed to log resume event: {e}")))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::RunState;
+
+    #[test]
+    fn test_cannot_resume_done() {
+        let mut state = RunState::new("test-resume-done".to_string());
+        state.current_phase = Phase::Done;
+        let err = can_resume(&state).unwrap_err();
+        assert!(format!("{err}").contains("completed run"));
+    }
+
+    #[test]
+    fn test_cannot_resume_idea_input() {
+        let mut state = RunState::new("test-resume-idea".to_string());
+        state.current_phase = Phase::IdeaInput;
+        let err = can_resume(&state).unwrap_err();
+        assert!(format!("{err}").contains("No work to resume"));
+    }
+
+    #[test]
+    fn test_can_resume_brainstorm() {
+        let mut state = RunState::new("test-resume-brainstorm".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        assert!(can_resume(&state).is_ok());
+    }
+
+    #[test]
+    fn test_can_resume_implementation_round() {
+        let mut state = RunState::new("test-resume-impl".to_string());
+        state.current_phase = Phase::ImplementationRound(2);
+        assert!(can_resume(&state).is_ok());
+    }
+
+    #[test]
+    fn test_resume_run_logs_event() {
+        let mut state = RunState::new("test-resume-log".to_string());
+        state.current_phase = Phase::PlanningRunning;
+
+        // Set up run directory so log_event can write
+        let dir = std::path::Path::new(".codexize").join("runs").join("test-resume-log");
+        let _ = std::fs::create_dir_all(&dir);
+
+        assert!(resume_run(&mut state).is_ok());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -1,22 +1,15 @@
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::Client;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
     env, fs,
-    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use super::{LiveModel, build_http_client, home_dir, parse_json_response, send_request};
+
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
-
-
-#[derive(Debug, Clone)]
-pub struct LiveModel {
-    pub name: String,
-    pub quota_percent: Option<u8>,
-}
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
@@ -132,19 +125,13 @@ fn fetch_usage_payload(api_key: &str) -> Result<Value> {
     let base_url =
         env::var("KIMI_CODE_BASE_URL").unwrap_or_else(|_| DEFAULT_USAGE_BASE_URL.to_string());
     let usage_url = format!("{}/usages", base_url.trim_end_matches('/'));
-    let client = Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .context("failed to build Kimi HTTP client")?;
+    let client = build_http_client(5)?;
 
-    client
+    let request = client
         .get(&usage_url)
-        .bearer_auth(api_key)
-        .send()
-        .and_then(|r| r.error_for_status())
-        .context("Kimi usage request failed")?
-        .json::<Value>()
-        .context("Kimi usage response was not valid JSON")
+        .bearer_auth(api_key);
+
+    parse_json_response(send_request(request, "Kimi")?, "Kimi")
 }
 
 fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> {
@@ -172,9 +159,4 @@ fn read_f64(value: Option<&Value>) -> Option<f64> {
         Some(Value::String(s)) => s.parse().ok(),
         _ => None,
     }
-}
-
-fn home_dir() -> Result<PathBuf> {
-    let home = env::var_os("HOME").context("HOME is not set")?;
-    Ok(Path::new(&home).to_path_buf())
 }

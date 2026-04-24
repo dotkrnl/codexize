@@ -1,19 +1,13 @@
 use crate::warmup;
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::Client;
 use serde_json::Value;
 use std::{process::Command, time::Duration};
+
+use super::{LiveModel, build_http_client, parse_json_response, send_request};
 
 const BASE_URL: &str = "https://api.anthropic.com";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const BETA_HEADER: &str = "oauth-2025-04-20";
-
-
-#[derive(Debug, Clone)]
-pub struct LiveModel {
-    pub name: String,
-    pub quota_percent: Option<u8>,
-}
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
@@ -95,22 +89,16 @@ fn resolve_org_id() -> Result<String> {
 }
 
 fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .context("failed to build Claude HTTP client")?;
+    let client = build_http_client(5)?;
 
-    client
+    let request = client
         .get(format!("{BASE_URL}/api/oauth/usage"))
         .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
         .header("User-Agent", "claude-code/2.1.118")
         .header("x-organization-uuid", org_id)
         .header("anthropic-beta", BETA_HEADER)
-        .header("anthropic-version", "2023-06-01")
-        .send()
-        .and_then(|response| response.error_for_status())
-        .context("Claude usage request failed")?
-        .json::<Value>()
-        .context("Claude usage response was not valid JSON")
+        .header("anthropic-version", "2023-06-01");
+
+    parse_json_response(send_request(request, "Claude")?, "Claude")
 }

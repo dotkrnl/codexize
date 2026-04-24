@@ -1,6 +1,5 @@
 use crate::warmup;
 use anyhow::{Context, Result, bail};
-use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -10,15 +9,9 @@ use std::{
     time::Duration,
 };
 
+use super::{LiveModel, build_http_client, parse_json_response, percent_to_u8, send_request};
+
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
-
-#[derive(Debug, Clone)]
-pub struct LiveModel {
-    pub name: String,
-    pub quota_percent: Option<u8>,
-}
-
-
 
 #[derive(Debug, Deserialize, Default)]
 struct CodexConfig {
@@ -184,10 +177,7 @@ fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
         format!("{base_url}/api/codex/usage")
     };
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .context("failed to build Codex HTTP client")?;
+    let client = build_http_client(5)?;
 
     let mut request = client
         .get(&usage_url)
@@ -198,12 +188,7 @@ fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
         request = request.header("chatgpt-account-id", account_id);
     }
 
-    request
-        .send()
-        .and_then(|response| response.error_for_status())
-        .context("Codex usage request failed")?
-        .json::<Value>()
-        .context("Codex usage response was not valid JSON")
+    parse_json_response(send_request(request, "Codex")?, "Codex")
 }
 
 fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate_limit: &Value) {
@@ -245,8 +230,4 @@ fn codex_home() -> Result<PathBuf> {
 
     let home = env::var_os("HOME").context("HOME is not set")?;
     Ok(Path::new(&home).join(".codex"))
-}
-
-fn percent_to_u8(value: f64) -> u8 {
-    value.round().clamp(0.0, 100.0) as u8
 }

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
-use crate::providers::{claude, codex, gemini, kimi};
+use crate::providers::{self, LiveModel};
 use super::types::{VendorKind, QuotaError};
 
 pub fn load_quota_maps() -> (BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>, Vec<QuotaError>) {
@@ -33,16 +33,16 @@ pub fn load_quota_maps() -> (BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
 
 fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<BTreeMap<String, Option<u8>>, String> {
     match vendor {
-        VendorKind::Codex => codex::load_live_models()
+        VendorKind::Codex => providers::codex::load_live_models()
             .map(live_map_codex)
             .map_err(|e| e.to_string()),
-        VendorKind::Claude => claude::load_live_models()
+        VendorKind::Claude => providers::claude::load_live_models()
             .map(live_map_claude)
             .map_err(|e| e.to_string()),
-        VendorKind::Gemini => gemini::load_live_models()
+        VendorKind::Gemini => providers::gemini::load_live_models()
             .map(live_map_direct)
             .map_err(|e| e.to_string()),
-        VendorKind::Kimi => kimi::load_live_models()
+        VendorKind::Kimi => providers::kimi::load_live_models()
             .map(live_map_kimi)
             .map_err(|e| e.to_string()),
     }
@@ -94,7 +94,7 @@ pub fn find_quota_by_heuristic(
     }
 }
 
-fn live_map_codex(models: Vec<codex::LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_codex(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     let raw = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
@@ -141,7 +141,7 @@ fn live_map_codex(models: Vec<codex::LiveModel>) -> BTreeMap<String, Option<u8>>
     mapped
 }
 
-fn live_map_claude(models: Vec<claude::LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     let raw = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
@@ -188,43 +188,18 @@ fn live_map_claude(models: Vec<claude::LiveModel>) -> BTreeMap<String, Option<u8
     mapped
 }
 
-fn live_map_direct<T: LiveModelLike>(models: Vec<T>) -> BTreeMap<String, Option<u8>> {
+fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     models
         .into_iter()
-        .map(|model| (model.name().to_ascii_lowercase(), model.quota_percent()))
+        .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
         .collect()
 }
 
-fn live_map_kimi(models: Vec<kimi::LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     // Kimi only has one effective model (kimi-latest); expose it under that
     // canonical name regardless of what the API returns.
     let quota = models
         .into_iter()
         .find_map(|m| m.quota_percent);
     BTreeMap::from([("kimi-latest".to_string(), quota)])
-}
-
-trait LiveModelLike {
-    fn name(&self) -> &str;
-    fn quota_percent(&self) -> Option<u8>;
-}
-
-impl LiveModelLike for gemini::LiveModel {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn quota_percent(&self) -> Option<u8> {
-        self.quota_percent
-    }
-}
-
-impl LiveModelLike for kimi::LiveModel {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn quota_percent(&self) -> Option<u8> {
-        self.quota_percent
-    }
 }

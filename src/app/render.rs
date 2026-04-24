@@ -33,21 +33,6 @@ impl Widget for PipelineWidget<'_> {
         }
 
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        let expanded_count = self
-            .app
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.app.is_expanded(*i))
-            .count();
-        let header_rows = self.app.nodes.len();
-        let body_avail = (inner.height as usize).saturating_sub(header_rows);
-        let per_stage = if expanded_count == 0 {
-            0
-        } else {
-            (body_avail / expanded_count).max(3)
-        };
-
         let bottom_y = inner.y.saturating_add(inner.height);
         let mut cursor_y = inner.y;
 
@@ -66,7 +51,10 @@ impl Widget for PipelineWidget<'_> {
 
             if expanded {
                 let remaining = (bottom_y - cursor_y) as usize;
-                let body_height = per_stage.min(remaining) as u16;
+                let natural = self
+                    .app
+                    .natural_stage_body_height(index, inner.width as usize, &local_offset);
+                let body_height = natural.min(remaining) as u16;
                 if body_height == 0 {
                     continue;
                 }
@@ -260,6 +248,16 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ),
         ]))
+    }
+
+    fn natural_stage_body_height(
+        &self,
+        index: usize,
+        available_width: usize,
+        local_offset: &chrono::FixedOffset,
+    ) -> usize {
+        let lines = self.node_body_with_offset(index, available_width, local_offset);
+        lines.len().max(1)
     }
 
     fn render_stage_body(

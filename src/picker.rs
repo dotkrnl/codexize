@@ -94,9 +94,14 @@ impl SessionPicker {
 
     fn draw(&self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+        let bottom_height = if self.input_mode {
+            self.input_height(area.width, area.height)
+        } else {
+            3
+        };
         let chunks = Layout::vertical([
             Constraint::Min(1),
-            Constraint::Length(3),
+            Constraint::Length(bottom_height),
         ])
         .split(area);
 
@@ -107,6 +112,18 @@ impl SessionPicker {
         } else {
             self.draw_action_bar(frame, chunks[1]);
         }
+    }
+
+    fn input_height(&self, total_width: u16, total_height: u16) -> u16 {
+        let inner_width = total_width.saturating_sub(2).max(1) as usize;
+        let mut wrapped: usize = 0;
+        for segment in self.input_buffer.split('\n') {
+            let len = segment.chars().count();
+            wrapped += len.div_ceil(inner_width).max(1);
+        }
+        let wrapped = wrapped.max(1) as u16;
+        let max = total_height.saturating_sub(3).max(3);
+        (wrapped + 2).clamp(3, max)
     }
 
     fn draw_list(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {

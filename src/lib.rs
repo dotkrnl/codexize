@@ -3,6 +3,7 @@ pub mod app;
 pub mod artifacts;
 pub mod cache;
 pub mod dashboard;
+pub mod input_editor;
 pub mod picker;
 pub mod providers;
 pub mod review;

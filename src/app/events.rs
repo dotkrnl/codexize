@@ -149,7 +149,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = false;
-                false
+                return false;
             }
             KeyCode::Enter => {
                 let trimmed = self.input_buffer.trim().to_string();
@@ -161,35 +161,33 @@ impl App {
                     if trimmed == "/stats" || trimmed == "/status" || trimmed == "/usage" {
                         self.force_refresh_models();
                         self.input_buffer.clear();
+                        self.input_cursor = 0;
                         self.input_mode = false;
                         return false;
                     }
 
                     if self.state.current_phase == Phase::IdeaInput {
                         self.input_buffer.clear();
+                        self.input_cursor = 0;
                         self.input_mode = false;
                         self.launch_brainstorm(trimmed);
                         return false;
                     }
 
                     self.input_buffer.clear();
+                    self.input_cursor = 0;
                 }
                 self.input_mode = false;
-                false
+                return false;
             }
-            KeyCode::Backspace => {
-                self.input_buffer.pop();
-                false
-            }
-            KeyCode::Char(c)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.input_buffer.push(c);
-                false
-            }
-            _ => false,
+            _ => {}
         }
+        let _ = crate::input_editor::apply(
+            &mut self.input_buffer,
+            &mut self.input_cursor,
+            key,
+        );
+        false
     }
 
     pub(super) fn toggle_expand_focused(&mut self) {

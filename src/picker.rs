@@ -27,6 +27,7 @@ pub struct SessionPicker {
     selected: usize,
     input_mode: bool,
     input_buffer: String,
+    input_cursor: usize,
     show_archived: bool,
     confirm_delete_hard: bool,
     confirm_delete_soft: bool,
@@ -46,6 +47,7 @@ impl SessionPicker {
             selected: 0,
             input_mode: false,
             input_buffer: String::new(),
+            input_cursor: 0,
             show_archived: false,
             confirm_delete_hard: false,
             confirm_delete_soft: false,
@@ -216,6 +218,7 @@ impl SessionPicker {
                 }
                 self.input_mode = true;
                 self.input_buffer.clear();
+                self.input_cursor = 0;
                 Ok(KeyAction::Continue)
             }
             KeyCode::Up => {
@@ -278,7 +281,7 @@ impl SessionPicker {
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = false;
-                Ok(KeyAction::Continue)
+                return Ok(KeyAction::Continue);
             }
             KeyCode::Enter => {
                 if !self.input_buffer.trim().is_empty() {
@@ -291,22 +294,20 @@ impl SessionPicker {
                     state.save()?;
                     state.log_event("session created")?;
 
-                    Ok(KeyAction::SelectSession(session_id))
+                    return Ok(KeyAction::SelectSession(session_id));
                 } else {
                     self.input_mode = false;
-                    Ok(KeyAction::Continue)
+                    return Ok(KeyAction::Continue);
                 }
             }
-            KeyCode::Backspace => {
-                self.input_buffer.pop();
-                Ok(KeyAction::Continue)
-            }
-            KeyCode::Char(c) => {
-                self.input_buffer.push(c);
-                Ok(KeyAction::Continue)
-            }
-            _ => Ok(KeyAction::Continue),
+            _ => {}
         }
+        let _ = crate::input_editor::apply(
+            &mut self.input_buffer,
+            &mut self.input_cursor,
+            key,
+        );
+        Ok(KeyAction::Continue)
     }
 
     fn handle_select(&self) -> Result<KeyAction> {

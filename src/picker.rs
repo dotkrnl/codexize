@@ -192,7 +192,26 @@ impl SessionPicker {
     }
 
     fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        let input = Paragraph::new(self.input_buffer.as_str())
+        // Split the buffer at the char-index cursor and render a visible
+        // caret span between the two halves. This lets ratatui's wrap handle
+        // positioning — no manual column math to drift.
+        let cursor = self.input_cursor.min(self.input_buffer.chars().count());
+        let byte = self
+            .input_buffer
+            .char_indices()
+            .nth(cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input_buffer.len());
+        let (left, right) = self.input_buffer.split_at(byte);
+        let line = ratatui::text::Line::from(vec![
+            ratatui::text::Span::raw(left.to_string()),
+            ratatui::text::Span::styled(
+                "▌",
+                Style::default().fg(Color::Yellow),
+            ),
+            ratatui::text::Span::raw(right.to_string()),
+        ]);
+        let input = Paragraph::new(line)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -200,33 +219,6 @@ impl SessionPicker {
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
-
-        // Position the terminal cursor so the user can see where they're typing.
-        let inner_width = area.width.saturating_sub(2) as usize;
-        if inner_width > 0 {
-            let prefix: String = self
-                .input_buffer
-                .chars()
-                .take(self.input_cursor)
-                .collect();
-            let mut row = 0u16;
-            let mut col = 0u16;
-            for ch in prefix.chars() {
-                if ch == '\n' || col as usize >= inner_width {
-                    row += 1;
-                    col = 0;
-                    if ch == '\n' {
-                        continue;
-                    }
-                }
-                col += 1;
-            }
-            let cursor_x = area.x + 1 + col;
-            let cursor_y = area.y + 1 + row;
-            if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-                frame.set_cursor_position((cursor_x, cursor_y));
-            }
-        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<KeyAction> {

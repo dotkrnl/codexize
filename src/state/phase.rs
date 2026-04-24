@@ -24,16 +24,7 @@ pub enum Phase {
     BlockedNeedsUser,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ArtifactKind {
-    Spec,
-    SpecReview,
-    Plan,
-    PlanReview,
-    CodeReview,
-    Implementation,
-}
+
 
 impl Phase {
     pub fn label(&self) -> String {

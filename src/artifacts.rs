@@ -36,3 +36,44 @@ impl SkipToImplProposal {
     }
 }
 
+// Minimal Spec struct for synthetic artifact generation
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Spec {
+    pub spec_refs: Vec<String>,
+    // Add other fields as they become relevant, or keep it minimal
+}
+
+// Minimal Implementation struct for synthetic artifact generation
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Implementation {
+    pub current_task_id: u32,
+    pub current_round: u32,
+    pub remaining_tasks: Vec<u32>,
+    // Add other fields as they become relevant
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Spec,
+    SpecReview,
+    Plan,
+    PlanReview,
+    CodeReview,
+    Implementation,
+    Tasks, // Added for tasks.toml
+}
+
+impl ArtifactKind {
+    pub fn filename(&self) -> &'static str {
+        match self {
+            ArtifactKind::Spec => "spec.md",
+            ArtifactKind::SpecReview => "spec_review.md",
+            ArtifactKind::Plan => "plan.md",
+            ArtifactKind::PlanReview => "plan_review.md",
+            ArtifactKind::CodeReview => "code_review.md",
+            ArtifactKind::Implementation => "implementation.json",
+            ArtifactKind::Tasks => "tasks.toml",
+        }
+    }
+}
+

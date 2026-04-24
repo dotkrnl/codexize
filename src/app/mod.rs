@@ -367,6 +367,7 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let coder_window: String;
         let reviewer_window: String;
+        let plan_review_window: String;
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
             Phase::BrainstormRunning => (
                 "[Brainstorm]",
@@ -384,6 +385,16 @@ impl App {
                 session_dir.join("artifacts").join("plan.md"),
                 Phase::PlanReviewRunning,
             ),
+            Phase::PlanReviewRunning => {
+                let review_n = self.state.plan_reviewers.len() + 1;
+                plan_review_window = format!("[Plan Review {review_n}]");
+                (
+                    plan_review_window.as_str(),
+                    session_dir.join("artifacts")
+                        .join(format!("plan-review-{review_n}.md")),
+                    Phase::PlanReviewPaused,
+                )
+            },
             Phase::ShardingRunning => (
                 "[Sharding]",
                 session_dir.join("artifacts").join("tasks.toml"),
@@ -454,6 +465,11 @@ impl App {
                     self.state.spec_reviewers.push(pm);
                 }
                 attempt_status = crate::state::AttemptStatus::Done;
+            } else if self.state.current_phase == Phase::PlanReviewRunning {
+                if let Some(pm) = self.state.phase_models.get("plan-review").cloned() {
+                    self.state.plan_reviewers.push(pm);
+                }
+                attempt_status = crate::state::AttemptStatus::Done;
             } else if let Phase::ReviewRound(r) = self.state.current_phase {
                 match review::validate(&artifact_path) {
                     Ok(v) => {
@@ -502,6 +518,16 @@ impl App {
 
         if let Some(error) = validation_error {
             self.state.agent_error = Some(error);
+            if self.state.current_phase == Phase::PlanReviewRunning {
+                let artifacts = session_dir.join("artifacts");
+                let review_n = self.state.plan_reviewers.len() + 1;
+                let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
+                let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
+                restore_artifacts(&[
+                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
+                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
+                ]);
+            }
         } else {
             self.state.agent_error = None;
         }

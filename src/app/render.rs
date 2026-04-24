@@ -613,23 +613,7 @@ impl App {
 fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
     let area = frame.area();
     let modal_width = area.width.saturating_sub(8).min(70).max(30);
-    let modal_height = 10u16.min(area.height.saturating_sub(4).max(6));
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
 
-    frame.render_widget(ratatui::widgets::Clear, rect);
-
-    let block = Block::default()
-        .title("Skip to implementation?")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled(
         "The brainstorm agent proposes skipping directly to implementation.",
@@ -653,6 +637,35 @@ fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
         "[N]/Esc    decline — continue through spec review",
         Style::default().fg(Color::Red),
     )));
+
+    // Estimate wrapped line count so the accept/decline buttons are never clipped.
+    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
+    let wrapped: u16 = lines
+        .iter()
+        .map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if w == 0 { 1 } else { w.div_ceil(inner_width).max(1) as u16 }
+        })
+        .sum();
+    let desired_height = wrapped.saturating_add(2); // borders
+    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
+
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let rect = ratatui::layout::Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = Block::default()
+        .title("Skip to implementation?")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
 
     let paragraph = Paragraph::new(lines)
         .block(block)

@@ -753,6 +753,96 @@ impl App {
         }
     }
 
+    fn launch_plan_review(&mut self) {
+        self.state.agent_error = None;
+
+        if self.models.is_empty() {
+            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.sections = build_sections(&self.state, self.window_launched);
+            return;
+        }
+
+        let session_id = self.state.session_id.clone();
+        let session_dir = session_state::session_dir(&session_id);
+        let artifacts = session_dir.join("artifacts");
+        let review_n = self.state.plan_reviewers.len() + 1;
+
+        let plan_path = artifacts.join("plan.md");
+        let spec_path = artifacts.join("spec.md");
+        let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
+        let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
+        let review_path = artifacts.join(format!("plan-review-{review_n}.md"));
+
+        backup_artifacts(&[
+            (plan_path.as_path(), plan_backup.as_path()),
+            (spec_path.as_path(), spec_backup.as_path()),
+        ]);
+
+        let mut excluded = self.state.plan_reviewers.clone();
+        if let Some(pm) = self.state.phase_models.get("planning").cloned() {
+            excluded.push(pm);
+        }
+
+        let chosen = select_for_review(&self.models, &excluded)
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()));
+
+        let (model, vendor_kind, vendor) = match chosen {
+            Some(c) => c,
+            None => {
+                self.state.agent_error = Some("no unused model available for plan review".to_string());
+                let _ = self.state.save();
+                self.sections = build_sections(&self.state, self.window_launched);
+                return;
+            }
+        };
+
+        let _ = std::fs::remove_file(&review_path);
+
+        let prompt_path = session_dir.join("prompts")
+            .join(format!("plan-review-{review_n}.md"));
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let live_summary_path = artifacts.join("live_summary.txt");
+        let prompt = plan_review_prompt(
+            &spec_path.display().to_string(),
+            &plan_path.display().to_string(),
+            &review_path.display().to_string(),
+            &live_summary_path.display().to_string(),
+        );
+        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
+            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
+            return;
+        }
+
+        let run = AgentRun {
+            model: model.clone(),
+            prompt_path: prompt_path.clone(),
+        };
+
+        let adapter = adapter_for_vendor(vendor_kind);
+        match launch_noninteractive(&format!("[Plan Review {review_n}]"), &run, adapter.as_ref()) {
+            Ok(()) => {
+                self.state.phase_models.insert(
+                    "plan-review".to_string(),
+                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
+                );
+                let _ = self.state.save();
+                self.window_launched = true;
+                self.live_summary_path = Some(artifacts.join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
+                self.sections = build_sections(&self.state, self.window_launched);
+                self.section_scroll.resize(self.sections.len(), usize::MAX);
+                self.selected = current_section_index(&self.sections);
+            }
+            Err(e) => {
+                self.sections[self.selected].events.push(format!("failed to launch plan review: {e}"));
+            }
+        }
+    }
+
     fn launch_sharding(&mut self) {
         self.state.agent_error = None;
 
@@ -974,6 +1064,8 @@ fn phase_attempt_key(phase: Phase) -> String {
         Phase::BrainstormRunning => "brainstorm".to_string(),
         Phase::SpecReviewRunning => "spec-review".to_string(),
         Phase::PlanningRunning => "planning".to_string(),
+        Phase::PlanReviewRunning => "plan-review".to_string(),
+        Phase::PlanReviewPaused => "plan-review".to_string(),
         Phase::ShardingRunning => "sharding".to_string(),
         Phase::ImplementationRound(r) | Phase::ReviewRound(r) => format!("builder-round-{r}"),
         _ => "unknown".to_string(),
@@ -984,6 +1076,22 @@ fn kill_window(name: &str) {
     let _ = std::process::Command::new("tmux")
         .args(["kill-window", "-t", name])
         .output();
+}
+
+fn backup_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
+    for (source, dest) in pairs {
+        if source.exists() {
+            let _ = std::fs::copy(source, dest);
+        }
+    }
+}
+
+fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
+    for (backup, target) in pairs {
+        if backup.exists() {
+            let _ = std::fs::copy(backup, target);
+        }
+    }
 }
 
 fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
@@ -1041,6 +1149,44 @@ The review must cover:
 - Overall verdict (approve / approve-with-changes / reject)
 - Specific issues found (if any), each with a suggested fix
 - Open risks the spec does not address
+{instr}"#
+    )
+}
+
+fn plan_review_prompt(
+    spec_path: &str,
+    plan_path: &str,
+    review_path: &str,
+    live_summary_path: &str,
+) -> String {
+    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    format!(
+        r#"You are reviewing an implementation plan written by another agent. This is a
+NON-INTERACTIVE run — the operator is NOT available. Do not ask clarifying
+questions; make your best judgement.
+
+Read the plan and spec:
+  - Plan: {plan_path}
+  - Spec: {spec_path}
+
+Your task:
+1. Read both files carefully.
+2. Review the plan for clarity, completeness, correctness, and buildability.
+   Check that every spec requirement maps to a concrete plan step, that steps
+   are ordered correctly, that file paths and function names are consistent
+   across steps, and that test instructions are specific.
+3. Directly edit {plan_path} to fix any issues you find: reorganize steps,
+   fill gaps, fix inconsistencies, add missing details, improve specificity.
+4. If plan review reveals spec-level issues (contradictions, ambiguities,
+   missing requirements), you may also edit {spec_path}.
+5. Write a changelog to: {review_path}
+   The changelog is a markdown bullet list of what you changed and why.
+
+Rules:
+  - Do NOT create or modify any source code files.
+  - Do NOT run git commands or modify version control state.
+  - Do NOT ask questions or request operator input.
+  - Focus edits on substance, not style — don't reformat for formatting's sake.
 {instr}"#
     )
 }

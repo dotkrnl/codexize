@@ -14,6 +14,10 @@ impl App {
             return self.handle_input_key(key);
         }
 
+        if self.state.current_phase == Phase::SkipToImplPending {
+            return self.handle_skip_to_impl_modal_key(key);
+        }
+
         if self.confirm_back && key.code != KeyCode::Char('b') {
             self.confirm_back = false;
             return false;
@@ -271,6 +275,28 @@ impl App {
         let current = self.effective_stage_scroll(idx, max_offset as usize) as isize;
         let next = (current + delta).clamp(0, max_offset);
         self.set_stage_scroll(idx, next as usize);
+    }
+
+    fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if let Err(err) = self.accept_skip_to_implementation() {
+                    self.state.agent_error =
+                        Some(format!("accept skip-to-implementation failed: {err:#}"));
+                }
+                false
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                if let Err(err) = self.decline_skip_to_implementation() {
+                    self.state.agent_error =
+                        Some(format!("decline skip-to-implementation failed: {err:#}"));
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn clamp_scroll(&mut self) {

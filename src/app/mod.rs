@@ -1252,10 +1252,27 @@ Your job:
      refs into the spec and plan for background.
   2. Implement the task end-to-end on the current branch.
   3. Make the tests described in the task pass.
-  4. Commit your work with a clear message.
+  4. Commit your work with a clear message (see commit rules below).
   5. When finished, write the commit SHA to: {commit}
-     (just the short SHA, one line). This is the signal that the round is
-     complete — the TUI polls for this file.
+     (just the short SHA, one line). This is the signal for the TUI to
+     pick up that your work is complete — the TUI polls for this file.
+
+Commit message rules (MANDATORY — the reviewer WILL reject violations):
+  - Use Conventional Commits: `type(scope): summary`, e.g.
+    `feat(auth): add refresh-token rotation`, `fix(db): close pool on shutdown`.
+    Common types: feat, fix, refactor, test, docs, chore, perf, style, build.
+  - Do NOT add `Co-Authored-By:` trailers or any other co-author attribution.
+  - Do NOT mention the orchestrator's internal vocabulary in the message:
+    no "task <N>", no "round <N>", no "plan", no "shard", no "phase",
+    no references to this prompt. Write the message as if a human engineer
+    authored the change standalone.
+
+Productivity rule — delegate tedious work to subagents:
+  - For repetitive, multi-file, or exploration-heavy chores (bulk renames,
+    codebase audits, test sweeps, dependency tracing, large refactors),
+    dispatch a subagent. They run in parallel, stay focused, and finish
+    faster than you doing it sequentially. Give each subagent a clear,
+    self-contained brief and verify their output before committing.
 
 Hard rules:
   - Do NOT ask clarifying questions; work from the task + spec + plan.

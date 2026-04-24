@@ -1,15 +1,15 @@
-use crate::state::{Phase, RunState};
+use crate::state::{Phase, SessionState};
 
 use super::state::{PipelineSection, SectionStatus};
 
-pub(super) fn phase_done_summary(state: &RunState, phase: &str, label: &str) -> String {
+pub(super) fn phase_done_summary(state: &SessionState, phase: &str, label: &str) -> String {
     match state.phase_models.get(phase) {
         Some(pm) => format!("{label} · {} ({})", pm.model, pm.vendor),
         None => label.to_string(),
     }
 }
 
-pub(super) fn build_sections(state: &RunState, window_launched: bool) -> Vec<PipelineSection> {
+pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec<PipelineSection> {
     let phase = state.current_phase;
     vec![
         match phase {
@@ -244,7 +244,7 @@ pub(super) fn build_sections(state: &RunState, window_launched: bool) -> Vec<Pip
     ]
 }
 
-fn builder_queue_lines(state: &RunState) -> Vec<String> {
+fn builder_queue_lines(state: &SessionState) -> Vec<String> {
     let b = &state.builder;
     let mut lines = Vec::new();
     for id in &b.done {

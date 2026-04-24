@@ -51,7 +51,7 @@ impl App {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!(" #{} ", self.state.run_id)),
+            Span::raw(format!(" #{} ", self.state.session_id)),
             Span::styled(
                 format!("[{}]", self.state.current_phase.label()),
                 Style::default().fg(Color::Yellow),

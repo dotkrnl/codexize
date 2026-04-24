@@ -8,7 +8,7 @@ use std::{
 use crate::state;
 
 pub fn run(
-    run_id: String,
+    session_id: String,
     phase: String,
     role: String,
     artifacts: Vec<String>,
@@ -18,7 +18,7 @@ pub fn run(
         bail!("no command provided to agent-run");
     }
 
-    let dir = state::run_dir(&run_id);
+    let dir = state::session_dir(&session_id);
     fs::create_dir_all(&dir)?;
 
     let log_path = dir.join(format!("{role}.log"));

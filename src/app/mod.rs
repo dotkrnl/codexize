@@ -9,7 +9,7 @@ use crate::{
     cache,
     review,
     selection::{self, ModelStatus, QuotaError, select_for_review},
-    state::{self as run_state, Phase, PhaseModel, RunState},
+    state::{self as session_state, Phase, PhaseModel, SessionState},
     tasks,
     tmux::{self, TmuxContext},
     tui::AppTerminal,
@@ -33,7 +33,7 @@ const PREVIEW_LINES: usize = 3;
 #[derive(Debug)]
 pub struct App {
     tmux: TmuxContext,
-    state: RunState,
+    state: SessionState,
     sections: Vec<PipelineSection>,
     models: Vec<ModelStatus>,
     model_refresh: ModelRefreshState,
@@ -52,7 +52,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(tmux: TmuxContext, state: RunState) -> Self {
+    pub fn new(tmux: TmuxContext, state: SessionState) -> Self {
         let sections = build_sections(&state, false);
         let section_count = sections.len();
         let current = current_section_index(&sections);
@@ -143,7 +143,7 @@ impl App {
     }
 
     fn editable_artifact(&self) -> Option<std::path::PathBuf> {
-        let run_dir = run_state::run_dir(&self.state.run_id);
+        let run_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = run_dir.join("artifacts");
         let path = match self.state.current_phase {
             Phase::BrainstormRunning
@@ -177,7 +177,7 @@ impl App {
     fn go_back(&mut self) {
         use std::fs;
 
-        let run_dir = run_state::run_dir(&self.state.run_id);
+        let run_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = run_dir.join("artifacts");
         let prompts = run_dir.join("prompts");
 
@@ -215,7 +215,7 @@ impl App {
                 kill_window(&format!("[Coder r{r}]"));
                 let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
-                    self.state.builder = run_state::BuilderState::default();
+                    self.state.builder = session_state::BuilderState::default();
                     Phase::ShardingRunning
                 } else {
                     Phase::ReviewRound(r - 1)
@@ -274,7 +274,7 @@ impl App {
             return;
         }
 
-        let run_dir = run_state::run_dir(&self.state.run_id);
+        let run_dir = session_state::session_dir(&self.state.session_id);
         let coder_window: String;
         let reviewer_window: String;
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
@@ -331,7 +331,7 @@ impl App {
                     Ok(file) => {
                         self.state.agent_error = None;
                         let ids: Vec<u32> = file.tasks.iter().map(|t| t.id).collect();
-                        self.state.builder = run_state::BuilderState {
+                        self.state.builder = session_state::BuilderState {
                             pending: ids,
                             done: Vec::new(),
                             current_task: None,
@@ -433,7 +433,7 @@ impl App {
             }
         }
         self.state.builder.iteration = round;
-        let round_dir = run_state::run_dir(&self.state.run_id)
+        let round_dir = session_state::session_dir(&self.state.session_id)
             .join("rounds").join(format!("{round:03}"));
         let _ = std::fs::create_dir_all(&round_dir);
         self.state.builder.current_task
@@ -459,9 +459,9 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
-        let run_id = &self.state.run_id;
-        let prompt_path = run_state::run_dir(run_id).join("prompts").join("brainstorm.md");
-        let spec_path = run_state::run_dir(run_id).join("artifacts").join("spec.md");
+        let run_id = &self.state.session_id;
+        let prompt_path = session_state::session_dir(run_id).join("prompts").join("brainstorm.md");
+        let spec_path = session_state::session_dir(run_id).join("artifacts").join("spec.md");
 
         let _ = std::fs::remove_file(&spec_path);
 
@@ -514,10 +514,10 @@ impl App {
             return;
         }
 
-        let run_id = self.state.run_id.clone();
-        let spec_path = run_state::run_dir(&run_id).join("artifacts").join("spec.md");
+        let run_id = self.state.session_id.clone();
+        let spec_path = session_state::session_dir(&run_id).join("artifacts").join("spec.md");
         let review_n = self.state.spec_reviewers.len() + 1;
-        let review_path = run_state::run_dir(&run_id).join("artifacts")
+        let review_path = session_state::session_dir(&run_id).join("artifacts")
             .join(format!("spec-review-{review_n}.md"));
 
         let mut excluded = self.state.spec_reviewers.clone();
@@ -540,7 +540,7 @@ impl App {
 
         let _ = std::fs::remove_file(&review_path);
 
-        let prompt_path = run_state::run_dir(&run_id).join("prompts")
+        let prompt_path = session_state::session_dir(&run_id).join("prompts")
             .join(format!("spec-review-{review_n}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -585,8 +585,8 @@ impl App {
             return;
         }
 
-        let run_id = self.state.run_id.clone();
-        let run_dir = run_state::run_dir(&run_id);
+        let run_id = self.state.session_id.clone();
+        let run_dir = session_state::session_dir(&run_id);
         let spec_path = run_dir.join("artifacts").join("spec.md");
         let plan_path = run_dir.join("artifacts").join("plan.md");
 
@@ -651,8 +651,8 @@ impl App {
             return;
         }
 
-        let run_id = self.state.run_id.clone();
-        let run_dir = run_state::run_dir(&run_id);
+        let run_id = self.state.session_id.clone();
+        let run_dir = session_state::session_dir(&run_id);
         let spec_path = run_dir.join("artifacts").join("spec.md");
         let plan_path = run_dir.join("artifacts").join("plan.md");
         let tasks_path = run_dir.join("artifacts").join("tasks.toml");
@@ -719,8 +719,8 @@ impl App {
             return;
         };
 
-        let run_id = self.state.run_id.clone();
-        let run_dir = run_state::run_dir(&run_id);
+        let run_id = self.state.session_id.clone();
+        let run_dir = session_state::session_dir(&run_id);
         let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
         let task_file = round_dir.join("task.md");
         let commit_file = round_dir.join("commit.txt");
@@ -794,8 +794,8 @@ impl App {
             return;
         };
 
-        let run_id = self.state.run_id.clone();
-        let run_dir = run_state::run_dir(&run_id);
+        let run_id = self.state.session_id.clone();
+        let run_dir = session_state::session_dir(&run_id);
         let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
         let review_path = round_dir.join("review.toml");
         let commit_file = round_dir.join("commit.txt");

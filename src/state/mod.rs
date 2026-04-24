@@ -58,10 +58,10 @@ pub struct BuilderState {
     pub last_verdict: Option<String>,
 }
 
-/// The persisted state of a single codexize run.
+/// The persisted state of a single codexize session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunState {
-    pub run_id: String,
+pub struct SessionState {
+    pub session_id: String,
     pub current_phase: Phase,
     #[serde(default)]
     pub idea_text: Option<String>,
@@ -78,12 +78,14 @@ pub struct RunState {
     /// Builder loop state (empty until sharding completes)
     #[serde(default)]
     pub builder: BuilderState,
+    #[serde(default)]
+    pub archived: bool,
 }
 
-impl RunState {
-    pub fn new(run_id: String) -> Self {
+impl SessionState {
+    pub fn new(session_id: String) -> Self {
         Self {
-            run_id,
+            session_id,
             current_phase: Phase::IdeaInput,
             idea_text: None,
             selected_model: None,
@@ -91,31 +93,32 @@ impl RunState {
             phase_models: std::collections::BTreeMap::new(),
             spec_reviewers: Vec::new(),
             builder: BuilderState::default(),
+            archived: false,
         }
     }
 
-    pub fn load(run_id: &str) -> Result<Self> {
-        let path = run_dir(run_id).join("run.toml");
+    pub fn load(session_id: &str) -> Result<Self> {
+        let path = session_dir(session_id).join("session.toml");
         let text = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read run state from {}", path.display()))?;
+            .with_context(|| format!("failed to read session state from {}", path.display()))?;
         toml::from_str(&text)
-            .with_context(|| format!("failed to parse run state from {}", path.display()))
+            .with_context(|| format!("failed to parse session state from {}", path.display()))
     }
 
     pub fn save(&self) -> Result<()> {
-        let dir = run_dir(&self.run_id);
+        let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create run directory {}", dir.display()))?;
-        let path = dir.join("run.toml");
-        let text = toml::to_string_pretty(self).context("failed to serialize run state")?;
+            .with_context(|| format!("failed to create session directory {}", dir.display()))?;
+        let path = dir.join("session.toml");
+        let text = toml::to_string_pretty(self).context("failed to serialize session state")?;
         fs::write(&path, text)
-            .with_context(|| format!("failed to write run state to {}", path.display()))?;
+            .with_context(|| format!("failed to write session state to {}", path.display()))?;
         Ok(())
     }
 
-    /// Append an event to the run's events.jsonl audit trail.
+    /// Append an event to the session's events.jsonl audit trail.
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {
-        let dir = run_dir(&self.run_id);
+        let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
         let path = dir.join("events.jsonl");
 
@@ -141,7 +144,38 @@ impl RunState {
     }
 }
 
-/// Return the directory path for a given run ID.
-pub fn run_dir(run_id: &str) -> PathBuf {
-    Path::new(".codexize").join("runs").join(run_id)
+/// Return the directory path for a given session ID.
+pub fn session_dir(session_id: &str) -> PathBuf {
+    Path::new(".codexize").join("sessions").join(session_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_state_archived_defaults_false() {
+        let state = SessionState::new("test-session".to_string());
+        assert!(!state.archived);
+    }
+
+    #[test]
+    fn test_session_state_archived_persists() {
+        let mut state = SessionState::new("test-session".to_string());
+        state.archived = true;
+
+        let toml = toml::to_string(&state).unwrap();
+        assert!(toml.contains("archived = true"));
+
+        let loaded: SessionState = toml::from_str(&toml).unwrap();
+        assert!(loaded.archived);
+    }
+
+    #[test]
+    fn test_session_state_archived_defaults_false_on_deserialize() {
+        let state = SessionState::new("test-session".to_string());
+        let toml = toml::to_string(&state).unwrap();
+        let loaded: SessionState = toml::from_str(&toml).unwrap();
+        assert!(!loaded.archived);
+    }
 }

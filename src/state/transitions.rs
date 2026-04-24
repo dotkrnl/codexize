@@ -1,4 +1,4 @@
-use super::{Phase, RunState};
+use super::{Phase, SessionState};
 use anyhow::{Context, Result};
 
 /// Errors that can occur during phase transitions.
@@ -46,7 +46,7 @@ pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionErr
 }
 
 /// Execute a validated transition, updating the state and persisting it.
-pub fn execute_transition(state: &mut RunState, to: Phase) -> Result<()> {
+pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     validate_transition(&state.current_phase, &to)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 

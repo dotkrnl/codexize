@@ -2692,8 +2692,11 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
         "\n\nEvery 2–3 min (and whenever your sub-goal changes), overwrite {} \
          with one plain-text line formatted as: `<short title> | <normal \
          summary in a short paragraph>`. The short title (≤5 words) MUST \
-         capture the real essence, not a generic label. The summary is a \
-         single short paragraph covering current progress and next action in \
+         capture the real essence, not a generic label, and SHOULD vary \
+         between updates whenever the focus shifts — avoid repeating the \
+         same title across successive writes when a different phrasing \
+         honestly reflects the current sub-goal. The summary is a single \
+         short paragraph covering current progress and next action in \
          normal prose. Your process is killed if this file isn't updated for \
          10 min of wall time (time spent inside tool calls is excluded from \
          that budget).\n",

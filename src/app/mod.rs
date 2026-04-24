@@ -439,6 +439,28 @@ impl App {
         let artifacts = session_dir.join("artifacts");
         let prompts = session_dir.join("prompts");
 
+        // Interrupt the running agent (if any) so rewinding takes effect even
+        // when the phase-specific kill_window base doesn't match the launch
+        // window name (e.g. "[Spec Review 1]" vs "[Spec Review]").
+        if let Some(run_id) = self.current_run_id {
+            let running = self
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == run_id)
+                .cloned();
+            if let Some(run) = running {
+                kill_window(&run.window_name);
+                if run.status == crate::state::RunStatus::Running {
+                    self.finalize_run_record(
+                        run_id,
+                        false,
+                        Some("aborted by user".to_string()),
+                    );
+                }
+            }
+        }
+
         match self.state.current_phase {
             Phase::BrainstormRunning => {
                 kill_window("[Brainstorm]");

@@ -205,8 +205,8 @@ impl App {
         else {
             return;
         };
-        if !self.expanded.insert(key.clone()) {
-            self.expanded.remove(&key);
+        if !self.collapsed_overrides.insert(key.clone()) {
+            self.collapsed_overrides.remove(&key);
         }
     }
 

@@ -60,7 +60,7 @@ pub struct App {
     models: Vec<ModelStatus>,
     model_refresh: ModelRefreshState,
     selected: usize,
-    expanded: BTreeSet<String>,
+    collapsed_overrides: BTreeSet<String>,
     stage_scroll: BTreeMap<String, usize>,
     body_inner_height: usize,
     body_inner_width: usize,
@@ -99,7 +99,7 @@ impl App {
                 started_at: Instant::now(),
             },
             selected: current,
-            expanded: BTreeSet::new(),
+            collapsed_overrides: BTreeSet::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 0,
             body_inner_width: 0,
@@ -224,10 +224,16 @@ impl App {
         if index == self.current_node() {
             return true;
         }
-        let Some(key) = self.nodes.get(index).and_then(Self::stage_scroll_key) else {
+        let Some(node) = self.nodes.get(index) else {
             return false;
         };
-        self.expanded.contains(&key)
+        if node.status == crate::state::NodeStatus::Pending {
+            return false;
+        }
+        let Some(key) = Self::stage_scroll_key(node) else {
+            return false;
+        };
+        !self.collapsed_overrides.contains(&key)
     }
 
     pub(super) fn page_step(&self) -> usize {
@@ -3006,7 +3012,7 @@ mod tests {
             models: Vec::new(),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
             selected,
-            expanded: BTreeSet::new(),
+            collapsed_overrides: BTreeSet::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 30,
             body_inner_width: 80,
@@ -3039,19 +3045,20 @@ mod tests {
     #[test]
     fn toggle_expand_adds_then_removes_by_stage_key() {
         let mut app = mk_app(mk_state_with_runs());
-        // Focus the Brainstorm stage (not the running one).
+        // Focus the Brainstorm stage (Done; auto-expanded).
         let bs_idx = app
             .nodes
             .iter()
             .position(|n| n.label == "Brainstorm")
             .unwrap();
         app.selected = bs_idx;
+        assert!(app.is_expanded(bs_idx));
+        app.toggle_expand_focused();
         assert!(!app.is_expanded(bs_idx));
+        assert!(app.collapsed_overrides.contains("Brainstorm"));
         app.toggle_expand_focused();
         assert!(app.is_expanded(bs_idx));
-        assert!(app.expanded.contains("Brainstorm"));
-        app.toggle_expand_focused();
-        assert!(!app.is_expanded(bs_idx));
+        assert!(!app.collapsed_overrides.contains("Brainstorm"));
     }
 
     #[test]
@@ -3059,7 +3066,7 @@ mod tests {
         let mut app = mk_app(mk_state_with_runs());
         app.selected = app.current_node();
         app.toggle_expand_focused();
-        assert!(app.expanded.is_empty());
+        assert!(app.collapsed_overrides.is_empty());
         // Still expanded via the current-running rule.
         assert!(app.is_expanded(app.selected));
     }
@@ -3073,16 +3080,17 @@ mod tests {
             .position(|n| n.label == "Brainstorm")
             .unwrap();
         app.selected = bs_idx;
+        // Brainstorm (Done) is auto-expanded; collapse it via toggle.
         app.toggle_expand_focused();
-        assert!(app.expanded.contains("Brainstorm"));
-        // Rebuild tree — indices may shift, but stage-keyed state persists.
+        assert!(app.collapsed_overrides.contains("Brainstorm"));
+        // Rebuild tree — indices may shift, but stage-keyed override persists.
         app.nodes = build_tree(&app.state);
         let bs_idx_after = app
             .nodes
             .iter()
             .position(|n| n.label == "Brainstorm")
             .unwrap();
-        assert!(app.is_expanded(bs_idx_after));
+        assert!(!app.is_expanded(bs_idx_after));
     }
 
     #[test]
@@ -3093,7 +3101,7 @@ mod tests {
             .iter()
             .position(|n| n.label == "Brainstorm")
             .unwrap();
-        app.expanded.insert("Brainstorm".to_string());
+        app.collapsed_overrides.insert("Brainstorm".to_string());
         app.set_stage_scroll(bs_idx, 7);
         assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(7));
         // Rebuild the tree, then confirm offset still there.
@@ -3129,7 +3137,7 @@ mod tests {
     fn boundary_handoff_on_up_moves_focus_to_previous_expanded_stage() {
         let mut app = mk_app(mk_state_with_runs());
         // Expand Brainstorm so it can receive focus handoff.
-        app.expanded.insert("Brainstorm".to_string());
+        app.collapsed_overrides.insert("Brainstorm".to_string());
         // Focus Spec Review (currently running, implicitly expanded) with scroll at top.
         let sr_idx = app
             .nodes
@@ -3151,27 +3159,21 @@ mod tests {
             .iter()
             .position(|n| n.label == "Brainstorm")
             .unwrap();
-        // Focus Brainstorm, expand it, and set a concrete scroll offset.
+        // Brainstorm (Done) is auto-expanded; set a scroll offset.
         app.selected = bs_idx;
-        app.expanded.insert("Brainstorm".to_string());
+        assert!(app.is_expanded(bs_idx));
         app.set_stage_scroll(bs_idx, 4);
         assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
 
-        // Collapse (toggle off) — focus moves elsewhere so the running-stage
-        // implicit-expand rule doesn't keep Brainstorm expanded.
+        // Collapse via toggle.
         app.toggle_expand_focused();
         assert!(!app.is_expanded(bs_idx));
-        // Simulate a render cycle that calls clamp_scroll after tree state changes.
         app.clamp_scroll();
-        // Scroll offset must survive while the stage is collapsed.
         assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
 
-        // Re-expand — offset should still be 4 (clamping may reduce it only if the
-        // current viewport cannot fit it, which it can here since max_offset = 0
-        // only bounds down and our test keeps content empty so max_offset is 0; we
-        // therefore assert the offset is *retained as stored* up to that point by
-        // checking the map directly before clamp applies to the now-expanded stage).
-        app.expanded.insert("Brainstorm".to_string());
+        // Re-expand via toggle — offset persists.
+        app.toggle_expand_focused();
+        assert!(app.is_expanded(bs_idx));
         assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
     }
 
@@ -3182,25 +3184,23 @@ mod tests {
     #[test]
     fn boundary_handoff_skips_collapsed_stages_between_expanded_neighbors() {
         let mut app = mk_app(mk_state_with_runs());
-        // Layout: Idea, Brainstorm, Spec Review(running/implicit-expand),
-        // Planning, Plan Review, Sharding, Builder Loop.
-        // Expand Plan Review, leave Planning collapsed between it and Spec Review,
-        // and focus Plan Review at the top boundary.
-        let pr_idx = node_index(&app, "Plan Review");
+        // Layout: Idea, Brainstorm(Done), Spec Review(running),
+        // Planning(Pending → auto-collapsed), Plan Review(Pending), …
+        let bs_idx = node_index(&app, "Brainstorm");
         let planning_idx = node_index(&app, "Planning");
         let sr_idx = node_index(&app, "Spec Review");
-        assert!(planning_idx > sr_idx && planning_idx < pr_idx);
-        app.expanded.insert("Plan Review".to_string());
-        assert!(!app.is_expanded(planning_idx));
-        app.selected = pr_idx;
-        app.set_stage_scroll(pr_idx, 0);
+        assert!(bs_idx < sr_idx && sr_idx < planning_idx);
 
-        // Up at the top boundary should jump past the collapsed Planning stage
-        // directly to Spec Review (the next expanded stage upward).
+        // Focus Spec Review at its top boundary.
+        app.selected = sr_idx;
+        app.set_stage_scroll(sr_idx, 0);
+
+        // Up at the top boundary should jump past any collapsed stages
+        // directly to Brainstorm (Done, auto-expanded).
         app.scroll_or_move_focus(-1);
         assert_eq!(
-            app.nodes[app.selected].label, "Spec Review",
-            "expected focus to skip collapsed Planning and land on Spec Review, got {:?}",
+            app.nodes[app.selected].label, "Brainstorm",
+            "expected focus to land on Brainstorm, got {:?}",
             app.nodes[app.selected].label
         );
     }
@@ -3209,7 +3209,7 @@ mod tests {
     fn space_binding_does_not_affect_input_mode() {
         let mut app = mk_app(mk_state_with_runs());
         app.input_mode = true;
-        let before = app.expanded.clone();
+        let before = app.collapsed_overrides.clone();
         // Directly test the guard: toggle_expand_focused shouldn't be reached via
         // input-mode keys. Sanity: toggle itself still works outside input mode.
         app.input_mode = false;
@@ -3219,7 +3219,7 @@ mod tests {
             .position(|n| n.label == "Brainstorm")
             .unwrap();
         app.toggle_expand_focused();
-        assert_ne!(app.expanded, before);
+        assert_ne!(app.collapsed_overrides, before);
     }
 
     fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::ModelStatus {
@@ -3272,7 +3272,7 @@ mod tests {
             models: Vec::new(),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
             selected,
-            expanded: BTreeSet::new(),
+            collapsed_overrides: BTreeSet::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 30,
             body_inner_width: 80,

@@ -797,12 +797,17 @@ mod tests {
 pub fn current_node_index(nodes: &[Node]) -> usize {
     nodes
         .iter()
-        .position(|n| n.status == NodeStatus::Running || n.status == NodeStatus::WaitingUser)
+        .position(|n| {
+            matches!(
+                n.status,
+                NodeStatus::Running | NodeStatus::WaitingUser | NodeStatus::Failed
+            )
+        })
+        .or_else(|| nodes.iter().position(|n| n.status == NodeStatus::Pending))
         .or_else(|| {
             nodes
                 .iter()
-                .position(|n| n.status == NodeStatus::Done)
-                .map(|i| i.min(nodes.len().saturating_sub(1)))
+                .rposition(|n| n.status == NodeStatus::Done)
         })
         .unwrap_or(0)
 }

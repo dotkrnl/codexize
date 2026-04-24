@@ -18,8 +18,11 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+        // `--color always` keeps the user/codex/exec section markers coloured
+        // when stdout is piped (e.g. tee'd into a log), instead of a flat
+        // monochrome wall of text.
         format!(
-            r#"codex exec --yolo -m {model} - < {prompt_path}"#,
+            r#"codex exec --yolo --color always -m {model} - < {prompt_path}"#,
             model = super::shell_escape(model),
             prompt_path = super::shell_escape(prompt_path),
         )

@@ -261,6 +261,50 @@ impl SessionState {
     pub fn transition_to(&mut self, next_phase: Phase) -> Result<()> {
         execute_transition(self, next_phase)
     }
+
+    /// Append a message to the session's messages.jsonl file.
+    pub fn append_message(&self, message: &Message) -> Result<()> {
+        let dir = session_dir(&self.session_id);
+        fs::create_dir_all(&dir)?;
+        let path = dir.join("messages.jsonl");
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+
+        let line = serde_json::to_string(message)
+            .context("failed to serialize message")?;
+        writeln!(file, "{}", line)?;
+        Ok(())
+    }
+
+    /// Load all messages for a session from messages.jsonl.
+    pub fn load_messages(session_id: &str) -> Result<Vec<Message>> {
+        let path = session_dir(session_id).join("messages.jsonl");
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read messages from {}", path.display()))?;
+
+        let mut messages = Vec::new();
+        for (line_num, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Message>(line) {
+                Ok(msg) => messages.push(msg),
+                Err(e) => {
+                    // Skip corrupt line, log to stderr (best effort)
+                    eprintln!("WARNING: corrupt message line {} in {}: {}", line_num + 1, session_id, e);
+                }
+            }
+        }
+
+        Ok(messages)
+    }
 }
 
 /// Return the directory path for a given session ID.
@@ -435,6 +479,97 @@ current_phase = "IdeaInput"
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(err_msg.contains("schema v1") || err_msg.contains("archive"));
+    }
+
+    #[test]
+    fn test_append_message() {
+        use tempfile::TempDir;
+        use std::env;
+
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            env::set_var("CODEXIZE_ROOT", temp.path());
+        }
+
+        let state = SessionState::new("test-msg-session".to_string());
+        state.save().unwrap();
+
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id: 1,
+            kind: MessageKind::Brief,
+            text: "Exploring code".to_string(),
+        };
+
+        state.append_message(&msg).unwrap();
+
+        // Verify file exists and contains the message
+        let path = session_dir("test-msg-session").join("messages.jsonl");
+        assert!(path.exists());
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Exploring code"));
+    }
+
+    #[test]
+    fn test_load_messages() {
+        use tempfile::TempDir;
+        use std::env;
+
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            env::set_var("CODEXIZE_ROOT", temp.path());
+        }
+
+        let state = SessionState::new("test-load-msg".to_string());
+        state.save().unwrap();
+
+        let msg1 = Message {
+            ts: chrono::Utc::now(),
+            run_id: 1,
+            kind: MessageKind::Brief,
+            text: "First".to_string(),
+        };
+        let msg2 = Message {
+            ts: chrono::Utc::now(),
+            run_id: 1,
+            kind: MessageKind::End,
+            text: "done in 1m".to_string(),
+        };
+
+        state.append_message(&msg1).unwrap();
+        state.append_message(&msg2).unwrap();
+
+        let loaded = SessionState::load_messages("test-load-msg").unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].text, "First");
+        assert_eq!(loaded[1].text, "done in 1m");
+    }
+
+    #[test]
+    fn test_load_messages_with_corrupt_line() {
+        use tempfile::TempDir;
+        use std::env;
+
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            env::set_var("CODEXIZE_ROOT", temp.path());
+        }
+
+        let state = SessionState::new("test-corrupt-msg".to_string());
+        state.save().unwrap();
+
+        // Manually write messages.jsonl with one corrupt line
+        let dir = session_dir("test-corrupt-msg");
+        let path = dir.join("messages.jsonl");
+        std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","text":"Good"}
+{corrupt json line here}
+{"ts":"2026-04-24T00:01:00Z","run_id":1,"kind":"End","text":"done"}
+"#).unwrap();
+
+        let loaded = SessionState::load_messages("test-corrupt-msg").unwrap();
+        assert_eq!(loaded.len(), 2); // Corrupt line skipped
+        assert_eq!(loaded[0].text, "Good");
+        assert_eq!(loaded[1].text, "done");
     }
 
     #[test]

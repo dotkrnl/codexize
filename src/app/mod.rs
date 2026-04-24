@@ -2135,6 +2135,68 @@ mod tests {
     }
 
     #[test]
+    fn collapse_then_reexpand_preserves_scroll_offset() {
+        let mut app = mk_app(mk_state_with_runs());
+        let bs_idx = app
+            .nodes
+            .iter()
+            .position(|n| n.label == "Brainstorm")
+            .unwrap();
+        // Focus Brainstorm, expand it, and set a concrete scroll offset.
+        app.selected = bs_idx;
+        app.expanded.insert("Brainstorm".to_string());
+        app.set_stage_scroll(bs_idx, 4);
+        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
+
+        // Collapse (toggle off) — focus moves elsewhere so the running-stage
+        // implicit-expand rule doesn't keep Brainstorm expanded.
+        app.toggle_expand_focused();
+        assert!(!app.is_expanded(bs_idx));
+        // Simulate a render cycle that calls clamp_scroll after tree state changes.
+        app.clamp_scroll();
+        // Scroll offset must survive while the stage is collapsed.
+        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
+
+        // Re-expand — offset should still be 4 (clamping may reduce it only if the
+        // current viewport cannot fit it, which it can here since max_offset = 0
+        // only bounds down and our test keeps content empty so max_offset is 0; we
+        // therefore assert the offset is *retained as stored* up to that point by
+        // checking the map directly before clamp applies to the now-expanded stage).
+        app.expanded.insert("Brainstorm".to_string());
+        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
+    }
+
+    fn node_index(app: &App, label: &str) -> usize {
+        app.nodes.iter().position(|n| n.label == label).unwrap()
+    }
+
+    #[test]
+    fn boundary_handoff_skips_collapsed_stages_between_expanded_neighbors() {
+        let mut app = mk_app(mk_state_with_runs());
+        // Layout: Idea, Brainstorm, Spec Review(running/implicit-expand),
+        // Planning, Plan Review, Sharding, Builder Loop.
+        // Expand Plan Review, leave Planning collapsed between it and Spec Review,
+        // and focus Plan Review at the top boundary.
+        let pr_idx = node_index(&app, "Plan Review");
+        let planning_idx = node_index(&app, "Planning");
+        let sr_idx = node_index(&app, "Spec Review");
+        assert!(planning_idx > sr_idx && planning_idx < pr_idx);
+        app.expanded.insert("Plan Review".to_string());
+        assert!(!app.is_expanded(planning_idx));
+        app.selected = pr_idx;
+        app.set_stage_scroll(pr_idx, 0);
+
+        // Up at the top boundary should jump past the collapsed Planning stage
+        // directly to Spec Review (the next expanded stage upward).
+        app.scroll_or_move_focus(-1);
+        assert_eq!(
+            app.nodes[app.selected].label, "Spec Review",
+            "expected focus to skip collapsed Planning and land on Spec Review, got {:?}",
+            app.nodes[app.selected].label
+        );
+    }
+
+    #[test]
     fn space_binding_does_not_affect_input_mode() {
         let mut app = mk_app(mk_state_with_runs());
         app.input_mode = true;

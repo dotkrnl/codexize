@@ -445,7 +445,7 @@ impl App {
         expanded: bool,
         node: &crate::state::Node,
     ) -> Line<'static> {
-        let marker = if expanded { "v" } else { ">" };
+        let marker = if expanded { "▾" } else { "▸" };
         let is_current = index == super::tree::current_node_index(&self.nodes);
         let style = if index == self.selected {
             Style::default()

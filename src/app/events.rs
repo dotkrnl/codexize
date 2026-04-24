@@ -240,20 +240,25 @@ impl App {
     }
 
     fn boundary_handoff(&mut self, delta: isize) {
-        let prev_focus = self.selected;
-        self.move_focus(delta);
-        if self.selected == prev_focus {
+        // Prefer jumping to the next expanded stage in the direction, skipping any
+        // collapsed stages between (spec § Navigation System → Boundary Handling).
+        if let Some(target) = self.find_expanded_neighbor(self.selected, delta) {
+            self.selected = target;
+            let max_offset = self.stage_max_offset(self.selected);
+            let landing = if delta < 0 { max_offset } else { 0 };
+            self.set_stage_scroll(self.selected, landing);
             return;
         }
-        if self.is_expanded(self.selected) {
-            // Land at the opposite boundary of the newly-focused expanded stage so
-            // subsequent keypresses continue to scroll in the same direction.
-            let max_offset = self.stage_max_offset(self.selected);
-            if delta < 0 {
-                self.set_stage_scroll(self.selected, max_offset);
-            } else {
-                self.set_stage_scroll(self.selected, 0);
-            }
+        // No expanded neighbor in that direction — fall back to a single-step focus
+        // move, which may land on a collapsed stage (focus-only move per spec).
+        self.move_focus(delta);
+    }
+
+    fn find_expanded_neighbor(&self, from: usize, delta: isize) -> Option<usize> {
+        if delta < 0 {
+            (0..from).rev().find(|&i| self.is_expanded(i))
+        } else {
+            ((from + 1)..self.nodes.len()).find(|&i| self.is_expanded(i))
         }
     }
 
@@ -271,7 +276,11 @@ impl App {
     pub(super) fn clamp_scroll(&mut self) {
         // Preserve the usize::MAX "stick to bottom" sentinel; clamp concrete offsets
         // against the current per-stage max so tree rebuilds don't leave them stale.
+        // Collapsed stages are skipped: their max_offset is only meaningful when the
+        // body is rendered, and clamping them here would erase a user's stored offset
+        // across a collapse/re-expand cycle (spec § State Persistence).
         let max_offsets: Vec<(String, usize)> = (0..self.nodes.len())
+            .filter(|&i| self.is_expanded(i))
             .filter_map(|index| {
                 let key = Self::stage_scroll_key(&self.nodes[index])?;
                 Some((key, self.stage_max_offset(index)))

@@ -8,7 +8,7 @@ mod tree;
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache, review,
-    selection::{self, ModelStatus, QuotaError, select_for_review},
+    selection::{self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review},
     state::{
         self as session_state, Message, MessageKind, MessageSender, Node, Phase, RunStatus,
         SessionState,
@@ -28,10 +28,23 @@ use self::{
 
 use notify::Watcher;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::mpsc,
     time::{Duration, Instant},
 };
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+struct TestLaunchOutcome {
+    exit_code: i32,
+    artifact_contents: Option<String>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct TestLaunchHarness {
+    outcomes: std::collections::VecDeque<TestLaunchOutcome>,
+}
 
 #[derive(Debug)]
 pub struct App {
@@ -58,6 +71,9 @@ pub struct App {
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,
     current_run_id: Option<u64>,
+    failed_models: HashMap<(String, Option<u32>, u32), HashSet<(VendorKind, String)>>,
+    #[cfg(test)]
+    test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
 }
 
@@ -66,6 +82,7 @@ impl App {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         let nodes = build_tree(&state);
         let current = current_node_index(&nodes);
+        let failed_models = Self::rebuild_failed_models(&state);
         let mut app = Self {
             tmux,
             state,
@@ -93,6 +110,9 @@ impl App {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             current_run_id: None,
+            failed_models,
+            #[cfg(test)]
+            test_launch_harness: None,
             messages,
         };
         // Load cached models if available
@@ -135,6 +155,25 @@ impl App {
         }
         let _ = app.setup_watcher();
         app
+    }
+
+    fn rebuild_failed_models(
+        state: &SessionState,
+    ) -> HashMap<(String, Option<u32>, u32), HashSet<(VendorKind, String)>> {
+        let mut failed_models = HashMap::new();
+        for run in state.agent_runs.iter().filter(|run| run.status == RunStatus::Failed) {
+            if run.error.as_deref() == Some("user_forced_retry") {
+                continue;
+            }
+            let Some(vendor) = selection::vendor::str_to_vendor(&run.vendor) else {
+                continue;
+            };
+            failed_models
+                .entry((run.stage.clone(), run.task_id, run.round))
+                .or_insert_with(HashSet::new)
+                .insert((vendor, run.model.clone()));
+        }
+        failed_models
     }
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
@@ -420,6 +459,190 @@ impl App {
         })
     }
 
+    fn try_test_launch(
+        &mut self,
+        status_path: &std::path::Path,
+        artifact_path: Option<&std::path::Path>,
+    ) -> Option<Result<()>> {
+        #[cfg(not(test))]
+        {
+            let _ = (status_path, artifact_path);
+            None
+        }
+        #[cfg(test)]
+        {
+        let harness = self.test_launch_harness.as_ref()?.clone();
+        let outcome = harness
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .outcomes
+            .pop_front()
+            .expect("expected queued test launch outcome");
+        Some((|| -> Result<()> {
+            if let Some(parent) = status_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(status_path, outcome.exit_code.to_string())?;
+            if let (Some(path), Some(contents)) = (artifact_path, outcome.artifact_contents) {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(path, contents)?;
+            }
+            Ok(())
+        })())
+        }
+    }
+
+    fn window_exists(&self, window_name: &str) -> bool {
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            return false;
+        }
+        tmux::window_exists(window_name)
+    }
+
+    fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {
+        (run.stage.clone(), run.task_id, run.round)
+    }
+
+    fn task_kind_for_stage(stage: &str) -> TaskKind {
+        match stage {
+            "brainstorm" => TaskKind::Idea,
+            "spec-review" => TaskKind::Review,
+            "planning" => TaskKind::Planning,
+            "plan-review" => TaskKind::Review,
+            "sharding" => TaskKind::Planning,
+            "coder" => TaskKind::Build,
+            "reviewer" => TaskKind::Review,
+            _ => TaskKind::Build,
+        }
+    }
+
+    fn run_status_path_for(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) -> std::path::PathBuf {
+        let task = task_id
+            .map(|id| format!("task-{id}"))
+            .unwrap_or_else(|| "stage".to_string());
+        session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join("run-status")
+            .join(format!("{stage}-{task}-r{round}-a{attempt}.txt"))
+    }
+
+    fn run_status_path(&self, run: &crate::state::RunRecord) -> std::path::PathBuf {
+        self.run_status_path_for(&run.stage, run.task_id, run.round, run.attempt)
+    }
+
+    fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
+        std::fs::read_to_string(self.run_status_path(run))
+            .ok()
+            .and_then(|text| text.trim().parse::<i32>().ok())
+    }
+
+    fn artifact_present(path: &std::path::Path) -> bool {
+        std::fs::metadata(path)
+            .map(|meta| meta.is_file() && meta.len() > 0)
+            .unwrap_or(false)
+    }
+
+    fn normalized_failure_reason(
+        &self,
+        run: &crate::state::RunRecord,
+    ) -> Result<Option<String>> {
+        let exit_code = self.read_exit_status_code(run);
+        if let Some(code) = exit_code {
+            if code != 0 {
+                if code > 128 {
+                    return Ok(Some(format!("killed({})", code - 128)));
+                }
+                return Ok(Some(format!("exit({code})")));
+            }
+        }
+
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let reason = match run.stage.as_str() {
+            "brainstorm" => {
+                let spec_path = session_dir.join("artifacts").join("spec.md");
+                (!Self::artifact_present(&spec_path)).then(|| "artifact_missing".to_string())
+            }
+            "spec-review" => {
+                let review_path = session_dir
+                    .join("artifacts")
+                    .join(format!("spec-review-{}.md", run.round));
+                (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string())
+            }
+            "planning" => {
+                let plan_path = session_dir.join("artifacts").join("plan.md");
+                (!Self::artifact_present(&plan_path)).then(|| "artifact_missing".to_string())
+            }
+            "plan-review" => {
+                let review_path = session_dir
+                    .join("artifacts")
+                    .join(format!("plan-review-{}.md", run.round));
+                (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string())
+            }
+            "sharding" => {
+                let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+                if !Self::artifact_present(&tasks_path) {
+                    Some("artifact_missing".to_string())
+                } else {
+                    tasks::validate(&tasks_path)
+                        .err()
+                        .map(|err| format!("artifact_invalid: {err}"))
+                }
+            }
+            "coder" => {
+                let commit_path = session_dir
+                    .join("rounds")
+                    .join(format!("{:03}", run.round))
+                    .join("commit.txt");
+                (!Self::artifact_present(&commit_path)).then(|| "artifact_missing".to_string())
+            }
+            "reviewer" => {
+                let review_path = session_dir
+                    .join("rounds")
+                    .join(format!("{:03}", run.round))
+                    .join("review.toml");
+                if !Self::artifact_present(&review_path) {
+                    Some("artifact_missing".to_string())
+                } else {
+                    review::validate(&review_path)
+                        .err()
+                        .map(|err| format!("artifact_invalid: {err}"))
+                }
+            }
+            _ => None,
+        };
+
+        // REVIEWER: if the wrapped command never wrote a status file, we fall back to
+        // artifact validation because the tmux window disappearance alone does not preserve
+        // a trustworthy exit code.
+        Ok(reason)
+    }
+
+    fn append_system_message(&mut self, run_id: u64, kind: MessageKind, text: String) {
+        let message = Message {
+            ts: chrono::Utc::now(),
+            run_id,
+            kind,
+            sender: MessageSender::System,
+            text,
+        };
+        if let Err(err) = self.state.append_message(&message) {
+            let _ = self
+                .state
+                .log_event(format!("failed to append system message for run {run_id}: {err}"));
+        } else {
+            self.messages.push(message);
+        }
+    }
+
     fn start_run_tracking(
         &mut self,
         stage: &str,
@@ -522,7 +745,7 @@ impl App {
         else {
             return;
         };
-        if tmux::window_exists(&run.window_name) {
+        if self.window_exists(&run.window_name) {
             return;
         }
 
@@ -583,7 +806,8 @@ impl App {
             format!("done in {minutes}m{seconds:02}s")
         } else {
             format!(
-                "failed in {minutes}m{seconds:02}s: {}",
+                "attempt {} failed: {}",
+                run.attempt,
                 error.unwrap_or_else(|| "unknown error".to_string())
             )
         };
@@ -608,64 +832,130 @@ impl App {
         }
     }
 
+    fn retry_exhausted_summary(&self, failed_run: &crate::state::RunRecord) -> String {
+        let mut attempts = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                run.stage == failed_run.stage
+                    && run.task_id == failed_run.task_id
+                    && run.round == failed_run.round
+                    && run.status == RunStatus::Failed
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        attempts.sort_by_key(|run| run.attempt);
+
+        let mut lines = vec![format!("retry exhausted ({} attempts)", attempts.len())];
+        for run in attempts {
+            lines.push(format!(
+                "  attempt {}: {}/{} — {}",
+                run.attempt,
+                run.vendor,
+                run.model,
+                run.error.unwrap_or_else(|| "unknown error".to_string())
+            ));
+        }
+        lines.join("\n")
+    }
+
+    fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
+        if failed_run.stage == "brainstorm" {
+            return false;
+        }
+        if failed_run.error.as_deref() == Some("user_forced_retry") {
+            return false;
+        }
+
+        let key = Self::retry_key_for_run(failed_run);
+        let last_failed_vendor = selection::vendor::str_to_vendor(&failed_run.vendor);
+        if let Some(vendor) = last_failed_vendor {
+            self.failed_models
+                .entry(key.clone())
+                .or_insert_with(HashSet::new)
+                .insert((vendor, failed_run.model.clone()));
+        }
+
+        let max_attempts = self.models.len() as u32 + 2;
+        if failed_run.attempt >= max_attempts {
+            let summary = self.retry_exhausted_summary(failed_run);
+            self.state.agent_error = Some(summary.clone());
+            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+            self.append_system_message(failed_run.id, MessageKind::End, summary);
+            let _ = self.state.log_event(format!(
+                "auto-retry safety cap hit for {} round {} attempt {}",
+                failed_run.stage, failed_run.round, failed_run.attempt
+            ));
+            return true;
+        }
+
+        let excluded = self.failed_models.get(&key).cloned().unwrap_or_default();
+        let next_model = select_excluding(
+            &self.models,
+            Self::task_kind_for_stage(&failed_run.stage),
+            &excluded,
+            last_failed_vendor,
+        );
+
+        if let Some(next_model) = next_model.cloned() {
+            self.append_system_message(
+                failed_run.id,
+                MessageKind::Started,
+                format!(
+                    "retrying with {}/{}",
+                    vendor_tag(next_model.vendor),
+                    next_model.name
+                ),
+            );
+            return self.launch_retry_for_stage(failed_run, next_model);
+        }
+
+        let summary = self.retry_exhausted_summary(failed_run);
+        self.state.agent_error = Some(summary.clone());
+        let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+        self.append_system_message(failed_run.id, MessageKind::End, summary);
+        true
+    }
+
     fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
         use anyhow::Context;
 
         let session_dir = session_state::session_dir(&self.state.session_id);
+        if let Some(error) = self.normalized_failure_reason(run)? {
+            self.finalize_run_record(run.id, false, Some(error.clone()));
+            let failed_run = self
+                .state
+                .agent_runs
+                .iter()
+                .find(|candidate| candidate.id == run.id)
+                .cloned()
+                .unwrap_or_else(|| run.clone());
+            if !self.maybe_auto_retry(&failed_run) {
+                self.state.agent_error = Some(error);
+            }
+            return Ok(());
+        }
         match self.state.current_phase {
             Phase::BrainstormRunning => {
-                let spec_path = session_dir.join("artifacts").join("spec.md");
-                if spec_path.exists() {
-                    self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
-                    self.transition_to_phase(Phase::SpecReviewRunning)?;
-                } else {
-                    let error = "missing spec artifact".to_string();
-                    self.finalize_run_record(run.id, false, Some(error.clone()));
-                    self.state.agent_error = Some(error);
-                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                self.transition_to_phase(Phase::SpecReviewRunning)?;
             }
             Phase::SpecReviewRunning => {
-                let round = run.round;
-                let review_path = session_dir
-                    .join("artifacts")
-                    .join(format!("spec-review-{round}.md"));
-                if review_path.exists() {
-                    self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
-                    self.transition_to_phase(Phase::SpecReviewPaused)?;
-                } else {
-                    let error = format!("missing {}", review_path.display());
-                    self.finalize_run_record(run.id, false, Some(error.clone()));
-                    self.state.agent_error = Some(error);
-                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                self.transition_to_phase(Phase::SpecReviewPaused)?;
             }
             Phase::PlanningRunning => {
-                let plan_path = session_dir.join("artifacts").join("plan.md");
-                if plan_path.exists() {
-                    self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
-                    self.transition_to_phase(Phase::PlanReviewRunning)?;
-                } else {
-                    let error = "missing plan artifact".to_string();
-                    self.finalize_run_record(run.id, false, Some(error.clone()));
-                    self.state.agent_error = Some(error);
-                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                self.transition_to_phase(Phase::PlanReviewRunning)?;
             }
             Phase::PlanReviewRunning => {
-                let round = run.round;
-                let review_path = session_dir
-                    .join("artifacts")
-                    .join(format!("plan-review-{round}.md"));
-                if review_path.exists() {
-                    self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
-                    self.transition_to_phase(Phase::PlanReviewPaused)?;
-                } else {
-                    let error = format!("missing {}", review_path.display());
-                    self.finalize_run_record(run.id, false, Some(error.clone()));
-                    self.state.agent_error = Some(error);
-                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                self.transition_to_phase(Phase::PlanReviewPaused)?;
             }
             Phase::ShardingRunning => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
@@ -683,27 +973,13 @@ impl App {
                         self.state.agent_error = None;
                         self.transition_to_phase(Phase::ImplementationRound(1))?;
                     }
-                    Err(err) => {
-                        let error = err.to_string();
-                        self.finalize_run_record(run.id, false, Some(error.clone()));
-                        self.state.agent_error = Some(error);
-                    }
+                    Err(err) => return Err(err),
                 }
             }
             Phase::ImplementationRound(round) => {
-                let commit_path = session_dir
-                    .join("rounds")
-                    .join(format!("{round:03}"))
-                    .join("commit.txt");
-                if commit_path.exists() {
-                    self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
-                    self.transition_to_phase(Phase::ReviewRound(round))?;
-                } else {
-                    let error = format!("missing {}", commit_path.display());
-                    self.finalize_run_record(run.id, false, Some(error.clone()));
-                    self.state.agent_error = Some(error);
-                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                self.transition_to_phase(Phase::ReviewRound(round))?;
             }
             Phase::ReviewRound(round) => {
                 let review_path = session_dir
@@ -740,11 +1016,7 @@ impl App {
                             }
                         }
                     }
-                    Err(err) => {
-                        let error = err.to_string();
-                        self.finalize_run_record(run.id, false, Some(error.clone()));
-                        self.state.agent_error = Some(error);
-                    }
+                    Err(err) => return Err(err),
                 }
             }
             Phase::IdeaInput
@@ -809,8 +1081,16 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
+        let attempt = self.attempt_for("brainstorm", None, 1);
+        let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
-        match launch_interactive("[Brainstorm]", &run, adapter.as_ref(), true) {
+        match launch_interactive(
+            "[Brainstorm]",
+            &run,
+            adapter.as_ref(),
+            true,
+            &status_path,
+        ) {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
@@ -836,14 +1116,34 @@ impl App {
         selection::select(models, selection::TaskKind::Idea)
     }
 
+    fn launch_retry_for_stage(
+        &mut self,
+        failed_run: &crate::state::RunRecord,
+        chosen: ModelStatus,
+    ) -> bool {
+        match failed_run.stage.as_str() {
+            "spec-review" => self.launch_spec_review_with_model(Some(chosen)),
+            "planning" => self.launch_planning_with_model(Some(chosen), false),
+            "plan-review" => self.launch_plan_review_with_model(Some(chosen)),
+            "sharding" => self.launch_sharding_with_model(Some(chosen)),
+            "coder" => self.launch_coder_with_model(Some(chosen)),
+            "reviewer" => self.launch_reviewer_with_model(Some(chosen)),
+            _ => false,
+        }
+    }
+
     fn launch_spec_review(&mut self) {
+        let _ = self.launch_spec_review_with_model(None);
+    }
+
+    fn launch_spec_review_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
 
         let round = match self.state.current_phase {
@@ -859,24 +1159,28 @@ impl App {
             .join("prompts")
             .join(format!("spec-review-{round}.md"));
 
-        let Some(chosen) = select_for_review(
-            &self.models,
-            &self
-                .state
-                .agent_runs
-                .iter()
-                .filter(|run| {
-                    run.stage == "spec-review"
-                        && run.round == round
-                        && run.status == RunStatus::Done
-                })
-                .cloned()
-                .collect::<Vec<_>>(),
-        )
-        .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| {
+                select_for_review(
+                    &self.models,
+                    &self
+                        .state
+                        .agent_runs
+                        .iter()
+                        .filter(|run| {
+                            run.stage == "spec-review"
+                                && run.round == round
+                                && run.status == RunStatus::Done
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -894,26 +1198,43 @@ impl App {
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
             self.state.agent_error = Some(format!("error writing prompt: {err}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
         };
-        let adapter = adapter_for_vendor(vendor_kind);
         let window_name = format!("[Spec Review {round}]");
-        match launch_noninteractive(&window_name, &run, adapter.as_ref()) {
+        let attempt = self.attempt_for("spec-review", None, round);
+        let status_path = self.run_status_path_for("spec-review", None, round, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
+                true
             }
             Err(err) => {
                 self.state.agent_error = Some(format!("failed to launch spec review: {err}"));
+                false
             }
         }
     }
 
     fn launch_planning(&mut self) {
+        let _ = self.launch_planning_with_model(None, true);
+    }
+
+    fn launch_planning_with_model(
+        &mut self,
+        override_model: Option<ModelStatus>,
+        interactive: bool,
+    ) -> bool {
         self.state.agent_error = None;
 
         if self.models.is_empty() {
@@ -921,7 +1242,7 @@ impl App {
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
 
         let session_id = self.state.session_id.clone();
@@ -942,13 +1263,15 @@ impl App {
             .filter(|path| path.exists())
             .collect();
 
-        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -962,7 +1285,7 @@ impl App {
         let prompt = planning_prompt(&spec_path, &review_paths, &plan_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
@@ -971,7 +1294,16 @@ impl App {
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
-        match launch_interactive("[Planning]", &run, adapter.as_ref(), true) {
+        let attempt = self.attempt_for("planning", None, 1);
+        let status_path = self.run_status_path_for("planning", None, 1, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
+            result
+        } else if interactive {
+            launch_interactive("[Planning]", &run, adapter.as_ref(), true, &status_path)
+        } else {
+            launch_noninteractive("[Planning]", &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
                     "planning",
@@ -981,23 +1313,29 @@ impl App {
                     vendor,
                     "[Planning]".to_string(),
                 );
+                true
             }
             Err(e) => {
                 let _ = self
                     .state
                     .log_event(format!("failed to launch planning: {e}"));
+                false
             }
         }
     }
 
     fn launch_plan_review(&mut self) {
+        let _ = self.launch_plan_review_with_model(None);
+    }
+
+    fn launch_plan_review_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
 
         let round = match self.state.current_phase {
@@ -1014,24 +1352,28 @@ impl App {
             .join("prompts")
             .join(format!("plan-review-{round}.md"));
 
-        let Some(chosen) = select_for_review(
-            &self.models,
-            &self
-                .state
-                .agent_runs
-                .iter()
-                .filter(|run| {
-                    run.stage == "plan-review"
-                        && run.round == round
-                        && run.status == RunStatus::Done
-                })
-                .cloned()
-                .collect::<Vec<_>>(),
-        )
-        .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| {
+                select_for_review(
+                    &self.models,
+                    &self
+                        .state
+                        .agent_runs
+                        .iter()
+                        .filter(|run| {
+                            run.stage == "plan-review"
+                                && run.round == round
+                                && run.status == RunStatus::Done
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string())) else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -1050,26 +1392,39 @@ impl App {
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
             self.state.agent_error = Some(format!("error writing prompt: {err}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
         };
-        let adapter = adapter_for_vendor(vendor_kind);
         let window_name = format!("[Plan Review {round}]");
-        match launch_noninteractive(&window_name, &run, adapter.as_ref()) {
+        let attempt = self.attempt_for("plan-review", None, round);
+        let status_path = self.run_status_path_for("plan-review", None, round, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                true
             }
             Err(err) => {
                 self.state.agent_error = Some(format!("failed to launch plan review: {err}"));
+                false
             }
         }
     }
 
     fn launch_sharding(&mut self) {
+        let _ = self.launch_sharding_with_model(None);
+    }
+
+    fn launch_sharding_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
         self.state.agent_error = None;
 
         if self.models.is_empty() {
@@ -1077,7 +1432,7 @@ impl App {
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
 
         let session_id = self.state.session_id.clone();
@@ -1086,13 +1441,15 @@ impl App {
         let plan_path = session_dir.join("artifacts").join("plan.md");
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
-        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -1106,7 +1463,7 @@ impl App {
         let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
@@ -1114,8 +1471,15 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let adapter = adapter_for_vendor(vendor_kind);
-        match launch_noninteractive("[Sharding]", &run, adapter.as_ref()) {
+        let attempt = self.attempt_for("sharding", None, 1);
+        let status_path = self.run_status_path_for("sharding", None, 1, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive("[Sharding]", &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
                     "sharding",
@@ -1125,32 +1489,38 @@ impl App {
                     vendor,
                     "[Sharding]".to_string(),
                 );
+                true
             }
             Err(e) => {
                 let _ = self
                     .state
                     .log_event(format!("failed to launch sharding: {e}"));
+                false
             }
         }
     }
 
     fn launch_coder(&mut self) {
+        let _ = self.launch_coder_with_model(None);
+    }
+
+    fn launch_coder_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
         let Phase::ImplementationRound(r) = self.state.current_phase else {
-            return;
+            return false;
         };
 
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
             self.state.agent_error = Some("no pending tasks".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
 
         let session_id = self.state.session_id.clone();
@@ -1168,12 +1538,14 @@ impl App {
 
         let _ = std::fs::remove_file(&commit_file);
 
-        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Build)
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Build))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -1189,7 +1561,7 @@ impl App {
         let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &commit_file, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
@@ -1197,8 +1569,16 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let adapter = adapter_for_vendor(vendor_kind);
-        match launch_noninteractive(&format!("[Coder r{r}]"), &run, adapter.as_ref()) {
+        let window_name = format!("[Coder r{r}]");
+        let attempt = self.attempt_for("coder", Some(task_id), r);
+        let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&commit_file)) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
                     "coder",
@@ -1206,31 +1586,37 @@ impl App {
                     r,
                     model,
                     vendor,
-                    format!("[Coder r{r}]"),
+                    window_name,
                 );
+                true
             }
             Err(e) => {
                 let _ = self.state.log_event(format!("failed to launch coder: {e}"));
+                false
             }
         }
     }
 
     fn launch_reviewer(&mut self) {
+        let _ = self.launch_reviewer_with_model(None);
+    }
+
+    fn launch_reviewer_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
         let Phase::ReviewRound(r) = self.state.current_phase else {
-            return;
+            return false;
         };
         let Some(task_id) = self.state.builder.current_task else {
             self.state.agent_error = Some("no current task".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
 
         let session_id = self.state.session_id.clone();
@@ -1253,12 +1639,14 @@ impl App {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let Some(chosen) = select_for_review(&self.models, &excluded)
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| select_for_review(&self.models, &excluded))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -1275,7 +1663,7 @@ impl App {
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
@@ -1283,8 +1671,16 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let adapter = adapter_for_vendor(vendor_kind);
-        match launch_noninteractive(&format!("[Review r{r}]"), &run, adapter.as_ref()) {
+        let window_name = format!("[Review r{r}]");
+        let attempt = self.attempt_for("reviewer", Some(task_id), r);
+        let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+        };
+        match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
                     "reviewer",
@@ -1292,13 +1688,15 @@ impl App {
                     r,
                     model,
                     vendor,
-                    format!("[Review r{r}]"),
+                    window_name,
                 );
+                true
             }
             Err(e) => {
                 let _ = self
                     .state
                     .log_event(format!("failed to launch reviewer: {e}"));
+                false
             }
         }
     }
@@ -1955,6 +2353,19 @@ mod tests {
     use super::*;
     use crate::state::{RunRecord, RunStatus};
 
+    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let cwd = std::env::current_dir().expect("cwd");
+
+        std::env::set_current_dir(temp.path()).expect("enter temp root");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        std::env::set_current_dir(cwd).expect("restore cwd");
+        result.expect("test panicked")
+    }
+
     fn mk_tmux() -> TmuxContext {
         TmuxContext {
             session_name: "test".to_string(),
@@ -2024,6 +2435,8 @@ mod tests {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             current_run_id: Some(2),
+            failed_models: HashMap::new(),
+            test_launch_harness: None,
             messages: Vec::new(),
         }
     }
@@ -2238,6 +2651,62 @@ mod tests {
         }
     }
 
+    fn ranked_model(
+        vendor: selection::VendorKind,
+        name: &str,
+        planning_rank: u8,
+        build_rank: u8,
+        review_rank: u8,
+    ) -> selection::ModelStatus {
+        selection::ModelStatus {
+            vendor,
+            name: name.to_string(),
+            stupid_level: Some(7),
+            quota_percent: Some(80),
+            idea_rank: 10,
+            planning_rank,
+            build_rank,
+            review_rank,
+            idea_weight: 0.0,
+            planning_weight: 0.0,
+            build_weight: 0.0,
+            review_weight: 0.0,
+        }
+    }
+
+    fn idle_app(state: SessionState) -> App {
+        let nodes = build_tree(&state);
+        let selected = current_node_index(&nodes);
+        App {
+            tmux: mk_tmux(),
+            state,
+            nodes,
+            models: Vec::new(),
+            model_refresh: ModelRefreshState::Idle(Instant::now()),
+            selected,
+            expanded: BTreeSet::new(),
+            stage_scroll: BTreeMap::new(),
+            body_inner_height: 30,
+            body_inner_width: 80,
+            input_mode: false,
+            input_buffer: String::new(),
+            confirm_back: false,
+            window_launched: false,
+            quota_errors: Vec::new(),
+            quota_retry_delay: Duration::from_secs(60),
+            agent_line_count: 0,
+            live_summary_watcher: None,
+            live_summary_change_rx: None,
+            live_summary_path: None,
+            live_summary_cached_text: String::new(),
+            live_summary_cached_mtime: None,
+            current_run_id: None,
+            failed_models: HashMap::new(),
+            test_launch_harness: None,
+            messages: Vec::new(),
+        }
+    }
+
     #[test]
     fn brainstorm_selection_uses_idea_task_kind() {
         let models = vec![
@@ -2248,5 +2717,336 @@ mod tests {
         let chosen = App::select_brainstorm_model(&models).expect("expected brainstorm model");
 
         assert_eq!(chosen.name, "idea-first");
+    }
+
+    #[test]
+    fn app_new_rebuilds_failed_models_without_force_retry_runs() {
+        with_temp_root(|| {
+            let session_id = "rebuild-failed-models";
+            let mut state = SessionState::new(session_id.to_string());
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(7),
+                round: 3,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Coder r3]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("exit(1)".to_string()),
+            });
+            state.agent_runs.push(RunRecord {
+                id: 2,
+                stage: "coder".to_string(),
+                task_id: Some(7),
+                round: 3,
+                attempt: 2,
+                model: "gemini-2.5-pro".to_string(),
+                vendor: "gemini".to_string(),
+                window_name: "[Coder r3]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("artifact_missing".to_string()),
+            });
+            state.agent_runs.push(RunRecord {
+                id: 3,
+                stage: "coder".to_string(),
+                task_id: Some(7),
+                round: 3,
+                attempt: 3,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Coder r3]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("user_forced_retry".to_string()),
+            });
+            state.save().expect("save session");
+
+            let app = App::new(mk_tmux(), SessionState::load(session_id).expect("load session"));
+
+            let key = ("coder".to_string(), Some(7), 3);
+            let failed = app
+                .failed_models
+                .get(&key)
+                .expect("expected failed model set");
+            assert!(failed.contains(&(selection::VendorKind::Claude, "claude-sonnet".to_string())));
+            assert!(failed.contains(&(selection::VendorKind::Gemini, "gemini-2.5-pro".to_string())));
+            assert!(!failed.contains(&(selection::VendorKind::Codex, "gpt-5".to_string())));
+            assert!(app.current_run_id.is_none());
+        });
+    }
+
+    #[test]
+    fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
+        with_temp_root(|| {
+            let session_id = "normalize-failure-reason";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let state = SessionState::new(session_id.to_string());
+            let app = mk_app(state);
+            let run = RunRecord {
+                id: 9,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Planning]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            };
+            std::fs::create_dir_all(
+                app.run_status_path(&run)
+                    .parent()
+                    .expect("status dir"),
+            )
+            .expect("create status dir");
+
+            std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
+            assert_eq!(
+                app.normalized_failure_reason(&run).expect("exit reason"),
+                Some("exit(1)".to_string())
+            );
+
+            std::fs::write(app.run_status_path(&run), "143").expect("write signal exit");
+            assert_eq!(
+                app.normalized_failure_reason(&run).expect("signal reason"),
+                Some("killed(15)".to_string())
+            );
+
+            std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
+            assert_eq!(
+                app.normalized_failure_reason(&run).expect("missing artifact"),
+                Some("artifact_missing".to_string())
+            );
+
+            std::fs::write(session_dir.join("artifacts").join("plan.md"), "").expect("write empty plan");
+            assert_eq!(
+                app.normalized_failure_reason(&run).expect("empty artifact"),
+                Some("artifact_missing".to_string())
+            );
+
+            let brainstorm = RunRecord {
+                stage: "brainstorm".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                ..run.clone()
+            };
+            std::fs::write(app.run_status_path(&brainstorm), "0").expect("clean brainstorm exit");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "").expect("write empty spec");
+            assert_eq!(
+                app.normalized_failure_reason(&brainstorm).expect("empty spec"),
+                Some("artifact_missing".to_string())
+            );
+
+            let sharding = RunRecord {
+                stage: "sharding".to_string(),
+                window_name: "[Sharding]".to_string(),
+                ..run.clone()
+            };
+            std::fs::write(app.run_status_path(&sharding), "0").expect("clean sharding exit");
+            std::fs::write(
+                session_dir.join("artifacts").join("tasks.toml"),
+                "not valid toml = [",
+            )
+            .expect("write invalid tasks");
+            assert!(
+                app.normalized_failure_reason(&sharding)
+                    .expect("invalid tasks")
+                    .expect("error text")
+                    .starts_with("artifact_invalid: ")
+            );
+        });
+    }
+
+    #[test]
+    fn coder_retry_loop_uses_distinct_models_until_success() {
+        with_temp_root(|| {
+            let session_id = "coder-retry-loop";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Claude, "claude-sonnet", 10, 1, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 10, 2, 10),
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 3, 10),
+            ];
+            let harness = std::sync::Arc::new(std::sync::Mutex::new(TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![
+                    TestLaunchOutcome {
+                        exit_code: 1,
+                        artifact_contents: None,
+                    },
+                    TestLaunchOutcome {
+                        exit_code: 1,
+                        artifact_contents: None,
+                    },
+                    TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: Some("abc123".to_string()),
+                    },
+                ]),
+            }));
+            app.test_launch_harness = Some(harness);
+
+            app.launch_coder();
+            for _ in 0..6 {
+                if app.current_run_id.is_none() {
+                    break;
+                }
+                app.poll_agent_window();
+            }
+
+            assert!(app.current_run_id.is_none());
+            assert_eq!(app.state.agent_runs.len(), 3);
+            assert_eq!(app.state.agent_runs[0].attempt, 1);
+            assert_eq!(app.state.agent_runs[1].attempt, 2);
+            assert_eq!(app.state.agent_runs[2].attempt, 3);
+            assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
+            assert_eq!(app.state.agent_runs[1].status, RunStatus::Failed);
+            assert_eq!(app.state.agent_runs[2].status, RunStatus::Done);
+            assert_eq!(app.state.agent_runs[0].error.as_deref(), Some("exit(1)"));
+            assert_eq!(app.state.agent_runs[1].error.as_deref(), Some("exit(1)"));
+            assert_eq!(app.state.agent_runs[0].model, "claude-sonnet");
+            assert_eq!(app.state.agent_runs[1].model, "gemini-2.5-pro");
+            assert_eq!(app.state.agent_runs[2].model, "gpt-5");
+            assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
+
+            let end_texts = app
+                .messages
+                .iter()
+                .filter(|message| message.kind == MessageKind::End)
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>();
+            assert!(end_texts.contains(&"attempt 1 failed: exit(1)".to_string()));
+            assert!(end_texts.contains(&"attempt 2 failed: exit(1)".to_string()));
+
+            let started_texts = app
+                .messages
+                .iter()
+                .filter(|message| message.kind == MessageKind::Started)
+                .map(|message| message.text.clone())
+                .collect::<Vec<_>>();
+            assert!(started_texts.contains(&"retrying with gemini/gemini-2.5-pro".to_string()));
+            assert!(started_texts.contains(&"retrying with codex/gpt-5".to_string()));
+        });
+    }
+
+    #[test]
+    fn coder_retry_exhaustion_blocks_with_summary() {
+        with_temp_root(|| {
+            let session_id = "coder-retry-exhaustion";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Claude, "claude-sonnet", 10, 1, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 10, 2, 10),
+            ];
+            let harness = std::sync::Arc::new(std::sync::Mutex::new(TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![
+                    TestLaunchOutcome {
+                        exit_code: 1,
+                        artifact_contents: None,
+                    },
+                    TestLaunchOutcome {
+                        exit_code: 1,
+                        artifact_contents: None,
+                    },
+                ]),
+            }));
+            app.test_launch_harness = Some(harness);
+
+            app.launch_coder();
+            for _ in 0..5 {
+                if app.current_run_id.is_none() {
+                    break;
+                }
+                app.poll_agent_window();
+            }
+
+            assert!(app.current_run_id.is_none());
+            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+            let error = app.state.agent_error.clone().expect("blocked summary");
+            assert!(error.starts_with("retry exhausted (2 attempts)"));
+            assert!(error.contains("attempt 1: claude/claude-sonnet"));
+            assert!(error.contains("attempt 2: gemini/gemini-2.5-pro"));
+            assert!(
+                app.messages
+                    .iter()
+                    .any(|message| message.kind == MessageKind::End && message.text == error)
+            );
+        });
+    }
+
+    #[test]
+    fn brainstorm_failures_do_not_retry_or_populate_failed_models() {
+        with_temp_root(|| {
+            let session_id = "brainstorm-no-retry";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            let run = RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            };
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet",
+                1,
+                1,
+                1,
+            )];
+            std::fs::create_dir_all(
+                app.run_status_path(&run)
+                    .parent()
+                    .expect("status dir"),
+            )
+            .expect("create status dir");
+            std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
+
+            app.finalize_current_run(&run).expect("finalize brainstorm failure");
+            assert!(app.failed_models.is_empty());
+            assert_eq!(app.state.agent_runs.len(), 1);
+            assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
+            assert_eq!(app.state.agent_runs[0].error.as_deref(), Some("exit(1)"));
+            assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
+
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(
+                app.run_status_path(&run)
+                    .parent()
+                    .expect("status dir"),
+            )
+            .expect("recreate status dir");
+            std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "spec").expect("write spec");
+            app.state.agent_runs[0].status = RunStatus::Running;
+            app.state.agent_runs[0].error = None;
+            app.finalize_current_run(&run).expect("finalize brainstorm success");
+            assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
+            assert!(app.failed_models.is_empty());
+        });
     }
 }

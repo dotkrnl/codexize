@@ -393,14 +393,19 @@ pub fn session_dir(session_id: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) fn test_fs_lock() -> &'static std::sync::Mutex<()> {
     use std::sync::{Mutex, OnceLock};
 
+    static TEST_FS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_FS_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        static TEST_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let _guard = TEST_ROOT_LOCK
-            .get_or_init(|| Mutex::new(()))
+        let _guard = test_fs_lock()
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();

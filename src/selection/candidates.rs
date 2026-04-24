@@ -5,8 +5,14 @@ use super::types::{Candidate, ModelStatus, QuotaError, TaskKind, VendorKind};
 use super::vendor;
 use crate::dashboard;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+#[cfg(test)]
+static TEST_SAMPLE_SEED: AtomicU64 = AtomicU64::new(0);
 
 pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     let dashboard_models = match dashboard::load_models() {
@@ -108,28 +114,81 @@ pub fn select_for_review<'a>(
     weighted_sample(&fresh_model, TaskKind::Review)
 }
 
+pub fn select_excluding<'a>(
+    models: &'a [ModelStatus],
+    task: TaskKind,
+    exclude: &HashSet<(VendorKind, String)>,
+    last_failed_vendor: Option<VendorKind>,
+) -> Option<&'a ModelStatus> {
+    let mut candidates: Vec<(&ModelStatus, f64)> = models
+        .iter()
+        .filter(|model| !exclude.contains(&(model.vendor, model.name.clone())))
+        .map(|model| {
+            let mut weight = weight_for(model, task);
+            if last_failed_vendor.is_some_and(|vendor| vendor != model.vendor) {
+                weight *= 1.3;
+            }
+            (model, weight)
+        })
+        .collect();
+
+    candidates.sort_by(|(left_model, left_weight), (right_model, right_weight)| {
+        right_weight
+            .partial_cmp(left_weight)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| left_model.rank_for(task).cmp(&right_model.rank_for(task)))
+            .then_with(|| left_model.name.cmp(&right_model.name))
+    });
+
+    weighted_sample_with_weights(&candidates, task)
+}
+
 fn weighted_sample<'a>(candidates: &[&'a ModelStatus], task: TaskKind) -> Option<&'a ModelStatus> {
+    let weighted: Vec<(&ModelStatus, f64)> = candidates
+        .iter()
+        .map(|model| (*model, weight_for(model, task)))
+        .collect();
+    weighted_sample_with_weights(&weighted, task)
+}
+
+fn weighted_sample_with_weights<'a>(
+    candidates: &[(&'a ModelStatus, f64)],
+    task: TaskKind,
+) -> Option<&'a ModelStatus> {
     if candidates.is_empty() {
         return None;
     }
-    let weights: Vec<f64> = candidates.iter().map(|m| weight_for(m, task)).collect();
-    let total: f64 = weights.iter().sum();
+    let total: f64 = candidates.iter().map(|(_, weight)| *weight).sum();
     if total <= 0.0 {
-        return candidates.iter().min_by_key(|m| m.rank_for(task)).copied();
+        return candidates
+            .iter()
+            .min_by_key(|(model, _)| model.rank_for(task))
+            .map(|(model, _)| *model);
     }
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as f64;
+    let seed = sample_seed() as f64;
     let r = (seed % 1_000_000.0) / 1_000_000.0 * total;
     let mut cumulative = 0.0;
-    for (model, &w) in candidates.iter().zip(weights.iter()) {
-        cumulative += w;
+    for (model, weight) in candidates.iter() {
+        cumulative += *weight;
         if r < cumulative {
             return Some(model);
         }
     }
-    candidates.last().copied()
+    candidates.last().map(|(model, _)| *model)
+}
+
+fn sample_seed() -> u64 {
+    #[cfg(test)]
+    {
+        let seeded = TEST_SAMPLE_SEED.load(AtomicOrdering::Relaxed);
+        if seeded != 0 {
+            return seeded;
+        }
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64
 }
 
 fn weight_for(model: &ModelStatus, task: TaskKind) -> f64 {
@@ -291,6 +350,7 @@ fn build_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     fn sample_model_status() -> ModelStatus {
         ModelStatus {
@@ -337,5 +397,71 @@ mod tests {
         let chosen = select(&models, TaskKind::Idea).expect("expected idea task selection");
 
         assert_eq!(chosen.name, "idea-choice");
+    }
+
+    #[test]
+    fn select_excluding_returns_none_for_empty_models() {
+        let excluded = HashSet::new();
+
+        let chosen = select_excluding(&[], TaskKind::Build, &excluded, None);
+
+        assert!(chosen.is_none());
+    }
+
+    #[test]
+    fn select_excluding_returns_none_when_everything_excluded() {
+        let models = vec![sample_model_status()];
+        let excluded = HashSet::from([(VendorKind::Claude, "claude-sonnet".to_string())]);
+
+        let chosen = select_excluding(&models, TaskKind::Build, &excluded, None);
+
+        assert!(chosen.is_none());
+    }
+
+    #[test]
+    fn select_excluding_applies_diversity_bonus() {
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let models = vec![
+            ModelStatus {
+                vendor: VendorKind::Claude,
+                name: "same-vendor".to_string(),
+                build_weight: 1.0,
+                ..sample_model_status()
+            },
+            ModelStatus {
+                vendor: VendorKind::Gemini,
+                name: "other-vendor".to_string(),
+                build_weight: 0.8,
+                ..sample_model_status()
+            },
+        ];
+        let excluded = HashSet::new();
+
+        let chosen = select_excluding(
+            &models,
+            TaskKind::Build,
+            &excluded,
+            Some(VendorKind::Claude),
+        )
+        .expect("expected a choice");
+
+        assert_eq!(chosen.name, "other-vendor");
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_excluding_keeps_same_vendor_candidates_when_needed() {
+        let models = vec![sample_model_status()];
+        let excluded = HashSet::new();
+
+        let chosen = select_excluding(
+            &models,
+            TaskKind::Build,
+            &excluded,
+            Some(VendorKind::Claude),
+        )
+        .expect("expected a same-vendor candidate");
+
+        assert_eq!(chosen.name, "claude-sonnet");
     }
 }

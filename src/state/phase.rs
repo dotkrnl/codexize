@@ -73,6 +73,7 @@ impl Phase {
             (ShardingRunning, ImplementationRound(1)) => true,
             (ShardingRunning, BlockedNeedsUser) => true,
             (ImplementationRound(r), ReviewRound(r2)) if *r == *r2 => true,
+            (ImplementationRound(_), BlockedNeedsUser) => true,
             (ReviewRound(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
             (ReviewRound(_), Done) => true,
             (ReviewRound(_), BlockedNeedsUser) => true,

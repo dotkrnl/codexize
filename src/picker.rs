@@ -455,6 +455,7 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
         Phase::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
         Phase::Done => ("done".to_string(), Color::Green, "✓"),
+        Phase::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
     }
 }
 

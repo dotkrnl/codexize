@@ -6,6 +6,7 @@ use codexize::{
     tmux, tui,
     picker,
 };
+use tokio;
 
 #[derive(Parser)]
 #[command(name = "codexize")]

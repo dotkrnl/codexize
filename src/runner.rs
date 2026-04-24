@@ -3,11 +3,15 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     path::PathBuf,
-    process::{Command, Stdio},
+    // process::{Command, Stdio}, // Removed as tokio::process is used
 };
 use crate::state;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt},
+    process::{Command, Stdio},
+};
 
-pub fn run(
+pub async fn run(
     session_id: String,
     phase: String,
     role: String,
@@ -19,13 +23,14 @@ pub fn run(
     }
 
     let dir = state::session_dir(&session_id);
-    fs::create_dir_all(&dir)?;
+    tokio::fs::create_dir_all(&dir).await?;
 
     let log_path = dir.join(format!("{role}.log"));
-    let mut log_file = fs::OpenOptions::new()
+    let mut log_file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)?;
+        .open(&log_path)
+        .await?;
 
     writeln!(log_file, "--- Agent Run Started: phase={phase}, role={role} ---")?;
     writeln!(log_file, "Command: {command:?}")?;
@@ -35,7 +40,7 @@ pub fn run(
 
     print_title_box(&phase, &role, &command);
 
-    let mut child = Command::new(&command[0])
+    let mut child = tokio::process::Command::new(&command[0])
         .args(&command[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -46,7 +51,7 @@ pub fn run(
     let stderr = child.stderr.take().unwrap();
 
     let mut log_out = log_file.try_clone()?;
-    let stdout_handle = std::thread::spawn(move || {
+    let stdout_handle = tokio::spawn(async move {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             println!("{line}");
             let _ = writeln!(log_out, "[OUT] {line}");
@@ -54,23 +59,23 @@ pub fn run(
     });
 
     let mut log_err = log_file.try_clone()?;
-    let stderr_handle = std::thread::spawn(move || {
+    let stderr_handle = tokio::spawn(async move {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             eprintln!("{line}");
             let _ = writeln!(log_err, "[ERR] {line}");
         }
     });
 
-    let status = child.wait()?;
-    let _ = stdout_handle.join();
-    let _ = stderr_handle.join();
+    let status = child.wait().await?;
+    let _ = stdout_handle.await?;
+    let _ = stderr_handle.await?;
 
     writeln!(log_file, "--- Agent Run Finished: status={status} ---")?;
 
     // Validate required artifacts regardless of exit status
     let mut missing: Vec<&str> = Vec::new();
     for path in &artifacts {
-        if !PathBuf::from(path).exists() {
+        if !tokio::fs::metadata(PathBuf::from(path)).await.is_ok_and(|m| m.is_file() && m.len() > 0) {
             missing.push(path);
             writeln!(log_file, "[MISSING ARTIFACT] {path}")?;
         }

@@ -382,7 +382,7 @@ impl SessionPicker {
 }
 
 pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
-    let sessions_dir = std::path::PathBuf::from(".codexize/sessions");
+    let sessions_dir = crate::state::codexize_root().join("sessions");
 
     if !sessions_dir.exists() {
         fs::create_dir_all(&sessions_dir)?;

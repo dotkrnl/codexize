@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 /// An event logged to the run's events.jsonl audit trail.
@@ -419,9 +419,18 @@ impl SessionState {
     }
 }
 
+/// Root directory for all session state. Honors the `CODEXIZE_ROOT` env var
+/// (used by tests to point at a tempdir); defaults to `.codexize` in the
+/// current working directory for normal use.
+pub fn codexize_root() -> PathBuf {
+    std::env::var_os("CODEXIZE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(".codexize"))
+}
+
 /// Return the directory path for a given session ID.
 pub fn session_dir(session_id: &str) -> PathBuf {
-    Path::new(".codexize").join("sessions").join(session_id)
+    codexize_root().join("sessions").join(session_id)
 }
 
 #[cfg(test)]
@@ -439,11 +448,20 @@ mod tests {
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         let _guard = test_fs_lock().lock().unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();
-        let cwd = std::env::current_dir().unwrap();
+        let prev = std::env::var_os("CODEXIZE_ROOT");
 
-        std::env::set_current_dir(temp.path()).unwrap();
+        // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the
+        // `test_fs_lock` mutex serializes every test that touches the env.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        std::env::set_current_dir(cwd).unwrap();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
         result.unwrap()
     }
 

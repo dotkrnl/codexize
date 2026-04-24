@@ -3283,11 +3283,19 @@ mod tests {
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().expect("tempdir");
-        let cwd = std::env::current_dir().expect("cwd");
+        let prev = std::env::var_os("CODEXIZE_ROOT");
 
-        std::env::set_current_dir(temp.path()).expect("enter temp root");
+        // SAFETY: env mutation is serialized by `test_fs_lock`.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        std::env::set_current_dir(cwd).expect("restore cwd");
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
         result.expect("test panicked")
     }
 
@@ -3457,16 +3465,18 @@ mod tests {
 
     #[test]
     fn transition_resets_scroll_only_for_changed_leaf_run() {
-        let mut app = mk_app(mk_state_with_runs());
-        // Pre-set scroll for Brainstorm (leaf_run_id=1) and Spec Review (running, id=2).
-        app.stage_scroll.insert("Brainstorm".to_string(), 3);
-        app.stage_scroll.insert("Spec Review".to_string(), 5);
+        with_temp_root(|| {
+            let mut app = mk_app(mk_state_with_runs());
+            // Pre-set scroll for Brainstorm (leaf_run_id=1) and Spec Review (running, id=2).
+            app.stage_scroll.insert("Brainstorm".to_string(), 3);
+            app.stage_scroll.insert("Spec Review".to_string(), 5);
 
-        // Advance: brainstorm's leaf doesn't change; spec review's run pool may shift.
-        // Mimic a phase transition where brainstorm leaf stays the same.
-        let _ = app.transition_to_phase(Phase::SpecReviewPaused);
-        // Brainstorm leaf_run_id didn't change, offset preserved.
-        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(3));
+            // Advance: brainstorm's leaf doesn't change; spec review's run pool may shift.
+            // Mimic a phase transition where brainstorm leaf stays the same.
+            let _ = app.transition_to_phase(Phase::SpecReviewPaused);
+            // Brainstorm leaf_run_id didn't change, offset preserved.
+            assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(3));
+        });
     }
 
     #[test]
@@ -3928,37 +3938,39 @@ mod tests {
 
     #[test]
     fn non_builder_retry_exhaustion_still_blocks() {
-        let mut state = SessionState::new("non-builder-retry".to_string());
-        state.current_phase = Phase::PlanningRunning;
-        let mut app = idle_app(state);
-        app.models = vec![ranked_model(
-            selection::VendorKind::Claude,
-            "claude-sonnet",
-            1,
-            10,
-            10,
-        )];
-        let failed = RunRecord {
-            id: 11,
-            stage: "planning".to_string(),
-            task_id: None,
-            round: 1,
-            attempt: 3,
-            model: "claude-sonnet".to_string(),
-            vendor: "claude".to_string(),
-            window_name: "[Planning]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: Some(chrono::Utc::now()),
-            status: RunStatus::Failed,
-            error: Some("exit(1)".to_string()),
-        };
-        let handled = app.maybe_auto_retry(&failed);
-        assert!(handled);
-        assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
-        assert!(!matches!(
-            app.state.current_phase,
-            Phase::BuilderRecovery(_)
-        ));
+        with_temp_root(|| {
+            let mut state = SessionState::new("non-builder-retry".to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet",
+                1,
+                10,
+                10,
+            )];
+            let failed = RunRecord {
+                id: 11,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 3,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Planning]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("exit(1)".to_string()),
+            };
+            let handled = app.maybe_auto_retry(&failed);
+            assert!(handled);
+            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+            assert!(!matches!(
+                app.state.current_phase,
+                Phase::BuilderRecovery(_)
+            ));
+        });
     }
 
     #[test]

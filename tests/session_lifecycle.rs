@@ -27,11 +27,19 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         .lock()
         .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
-    let cwd = std::env::current_dir().expect("cwd");
+    let prev = std::env::var_os("CODEXIZE_ROOT");
 
-    std::env::set_current_dir(temp.path()).expect("enter temp root");
+    // SAFETY: env mutation is serialized by `TEST_ROOT_LOCK`.
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    std::env::set_current_dir(cwd).expect("restore cwd");
+    unsafe {
+        match prev {
+            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+            None => std::env::remove_var("CODEXIZE_ROOT"),
+        }
+    }
     result.expect("test panicked")
 }
 

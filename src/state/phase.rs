@@ -10,6 +10,7 @@ pub enum Phase {
     PlanReviewRunning,
     PlanReviewPaused,
     ShardingRunning,
+    SkipToImplPending, // New phase
     /// Coder agent is working on the current task in round N.
     ImplementationRound(u32),
     /// Reviewer agent is checking the current task's work in round N.

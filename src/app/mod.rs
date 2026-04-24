@@ -371,6 +371,13 @@ impl App {
         Ok(())
     }
 
+    pub fn decline_skip_to_implementation(&mut self) -> Result<()> {
+        self.state.skip_to_impl_rationale = None; // Clear the rationale
+        self.transition_to_phase(Phase::SpecReviewRunning)?;
+        self.state.save()?; // Persist state after transition
+        Ok(())
+    }
+
     fn editable_artifact(&self) -> Option<std::path::PathBuf> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");

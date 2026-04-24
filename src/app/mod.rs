@@ -382,7 +382,7 @@ impl App {
             Phase::PlanningRunning => (
                 "[Planning]",
                 session_dir.join("artifacts").join("plan.md"),
-                Phase::ShardingRunning,
+                Phase::PlanReviewRunning,
             ),
             Phase::ShardingRunning => (
                 "[Sharding]",

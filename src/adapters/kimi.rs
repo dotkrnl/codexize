@@ -10,23 +10,23 @@ impl AgentAdapter for KimiAdapter {
     }
 
     fn interactive_command(&self, _model: &str, prompt_path: &str) -> String {
+        // kimi's `-p/--prompt` always exits after the query (one-shot — see
+        // https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.md),
+        // and there's no flag to preload a prompt and stay in the TUI. So we
+        // background a tmux paste into this pane that fires once the TUI has
+        // initialized, then exec kimi in shell (interactive) mode.
         format!(
-            r#"kimi --yolo -p "$(cat {prompt_path})""#,
+            r#"(sleep 1 && tmux load-buffer -b codexize_kimi {prompt_path} && tmux paste-buffer -d -b codexize_kimi -t "$TMUX_PANE" && tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
 
     fn noninteractive_command(&self, _model: &str, prompt_path: &str) -> String {
-        // kimi's default `--print` emits Python-repr-style event objects that
-        // are unreadable; stream-json instead gives a single final message
-        // object with typed content blocks. jq formats think / text / tool
-        // use blocks with coloured markers. `fromjson?` skips non-JSON
-        // trailers like the "To resume this session:" line.
-        let filter = r##"fromjson? | .content[]? | if .type=="think" then "\n[2;35m💭 thinking[0m\n[2;35m" + (.think // "") + "[0m\n" elif .type=="text" then (.text // "") + "\n" elif .type=="tool_use" then "\n[1;33m🔧 " + (.name // "tool") + "[0m\n[33m" + ((.arguments // .input // "") | tostring) + "[0m\n" else "" end"##;
+        // `-p` is one-shot and renders its own nicely formatted output — more
+        // readable than --print stream-json piped through jq, so use it.
         format!(
-            r#"kimi --yolo --print --output-format stream-json < {prompt_path} | jq -Rjr --unbuffered '{filter}'"#,
+            r#"kimi --yolo -p "$(cat {prompt_path})""#,
             prompt_path = super::shell_escape(prompt_path),
-            filter = filter,
         )
     }
 }

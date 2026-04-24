@@ -103,6 +103,9 @@ impl Phase {
             (PlanReviewRunning, PlanReviewPaused) => true,
             (PlanReviewPaused, PlanningRunning) => true,
             (ImplementationRound(r), ShardingRunning) if *r <= 1 => true,
+            // Skip-to-implementation sessions rewind past sharding back to brainstorm,
+            // since sharding never ran on this path.
+            (ImplementationRound(r), BrainstormRunning) if *r <= 1 => true,
             (ImplementationRound(r), ReviewRound(r2)) if *r2 == *r - 1 => true,
             (ReviewRound(r), ImplementationRound(r2)) if *r == *r2 => true,
             _ => false,
@@ -230,5 +233,14 @@ mod tests {
         assert!(!Phase::PlanningRunning.can_transition_to(&Phase::SkipToImplPending));
         assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::BrainstormRunning));
         assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::PlanningRunning));
+    }
+
+    #[test]
+    fn impl_round_one_can_go_back_to_brainstorm_on_skip_path() {
+        assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::BrainstormRunning));
+        // Still allowed to rewind into sharding for the normal path.
+        assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::ShardingRunning));
+        // Later rounds must not jump straight to brainstorm.
+        assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::BrainstormRunning));
     }
 }

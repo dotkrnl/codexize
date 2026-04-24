@@ -147,6 +147,9 @@ pub struct BuilderState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub session_id: String,
+    pub schema_version: u32,
+    #[serde(default)]
+    pub agent_runs: Vec<RunRecord>,
     pub current_phase: Phase,
     #[serde(default)]
     pub idea_text: Option<String>,
@@ -176,6 +179,8 @@ impl SessionState {
     pub fn new(session_id: String) -> Self {
         Self {
             session_id,
+            schema_version: 2,
+            agent_runs: Vec::new(),
             current_phase: Phase::IdeaInput,
             idea_text: None,
             selected_model: None,
@@ -193,8 +198,30 @@ impl SessionState {
         let path = session_dir(session_id).join("session.toml");
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read session state from {}", path.display()))?;
-        toml::from_str(&text)
-            .with_context(|| format!("failed to parse session state from {}", path.display()))
+
+        // Reject v1 files (no schema_version field)
+        let raw: toml::Value = toml::from_str(&text)
+            .with_context(|| format!("failed to parse session state from {}", path.display()))?;
+        if raw.get("schema_version").is_none() {
+            anyhow::bail!(
+                "session {} uses schema v1; archive with `codexize archive {}` and start fresh.",
+                session_id, session_id
+            );
+        }
+
+        let state: SessionState = toml::from_str(&text)
+            .with_context(|| format!("failed to parse session state from {}", path.display()))?;
+
+        if state.schema_version != 2 {
+            anyhow::bail!(
+                "session {} uses schema v{}; archive with `codexize archive {}` and start fresh.",
+                session_id,
+                state.schema_version,
+                session_id
+            );
+        }
+
+        Ok(state)
     }
 
     pub fn save(&self) -> Result<()> {
@@ -348,6 +375,66 @@ mod tests {
         assert_eq!(node.label, "Brainstorm");
         assert_eq!(node.kind, NodeKind::Stage);
         assert_eq!(node.leaf_run_id, Some(1));
+    }
+
+    #[test]
+    fn test_session_state_schema_v2() {
+        use tempfile::TempDir;
+        use std::env;
+
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            env::set_var("CODEXIZE_ROOT", temp.path());
+        }
+
+        let mut state = SessionState::new("test-session".to_string());
+        state.schema_version = 2;
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        state.save().unwrap();
+        let loaded = SessionState::load("test-session").unwrap();
+
+        assert_eq!(loaded.schema_version, 2);
+        assert_eq!(loaded.agent_runs.len(), 1);
+        assert_eq!(loaded.agent_runs[0].id, 1);
+    }
+
+    #[test]
+    fn test_session_state_v1_rejection() {
+        use tempfile::TempDir;
+        use std::env;
+
+        let temp = TempDir::new().unwrap();
+        unsafe {
+            env::set_var("CODEXIZE_ROOT", temp.path());
+        }
+
+        // Manually write a v1 session file (no schema_version field)
+        let dir = session_dir("test-v1-session");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.toml");
+        std::fs::write(&path, r#"
+session_id = "test-v1-session"
+current_phase = "IdeaInput"
+"#).unwrap();
+
+        let result = SessionState::load("test-v1-session");
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("schema v1") || err_msg.contains("archive"));
     }
 
     #[test]

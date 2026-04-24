@@ -95,6 +95,9 @@ pub struct SessionState {
     /// All spec reviewers in order (may be multiple rounds)
     #[serde(default)]
     pub spec_reviewers: Vec<PhaseModel>,
+    /// All plan reviewers in order (may be multiple rounds)
+    #[serde(default)]
+    pub plan_reviewers: Vec<PhaseModel>,
     /// Builder loop state (empty until sharding completes)
     #[serde(default)]
     pub builder: BuilderState,
@@ -114,6 +117,7 @@ impl SessionState {
             agent_error: None,
             phase_models: std::collections::BTreeMap::new(),
             spec_reviewers: Vec::new(),
+            plan_reviewers: Vec::new(),
             builder: BuilderState::default(),
             archived: false,
             phase_attempts: std::collections::BTreeMap::new(),
@@ -223,5 +227,24 @@ mod tests {
         let toml = toml::to_string(&state).unwrap();
         let loaded: SessionState = toml::from_str(&toml).unwrap();
         assert!(!loaded.archived);
+    }
+
+    #[test]
+    fn test_plan_reviewers_defaults_empty() {
+        let state = SessionState::new("test".to_string());
+        assert!(state.plan_reviewers.is_empty());
+    }
+
+    #[test]
+    fn test_plan_reviewers_roundtrip() {
+        let mut state = SessionState::new("test".to_string());
+        state.plan_reviewers.push(PhaseModel {
+            model: "o3".to_string(),
+            vendor: "openai".to_string(),
+        });
+        let toml = toml::to_string(&state).unwrap();
+        let loaded: SessionState = toml::from_str(&toml).unwrap();
+        assert_eq!(loaded.plan_reviewers.len(), 1);
+        assert_eq!(loaded.plan_reviewers[0].model, "o3");
     }
 }

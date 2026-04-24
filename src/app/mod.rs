@@ -2651,9 +2651,7 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
          single short paragraph covering current progress and next action in \
          normal prose. Your process is killed if this file isn't updated for \
          10 min of wall time (time spent inside tool calls is excluded from \
-         that budget).\n\n\
-         When you finish, end your final message with an explicit line asking \
-         the operator to run `/exit` if they have no further comments.\n",
+         that budget).\n",
         path.display()
     )
 }
@@ -2764,7 +2762,9 @@ HARD rules — override anything the superpowers / brainstorming skill suggests:
     prompt the skill may offer. When the spec is written, STOP and exit. The
     orchestrator drives stage transitions.
 
-The operator IS available to answer questions ABOUT THE DESIGN itself.
+The operator IS available to answer questions ABOUT THE DESIGN itself. When
+you finish, end your final message with an explicit line asking the operator
+to enter `/exit` if they have no further comments.
 {instr}"#
     )
 }
@@ -2837,6 +2837,8 @@ Hard rules — override anything the writing-plans skill suggests:
       transitions.
 
 The operator IS available for clarifying questions about the design itself.
+When you finish, end your final message with an explicit line asking the
+operator to enter `/exit` if they have no further comments.
 {instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,

@@ -58,6 +58,34 @@ pub struct Message {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeKind {
+    Stage,
+    Task,
+    Round,
+    AgentRun,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeStatus {
+    Pending,
+    Running,
+    WaitingUser,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct Node {
+    pub label: String,
+    pub kind: NodeKind,
+    pub status: NodeStatus,
+    pub summary: String,
+    pub children: Vec<Node>,
+    pub run_id: Option<u64>,
+    pub leaf_run_id: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AttemptStatus {
     Done,
@@ -303,6 +331,23 @@ mod tests {
         assert_eq!(msg.run_id, 1);
         assert_eq!(msg.kind, MessageKind::Brief);
         assert_eq!(msg.text, "Exploring codebase");
+    }
+
+    #[test]
+    fn test_node_creation() {
+        let node = Node {
+            label: "Brainstorm".to_string(),
+            kind: NodeKind::Stage,
+            status: NodeStatus::Done,
+            summary: "completed".to_string(),
+            children: vec![],
+            run_id: None,
+            leaf_run_id: Some(1),
+        };
+
+        assert_eq!(node.label, "Brainstorm");
+        assert_eq!(node.kind, NodeKind::Stage);
+        assert_eq!(node.leaf_run_id, Some(1));
     }
 
     #[test]

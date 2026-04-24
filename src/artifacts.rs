@@ -1,8 +1,5 @@
-// artifacts.rs — artifact path helpers (currently minimal; expanded as needed)
-use anyhow::Result;
+// artifacts.rs — artifact path helpers and typed wrappers.
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use tokio::fs;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkipToImplProposal {
@@ -15,18 +12,23 @@ impl SkipToImplProposal {
         Self { proposed, rationale }
     }
 
-    pub async fn read_from_path(path: &std::path::Path) -> anyhow::Result<Option<Self>> {
+    /// Read the skip-to-implementation proposal artifact from `path`.
+    ///
+    /// Returns `Ok(None)` if the file is absent. Returns `Err` if the file is
+    /// present but malformed or invalid; callers log a warning and fall through
+    /// to the normal flow on error.
+    pub fn read_from_path(path: &std::path::Path) -> anyhow::Result<Option<Self>> {
         if !path.exists() {
             return Ok(None);
         }
-        let content = tokio::fs::read_to_string(path).await?;
+        let content = std::fs::read_to_string(path)?;
         let proposal: Self = serde_json::from_str(&content)?;
         proposal.validate()?;
         Ok(Some(proposal))
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        if self.proposed && self.rationale.is_empty() {
+        if self.proposed && self.rationale.trim().is_empty() {
             anyhow::bail!("rationale cannot be empty if proposed is true");
         }
         if self.rationale.len() > 500 {
@@ -36,21 +38,21 @@ impl SkipToImplProposal {
     }
 }
 
-// Minimal Spec struct for synthetic artifact generation
+/// Minimal Spec representation used by synthetic-artifact generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Spec {
+    #[serde(default)]
     pub content: String,
-    pub spec_refs: Vec<String>, // Keep spec_refs for now to pass to Task.
-    // Add other fields as they become relevant, or keep it minimal
+    #[serde(default)]
+    pub spec_refs: Vec<String>,
 }
 
-// Minimal Implementation struct for synthetic artifact generation
+/// Minimal implementation-pointer artifact written alongside synthetic plan/tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Implementation {
     pub current_task_id: u32,
     pub current_round: u32,
     pub remaining_tasks: Vec<u32>,
-    // Add other fields as they become relevant
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +63,8 @@ pub enum ArtifactKind {
     PlanReview,
     CodeReview,
     Implementation,
-    Tasks, // Added for tasks.toml
+    Tasks,
+    SkipToImpl,
 }
 
 impl ArtifactKind {
@@ -74,7 +77,7 @@ impl ArtifactKind {
             ArtifactKind::CodeReview => "code_review.md",
             ArtifactKind::Implementation => "implementation.json",
             ArtifactKind::Tasks => "tasks.toml",
+            ArtifactKind::SkipToImpl => "skip_to_impl.json",
         }
     }
 }
-

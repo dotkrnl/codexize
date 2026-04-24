@@ -182,6 +182,8 @@ pub struct SessionState {
     pub builder: BuilderState,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub skip_to_impl_rationale: Option<String>,
 }
 
 impl SessionState {
@@ -196,6 +198,7 @@ impl SessionState {
             agent_error: None,
             builder: BuilderState::default(),
             archived: false,
+            skip_to_impl_rationale: None,
         }
     }
 

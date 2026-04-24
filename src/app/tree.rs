@@ -44,8 +44,9 @@ fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
         .iter()
         .filter(|r| r.stage == stage_key)
         .collect();
-    let status = stage_status_from_runs(&runs, state, stage_key);
-    let summary = stage_summary(state, stage_key, label, &runs);
+    let latest = latest_attempts(&runs);
+    let status = stage_status_from_runs(&latest, state, stage_key);
+    let summary = stage_summary(state, stage_key, label, &latest);
     let mut children = Vec::new();
     for run in runs {
         children.push(agent_run_node(run));
@@ -67,8 +68,9 @@ fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
         .iter()
         .filter(|r| r.stage == stage_key)
         .collect();
-    let status = stage_status_from_runs(&runs, state, stage_key);
-    let summary = stage_summary(state, stage_key, label, &runs);
+    let latest = latest_attempts(&runs);
+    let status = stage_status_from_runs(&latest, state, stage_key);
+    let summary = stage_summary(state, stage_key, label, &latest);
     let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> =
         std::collections::BTreeMap::new();
     for run in &runs {
@@ -77,19 +79,10 @@ fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
     let mut children = Vec::new();
     for (round_num, round_runs) in rounds {
         let mut round_children = Vec::new();
-        for run in round_runs {
+        for run in &round_runs {
             round_children.push(agent_run_node(run));
         }
-        let round_status = if round_children
-            .iter()
-            .any(|c| c.status == NodeStatus::Running)
-        {
-            NodeStatus::Running
-        } else if round_children.iter().all(|c| c.status == NodeStatus::Done) {
-            NodeStatus::Done
-        } else {
-            NodeStatus::Failed
-        };
+        let round_status = rollup_status(&round_runs);
         children.push(Node {
             label: format!("Round {}", round_num),
             kind: NodeKind::Round,
@@ -172,21 +165,16 @@ fn build_builder_stage(state: &SessionState) -> Node {
         let mut round_nodes = Vec::new();
         for (round_num, (c_runs, r_runs)) in rounds {
             let mut run_nodes = Vec::new();
-            for run in c_runs {
+            let mut combined: Vec<&RunRecord> = Vec::new();
+            for run in &c_runs {
                 run_nodes.push(agent_run_node(run));
+                combined.push(*run);
             }
-            for run in r_runs {
+            for run in &r_runs {
                 run_nodes.push(agent_run_node(run));
+                combined.push(*run);
             }
-            let round_status = if run_nodes.iter().any(|c| c.status == NodeStatus::Running) {
-                NodeStatus::Running
-            } else if run_nodes.is_empty() {
-                NodeStatus::Pending
-            } else if run_nodes.iter().all(|c| c.status == NodeStatus::Done) {
-                NodeStatus::Done
-            } else {
-                NodeStatus::Failed
-            };
+            let round_status = rollup_status(&combined);
             round_nodes.push(Node {
                 label: format!("Round {}", round_num),
                 kind: NodeKind::Round,
@@ -225,18 +213,10 @@ fn build_builder_stage(state: &SessionState) -> Node {
         let mut round_nodes = Vec::new();
         for (round_num, round_runs) in rounds {
             let mut run_nodes = Vec::new();
-            for run in round_runs {
+            for run in &round_runs {
                 run_nodes.push(agent_run_node(run));
             }
-            let round_status = if run_nodes.iter().any(|c| c.status == NodeStatus::Running) {
-                NodeStatus::Running
-            } else if run_nodes.iter().all(|c| c.status == NodeStatus::Done) {
-                NodeStatus::Done
-            } else if run_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
-                NodeStatus::Failed
-            } else {
-                NodeStatus::Pending
-            };
+            let round_status = rollup_status(&round_runs);
             round_nodes.push(Node {
                 label: format!("Round {}", round_num),
                 kind: NodeKind::Round,
@@ -306,6 +286,35 @@ fn role_label(stage: &str) -> &str {
         "coder" => "Coder",
         "reviewer" => "Reviewer",
         _ => stage,
+    }
+}
+
+fn latest_attempts<'a>(runs: &[&'a RunRecord]) -> Vec<&'a RunRecord> {
+    use std::collections::BTreeMap;
+    let mut best: BTreeMap<(String, Option<u32>, u32), &'a RunRecord> = BTreeMap::new();
+    for run in runs {
+        let key = (run.stage.clone(), run.task_id, run.round);
+        best.entry(key)
+            .and_modify(|existing| {
+                if run.attempt > existing.attempt {
+                    *existing = *run;
+                }
+            })
+            .or_insert(*run);
+    }
+    best.into_values().collect()
+}
+
+fn rollup_status(runs: &[&RunRecord]) -> NodeStatus {
+    let latest = latest_attempts(runs);
+    if latest.iter().any(|r| r.status == RunStatus::Running) {
+        NodeStatus::Running
+    } else if latest.is_empty() {
+        NodeStatus::Pending
+    } else if latest.iter().all(|r| r.status == RunStatus::Done) {
+        NodeStatus::Done
+    } else {
+        NodeStatus::Failed
     }
 }
 
@@ -634,6 +643,101 @@ mod tests {
                 .all(|c| c.kind == NodeKind::AgentRun)
         );
         assert_eq!(spec_review.children.len(), 2);
+        assert_eq!(spec_review.status, NodeStatus::Done);
+        assert_eq!(spec_review.summary, "spec review complete");
+    }
+
+    #[test]
+    fn test_retry_success_collapses_to_done_for_simple_stage() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::SpecReviewRunning;
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("quota exceeded".to_string()),
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 2,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        let nodes = build_tree(&state);
+        let planning = nodes.iter().find(|n| n.label == "Planning").unwrap();
+        assert_eq!(planning.status, NodeStatus::Done);
+        assert_eq!(planning.summary, "planning complete");
+    }
+
+    #[test]
+    fn test_retry_success_collapses_round_status_in_builder() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Coder t1 r1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("timeout".to_string()),
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 2,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Coder t1 r1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        let nodes = build_tree(&state);
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        // Walk into the task/round tree (collapsing may hoist children).
+        let rollup_failed = |n: &Node| {
+            fn walk(n: &Node, found: &mut bool) {
+                if n.kind != NodeKind::AgentRun && n.status == NodeStatus::Failed {
+                    *found = true;
+                }
+                for c in &n.children {
+                    walk(c, found);
+                }
+            }
+            let mut found = false;
+            walk(n, &mut found);
+            found
+        };
+        assert!(
+            !rollup_failed(builder),
+            "no task/round/stage rollup should be Failed when the latest attempt succeeded"
+        );
     }
 
     #[test]

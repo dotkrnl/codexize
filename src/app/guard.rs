@@ -181,7 +181,7 @@ fn verify_non_coder(snap: &Snapshot) -> Option<String> {
         } else {
             let _ = std::process::Command::new("git")
                 .args(["checkout", "HEAD", "--", path])
-                .status();
+                .output();
         }
         reverted.push(path.clone());
     }
@@ -189,7 +189,7 @@ fn verify_non_coder(snap: &Snapshot) -> Option<String> {
     if head_changed {
         let _ = std::process::Command::new("git")
             .args(["reset", "--hard", &snap.head])
-            .status();
+            .output();
         return Some(format!(
             "forbidden_write: HEAD moved to {current_head} (reset to {})",
             snap.head

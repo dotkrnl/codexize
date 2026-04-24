@@ -365,6 +365,7 @@ fn build_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::collections::HashSet;
 
     fn sample_model_status() -> ModelStatus {
@@ -478,5 +479,158 @@ mod tests {
         .expect("expected a same-vendor candidate");
 
         assert_eq!(chosen.name, "claude-sonnet");
+    }
+
+    fn dashboard_model(name: &str) -> dashboard::DashboardModel {
+        dashboard::DashboardModel {
+            name: name.to_string(),
+            vendor: "gemini".to_string(),
+            overall_score: 75.0,
+            current_score: 75.0,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            display_order: 0,
+        }
+    }
+
+    fn quotas_for(
+        entries: &[(&str, Option<u8>)],
+    ) -> BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> {
+        let mut inner = BTreeMap::new();
+        for (name, quota) in entries {
+            inner.insert((*name).to_string(), *quota);
+        }
+        BTreeMap::from([(VendorKind::Gemini, inner)])
+    }
+
+    fn model_status_from_candidate(candidate: &Candidate) -> ModelStatus {
+        ModelStatus {
+            vendor: candidate.vendor,
+            name: candidate.name.clone(),
+            stupid_level: candidate.stupid_level,
+            quota_percent: candidate.quota_percent,
+            idea_rank: 1,
+            planning_rank: 1,
+            build_rank: 1,
+            review_rank: 1,
+            idea_weight: candidate.idea_probability,
+            planning_weight: candidate.planning_probability,
+            build_weight: candidate.build_probability,
+            review_weight: candidate.review_probability,
+        }
+    }
+
+    #[test]
+    fn flash_model_gets_penalty() {
+        let flash_name = "gemini-2.5-flash";
+        let pro_name = "gemini-2.5-pro";
+        let flash_model = dashboard_model(flash_name);
+        let pro_model = dashboard_model(pro_name);
+        let quotas = quotas_for(&[(flash_name, Some(80)), (pro_name, Some(80))]);
+
+        let flash = build_candidate(flash_model.clone(), &quotas).expect("flash candidate");
+        let pro = build_candidate(pro_model.clone(), &quotas).expect("pro candidate");
+
+        let penalty = SELECTION_CONFIG.flash_tier_penalty;
+        let epsilon = 1e-12;
+
+        assert!((flash.idea_probability - pro.idea_probability * penalty).abs() < epsilon);
+        assert!((flash.planning_probability - pro.planning_probability * penalty).abs() < epsilon);
+        assert!((flash.build_probability - pro.build_probability * penalty).abs() < epsilon);
+        assert!((flash.review_probability - pro.review_probability * penalty).abs() < epsilon);
+    }
+
+    #[test]
+    fn non_flash_gemini_unaffected() {
+        let pro_name = "gemini-2.5-pro";
+        let pro_model = dashboard_model(pro_name);
+        let quotas = quotas_for(&[(pro_name, Some(80))]);
+
+        let pro = build_candidate(pro_model.clone(), &quotas).expect("pro candidate");
+        let epsilon = 1e-12;
+
+        let expected_idea = ranking::selection_probability(
+            &pro_model,
+            Some(80),
+            VendorKind::Gemini,
+            SelectionPhase::Idea,
+        );
+        let expected_planning = ranking::selection_probability(
+            &pro_model,
+            Some(80),
+            VendorKind::Gemini,
+            SelectionPhase::Planning,
+        );
+        let expected_build = ranking::selection_probability(
+            &pro_model,
+            Some(80),
+            VendorKind::Gemini,
+            SelectionPhase::Build,
+        );
+        let expected_review = ranking::selection_probability(
+            &pro_model,
+            Some(80),
+            VendorKind::Gemini,
+            SelectionPhase::Review,
+        );
+
+        assert!((pro.idea_probability - expected_idea).abs() < epsilon);
+        assert!((pro.planning_probability - expected_planning).abs() < epsilon);
+        assert!((pro.build_probability - expected_build).abs() < epsilon);
+        assert!((pro.review_probability - expected_review).abs() < epsilon);
+    }
+
+    #[test]
+    fn flash_survives_as_last_resort() {
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let flash_name = "gemini-2.5-flash";
+        let pro_name = "gemini-2.5-pro";
+        let flash_model = dashboard_model(flash_name);
+        let pro_model = dashboard_model(pro_name);
+
+        // Only the flash model has quota; the premium model gets zeroed weights.
+        let quotas = quotas_for(&[(flash_name, Some(80)), (pro_name, Some(0))]);
+
+        let mut candidates = vec![
+            build_candidate(pro_model, &quotas).expect("pro candidate"),
+            build_candidate(flash_model, &quotas).expect("flash candidate"),
+        ];
+        apply_top_third_cutoff(&mut candidates);
+
+        let models: Vec<ModelStatus> = candidates.iter().map(model_status_from_candidate).collect();
+
+        let chosen = select(&models, TaskKind::Build).expect("expected a choice");
+        assert_eq!(chosen.name, flash_name);
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn flash_excluded_when_premium_available() {
+        let flash_name = "gemini-2.5-flash";
+        let pro_name = "gemini-2.5-pro";
+        let flash_model = dashboard_model(flash_name);
+        let pro_model = dashboard_model(pro_name);
+        let quotas = quotas_for(&[(flash_name, Some(80)), (pro_name, Some(80))]);
+
+        let mut candidates = vec![
+            build_candidate(flash_model, &quotas).expect("flash candidate"),
+            build_candidate(pro_model, &quotas).expect("pro candidate"),
+        ];
+        apply_top_third_cutoff(&mut candidates);
+
+        let flash = candidates
+            .iter()
+            .find(|c| c.name == flash_name)
+            .expect("flash still present");
+        assert_eq!(flash.build_probability, 0.0);
+
+        let models: Vec<ModelStatus> = candidates.iter().map(model_status_from_candidate).collect();
+
+        for seed in 1..50_u64 {
+            TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+            let chosen = select(&models, TaskKind::Build).expect("expected a choice");
+            assert_ne!(chosen.name, flash_name);
+        }
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 }

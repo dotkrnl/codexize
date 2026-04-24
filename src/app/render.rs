@@ -579,20 +579,58 @@ impl App {
             if wrapped.is_empty() {
                 wrapped.push(String::new());
             }
+            // Map the char-index cursor onto (line, column) within the
+            // wrapped chunks. Placeholder text is never editable, so the
+            // cursor pins to 0 when the buffer is empty.
+            let cursor_pos = if active {
+                let target = if self.input_buffer.is_empty() {
+                    0
+                } else {
+                    self.input_cursor.min(self.input_buffer.chars().count())
+                };
+                let mut acc = 0usize;
+                let mut found = (wrapped.len().saturating_sub(1), 0usize);
+                for (idx, chunk) in wrapped.iter().enumerate() {
+                    let chunk_len = chunk.chars().count();
+                    if target <= acc + chunk_len {
+                        found = (idx, target - acc);
+                        break;
+                    }
+                    acc += chunk_len;
+                }
+                Some(found)
+            } else {
+                None
+            };
             for (idx, chunk) in wrapped.iter().enumerate() {
-                let is_last = idx + 1 == wrapped.len();
-                let cursor = if active && is_last { "▌" } else { "" };
+                let show_cursor_here = cursor_pos.is_some_and(|(line, _)| line == idx);
+                let split_col = cursor_pos
+                    .filter(|(line, _)| *line == idx)
+                    .map(|(_, col)| col)
+                    .unwrap_or(0);
+                let (left, right) = if show_cursor_here {
+                    let byte = chunk
+                        .char_indices()
+                        .nth(split_col)
+                        .map(|(i, _)| i)
+                        .unwrap_or(chunk.len());
+                    (&chunk[..byte], &chunk[byte..])
+                } else {
+                    (chunk.as_str(), "")
+                };
+                let cursor = if show_cursor_here { "▌" } else { "" };
                 let visible_len = chunk.chars().count() + cursor.chars().count();
                 let padding = inner_width.saturating_sub(visible_len);
                 lines.push(Line::from(vec![
                     Span::styled("  │ ", Style::default().fg(frame_color)),
-                    Span::styled(chunk.clone(), text_style),
+                    Span::styled(left.to_string(), text_style),
                     Span::styled(
                         cursor.to_string(),
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::SLOW_BLINK),
                     ),
+                    Span::styled(right.to_string(), text_style),
                     Span::raw(" ".repeat(padding)),
                     Span::styled(" │", Style::default().fg(frame_color)),
                 ]));

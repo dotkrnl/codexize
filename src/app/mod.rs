@@ -4098,4 +4098,90 @@ estimated_tokens = 1
             assert_eq!(app.state.agent_runs[1].stage, "brainstorm");
         });
     }
+
+    #[test]
+    fn go_back_from_impl_round_one_on_skip_path_returns_to_brainstorm() {
+        with_temp_root(|| {
+            let session_id = "skip-back-nav";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.skip_to_impl_rationale = Some("trivial change".to_string());
+            // Seed a non-default BuilderState so we can detect that the skip branch
+            // preserves it (unlike the normal-path branch, which resets).
+            state.builder.pending = vec![1];
+            state.builder.task_titles.insert(1, "t".to_string());
+
+            let mut app = idle_app(state);
+            app.go_back();
+
+            assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
+            // Skip-path back-nav should not clobber BuilderState the way the
+            // ShardingRunning branch does.
+            assert_eq!(app.state.builder.pending, vec![1]);
+        });
+    }
+
+    #[test]
+    fn go_back_from_impl_round_one_without_skip_resets_to_sharding() {
+        with_temp_root(|| {
+            let session_id = "normal-back-nav";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.skip_to_impl_rationale = None;
+            state.builder.pending = vec![1];
+
+            let mut app = idle_app(state);
+            app.go_back();
+
+            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            assert!(app.state.builder.pending.is_empty());
+        });
+    }
+
+    #[test]
+    fn skip_modal_decline_enters_spec_review() {
+        with_temp_root(|| {
+            let session_id = "skip-decline";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::SkipToImplPending;
+            state.skip_to_impl_rationale = Some("rationale".to_string());
+
+            let mut app = idle_app(state);
+            app.decline_skip_to_implementation()
+                .expect("decline should succeed");
+
+            assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
+            assert!(app.state.skip_to_impl_rationale.is_none());
+        });
+    }
+
+    #[test]
+    fn skip_modal_accept_generates_artifacts_and_enters_impl_round_one() {
+        with_temp_root(|| {
+            let session_id = "skip-accept";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::SkipToImplPending;
+            state.skip_to_impl_rationale = Some("trivial".to_string());
+
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("mk artifacts dir");
+            std::fs::write(
+                artifacts.join("spec.md"),
+                "# Spec\n\nA trivial feature.\n",
+            )
+            .expect("write spec");
+
+            let mut app = idle_app(state);
+            app.accept_skip_to_implementation()
+                .expect("accept should succeed");
+
+            assert_eq!(app.state.current_phase, Phase::ImplementationRound(1));
+            assert!(artifacts.join("plan.md").exists());
+            assert!(artifacts.join("tasks.toml").exists());
+            assert!(artifacts.join("implementation.json").exists());
+            assert_eq!(app.state.builder.pending, vec![1]);
+            assert!(app.state.builder.current_task.is_none());
+        });
+    }
 }

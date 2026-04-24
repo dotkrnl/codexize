@@ -51,6 +51,7 @@ impl Phase {
             Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
             Phase::Done => "Done".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
+            Phase::SkipToImplPending => "Skip Confirmation".to_string(),
         }
     }
 
@@ -126,6 +127,7 @@ impl Phase {
             }
             Phase::ReviewRound(_) => vec![ArtifactKind::CodeReview],
             Phase::BuilderRecovery(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
+            Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself
             _ => vec![],
         }
     }
@@ -147,6 +149,7 @@ impl Phase {
             Phase::BuilderRecovery(_) => "AI agent repairing builder artifacts",
             Phase::Done => "Run completed successfully",
             Phase::BlockedNeedsUser => "Blocked - requires user intervention",
+            Phase::SkipToImplPending => "Awaiting user confirmation to skip to implementation",
         }
     }
 

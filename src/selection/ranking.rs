@@ -99,7 +99,7 @@ pub fn selection_probability(
     if quota_weight <= 0.0 {
         return 0.0;
     }
-    let axis_score = raw_axis_score(model, phase.axes()) / 100.0;
+    let axis_score = raw_axis_score(model, phase.axes(), phase) / 100.0;
     let role_weight = axis_score
         .max(cfg.min_role_score_weight)
         .powi(cfg.role_score_exponent);
@@ -107,7 +107,11 @@ pub fn selection_probability(
     quota_weight * role_weight * variance_factor * cfg.vendor_bias(vendor, &model.name, phase)
 }
 
-fn raw_axis_score(model: &dashboard::DashboardModel, axes: &[&str]) -> f64 {
+fn raw_axis_score(
+    model: &dashboard::DashboardModel,
+    axes: &[&str],
+    phase: SelectionPhase,
+) -> f64 {
     let axis_map = model.axes.iter().cloned().collect::<std::collections::BTreeMap<_, _>>();
     let mut values = axes
         .iter()
@@ -119,11 +123,25 @@ fn raw_axis_score(model: &dashboard::DashboardModel, axes: &[&str]) -> f64 {
     }
 
     if values.is_empty() {
-        model.overall_score
-    } else {
-        values.iter().sum::<f64>() / values.len() as f64 * 100.0
+        return model.overall_score.clamp(0.0, 100.0);
     }
-    .clamp(0.0, 100.0)
+
+    // Idea rewards breadth (a strong spike on one axis can carry a creative
+    // pick), so it keeps the arithmetic mean. Planning/Build/Review need
+    // consistency across reliability axes — geometric mean punishes uneven
+    // profiles so a model that's great at one axis and weak at another
+    // doesn't get averaged up to a misleadingly high score.
+    let score = match phase {
+        SelectionPhase::Idea => values.iter().sum::<f64>() / values.len() as f64 * 100.0,
+        SelectionPhase::Planning | SelectionPhase::Build | SelectionPhase::Review => {
+            // Floor each axis before taking the log so a single zero doesn't
+            // annihilate the product. Axis values are on a 0..1 scale here.
+            let floor = SELECTION_CONFIG.min_role_score_weight;
+            let log_sum: f64 = values.iter().map(|v| v.max(floor).ln()).sum();
+            (log_sum / values.len() as f64).exp() * 100.0
+        }
+    };
+    score.clamp(0.0, 100.0)
 }
 
 /// Linear variance-penalty factor (0..1) applied once, outside the role

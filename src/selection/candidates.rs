@@ -44,6 +44,7 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     candidates.retain(|candidate| retained_names.contains(&candidate.name));
 
     apply_version_penalties(&mut candidates);
+    apply_top_third_cutoff(&mut candidates);
 
     let idea_ranks = ranking::rank_map(&candidates, |candidate| candidate.idea_probability);
     let planning_ranks = ranking::rank_map(&candidates, |candidate| candidate.planning_probability);
@@ -211,6 +212,27 @@ fn apply_version_penalties(candidates: &mut [Candidate]) {
         candidate.planning_probability *= interactive_penalty;
         candidate.build_probability *= headless_penalty;
         candidate.review_probability *= headless_penalty;
+    }
+}
+
+/// Zero out any probability that's below one third of the top probability
+/// in its phase. Keeps the top tier competing on weight and hard-excludes
+/// trailing models from both weighted sampling and round-robin fallbacks.
+fn apply_top_third_cutoff(candidates: &mut [Candidate]) {
+    fn cutoff<F: Fn(&Candidate) -> f64>(candidates: &[Candidate], selector: F) -> f64 {
+        candidates.iter().map(selector).fold(0.0_f64, f64::max) / 3.0
+    }
+
+    let idea_cut = cutoff(candidates, |c| c.idea_probability);
+    let planning_cut = cutoff(candidates, |c| c.planning_probability);
+    let build_cut = cutoff(candidates, |c| c.build_probability);
+    let review_cut = cutoff(candidates, |c| c.review_probability);
+
+    for c in candidates.iter_mut() {
+        if c.idea_probability < idea_cut { c.idea_probability = 0.0; }
+        if c.planning_probability < planning_cut { c.planning_probability = 0.0; }
+        if c.build_probability < build_cut { c.build_probability = 0.0; }
+        if c.review_probability < review_cut { c.review_probability = 0.0; }
     }
 }
 

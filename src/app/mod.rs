@@ -1302,6 +1302,9 @@ Your task:
      - File paths, function names, or interfaces that are inconsistent
        across steps in a way that would cause real breakage.
      - Spec-level ambiguity so severe that an implementer could not proceed.
+   The existence of multiple valid implementations is NOT a plan defect. Do
+   not request added detail just to force one internal design choice when
+   several reasonable options satisfy the spec and any explicit interfaces.
 3. If — and ONLY if — you find critical issues, directly edit {plan_path}
    (and {spec_path} if the issue is spec-level) to fix them. Make the
    smallest edit that resolves the problem.
@@ -1315,6 +1318,9 @@ DO NOT flag or fix:
   - Style, tone, or structural polish.
   - Missing low-level implementation detail (the implementer figures that
     out — the plan is a plan, not the code).
+  - Absence of prescribed helper/function structure.
+  - Multiple possible implementation approaches, unless the plan/spec makes
+    an explicit interface commitment that is internally contradictory.
   - Hypothetical edge cases the spec does not require.
   - Minor nitpicks, suggestions, or "nice-to-have" improvements.
 
@@ -1411,6 +1417,22 @@ Hard rules — override anything the superpowers / writing-plans skill suggests:
   - Do NOT `git add`, `git commit`, `git stash`, or otherwise touch
     version control. The spec and plan stay untracked; a later phase
     commits. If the skill offers to commit, refuse.
+  - The plan MUST be an execution map for coordination. It SHOULD include:
+      - Sequencing and dependencies between work items (what order matters, and why)
+      - Interfaces, integration points, and execution seams that must be honored
+      - Constraints from the spec that narrow the correct solution space
+      - Optional likely file/module touchpoints ONLY as orientation when helpful
+  - The plan MUST NOT read like a pseudo-implementation or patch recipe:
+      - No checkbox to-do lists or step-by-step coding instructions
+      - No helper/function decomposition scripts or function-by-function edit sequences
+      - No patch-like ordering of edits, "change this line then that line", or mini diffs
+      - No mandated internal code shape (struct fields, method signatures, class layout)
+        unless required by the spec or an explicit interface commitment needed for coordination
+  - Authority rule:
+      - The spec is the design contract and wins any conflict.
+      - The plan is advisory for implementation shape.
+      - The plan is authoritative ONLY for sequencing and explicit interface commitments
+        it names for coordination. Do not turn advisory detail into an implementation contract.
   - Do NOT ask the operator whether to continue, proceed, start
     implementing, jump to coding, run the next skill, or skip any
     downstream stage. When the plan is written, STOP and exit — the
@@ -1468,6 +1490,19 @@ Rules:
        - spec_refs      array of {{ path, lines }} pointing into the spec
        - plan_refs      array of {{ path, lines }} pointing into the plan
      The `lines` field is a range like "12-45" or a single number.
+
+Hard rules — keep tasks outcome- and coordination-oriented:
+  - Each task `description` SHOULD focus on required outcomes, dependencies /
+    ordering constraints, acceptance checks, and relevant interfaces or
+    touchpoints (including likely file/module touchpoints only as orientation).
+  - Task descriptions MUST NOT be recipe-style coding scripts:
+      - No step-by-step coding instructions ("do X, then Y, then Z")
+      - No miniature edit scripts or pseudo-patch sequences
+      - No mandated internal design or helper/function decomposition unless
+        required by the spec or an explicit interface commitment needed for coordination
+  - `plan_refs` MUST point to plan content about goals, sequencing,
+    dependencies, or interface commitments. Do not point primarily to
+    recipe-like implementation instructions.
 
 Output: write the TOML to {tasks}
 in EXACTLY this shape (double quotes for strings, triple quotes for

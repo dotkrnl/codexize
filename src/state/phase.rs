@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::artifacts::ArtifactKind;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Phase {

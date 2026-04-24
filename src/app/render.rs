@@ -550,7 +550,7 @@ impl App {
             };
             let width = 64usize;
             lines.push(Line::from(""));
-            let label = if active { " typing " } else { " input " };
+            let label = if active { " working " } else { " input " };
             let fill = width.saturating_sub(label.len() + 2);
             let top = format!("  ╭{label}{}╮", "─".repeat(fill));
             lines.push(Line::from(Span::styled(

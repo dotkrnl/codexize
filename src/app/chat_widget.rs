@@ -235,7 +235,7 @@ fn render_messages(
         let spin = SPINNER[spinner_tick % SPINNER.len()];
         lines.push(RenderedLine {
             spans: vec![Span::styled(
-                format!("{} typing...", spin),
+                format!("{} working...", spin),
                 Style::default().fg(Color::DarkGray),
             )],
         });
@@ -490,7 +490,7 @@ mod tests {
         let lines = render_messages(&msgs, &run, &offset, 60, 0);
         let last = &lines[lines.len() - 1];
         let text: String = last.spans.iter().map(|s| s.content.to_string()).collect();
-        assert!(text.contains("typing..."));
+        assert!(text.contains("working..."));
     }
 
     #[test]
@@ -504,7 +504,7 @@ mod tests {
         let lines = render_messages(&msgs, &run, &offset, 60, 0);
         for line in &lines {
             let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-            assert!(!text.contains("typing..."));
+            assert!(!text.contains("working..."));
         }
     }
 

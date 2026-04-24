@@ -212,6 +212,10 @@ impl App {
         frame.render_widget(self.header(), root[0]);
         frame.render_widget(PipelineWidget { app: self }, root[1]);
         frame.render_widget(self.model_strip(), root[2]);
+
+        if self.state.current_phase == Phase::SkipToImplPending {
+            render_skip_to_impl_modal(frame, self.state.skip_to_impl_rationale.as_deref());
+        }
     }
 
     fn header(&self) -> Paragraph<'_> {
@@ -604,4 +608,54 @@ impl App {
         lines
     }
 
+}
+
+fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
+    let area = frame.area();
+    let modal_width = area.width.saturating_sub(8).min(70).max(30);
+    let modal_height = 10u16.min(area.height.saturating_sub(4).max(6));
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let rect = ratatui::layout::Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = Block::default()
+        .title("Skip to implementation?")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "The brainstorm agent proposes skipping directly to implementation.",
+        Style::default().fg(Color::White),
+    )));
+    lines.push(Line::from(""));
+    let rationale_text = rationale
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("(no rationale provided)");
+    lines.push(Line::from(vec![
+        Span::styled("Rationale: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(rationale_text.to_string()),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "[Y]/Enter  accept — jump to implementation round 1",
+        Style::default().fg(Color::Green),
+    )));
+    lines.push(Line::from(Span::styled(
+        "[N]/Esc    decline — continue through spec review",
+        Style::default().fg(Color::Red),
+    )));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, rect);
 }

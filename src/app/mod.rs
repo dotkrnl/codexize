@@ -2415,11 +2415,13 @@ fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
         "\n\nEvery 2–3 min (and whenever your sub-goal changes), overwrite {} \
-         with one plain-text line formatted as: `<≤5-word essence> | <current \
-         progress> | <next action>`. The first field MUST capture the real \
-         essence, not a generic label. Your process is killed if this file \
-         isn't updated for 10 min of wall time (time spent inside tool calls \
-         is excluded from that budget).\n",
+         with one plain-text line formatted as: `<short title> | <normal \
+         summary in a short paragraph>`. The short title (≤5 words) MUST \
+         capture the real essence, not a generic label. The summary is a \
+         single short paragraph covering current progress and next action in \
+         normal prose. Your process is killed if this file isn't updated for \
+         10 min of wall time (time spent inside tool calls is excluded from \
+         that budget).\n",
         path.display()
     )
 }

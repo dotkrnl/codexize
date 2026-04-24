@@ -19,6 +19,33 @@ use super::{
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+fn probability_percent(weight: f64, total: f64) -> u8 {
+    if total <= 0.0 || weight <= 0.0 {
+        return 0;
+    }
+    (weight / total * 100.0).round().clamp(0.0, 99.0) as u8
+}
+
+fn probability_color(pct: u8) -> Color {
+    match pct {
+        0 => Color::DarkGray,
+        1..=5 => Color::Gray,
+        6..=15 => Color::Blue,
+        16..=30 => Color::Cyan,
+        31..=50 => Color::Yellow,
+        _ => Color::Green,
+    }
+}
+
+fn probability_span(label: &str, pct: u8) -> Span<'static> {
+    let color = probability_color(pct);
+    let mut style = Style::default().fg(color);
+    if pct >= 31 {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    Span::styled(format!("{}{:>2}", label, pct), style)
+}
+
 fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
@@ -169,6 +196,11 @@ impl App {
             by_vendor.entry(model.vendor).or_default().push(model);
         }
 
+        let total_idea: f64 = self.models.iter().map(|m| m.idea_weight).sum();
+        let total_planning: f64 = self.models.iter().map(|m| m.planning_weight).sum();
+        let total_build: f64 = self.models.iter().map(|m| m.build_weight).sum();
+        let total_review: f64 = self.models.iter().map(|m| m.review_weight).sum();
+
         let mut lines: Vec<Line<'static>> = Vec::new();
         for vendor in &vendor_order {
             let tag = vendor_tag(*vendor);
@@ -201,6 +233,11 @@ impl App {
                     Span::raw("        ")
                 };
 
+                let idea_pct = probability_percent(model.idea_weight, total_idea);
+                let planning_pct = probability_percent(model.planning_weight, total_planning);
+                let build_pct = probability_percent(model.build_weight, total_build);
+                let review_pct = probability_percent(model.review_weight, total_review);
+
                 lines.push(Line::from(vec![
                     tag_span,
                     Span::styled(
@@ -211,16 +248,13 @@ impl App {
                     Span::raw("  "),
                     Span::styled(quota, Style::default().fg(Color::Green)),
                     Span::raw("  "),
-                    Span::styled(
-                        format!(
-                            "I:{:>2} P:{:>2} B:{:>2} R:{:>2}",
-                            model.idea_rank,
-                            model.planning_rank,
-                            model.build_rank,
-                            model.review_rank
-                        ),
-                        Style::default().fg(Color::DarkGray),
-                    ),
+                    probability_span("I", idea_pct),
+                    Span::raw(" "),
+                    probability_span("P", planning_pct),
+                    Span::raw(" "),
+                    probability_span("B", build_pct),
+                    Span::raw(" "),
+                    probability_span("R", review_pct),
                 ]));
             }
         }

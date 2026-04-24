@@ -164,15 +164,39 @@ fn build_builder_stage(state: &SessionState) -> Node {
         }
         let mut round_nodes = Vec::new();
         for (round_num, (c_runs, r_runs)) in rounds {
-            let mut run_nodes = Vec::new();
+            let mut mode_nodes = Vec::new();
             let mut combined: Vec<&RunRecord> = Vec::new();
-            for run in &c_runs {
-                run_nodes.push(agent_run_node(run));
-                combined.push(*run);
+            if !c_runs.is_empty() {
+                let mut coder_children = Vec::new();
+                for run in &c_runs {
+                    coder_children.push(attempt_run_node(run));
+                    combined.push(*run);
+                }
+                mode_nodes.push(Node {
+                    label: "Coder".to_string(),
+                    kind: NodeKind::Mode,
+                    status: rollup_status(&c_runs),
+                    summary: String::new(),
+                    children: coder_children,
+                    run_id: None,
+                    leaf_run_id: None,
+                });
             }
-            for run in &r_runs {
-                run_nodes.push(agent_run_node(run));
-                combined.push(*run);
+            if !r_runs.is_empty() {
+                let mut reviewer_children = Vec::new();
+                for run in &r_runs {
+                    reviewer_children.push(attempt_run_node(run));
+                    combined.push(*run);
+                }
+                mode_nodes.push(Node {
+                    label: "Reviewer".to_string(),
+                    kind: NodeKind::Mode,
+                    status: rollup_status(&r_runs),
+                    summary: String::new(),
+                    children: reviewer_children,
+                    run_id: None,
+                    leaf_run_id: None,
+                });
             }
             let round_status = rollup_status(&combined);
             round_nodes.push(Node {
@@ -180,7 +204,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
                 kind: NodeKind::Round,
                 status: round_status,
                 summary: String::new(),
-                children: run_nodes,
+                children: mode_nodes,
                 run_id: None,
                 leaf_run_id: None,
             });
@@ -218,9 +242,21 @@ fn build_builder_stage(state: &SessionState) -> Node {
         }
         let mut round_nodes = Vec::new();
         for (round_num, round_runs) in rounds {
-            let mut run_nodes = Vec::new();
-            for run in &round_runs {
-                run_nodes.push(agent_run_node(run));
+            let mut mode_nodes = Vec::new();
+            if !round_runs.is_empty() {
+                let mut recovery_children = Vec::new();
+                for run in &round_runs {
+                    recovery_children.push(attempt_run_node(run));
+                }
+                mode_nodes.push(Node {
+                    label: "Recovery".to_string(),
+                    kind: NodeKind::Mode,
+                    status: rollup_status(&round_runs),
+                    summary: String::new(),
+                    children: recovery_children,
+                    run_id: None,
+                    leaf_run_id: None,
+                });
             }
             let round_status = rollup_status(&round_runs);
             round_nodes.push(Node {
@@ -228,7 +264,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
                 kind: NodeKind::Round,
                 status: round_status,
                 summary: String::new(),
-                children: run_nodes,
+                children: mode_nodes,
                 run_id: None,
                 leaf_run_id: None,
             });
@@ -265,6 +301,18 @@ fn build_builder_stage(state: &SessionState) -> Node {
         summary,
         children,
         run_id: None,
+        leaf_run_id: None,
+    }
+}
+
+fn attempt_run_node(run: &RunRecord) -> Node {
+    Node {
+        label: format!("Attempt {}", run.attempt),
+        kind: NodeKind::AgentRun,
+        status: run_status_to_node(run.status),
+        summary: String::new(),
+        children: Vec::new(),
+        run_id: Some(run.id),
         leaf_run_id: None,
     }
 }
@@ -484,21 +532,23 @@ fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String
     format!("{} of {} tasks done", done, total)
 }
 
-/// Collapse single-child Task/Round/AgentRun layers.
-/// When a parent has exactly one child, the child is "skipped":
-/// the parent's children become the child's children (or leaf_run_id).
-/// Stage nodes are never removed, but their children may be hoisted.
+/// Collapse single-child layers selectively.
+/// Only Round and AgentRun nodes may be absorbed by their parent.
+/// Stage, Task, and Mode nodes are NEVER absorbed—they always remain visible.
 pub fn collapse_tree(node: &mut Node) {
     for child in &mut node.children {
         collapse_tree(child);
     }
     if node.children.len() == 1 {
-        let child = node.children.pop().unwrap();
-        if child.kind == NodeKind::AgentRun {
-            node.leaf_run_id = child.run_id;
-        } else {
-            node.children = child.children;
-            node.leaf_run_id = child.leaf_run_id;
+        let child_kind = node.children[0].kind;
+        if matches!(child_kind, NodeKind::Round | NodeKind::AgentRun) {
+            let child = node.children.pop().unwrap();
+            if child.kind == NodeKind::AgentRun {
+                node.leaf_run_id = child.run_id;
+            } else {
+                node.children = child.children;
+                node.leaf_run_id = child.leaf_run_id;
+            }
         }
     }
 }
@@ -536,9 +586,10 @@ mod tests {
     }
 
     #[test]
-    fn test_collapse_single_child_layers() {
+    fn test_collapse_preserves_task_node() {
+        // Task nodes are never absorbed, ensuring they always remain visible
         let mut stage = Node {
-            label: "Brainstorm".to_string(),
+            label: "Builder Loop".to_string(),
             kind: NodeKind::Stage,
             status: NodeStatus::Done,
             summary: "".to_string(),
@@ -571,8 +622,11 @@ mod tests {
             leaf_run_id: None,
         };
         collapse_tree(&mut stage);
-        assert_eq!(stage.children.len(), 0);
-        assert_eq!(stage.leaf_run_id, Some(1));
+        // Task preserved (never absorbed), Round+AgentRun absorbed
+        assert_eq!(stage.children.len(), 1);
+        assert_eq!(stage.leaf_run_id, None);
+        assert_eq!(stage.children[0].label, "Task 1");
+        assert_eq!(stage.children[0].leaf_run_id, Some(1));
     }
 
     #[test]
@@ -800,6 +854,110 @@ mod tests {
         );
         assert_eq!(builder.summary, "builder recovery in progress");
         assert_eq!(builder.status, NodeStatus::Running);
+    }
+
+    #[test]
+    fn test_collapse_preserves_mode_absorbs_attempt() {
+        // Mode nodes are never absorbed but can absorb single AgentRun children
+        let mut task = Node {
+            label: "Task 1".to_string(),
+            kind: NodeKind::Task,
+            status: NodeStatus::Done,
+            summary: "".to_string(),
+            children: vec![Node {
+                label: "Round 1".to_string(),
+                kind: NodeKind::Round,
+                status: NodeStatus::Done,
+                summary: "".to_string(),
+                children: vec![
+                    Node {
+                        label: "Coder".to_string(),
+                        kind: NodeKind::Mode,
+                        status: NodeStatus::Done,
+                        summary: "".to_string(),
+                        children: vec![Node {
+                            label: "Attempt 1".to_string(),
+                            kind: NodeKind::AgentRun,
+                            status: NodeStatus::Done,
+                            summary: "".to_string(),
+                            children: vec![],
+                            run_id: Some(1),
+                            leaf_run_id: None,
+                        }],
+                        run_id: None,
+                        leaf_run_id: None,
+                    },
+                    Node {
+                        label: "Reviewer".to_string(),
+                        kind: NodeKind::Mode,
+                        status: NodeStatus::Done,
+                        summary: "".to_string(),
+                        children: vec![Node {
+                            label: "Attempt 1".to_string(),
+                            kind: NodeKind::AgentRun,
+                            status: NodeStatus::Done,
+                            summary: "".to_string(),
+                            children: vec![],
+                            run_id: Some(2),
+                            leaf_run_id: None,
+                        }],
+                        run_id: None,
+                        leaf_run_id: None,
+                    },
+                ],
+                run_id: None,
+                leaf_run_id: None,
+            }],
+            run_id: None,
+            leaf_run_id: None,
+        };
+        collapse_tree(&mut task);
+        // Task absorbs Round, but Round had 2 Mode children (multi-child preserved)
+        // So Task now has the 2 Mode children; each Mode absorbed its single AgentRun
+        assert_eq!(task.children.len(), 2);
+        assert_eq!(task.children[0].label, "Coder");
+        assert_eq!(task.children[0].kind, NodeKind::Mode);
+        assert_eq!(task.children[0].leaf_run_id, Some(1));
+        assert_eq!(task.children[1].label, "Reviewer");
+        assert_eq!(task.children[1].kind, NodeKind::Mode);
+        assert_eq!(task.children[1].leaf_run_id, Some(2));
+    }
+
+    #[test]
+    fn test_collapse_mode_multiple_attempts_preserved() {
+        // Mode with multiple attempts preserves them as children
+        let mut mode = Node {
+            label: "Coder".to_string(),
+            kind: NodeKind::Mode,
+            status: NodeStatus::Done,
+            summary: "".to_string(),
+            children: vec![
+                Node {
+                    label: "Attempt 1".to_string(),
+                    kind: NodeKind::AgentRun,
+                    status: NodeStatus::Failed,
+                    summary: "".to_string(),
+                    children: vec![],
+                    run_id: Some(1),
+                    leaf_run_id: None,
+                },
+                Node {
+                    label: "Attempt 2".to_string(),
+                    kind: NodeKind::AgentRun,
+                    status: NodeStatus::Done,
+                    summary: "".to_string(),
+                    children: vec![],
+                    run_id: Some(2),
+                    leaf_run_id: None,
+                },
+            ],
+            run_id: None,
+            leaf_run_id: None,
+        };
+        collapse_tree(&mut mode);
+        // Mode keeps both attempt children (multi-child not collapsed)
+        assert_eq!(mode.children.len(), 2);
+        assert_eq!(mode.leaf_run_id, None);
     }
 }
 

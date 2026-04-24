@@ -228,6 +228,10 @@ fn render_messages(
                 ],
             });
         }
+
+        if msg.kind == MessageKind::End {
+            lines.push(RenderedLine { spans: vec![Span::raw(String::new())] });
+        }
     }
 
     let has_end = messages.iter().any(|m| m.kind == MessageKind::End);

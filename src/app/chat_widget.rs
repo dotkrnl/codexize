@@ -2,7 +2,7 @@ use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Widget,
 };
@@ -192,8 +192,67 @@ fn render_messages(
         let prefix_width = ts_w + 3; // " ○ "
         let content_width = available_width.saturating_sub(prefix_width);
 
-        let wrapped = wrap_text(&msg.text, content_width);
         let indent = " ".repeat(prefix_width);
+
+        if msg.kind == MessageKind::Brief {
+            let (title, details) = match msg.text.split_once('|') {
+                Some((t, d)) => (t.trim().to_string(), d.trim().to_string()),
+                None => (msg.text.trim().to_string(), String::new()),
+            };
+            let title_wrapped = wrap_text(&title, content_width);
+            for (i, chunk) in title_wrapped.iter().enumerate() {
+                let title_span = Span::styled(
+                    chunk.clone(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                );
+                if i == 0 {
+                    lines.push(RenderedLine {
+                        spans: vec![
+                            Span::styled(
+                                format!("{} ", ts_str),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                format!("{} ", sym.symbol),
+                                Style::default().fg(sym.color),
+                            ),
+                            title_span,
+                        ],
+                    });
+                } else {
+                    lines.push(RenderedLine {
+                        spans: vec![Span::raw(indent.clone()), title_span],
+                    });
+                }
+            }
+            if title_wrapped.is_empty() {
+                lines.push(RenderedLine {
+                    spans: vec![
+                        Span::styled(
+                            format!("{} ", ts_str),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("{} ", sym.symbol),
+                            Style::default().fg(sym.color),
+                        ),
+                    ],
+                });
+            }
+            if !details.is_empty() {
+                for chunk in wrap_text(&details, content_width) {
+                    lines.push(RenderedLine {
+                        spans: vec![
+                            Span::raw(indent.clone()),
+                            Span::styled(chunk, Style::default().fg(Color::DarkGray)),
+                        ],
+                    });
+                }
+            }
+            continue;
+        }
+
+        let wrapped = wrap_text(&msg.text, content_width);
 
         for (i, chunk) in wrapped.iter().enumerate() {
             if i == 0 {

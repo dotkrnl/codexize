@@ -2577,6 +2577,18 @@ When the skill asks where to write the design doc, write it to {spec_path}.
 This is a spec-only phase: do NOT write or modify any code; the spec file is
 your only output. Implementation happens in a later phase.
 
+SKIP-TO-IMPLEMENTATION PROPOSAL (optional): after writing the spec, if the task
+is small and self-contained enough that separate planning and sharding phases
+would add no value (e.g. a single-file change, a bug fix with an obvious edit
+site, a trivial refactor), you MAY write a skip proposal to
+`artifacts/skip_to_impl.json` ALONGSIDE the spec. Format:
+    {{"proposed": true, "rationale": "<=500 chars explaining why"}}
+Only emit this when the spec genuinely needs no further breakdown. When in
+doubt, omit the file — the normal spec-review → planning → sharding pipeline
+is the default. If you emit `"proposed": true`, the rationale MUST be a
+non-empty, <=500 character explanation the operator will read before
+accepting.
+
 HARD rules — override anything the superpowers / brainstorming skill suggests:
   - Do NOT `git add`, `git commit`, `git stash`, or touch version control. The
     spec stays untracked; a later phase commits.

@@ -395,25 +395,17 @@ impl App {
 
         self.window_launched = false;
 
-        // Snapshot attempt before any transition or rebuild.
-        match self.state.current_phase {
-            Phase::ImplementationRound(_) => {
-                // Successful coder round defers recording until reviewer completes.
-                if !artifact_path.exists() {
-                    self.record_attempt(crate::state::AttemptStatus::Failed);
-                }
-            }
-            _ => {
-                let status = if artifact_path.exists() && self.state.agent_error.is_none() {
-                    crate::state::AttemptStatus::Done
-                } else {
-                    crate::state::AttemptStatus::Failed
-                };
-                self.record_attempt(status);
-            }
-        }
+        let mut attempt_status = crate::state::AttemptStatus::Failed;
+        let mut validation_error: Option<String> = None;
+        let mut resolved_next_phase = None;
 
-        if artifact_path.exists() {
+        if !artifact_path.exists() {
+            validation_error = Some(format!(
+                "agent window closed without producing {}",
+                artifact_path.display()
+            ));
+        } else {
+            // Artifact exists, proceed with validation
             if self.state.current_phase == Phase::ShardingRunning {
                 match tasks::validate(&artifact_path) {
                     Ok(file) => {
@@ -428,28 +420,20 @@ impl App {
                             reviewer_started: false,
                             last_verdict: None,
                         };
+                        attempt_status = crate::state::AttemptStatus::Done;
                     }
                     Err(e) => {
-                        self.state.agent_error = Some(format!(
+                        validation_error = Some(format!(
                             "tasks.toml invalid: {e} — retry or edit the file"
                         ));
-                        let _ = self.state.save();
-                        self.sections = build_sections(&self.state, self.window_launched);
-                        self.section_scroll.resize(self.sections.len(), usize::MAX);
-                        self.selected = current_section_index(&self.sections);
-                        return;
                     }
                 }
-            } else {
-                self.state.agent_error = None;
-            }
-            if self.state.current_phase == Phase::SpecReviewRunning {
+            } else if self.state.current_phase == Phase::SpecReviewRunning {
                 if let Some(pm) = self.state.phase_models.get("spec-review").cloned() {
                     self.state.spec_reviewers.push(pm);
                 }
-            }
-
-            let resolved_next = if let Phase::ReviewRound(r) = self.state.current_phase {
+                attempt_status = crate::state::AttemptStatus::Done;
+            } else if let Phase::ReviewRound(r) = self.state.current_phase {
                 match review::validate(&artifact_path) {
                     Ok(v) => {
                         self.state.builder.last_verdict = Some(match v.status {
@@ -458,7 +442,7 @@ impl App {
                             review::ReviewStatus::Blocked => "blocked",
                         }.to_string());
                         self.state.builder.reviewer_started = false;
-                        match v.status {
+                        resolved_next_phase = Some(match v.status {
                             review::ReviewStatus::Done => {
                                 if let Some(id) = self.state.builder.current_task.take() {
                                     self.state.builder.done.push(id);
@@ -478,32 +462,39 @@ impl App {
                                 Phase::ImplementationRound(r + 1)
                             }
                             review::ReviewStatus::Blocked => Phase::BlockedNeedsUser,
-                        }
+                        });
+                        attempt_status = crate::state::AttemptStatus::Done;
                     }
                     Err(e) => {
-                        self.state.agent_error = Some(format!("review TOML invalid: {e}"));
-                        let _ = self.state.save();
-                        self.sections = build_sections(&self.state, self.window_launched);
-                        self.section_scroll.resize(self.sections.len(), usize::MAX);
-                        self.selected = current_section_index(&self.sections);
-                        return;
+                        validation_error = Some(format!("review TOML invalid: {e}"));
                     }
                 }
             } else if matches!(self.state.current_phase, Phase::ImplementationRound(_)) {
                 self.state.builder.coder_started = false;
-                next_phase
+                resolved_next_phase = Some(next_phase);
+                attempt_status = crate::state::AttemptStatus::Done;
             } else {
-                next_phase
-            };
+                resolved_next_phase = Some(next_phase);
+                attempt_status = crate::state::AttemptStatus::Done;
+            }
+        }
 
-            let _ = self.state.transition_to(resolved_next);
-        } else {
-            let error = format!(
-                "agent window closed without producing {}",
-                artifact_path.display()
-            );
+        if let Some(error) = validation_error {
             self.state.agent_error = Some(error);
-            let _ = self.state.save();
+        } else {
+            self.state.agent_error = None;
+        }
+
+        self.record_attempt(attempt_status);
+        let _ = self.state.save();
+
+        if self.state.agent_error.is_some() && matches!(self.state.current_phase, Phase::ShardingRunning | Phase::ReviewRound(_)) {
+            // Do not transition if there's a validation error that requires user intervention
+        } else if let Some(phase) = resolved_next_phase {
+            let _ = self.state.transition_to(phase);
+        } else if self.state.agent_error.is_none() {
+            // For phases like BrainstormRunning, PlanningRunning, etc. that don't have a specific resolved_next_phase from validation
+            let _ = self.state.transition_to(next_phase);
         }
 
         self.sections = build_sections(&self.state, self.window_launched);

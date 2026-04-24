@@ -1,21 +1,11 @@
-mod adapters;
-mod app;
-mod artifacts;
-mod cache;
-mod dashboard;
-mod picker;
-mod providers;
-mod review;
-mod runner;
-mod selection;
-mod state;
-mod tasks;
-mod tmux;
-mod tui;
-mod warmup;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use codexize::{
+    app, runner,
+    state::{self},
+    tmux, tui,
+    picker,
+};
 
 #[derive(Parser)]
 #[command(name = "codexize")]

@@ -1,3 +1,10 @@
+pub mod phase;
+pub mod transitions;
+pub mod resume;
+
+pub use phase::Phase;
+pub use transitions::execute_transition;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -6,39 +13,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum Phase {
-    IdeaInput,
-    BrainstormRunning,
-    SpecReviewRunning,
-    SpecReviewPaused,
-    PlanningRunning,
-    ShardingRunning,
-    /// Coder agent is working on the current task in round N.
-    ImplementationRound(u32),
-    /// Reviewer agent is checking the current task's work in round N.
-    ReviewRound(u32),
-    Done,
-    BlockedNeedsUser,
-}
-
-impl Phase {
-    pub fn label(&self) -> String {
-        match self {
-            Phase::IdeaInput => "Idea Input".to_string(),
-            Phase::BrainstormRunning => "Brainstorming".to_string(),
-            Phase::SpecReviewRunning => "Spec Review".to_string(),
-            Phase::SpecReviewPaused => "Spec Review".to_string(),
-            Phase::PlanningRunning => "Planning".to_string(),
-            Phase::ShardingRunning => "Sharding".to_string(),
-            Phase::ImplementationRound(r) => format!("Builder: coder r{r}"),
-            Phase::ReviewRound(r) => format!("Builder: reviewer r{r}"),
-            Phase::Done => "Done".to_string(),
-            Phase::BlockedNeedsUser => "Blocked".to_string(),
-        }
-    }
-}
-
+/// An event logged to the run's events.jsonl audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub timestamp: String,
@@ -46,6 +21,7 @@ pub struct Event {
     pub message: String,
 }
 
+/// Model selected for a specific phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseModel {
     pub model: String,
@@ -82,6 +58,7 @@ pub struct BuilderState {
     pub last_verdict: Option<String>,
 }
 
+/// The persisted state of a single codexize run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunState {
     pub run_id: String,
@@ -121,7 +98,8 @@ impl RunState {
         let path = run_dir(run_id).join("run.toml");
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read run state from {}", path.display()))?;
-        toml::from_str(&text).with_context(|| format!("failed to parse run state from {}", path.display()))
+        toml::from_str(&text)
+            .with_context(|| format!("failed to parse run state from {}", path.display()))
     }
 
     pub fn save(&self) -> Result<()> {
@@ -135,6 +113,7 @@ impl RunState {
         Ok(())
     }
 
+    /// Append an event to the run's events.jsonl audit trail.
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {
         let dir = run_dir(&self.run_id);
         fs::create_dir_all(&dir)?;
@@ -156,18 +135,13 @@ impl RunState {
         Ok(())
     }
 
+    /// Transition to a new phase with validation and persistence.
     pub fn transition_to(&mut self, next_phase: Phase) -> Result<()> {
-        let old_phase = self.current_phase;
-        self.current_phase = next_phase;
-        self.log_event(format!(
-            "transitioned phase from {:?} to {:?}",
-            old_phase, next_phase
-        ))?;
-        self.save()?;
-        Ok(())
+        execute_transition(self, next_phase)
     }
 }
 
+/// Return the directory path for a given run ID.
 pub fn run_dir(run_id: &str) -> PathBuf {
     Path::new(".codexize").join("runs").join(run_id)
 }

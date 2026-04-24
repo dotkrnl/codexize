@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
-use crate::{claude, codex, gemini, kimi};
+use crate::providers::{claude, codex, gemini, kimi};
 use super::types::{VendorKind, QuotaError};
 
 pub fn load_quota_maps() -> (BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>, Vec<QuotaError>) {

@@ -2,11 +2,8 @@ mod adapters;
 mod app;
 mod artifacts;
 mod cache;
-mod claude;
-mod codex;
 mod dashboard;
-mod gemini;
-mod kimi;
+mod providers;
 mod review;
 mod runner;
 mod selection;
@@ -79,8 +76,8 @@ fn load_or_create_state() -> Result<state::RunState> {
 
         if let Some(latest) = entries.last() {
             if let Some(run_id) = latest.file_name().to_str() {
-                if let Ok(state) = state::RunState::load(run_id) {
-                    state.log_event("resuming run")?;
+                if let Ok(mut state) = state::RunState::load(run_id) {
+                    let _ = state::resume::resume_run(&mut state);
                     return Ok(state);
                 }
             }

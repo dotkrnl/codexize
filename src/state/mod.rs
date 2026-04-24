@@ -1,6 +1,6 @@
 pub mod phase;
-pub mod transitions;
 pub mod resume;
+pub mod transitions;
 
 pub use phase::Phase;
 pub use transitions::execute_transition;
@@ -46,8 +46,15 @@ pub struct RunRecord {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageKind {
+    Started,
     Brief,
     End,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MessageSender {
+    System,
+    Agent { model: String, vendor: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +62,7 @@ pub struct Message {
     pub ts: chrono::DateTime<chrono::Utc>,
     pub run_id: u64,
     pub kind: MessageKind,
+    pub sender: MessageSender,
     pub text: String,
 }
 
@@ -178,7 +186,8 @@ impl SessionState {
         if raw.get("schema_version").is_none() {
             anyhow::bail!(
                 "session {} uses schema v1; archive with `codexize archive {}` and start fresh.",
-                session_id, session_id
+                session_id,
+                session_id
             );
         }
 
@@ -246,8 +255,7 @@ impl SessionState {
             .append(true)
             .open(&path)?;
 
-        let line = serde_json::to_string(message)
-            .context("failed to serialize message")?;
+        let line = serde_json::to_string(message).context("failed to serialize message")?;
         writeln!(file, "{}", line)?;
         Ok(())
     }
@@ -271,7 +279,12 @@ impl SessionState {
                 Ok(msg) => messages.push(msg),
                 Err(e) => {
                     // Skip corrupt line, log to stderr (best effort)
-                    eprintln!("WARNING: corrupt message line {} in {}: {}", line_num + 1, session_id, e);
+                    eprintln!(
+                        "WARNING: corrupt message line {} in {}: {}",
+                        line_num + 1,
+                        session_id,
+                        e
+                    );
                 }
             }
         }
@@ -311,17 +324,14 @@ impl SessionState {
 
     /// Return the next available agent_run_id (monotonic within session).
     pub fn next_agent_run_id(&self) -> u64 {
-        self.agent_runs
-            .iter()
-            .map(|r| r.id)
-            .max()
-            .unwrap_or(0)
-            + 1
+        self.agent_runs.iter().map(|r| r.id).max().unwrap_or(0) + 1
     }
 
     /// Resume running runs on session load. Returns the current run ID if exactly one Running run exists and its window is live.
     pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
-        let running_ids: Vec<u64> = self.agent_runs.iter()
+        let running_ids: Vec<u64> = self
+            .agent_runs
+            .iter()
             .filter(|r| r.status == RunStatus::Running)
             .map(|r| r.id)
             .collect();
@@ -339,7 +349,9 @@ impl SessionState {
         }
 
         let run_id = running_ids[0];
-        let window_name = self.agent_runs.iter()
+        let window_name = self
+            .agent_runs
+            .iter()
             .find(|r| r.id == run_id)
             .map(|r| r.window_name.clone())
             .unwrap_or_default();
@@ -360,7 +372,11 @@ impl SessionState {
                 ts: chrono::Utc::now(),
                 run_id,
                 kind: MessageKind::End,
-                text: format!("failed in {}s: window missing on resume", duration.num_seconds()),
+                sender: MessageSender::System,
+                text: format!(
+                    "failed in {}s: window missing on resume",
+                    duration.num_seconds()
+                ),
             };
             let _ = self.append_message(&msg); // Best-effort
             self.save()?;
@@ -476,12 +492,22 @@ mod tests {
             ts: chrono::Utc::now(),
             run_id: 1,
             kind: MessageKind::Brief,
+            sender: MessageSender::Agent {
+                model: "gpt-5".to_string(),
+                vendor: "openai".to_string(),
+            },
             text: "Exploring codebase".to_string(),
         };
 
         assert_eq!(msg.run_id, 1);
         assert_eq!(msg.kind, MessageKind::Brief);
         assert_eq!(msg.text, "Exploring codebase");
+    }
+
+    #[test]
+    fn test_message_kind_started_deserializes() {
+        let kind = serde_json::from_str::<MessageKind>("\"Started\"");
+        assert!(kind.is_ok(), "Started message kind must deserialize");
     }
 
     #[test]
@@ -537,10 +563,14 @@ mod tests {
             let dir = session_dir("test-v1-session");
             std::fs::create_dir_all(&dir).unwrap();
             let path = dir.join("session.toml");
-            std::fs::write(&path, r#"
+            std::fs::write(
+                &path,
+                r#"
 session_id = "test-v1-session"
 current_phase = "IdeaInput"
-"#).unwrap();
+"#,
+            )
+            .unwrap();
 
             let result = SessionState::load("test-v1-session");
             assert!(result.is_err());
@@ -559,6 +589,10 @@ current_phase = "IdeaInput"
                 ts: chrono::Utc::now(),
                 run_id: 1,
                 kind: MessageKind::Brief,
+                sender: MessageSender::Agent {
+                    model: "gpt-5".to_string(),
+                    vendor: "openai".to_string(),
+                },
                 text: "Exploring code".to_string(),
             };
 
@@ -582,12 +616,17 @@ current_phase = "IdeaInput"
                 ts: chrono::Utc::now(),
                 run_id: 1,
                 kind: MessageKind::Brief,
+                sender: MessageSender::Agent {
+                    model: "gpt-5".to_string(),
+                    vendor: "openai".to_string(),
+                },
                 text: "First".to_string(),
             };
             let msg2 = Message {
                 ts: chrono::Utc::now(),
                 run_id: 1,
                 kind: MessageKind::End,
+                sender: MessageSender::System,
                 text: "done in 1m".to_string(),
             };
 
@@ -602,6 +641,64 @@ current_phase = "IdeaInput"
     }
 
     #[test]
+    fn test_load_messages_roundtrip_sender_field() {
+        with_temp_root(|| {
+            let state = SessionState::new("test-sender-msg".to_string());
+            state.save().unwrap();
+            let dir = session_dir("test-sender-msg");
+            let path = dir.join("messages.jsonl");
+            std::fs::write(
+                &path,
+                r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","sender":{"Agent":{"model":"gpt-5","vendor":"openai"}},"text":"hello"}
+"#,
+            )
+            .unwrap();
+
+            let loaded = SessionState::load_messages("test-sender-msg").unwrap();
+            assert_eq!(loaded.len(), 1);
+
+            let serialized = serde_json::to_value(&loaded[0]).unwrap();
+            assert_eq!(
+                serialized
+                    .pointer("/sender/Agent/model")
+                    .and_then(serde_json::Value::as_str),
+                Some("gpt-5")
+            );
+            assert_eq!(
+                serialized
+                    .pointer("/sender/Agent/vendor")
+                    .and_then(serde_json::Value::as_str),
+                Some("openai")
+            );
+        });
+    }
+
+    #[test]
+    fn test_load_messages_roundtrip_started_message() {
+        with_temp_root(|| {
+            let state = SessionState::new("test-started-msg".to_string());
+            state.save().unwrap();
+            let dir = session_dir("test-started-msg");
+            let path = dir.join("messages.jsonl");
+            std::fs::write(
+                &path,
+                r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Started","sender":"System","text":"agent started · gpt-5 (openai)"}
+"#,
+            )
+            .unwrap();
+
+            let loaded = SessionState::load_messages("test-started-msg").unwrap();
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].text, "agent started · gpt-5 (openai)");
+            let serialized = serde_json::to_value(&loaded[0]).unwrap();
+            assert_eq!(
+                serialized.get("kind").and_then(serde_json::Value::as_str),
+                Some("Started")
+            );
+        });
+    }
+
+    #[test]
     fn test_load_messages_with_corrupt_line() {
         with_temp_root(|| {
             let state = SessionState::new("test-corrupt-msg".to_string());
@@ -610,9 +707,9 @@ current_phase = "IdeaInput"
             // Manually write messages.jsonl with one corrupt line
             let dir = session_dir("test-corrupt-msg");
             let path = dir.join("messages.jsonl");
-            std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","text":"Good"}
+            std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","sender":{"Agent":{"model":"gpt-5","vendor":"openai"}},"text":"Good"}
 {corrupt json line here}
-{"ts":"2026-04-24T00:01:00Z","run_id":1,"kind":"End","text":"done"}
+{"ts":"2026-04-24T00:01:00Z","run_id":1,"kind":"End","sender":"System","text":"done"}
 "#).unwrap();
 
             let loaded = SessionState::load_messages("test-corrupt-msg").unwrap();
@@ -695,7 +792,10 @@ current_phase = "IdeaInput"
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
         assert_eq!(state.agent_runs[0].status, RunStatus::Failed);
-        assert_eq!(state.agent_runs[0].error, Some("window missing on resume".to_string()));
+        assert_eq!(
+            state.agent_runs[0].error,
+            Some("window missing on resume".to_string())
+        );
     }
 
     #[test]

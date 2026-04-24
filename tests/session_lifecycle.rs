@@ -1,4 +1,7 @@
-use codexize::state::{Message, MessageKind, RunRecord, RunStatus, SessionState, session_dir};
+use codexize::state::{
+    Message, MessageKind, MessageSender, RunRecord, RunStatus, SessionState, session_dir,
+};
+use std::sync::{Mutex, OnceLock};
 
 fn sample_run(id: u64, status: RunStatus) -> RunRecord {
     RunRecord {
@@ -18,6 +21,11 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
 }
 
 fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+    static TEST_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = TEST_ROOT_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let temp = tempfile::TempDir::new().expect("tempdir");
     let cwd = std::env::current_dir().expect("cwd");
 
@@ -39,6 +47,10 @@ fn session_round_trips_schema_v2_runs_and_messages() {
                 ts: chrono::Utc::now(),
                 run_id: 1,
                 kind: MessageKind::Brief,
+                sender: MessageSender::Agent {
+                    model: "claude-opus-4-7".to_string(),
+                    vendor: "anthropic".to_string(),
+                },
                 text: "drafting schema".to_string(),
             })
             .expect("append brief");
@@ -47,6 +59,7 @@ fn session_round_trips_schema_v2_runs_and_messages() {
                 ts: chrono::Utc::now(),
                 run_id: 1,
                 kind: MessageKind::End,
+                sender: MessageSender::System,
                 text: "done in 0m10s".to_string(),
             })
             .expect("append end");

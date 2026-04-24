@@ -45,12 +45,12 @@ impl App {
                 let on_current = self.selected == current_node_index(&self.nodes);
                 if on_current {
                     if self.state.current_phase == Phase::SpecReviewPaused {
-                        let _ = self.state.transition_to(Phase::SpecReviewRunning);
+                        let _ = self.transition_to_phase(Phase::SpecReviewRunning);
                         self.launch_spec_review();
                         return false;
                     }
                     if self.state.current_phase == Phase::PlanReviewPaused {
-                        let _ = self.state.transition_to(Phase::PlanReviewRunning);
+                        let _ = self.transition_to_phase(Phase::PlanReviewRunning);
                         self.launch_plan_review();
                         return false;
                     }
@@ -115,16 +115,10 @@ impl App {
                         && self.state.agent_error.is_some());
                 if can_skip_spec {
                     self.state.agent_error = None;
-                    let _ = self.state.transition_to(Phase::PlanningRunning);
-                    self.nodes = super::tree::build_tree(&self.state);
-                    self.node_scroll.resize(self.nodes.len(), usize::MAX);
-                    self.selected = current_node_index(&self.nodes);
+                    let _ = self.transition_to_phase(Phase::PlanningRunning);
                 } else if can_skip_plan {
                     self.state.agent_error = None;
-                    let _ = self.state.transition_to(Phase::ShardingRunning);
-                    self.nodes = super::tree::build_tree(&self.state);
-                    self.node_scroll.resize(self.nodes.len(), usize::MAX);
-                    self.selected = current_node_index(&self.nodes);
+                    let _ = self.transition_to_phase(Phase::ShardingRunning);
                 }
                 false
             }

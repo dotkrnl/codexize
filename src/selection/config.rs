@@ -52,6 +52,9 @@ pub struct SelectionConfig {
     pub high_variance_std_err: f64,
     pub high_variance_extra_penalty: f64,
     pub std_err_penalty_multiplier: f64,
+    /// Multiplicative penalty applied to flash-tier models (e.g. Gemini Flash/Nano)
+    /// so they become last-resort fallbacks rather than regular candidates.
+    pub flash_tier_penalty: f64,
     /// Multiplicative biases applied when a vendor (optionally restricted
     /// to a model-name substring) is being considered for the given phase.
     pub vendor_phase_biases: &'static [(VendorKind, Option<&'static str>, SelectionPhase, f64)],
@@ -66,6 +69,7 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     high_variance_std_err: 5.0,
     high_variance_extra_penalty: 10.0,
     std_err_penalty_multiplier: 1.0,
+    flash_tier_penalty: 0.05,
     vendor_phase_biases: &[
         (VendorKind::Claude, Some("opus"), SelectionPhase::Idea, 1.5),
         (VendorKind::Claude, Some("opus"), SelectionPhase::Planning, 1.5),

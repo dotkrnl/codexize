@@ -309,6 +309,11 @@ fn apply_top_third_cutoff(candidates: &mut [Candidate]) {
     }
 }
 
+fn is_flash_tier(candidate: &Candidate) -> bool {
+    candidate.vendor == VendorKind::Gemini
+        && (candidate.name.contains("flash") || candidate.name.contains("nano"))
+}
+
 fn build_candidate(
     model: dashboard::DashboardModel,
     quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
@@ -333,7 +338,7 @@ fn build_candidate(
     let review_probability =
         ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Review);
 
-    Some(Candidate {
+    let mut candidate = Candidate {
         vendor,
         name: model.name,
         stupid_level: Some(model.current_score.round().clamp(0.0, 99.0) as u8),
@@ -344,7 +349,17 @@ fn build_candidate(
         planning_probability,
         build_probability,
         review_probability,
-    })
+    };
+
+    if is_flash_tier(&candidate) {
+        let penalty = SELECTION_CONFIG.flash_tier_penalty;
+        candidate.idea_probability *= penalty;
+        candidate.planning_probability *= penalty;
+        candidate.build_probability *= penalty;
+        candidate.review_probability *= penalty;
+    }
+
+    Some(candidate)
 }
 
 #[cfg(test)]

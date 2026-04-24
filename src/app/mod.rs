@@ -1481,7 +1481,7 @@ impl App {
     ) -> bool {
         match failed_run.stage.as_str() {
             "spec-review" => self.launch_spec_review_with_model(Some(chosen)),
-            "planning" => self.launch_planning_with_model(Some(chosen), false),
+            "planning" => self.launch_planning_with_model(Some(chosen), true),
             "plan-review" => self.launch_plan_review_with_model(Some(chosen)),
             "sharding" => self.launch_sharding_with_model(Some(chosen)),
             "recovery" => self.launch_recovery_with_model(Some(chosen)),

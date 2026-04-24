@@ -1522,6 +1522,7 @@ impl App {
             .join("spec.md");
 
         let _ = std::fs::remove_file(&spec_path);
+        let _ = std::fs::remove_file(session_state::session_dir(session_id).join("artifacts").join("skip_to_impl.json"));
 
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);

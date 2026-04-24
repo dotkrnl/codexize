@@ -15,12 +15,32 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 static TEST_SAMPLE_SEED: AtomicU64 = AtomicU64::new(0);
 
 pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
-    let dashboard_models = match dashboard::load_models() {
+    let mut dashboard_models = match dashboard::load_models() {
         Ok(models) => models,
         Err(_) => return (Vec::new(), Vec::new()),
     };
 
     let (quotas, errors) = quota::load_quota_maps();
+
+    // Synthesize entries for live-quota models missing from the ranking API
+    // (e.g. "gpt-5.5" before aistupidlevel picks it up). Uses same-stem
+    // siblings' scores; once the real score lands, the name matches here and
+    // this synthesis is skipped.
+    let existing: HashSet<String> = dashboard_models.iter().map(|m| m.name.clone()).collect();
+    let mut synthesized: HashSet<String> = HashSet::new();
+    for (vendor_kind, models) in &quotas {
+        let vendor_str = vendor::vendor_kind_to_str(*vendor_kind);
+        for name in models.keys() {
+            if existing.contains(name) || synthesized.contains(name) {
+                continue;
+            }
+            if let Some(model) = dashboard::synthesize_sibling(name, vendor_str, &dashboard_models) {
+                synthesized.insert(name.clone());
+                dashboard_models.push(model);
+            }
+        }
+    }
+
     let mut candidates = dashboard_models
         .into_iter()
         .filter_map(|model| build_candidate(model, &quotas))

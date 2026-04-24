@@ -1,6 +1,15 @@
 use crate::dashboard;
 use super::types::VendorKind;
 
+pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
+    match v {
+        VendorKind::Claude => "claude",
+        VendorKind::Codex => "openai",
+        VendorKind::Gemini => "google",
+        VendorKind::Kimi => "moonshotai",
+    }
+}
+
 pub fn str_to_vendor(s: &str) -> Option<VendorKind> {
     match s {
         "claude" => Some(VendorKind::Claude),

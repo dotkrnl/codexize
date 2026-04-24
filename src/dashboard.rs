@@ -293,6 +293,43 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
         })
 }
 
+// Synthesize a DashboardModel for a name absent from the ranking API by
+// borrowing the best-scoring sibling's numbers (same version stem). Used by
+// the selection layer to keep live-quota-only models (e.g. "gpt-5.5" before
+// aistupidlevel catches up) in the candidate pool. Emits a warning so the
+// fallback is visible; once the real score lands in `existing`, the caller
+// finds an exact match and never calls this.
+pub fn synthesize_sibling(
+    name: &str,
+    vendor: &str,
+    existing: &[DashboardModel],
+) -> Option<DashboardModel> {
+    let stem = version_stem(name)?;
+    let sibling = existing
+        .iter()
+        .filter(|m| m.name != name && version_stem(&m.name) == Some(stem))
+        .max_by(|a, b| {
+            a.overall_score
+                .partial_cmp(&b.overall_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+
+    eprintln!(
+        "warning: no ranking-API score for {} yet; falling back to {}'s score",
+        name, sibling.name
+    );
+
+    Some(DashboardModel {
+        name: name.to_string(),
+        vendor: if !vendor.is_empty() { vendor.to_string() } else { sibling.vendor.clone() },
+        overall_score: sibling.overall_score,
+        current_score: sibling.current_score,
+        standard_error: sibling.standard_error,
+        axes: sibling.axes.clone(),
+        display_order: sibling.display_order,
+    })
+}
+
 fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {
     let latest = value.as_array()?.last()?;
     let axes = latest.get("axes")?.as_object()?;

@@ -1063,7 +1063,17 @@ IMPORTANT: this is a spec-only phase. Do NOT write or modify any code in the
 repository. Your only output should be the spec file. Implementation happens
 in a later phase.
 
-The operator is here and ready to respond to your questions.
+HARD RULES — override anything the superpowers / brainstorming skill suggests:
+  - Do NOT `git add`, `git commit`, `git stash`, or otherwise change version
+    control state. The spec file lives untracked; a later phase commits.
+  - Do NOT ask the operator whether to continue, proceed to planning,
+    move to the next stage, or run any follow-up skill. When the spec is
+    written, STOP and exit. The orchestrator drives stage transitions,
+    not you.
+  - If the skill offers a "continue to next stage" prompt inline, ignore
+    it and exit.
+
+The operator is here and ready to respond to your questions ABOUT THE DESIGN.
 {instr}"#
     )
 }
@@ -1112,13 +1122,16 @@ When every trade-off is resolved, do TWO things in this order:
      anything in the plan.
   2. Write the plan to: {plan}
 
-Hard rules:
+Hard rules — override anything the superpowers / writing-plans skill suggests:
   - Do NOT write or modify any code (source files, configs, build
     scripts). You may only edit the spec and write the plan.
-  - Do NOT ask the operator whether to start implementing, whether to
-    jump straight to coding, or whether to skip any downstream phase.
-    Implementation is a separate later phase handled by a different
-    agent — your job ends once the plan is written.
+  - Do NOT `git add`, `git commit`, `git stash`, or otherwise touch
+    version control. The spec and plan stay untracked; a later phase
+    commits. If the skill offers to commit, refuse.
+  - Do NOT ask the operator whether to continue, proceed, start
+    implementing, jump to coding, run the next skill, or skip any
+    downstream stage. When the plan is written, STOP and exit — the
+    orchestrator drives stage transitions, not you.
   - Do NOT offer to run tests, commit, or push anything.
 
 The operator is here and ready to respond to clarifying questions

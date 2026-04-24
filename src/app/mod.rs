@@ -554,6 +554,60 @@ impl App {
             .unwrap_or(false)
     }
 
+    /// Capture HEAD at round start so the reviewer can inspect `base..HEAD`.
+    /// Idempotent on resume: the original base is preserved.
+    fn capture_round_base(&self, round_dir: &std::path::Path) {
+        let base_file = round_dir.join("base.txt");
+        if base_file.exists() {
+            return;
+        }
+        if let Some(parent) = base_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            let _ = std::fs::write(&base_file, "test-base");
+            return;
+        }
+        if let Some(sha) = git_rev_parse_head() {
+            let _ = std::fs::write(&base_file, sha);
+        }
+    }
+
+    fn coder_gate_reason(&self, round_dir: &std::path::Path) -> Option<String> {
+        let base_file = round_dir.join("base.txt");
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            return (!Self::artifact_present(&base_file))
+                .then(|| "base_missing".to_string());
+        }
+        if !Self::artifact_present(&base_file) {
+            return Some("base_missing".to_string());
+        }
+        let base = match std::fs::read_to_string(&base_file) {
+            Ok(s) => s.trim().to_string(),
+            Err(_) => return Some("base_missing".to_string()),
+        };
+        if base.is_empty() {
+            return Some("base_missing".to_string());
+        }
+        let Some(head) = git_rev_parse_head() else {
+            return Some("git_unavailable".to_string());
+        };
+        if head == base {
+            return Some("no_commits_since_round_start".to_string());
+        }
+        let reachable = std::process::Command::new("git")
+            .args(["merge-base", "--is-ancestor", &base, &head])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !reachable {
+            return Some("base_not_reachable_history_rewritten".to_string());
+        }
+        None
+    }
+
     fn normalized_failure_reason(
         &self,
         run: &crate::state::RunRecord,
@@ -601,11 +655,10 @@ impl App {
                 }
             }
             "coder" => {
-                let commit_path = session_dir
+                let round_dir = session_dir
                     .join("rounds")
-                    .join(format!("{:03}", run.round))
-                    .join("commit.txt");
-                (!Self::artifact_present(&commit_path)).then(|| "artifact_missing".to_string())
+                    .join(format!("{:03}", run.round));
+                self.coder_gate_reason(&round_dir)
             }
             "reviewer" => {
                 let review_path = session_dir
@@ -1533,7 +1586,6 @@ impl App {
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let task_file = round_dir.join("task.md");
-        let commit_file = round_dir.join("commit.txt");
 
         if !task_file.exists() {
             let body = task_body_for(&session_dir, task_id).unwrap_or_else(|e| {
@@ -1542,7 +1594,8 @@ impl App {
             let _ = std::fs::write(&task_file, body);
         }
 
-        let _ = std::fs::remove_file(&commit_file);
+        // Pin the base HEAD before the coder runs; preserves original base on resume.
+        self.capture_round_base(&round_dir);
 
         let Some(chosen) = override_model
             .as_ref()
@@ -1564,7 +1617,7 @@ impl App {
             .agent_runs
             .iter()
             .any(|run| run.stage == "coder" && run.task_id == Some(task_id) && run.round == r);
-        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &commit_file, resume);
+        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return false;
@@ -1578,7 +1631,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
         let attempt = self.attempt_for("coder", Some(task_id), r);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&commit_file)) {
+        let launch_result = if let Some(result) = self.try_test_launch(&status_path, None) {
             result
         } else {
             let adapter = adapter_for_vendor(vendor_kind);
@@ -1629,10 +1682,30 @@ impl App {
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let review_path = round_dir.join("review.toml");
-        let commit_file = round_dir.join("commit.txt");
+        let base_file = round_dir.join("base.txt");
+        let commits_file = round_dir.join("commits.txt");
         let task_file = round_dir.join("task.md");
 
         let _ = std::fs::remove_file(&review_path);
+
+        // Pre-compute the SHA list in base..HEAD so the reviewer can glance at it
+        // without shelling out. Skipped in test mode (no real git).
+        #[cfg(not(test))]
+        if let Ok(base) = std::fs::read_to_string(&base_file) {
+            let base = base.trim();
+            if !base.is_empty() {
+                write_commits_list(&round_dir, base);
+            }
+        }
+        #[cfg(test)]
+        if self.test_launch_harness.is_none() {
+            if let Ok(base) = std::fs::read_to_string(&base_file) {
+                let base = base.trim();
+                if !base.is_empty() {
+                    write_commits_list(&round_dir, base);
+                }
+            }
+        }
 
         let excluded = self
             .state
@@ -1664,7 +1737,8 @@ impl App {
             task_id,
             r,
             &task_file,
-            &commit_file,
+            &base_file,
+            &commits_file,
             &review_path,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
@@ -2208,12 +2282,41 @@ will cause rejection. Do not emit any prose around the TOML.
     )
 }
 
+fn git_rev_parse_head() -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!sha.is_empty()).then_some(sha)
+}
+
+/// Pre-compute the list of SHAs in `base..HEAD` so the reviewer doesn't need to
+/// shell out. Writes `rounds/NNN/commits.txt` with one SHA per line. No-op in
+/// test mode (no real git) and on any git failure; the reviewer prompt only
+/// references the file when it's useful.
+fn write_commits_list(round_dir: &std::path::Path, base: &str) {
+    let commits_file = round_dir.join("commits.txt");
+    let Ok(output) = std::process::Command::new("git")
+        .args(["log", "--format=%H", &format!("{base}..HEAD")])
+        .output()
+    else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    let _ = std::fs::write(&commits_file, output.stdout);
+}
+
 fn coder_prompt(
     session_dir: &std::path::Path,
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
-    commit_file: &std::path::Path,
     resume: bool,
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
@@ -2258,10 +2361,11 @@ Your job:
      refs into the spec and plan for background.
   2. Implement the task end-to-end on the current branch.
   3. Make the tests described in the task pass.
-  4. Commit your work with a clear message (see commit rules below).
-  5. When finished, write the commit SHA to: {commit}
-     (just the short SHA, one line). This is the signal for the TUI to
-     pick up that your work is complete — the TUI polls for this file.
+  4. Commit your work on the current branch with a clear message (see commit
+     rules below). You may make one or more commits; the reviewer inspects
+     the aggregate `base..HEAD` range for this round, where `base` was pinned
+     by the orchestrator before you started. Do NOT write any SHA file — the
+     TUI detects completion by observing that HEAD has advanced past base.
 
 Commit message rules (MANDATORY — the reviewer WILL reject violations):
   - Use Conventional Commits: `type(scope): summary`, e.g.
@@ -2294,7 +2398,6 @@ Hard rules:
         plan = plan.display(),
         prev_review = prev_review,
         resume_hint = resume_hint,
-        commit = commit_file.display(),
         instr = instr,
     )
 }
@@ -2304,7 +2407,8 @@ fn reviewer_prompt(
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
-    commit_file: &std::path::Path,
+    base_file: &std::path::Path,
+    commits_file: &std::path::Path,
     review_file: &std::path::Path,
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
@@ -2319,13 +2423,21 @@ Inputs:
   Task:         {task}
   Spec:         {spec}
   Plan:         {plan}
-  Commit SHA:   {commit}
+  Base SHA:     {base} (contents are one SHA — HEAD at round start)
+  Commit list:  {commits} (one SHA per line in `base..HEAD`, may be empty
+                 if git was unavailable — fall back to `git log` yourself)
 
 Review the change carefully:
-  1. `git show $(cat {commit})` to see what was actually committed.
+  1. BASE=$(cat {base})
+     `git log --oneline $BASE..HEAD`  — see every commit in this round.
+     `git diff $BASE..HEAD`            — see the aggregate change.
+     `git show <sha>`                  — drill into any individual commit.
+     The coder may have made one or more commits; judge the aggregate delta
+     against the task. Per-commit structure is the coder's choice.
   2. Verify the task's test description passes (run it, inspect code).
   3. Check for issues: correctness, missing edge cases, broken contracts,
-     bad error handling, test gaps.
+     bad error handling, test gaps. Uncommitted working-tree changes are
+     NOT in scope — review only what's in `base..HEAD`.
 
 Emit the verdict to: {review}
 in EXACTLY this TOML shape (double-quoted strings; triple-quoted for
@@ -2363,7 +2475,8 @@ Rules:
         task = task_file.display(),
         spec = spec.display(),
         plan = plan.display(),
-        commit = commit_file.display(),
+        base = base_file.display(),
+        commits = commits_file.display(),
         review = review_file.display(),
         instr = instr,
     )

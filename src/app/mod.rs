@@ -84,8 +84,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(tmux: TmuxContext, state: SessionState) -> Self {
+    pub fn new(tmux: TmuxContext, mut state: SessionState) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
+        if state.builder.task_titles.is_empty() {
+            let tasks_path = session_state::session_dir(&state.session_id)
+                .join("artifacts")
+                .join("tasks.toml");
+            if let Ok(parsed) = tasks::validate(&tasks_path) {
+                state.builder.task_titles = parsed
+                    .tasks
+                    .into_iter()
+                    .map(|t| (t.id, t.title))
+                    .collect();
+            }
+        }
         let nodes = build_tree(&state);
         let current = current_node_index(&nodes);
         let failed_models = Self::rebuild_failed_models(&state);
@@ -1088,6 +1100,12 @@ impl App {
         }
 
         self.state.builder.pending = recovered_ids;
+        for task in &parsed.tasks {
+            self.state
+                .builder
+                .task_titles
+                .insert(task.id, task.title.clone());
+        }
         self.state.builder.current_task = None;
         self.state.builder.retry_reset_run_id_cutoff = Some(recovery_run_id);
         self.state.builder.recovery_trigger_task_id = None;
@@ -1309,6 +1327,11 @@ impl App {
                     Ok(parsed) => {
                         self.state.builder.pending =
                             parsed.tasks.iter().map(|task| task.id).collect();
+                        self.state.builder.task_titles = parsed
+                            .tasks
+                            .iter()
+                            .map(|t| (t.id, t.title.clone()))
+                            .collect();
                         self.state.builder.current_task = None;
                         self.state.builder.done.clear();
                         self.state.builder.iteration = 0;
@@ -2594,7 +2617,8 @@ Sizing:
 
 Required fields per task:
   - id               sequential integer starting at 1
-  - title            one-line summary
+  - title            very short summary (≤60 chars, imperative, no trailing
+                     period) — shown as the task label in the pipeline UI
   - description      detailed what-to-do (multi-line TOML string allowed)
   - test             concrete verification steps, OR the literal string
                      "not testable" followed by a one-line reason (e.g.

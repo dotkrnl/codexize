@@ -194,8 +194,14 @@ fn build_builder_stage(state: &SessionState) -> Node {
         } else {
             NodeStatus::Pending
         };
+        let label = match state.builder.task_titles.get(&task_id) {
+            Some(title) if !title.trim().is_empty() => {
+                format!("Task {}: {}", task_id, title.trim())
+            }
+            _ => format!("Task {}", task_id),
+        };
         children.push(Node {
-            label: format!("Task {}", task_id),
+            label,
             kind: NodeKind::Task,
             status: task_status,
             summary: String::new(),

@@ -157,6 +157,10 @@ pub struct BuilderState {
     /// run id are ignored when rebuilding retry exclusions after restart.
     #[serde(default)]
     pub retry_reset_run_id_cutoff: Option<u64>,
+    /// Short one-line titles keyed by task id, sourced from tasks.toml.
+    /// Used to label task nodes in the pipeline tree.
+    #[serde(default)]
+    pub task_titles: std::collections::BTreeMap<u32, String>,
 }
 
 /// The persisted state of a single codexize session.

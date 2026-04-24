@@ -26,3 +26,20 @@ pub fn stop(terminal: &mut AppTerminal) -> Result<()> {
 
     Ok(())
 }
+
+/// Temporarily drops out of the TUI so an external program (e.g. vim) can
+/// own the terminal, then restores the alternate screen on return.
+pub fn run_foreground<F>(terminal: &mut AppTerminal, f: F) -> Result<()>
+where
+    F: FnOnce() -> Result<()>,
+{
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+    let outcome = f();
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+    outcome
+}

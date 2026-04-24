@@ -68,6 +68,7 @@ pub struct App {
     input_mode: bool,
     input_buffer: String,
     input_cursor: usize,
+    pending_view_path: Option<std::path::PathBuf>,
     confirm_back: bool,
     window_launched: bool,
     quota_errors: Vec<QuotaError>,
@@ -120,6 +121,7 @@ impl App {
             input_mode: false,
             input_buffer: String::new(),
             input_cursor: 0,
+            pending_view_path: None,
             confirm_back: false,
             window_launched: false,
             quota_errors: Vec::new(),
@@ -209,6 +211,16 @@ impl App {
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         loop {
+            if let Some(path) = self.pending_view_path.take() {
+                let _ = crate::tui::run_foreground(terminal, || {
+                    let _ = std::process::Command::new(
+                        std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
+                    )
+                    .arg(&path)
+                    .status();
+                    Ok(())
+                });
+            }
             self.refresh_models_if_due();
             self.poll_agent_window();
             self.maybe_auto_launch();
@@ -426,6 +438,15 @@ impl App {
         let _ = std::process::Command::new("tmux")
             .args(["select-window", "-t", "[Edit]"])
             .output();
+    }
+
+    pub(super) fn queue_view_of_current_artifact(&mut self, filename: &str) {
+        let path = session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join(filename);
+        if path.exists() {
+            self.pending_view_path = Some(path);
+        }
     }
 
     fn can_go_back(&self) -> bool {
@@ -2682,6 +2703,10 @@ Idea:
 
 When the skill asks where to write the design doc, write it to {spec_path}.
 
+At the very TOP of the spec file, before anything else, include a short
+"TL;DR" section: 3–6 bullet points capturing the key decisions so a lazy
+reader can skim it in 30 seconds.
+
 This is a spec-only phase: do NOT write or modify any code; the spec file is
 your only output. Implementation happens in a later phase.
 
@@ -2752,7 +2777,10 @@ Once every trade-off is resolved, do TWO things IN THIS ORDER:
   1. UPDATE the spec in place at {spec} so it reflects accepted feedback and
      every decision you just made. Another agent reading ONLY the spec must not
      be surprised by anything in the plan.
-  2. Write the plan to {plan}.
+  2. Write the plan to {plan}. At the very TOP of the plan, before anything
+     else, include a short "TL;DR" section: 3–6 bullet points summarising the
+     key sequencing/interface decisions so a lazy reader can skim it in 30
+     seconds.
 
 Hard rules — override anything the writing-plans skill suggests:
   - Do NOT write or modify any code (source, configs, build scripts). You may
@@ -3248,6 +3276,7 @@ mod tests {
             input_mode: false,
             input_buffer: String::new(),
             input_cursor: 0,
+            pending_view_path: None,
             confirm_back: false,
             window_launched: true,
             quota_errors: Vec::new(),
@@ -3509,6 +3538,7 @@ mod tests {
             input_mode: false,
             input_buffer: String::new(),
             input_cursor: 0,
+            pending_view_path: None,
             confirm_back: false,
             window_launched: false,
             quota_errors: Vec::new(),

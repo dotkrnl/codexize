@@ -121,9 +121,11 @@ impl App {
                         && self.state.agent_error.is_some());
                 if can_skip_spec {
                     self.state.agent_error = None;
+                    self.queue_view_of_current_artifact("spec.md");
                     let _ = self.transition_to_phase(Phase::PlanningRunning);
                 } else if can_skip_plan {
                     self.state.agent_error = None;
+                    self.queue_view_of_current_artifact("plan.md");
                     let _ = self.transition_to_phase(Phase::ShardingRunning);
                 }
                 false

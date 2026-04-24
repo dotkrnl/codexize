@@ -1,6 +1,35 @@
-use crate::state::{Phase, SessionState};
+use crate::state::{AttemptStatus, Phase, PhaseAttempt, SessionState};
 
-use super::state::{PipelineSection, SectionStatus};
+use super::state::{AttemptSection, PipelineSection, SectionStatus};
+
+fn attempt_section_from(phase_attempt: &PhaseAttempt, label: String) -> AttemptSection {
+    AttemptSection {
+        label,
+        status: match phase_attempt.status {
+            AttemptStatus::Done => SectionStatus::Done,
+            AttemptStatus::Failed => SectionStatus::Failed,
+        },
+        summary: phase_attempt.summary.clone(),
+        events: phase_attempt.events.clone(),
+        transcript: phase_attempt.transcript.clone(),
+        live_summary: phase_attempt.live_summary.clone(),
+    }
+}
+
+fn build_attempts(state: &SessionState, key: &str) -> Vec<AttemptSection> {
+    let mut result = Vec::new();
+    if let Some(attempts) = state.phase_attempts.get(key) {
+        for (idx, attempt) in attempts.iter().enumerate() {
+            let label = if key.starts_with("builder-round-") {
+                format!("Round {}", idx + 1)
+            } else {
+                format!("Attempt {}", idx + 1)
+            };
+            result.push(attempt_section_from(attempt, label));
+        }
+    }
+    result
+}
 
 pub(super) fn phase_done_summary(state: &SessionState, phase: &str, label: &str) -> String {
     match state.phase_models.get(phase) {
@@ -11,6 +40,10 @@ pub(super) fn phase_done_summary(state: &SessionState, phase: &str, label: &str)
 
 pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec<PipelineSection> {
     let phase = state.current_phase;
+    let builder_key = match phase {
+        Phase::ImplementationRound(r) | Phase::ReviewRound(r) => format!("builder-round-{r}"),
+        _ => "builder-loop".to_string(),
+    };
     vec![
         match phase {
             Phase::IdeaInput => PipelineSection::waiting_user(
@@ -26,7 +59,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-        },
+        }.with_attempts(build_attempts(state, "idea")),
         match phase {
             Phase::IdeaInput => PipelineSection::pending("Brainstorm", "waiting for idea"),
             Phase::BrainstormRunning => {
@@ -64,7 +97,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-        },
+        }.with_attempts(build_attempts(state, "brainstorm")),
         match phase {
             Phase::IdeaInput | Phase::BrainstormRunning => {
                 PipelineSection::pending("Spec Review", "blocked on brainstorm")
@@ -121,7 +154,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-        },
+        }.with_attempts(build_attempts(state, "spec-review")),
         match phase {
             Phase::IdeaInput | Phase::BrainstormRunning
             | Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
@@ -154,7 +187,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-        },
+        }.with_attempts(build_attempts(state, "planning")),
         match phase {
             Phase::IdeaInput | Phase::BrainstormRunning
             | Phase::SpecReviewRunning | Phase::SpecReviewPaused
@@ -187,7 +220,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                 Vec::<String>::new(),
                 Vec::<String>::new(),
             ),
-        },
+        }.with_attempts(build_attempts(state, "sharding")),
         match phase {
             Phase::IdeaInput
             | Phase::BrainstormRunning
@@ -240,7 +273,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                     )
                 }
             }
-        },
+        }.with_attempts(build_attempts(state, &builder_key)),
     ]
 }
 
@@ -273,4 +306,96 @@ pub(super) fn current_section_index(sections: &[PipelineSection]) -> usize {
                 .map(|i| i.min(sections.len().saturating_sub(1)))
         })
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AttemptStatus, PhaseAttempt, SessionState};
+
+    fn state_with_attempts(key: &str, attempts: Vec<PhaseAttempt>) -> SessionState {
+        let mut state = SessionState::new("test".to_string());
+        state.phase_attempts.insert(key.to_string(), attempts);
+        state
+    }
+
+    #[test]
+    fn test_build_sections_no_attempts() {
+        let state = SessionState::new("test".to_string());
+        let sections = build_sections(&state, false);
+        assert!(sections.iter().all(|s| s.attempts.is_empty()));
+    }
+
+    #[test]
+    fn test_build_sections_brainstorm_failed_attempt() {
+        let state = state_with_attempts(
+            "brainstorm",
+            vec![PhaseAttempt {
+                status: AttemptStatus::Failed,
+                summary: "timeout".to_string(),
+                events: vec!["error: timeout".to_string()],
+                transcript: Vec::new(),
+                error: Some("timeout".to_string()),
+                live_summary: "almost done".to_string(),
+            }],
+        );
+        let sections = build_sections(&state, false);
+        let brainstorm = sections.iter().find(|s| s.name == "Brainstorm").unwrap();
+        assert_eq!(brainstorm.attempts.len(), 1);
+        assert_eq!(brainstorm.attempts[0].label, "Attempt 1");
+        assert_eq!(brainstorm.attempts[0].status, SectionStatus::Failed);
+        assert_eq!(brainstorm.attempts[0].live_summary, "almost done");
+    }
+
+    #[test]
+    fn test_build_sections_builder_round_label() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.phase_attempts.insert(
+            "builder-round-1".to_string(),
+            vec![PhaseAttempt {
+                status: AttemptStatus::Done,
+                summary: "round complete".to_string(),
+                events: Vec::new(),
+                transcript: Vec::new(),
+                error: None,
+                live_summary: "committed".to_string(),
+            }],
+        );
+        let sections = build_sections(&state, false);
+        let builder = sections.iter().find(|s| s.name == "Builder Loop").unwrap();
+        assert_eq!(builder.attempts.len(), 1);
+        assert_eq!(builder.attempts[0].label, "Round 1");
+        assert_eq!(builder.attempts[0].status, SectionStatus::Done);
+    }
+
+    #[test]
+    fn test_build_sections_multiple_attempts_ordered() {
+        let state = state_with_attempts(
+            "planning",
+            vec![
+                PhaseAttempt {
+                    status: AttemptStatus::Failed,
+                    summary: "first fail".to_string(),
+                    events: Vec::new(),
+                    transcript: Vec::new(),
+                    error: None,
+                    live_summary: String::new(),
+                },
+                PhaseAttempt {
+                    status: AttemptStatus::Done,
+                    summary: "second success".to_string(),
+                    events: Vec::new(),
+                    transcript: Vec::new(),
+                    error: None,
+                    live_summary: String::new(),
+                },
+            ],
+        );
+        let sections = build_sections(&state, false);
+        let planning = sections.iter().find(|s| s.name == "Planning").unwrap();
+        assert_eq!(planning.attempts.len(), 2);
+        assert_eq!(planning.attempts[0].label, "Attempt 1");
+        assert_eq!(planning.attempts[1].label, "Attempt 2");
+    }
 }

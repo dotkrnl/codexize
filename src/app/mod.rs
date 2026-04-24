@@ -49,6 +49,9 @@ pub struct App {
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,
     agent_line_count: usize,
+    live_summary: String,
+    live_summary_path: Option<std::path::PathBuf>,
+    live_summary_mtime: Option<std::time::SystemTime>,
 }
 
 impl App {
@@ -87,6 +90,9 @@ impl App {
             quota_errors,
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
+            live_summary: String::new(),
+            live_summary_path: None,
+            live_summary_mtime: None,
         }
     }
 
@@ -95,6 +101,7 @@ impl App {
             self.refresh_models_if_due();
             self.poll_agent_window();
             self.update_agent_progress();
+            self.poll_live_summary();
             terminal.draw(|frame| self.draw(frame))?;
 
             if event::poll(Duration::from_millis(250))? {
@@ -238,6 +245,68 @@ impl App {
         self.selected = current_section_index(&self.sections);
     }
 
+    fn record_attempt(&mut self, status: crate::state::AttemptStatus) {
+        let section_idx = current_section_index(&self.sections);
+        let section = &self.sections[section_idx];
+        let key = phase_attempt_key(self.state.current_phase);
+
+        let attempt = crate::state::PhaseAttempt {
+            status,
+            summary: section.summary.clone(),
+            events: section.events.clone(),
+            transcript: section.transcript.clone(),
+            error: self.state.agent_error.clone(),
+            live_summary: self.live_summary.clone(),
+        };
+
+        self.state.phase_attempts.entry(key).or_default().push(attempt);
+    }
+
+    fn poll_live_summary(&mut self) {
+        if !self.window_launched {
+            self.live_summary.clear();
+            self.live_summary_mtime = None;
+            return;
+        }
+
+        let Some(path) = self.live_summary_path.clone() else {
+            self.live_summary.clear();
+            return;
+        };
+
+        let Ok(meta) = std::fs::metadata(&path) else {
+            self.live_summary.clear();
+            self.live_summary_mtime = None;
+            return;
+        };
+
+        let Ok(mtime) = meta.modified() else {
+            return;
+        };
+
+        let stale = mtime
+            .elapsed()
+            .map(|d| d > std::time::Duration::from_secs(60))
+            .unwrap_or(true);
+
+        if stale {
+            self.live_summary.clear();
+            return;
+        }
+
+        let should_read = match self.live_summary_mtime {
+            None => true,
+            Some(cached) => mtime > cached,
+        };
+
+        if should_read {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                self.live_summary = content.trim().to_string();
+                self.live_summary_mtime = Some(mtime);
+            }
+        }
+    }
+
     fn update_agent_progress(&mut self) {
         if !self.window_launched {
             self.agent_line_count = 0;
@@ -325,6 +394,25 @@ impl App {
         }
 
         self.window_launched = false;
+
+        // Snapshot attempt before any transition or rebuild.
+        match self.state.current_phase {
+            Phase::ImplementationRound(_) => {
+                // Successful coder round defers recording until reviewer completes.
+                if !artifact_path.exists() {
+                    self.record_attempt(crate::state::AttemptStatus::Failed);
+                }
+            }
+            _ => {
+                let status = if artifact_path.exists() && self.state.agent_error.is_none() {
+                    crate::state::AttemptStatus::Done
+                } else {
+                    crate::state::AttemptStatus::Failed
+                };
+                self.record_attempt(status);
+            }
+        }
+
         if artifact_path.exists() {
             if self.state.current_phase == Phase::ShardingRunning {
                 match tasks::validate(&artifact_path) {
@@ -468,7 +556,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let prompt = brainstorm_prompt(&idea, &spec_path.display().to_string());
+        let live_summary_path = session_state::session_dir(session_id).join("artifacts").join("live_summary.txt");
+        let prompt = brainstorm_prompt(&idea, &spec_path.display().to_string(), &live_summary_path.display().to_string());
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected]
                 .events
@@ -492,6 +581,9 @@ impl App {
                 );
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -545,7 +637,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let prompt = spec_review_prompt(&spec_path.display().to_string(), &review_path.display().to_string());
+        let live_summary_path = session_state::session_dir(&session_id).join("artifacts").join("live_summary.txt");
+        let prompt = spec_review_prompt(&spec_path.display().to_string(), &review_path.display().to_string(), &live_summary_path.display().to_string());
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
             return;
@@ -565,6 +658,9 @@ impl App {
                 );
                 let _ = self.state.save();
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -611,7 +707,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let prompt = planning_prompt(&spec_path, &review_paths, &plan_path);
+        let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+        let prompt = planning_prompt(&spec_path, &review_paths, &plan_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
             return;
@@ -631,6 +728,9 @@ impl App {
                 );
                 let _ = self.state.save();
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -673,7 +773,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path);
+        let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+        let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
             return;
@@ -693,6 +794,9 @@ impl App {
                 );
                 let _ = self.state.save();
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -769,6 +873,9 @@ impl App {
                 self.state.builder.coder_started = true;
                 let _ = self.state.save();
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -836,6 +943,9 @@ impl App {
                 self.state.builder.reviewer_started = true;
                 let _ = self.state.save();
                 self.window_launched = true;
+                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
+                self.live_summary.clear();
+                self.live_summary_mtime = None;
                 self.sections = build_sections(&self.state, self.window_launched);
                 self.section_scroll.resize(self.sections.len(), usize::MAX);
                 self.selected = current_section_index(&self.sections);
@@ -844,6 +954,17 @@ impl App {
                 self.sections[self.selected].events.push(format!("failed to launch reviewer: {e}"));
             }
         }
+    }
+}
+
+fn phase_attempt_key(phase: Phase) -> String {
+    match phase {
+        Phase::BrainstormRunning => "brainstorm".to_string(),
+        Phase::SpecReviewRunning => "spec-review".to_string(),
+        Phase::PlanningRunning => "planning".to_string(),
+        Phase::ShardingRunning => "sharding".to_string(),
+        Phase::ImplementationRound(r) | Phase::ReviewRound(r) => format!("builder-round-{r}"),
+        _ => "unknown".to_string(),
     }
 }
 
@@ -879,7 +1000,17 @@ fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
     ))
 }
 
-fn spec_review_prompt(spec_path: &str, review_path: &str) -> String {
+fn live_summary_instruction(path: &std::path::Path) -> String {
+    format!(
+        "\n\nPeriodically write a concise plain-text summary of your current progress \
+         and next intended action to:\n  {}\nUpdate this file every 2–3 minutes or \
+         whenever your major sub-goal changes. One paragraph is enough.\n",
+        path.display()
+    )
+}
+
+fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &str) -> String {
+    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
         r#"You are reviewing a spec written by another agent. This is a NON-INTERACTIVE run —
 the operator is NOT available. Do not ask clarifying questions; make your best
@@ -898,11 +1029,12 @@ The review must cover:
 - Overall verdict (approve / approve-with-changes / reject)
 - Specific issues found (if any), each with a suggested fix
 - Open risks the spec does not address
-"#
+{instr}"#
     )
 }
 
-fn brainstorm_prompt(idea: &str, spec_path: &str) -> String {
+fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> String {
+    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
         r#"Invoke your brainstorming skill now.
 
@@ -920,7 +1052,7 @@ repository. Your only output should be the spec file. Implementation happens
 in a later phase.
 
 The operator is here and ready to respond to your questions.
-"#
+{instr}"#
     )
 }
 
@@ -928,7 +1060,9 @@ fn planning_prompt(
     spec_path: &std::path::Path,
     review_paths: &[std::path::PathBuf],
     plan_path: &std::path::Path,
+    live_summary_path: &std::path::Path,
 ) -> String {
+    let instr = live_summary_instruction(live_summary_path);
     let reviews_block = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
     } else {
@@ -977,10 +1111,11 @@ Hard rules:
 
 The operator is here and ready to respond to clarifying questions
 about the design itself.
-"#,
+{instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,
         plan = plan_path.display(),
+        instr = instr,
     )
 }
 
@@ -988,7 +1123,9 @@ fn sharding_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
     tasks_path: &std::path::Path,
+    live_summary_path: &std::path::Path,
 ) -> String {
+    let instr = live_summary_instruction(live_summary_path);
     format!(
         r#"You are splitting an approved plan into actionable, self-contained,
 testable tasks. This is a NON-INTERACTIVE run — the operator is NOT
@@ -1052,10 +1189,11 @@ multi-line, arrays of inline tables for refs):
 
 The file will be validated programmatically — missing or empty fields
 will cause rejection. Do not emit any prose around the TOML.
-"#,
+{instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),
         tasks = tasks_path.display(),
+        instr = instr,
     )
 }
 
@@ -1084,6 +1222,8 @@ fn coder_prompt(
     } else {
         ""
     };
+    let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+    let instr = live_summary_instruction(&live_summary_path);
     format!(
         r#"You are the coder for task {task_id}, round {round}. This is a
 NON-INTERACTIVE run — the operator is NOT available during coding.
@@ -1111,7 +1251,7 @@ Hard rules:
     do NOT do it yourself — note it for the reviewer instead.
   - Do NOT force-push, rebase history, or delete branches.
   - Do NOT proceed to the next task; one task per round.
-"#,
+{instr}"#,
         task_id = task_id,
         round = round,
         task = task_file.display(),
@@ -1120,6 +1260,7 @@ Hard rules:
         prev_review = prev_review,
         resume_hint = resume_hint,
         commit = commit_file.display(),
+        instr = instr,
     )
 }
 
@@ -1133,6 +1274,8 @@ fn reviewer_prompt(
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
+    let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+    let instr = live_summary_instruction(&live_summary_path);
     format!(
         r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
 the operator is NOT available. Do NOT modify code. Write ONLY the review TOML.
@@ -1179,7 +1322,7 @@ Rules:
                           what's unclear or stuck.
   - Do NOT leave feedback empty for revise/blocked.
   - Do NOT emit prose outside the TOML.
-"#,
+{instr}"#,
         task_id = task_id,
         round = round,
         task = task_file.display(),
@@ -1187,5 +1330,6 @@ Rules:
         plan = plan.display(),
         commit = commit_file.display(),
         review = review_file.display(),
+        instr = instr,
     )
 }

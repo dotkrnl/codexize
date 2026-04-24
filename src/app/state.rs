@@ -4,6 +4,17 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 #[derive(Debug)]
+pub(crate) struct AttemptSection {
+    pub(super) label: String,
+    pub(super) status: SectionStatus,
+    pub(super) summary: String,
+    pub(super) events: Vec<String>,
+    #[allow(dead_code)]
+    pub(super) transcript: Vec<String>,
+    pub(super) live_summary: String,
+}
+
+#[derive(Debug)]
 pub(crate) struct PipelineSection {
     pub(super) name: String,
     pub(super) status: SectionStatus,
@@ -11,6 +22,7 @@ pub(crate) struct PipelineSection {
     pub(super) events: Vec<String>,
     pub(super) transcript: Vec<String>,
     pub(super) input_placeholder: Option<String>,
+    pub(super) attempts: Vec<AttemptSection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +31,7 @@ pub(super) enum SectionStatus {
     Running,
     WaitingUser,
     Done,
+    Failed,
 }
 
 #[derive(Debug)]
@@ -44,6 +57,7 @@ impl PipelineSection {
             events: events.into_iter().map(Into::into).collect(),
             transcript: transcript.into_iter().map(Into::into).collect(),
             input_placeholder: None,
+            attempts: Vec::new(),
         }
     }
 
@@ -61,6 +75,7 @@ impl PipelineSection {
             events: events.into_iter().map(Into::into).collect(),
             transcript: transcript.into_iter().map(Into::into).collect(),
             input_placeholder: Some(input_placeholder.into()),
+            attempts: Vec::new(),
         }
     }
 
@@ -76,6 +91,7 @@ impl PipelineSection {
             events: events.into_iter().map(Into::into).collect(),
             transcript: Vec::new(),
             input_placeholder: None,
+            attempts: Vec::new(),
         }
     }
 
@@ -87,6 +103,7 @@ impl PipelineSection {
             events: Vec::new(),
             transcript: Vec::new(),
             input_placeholder: None,
+            attempts: Vec::new(),
         }
     }
 
@@ -102,7 +119,13 @@ impl PipelineSection {
             events: events.into_iter().map(Into::into).collect(),
             transcript: Vec::new(),
             input_placeholder: None,
+            attempts: Vec::new(),
         }
+    }
+
+    pub(super) fn with_attempts(mut self, attempts: Vec<AttemptSection>) -> Self {
+        self.attempts = attempts;
+        self
     }
 }
 
@@ -113,6 +136,7 @@ impl SectionStatus {
             Self::Running => "running",
             Self::WaitingUser => "waiting-user",
             Self::Done => "done",
+            Self::Failed => "failed",
         }
     }
 
@@ -122,6 +146,7 @@ impl SectionStatus {
             Self::Running => Style::default().fg(Color::Cyan),
             Self::WaitingUser => Style::default().fg(Color::Yellow),
             Self::Done => Style::default().fg(Color::Green),
+            Self::Failed => Style::default().fg(Color::Red),
         }
     }
 }

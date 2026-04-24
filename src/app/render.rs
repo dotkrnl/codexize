@@ -23,6 +23,53 @@ fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 
+fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&c) = chars.peek() {
+                    chars.next();
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+fn sanitize_live_summary(text: &str) -> String {
+    let stripped = strip_ansi_codes(text);
+    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(500).collect()
+}
+
+fn hard_wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            if !current.is_empty() && current.len() + 1 + word.len() > width {
+                lines.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+    lines
+}
+
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
         let model_height = (self.models.len() + self.quota_errors.len()).max(1) as u16 + 2;
@@ -287,6 +334,25 @@ impl App {
             }
         }
 
+        // Live summary for currently running agent
+        if section.status == SectionStatus::Running
+            && self.window_launched
+            && !self.live_summary.is_empty()
+        {
+            let sanitized = sanitize_live_summary(&self.live_summary);
+            let wrapped = hard_wrap(&sanitized, 80);
+            for (i, line) in wrapped.into_iter().enumerate() {
+                lines.insert(
+                    i,
+                    Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled("⦿ ", Style::default().fg(Color::Green)),
+                        Span::raw(line),
+                    ]),
+                );
+            }
+        }
+
         if section.events.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  - no events yet",
@@ -353,6 +419,53 @@ impl App {
             let fill = width.saturating_sub(hint.len() + 2);
             let bottom = format!("  ╰{}{hint}╯", "─".repeat(fill));
             lines.push(Line::from(Span::styled(bottom, Style::default().fg(frame_color))));
+        }
+
+        // Historical attempts
+        if !section.attempts.is_empty() {
+            lines.push(Line::from(""));
+            for attempt in &section.attempts {
+                lines.push(Line::from(vec![
+                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{} ", attempt.label),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("({})", attempt.status.label()),
+                        attempt.status.style(),
+                    ),
+                    Span::styled(" ──", Style::default().fg(Color::DarkGray)),
+                ]));
+                if !attempt.summary.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(attempt.summary.clone(), Style::default().fg(Color::Gray)),
+                    ]));
+                }
+                for event in &attempt.events {
+                    lines.push(Line::from(vec![
+                        Span::styled("      - ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(event.clone()),
+                    ]));
+                }
+                if !attempt.live_summary.is_empty() {
+                    lines.push(Line::from(vec![Span::styled(
+                        "    Final Summary: ",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    )]));
+                    let sanitized = sanitize_live_summary(&attempt.live_summary);
+                    let wrapped = hard_wrap(&sanitized, 80);
+                    for line in wrapped {
+                        lines.push(Line::from(vec![
+                            Span::styled("      ", Style::default()),
+                            Span::raw(line),
+                        ]));
+                    }
+                }
+            }
         }
 
         lines

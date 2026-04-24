@@ -21,6 +21,26 @@ pub struct Event {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AttemptStatus {
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseAttempt {
+    pub status: AttemptStatus,
+    pub summary: String,
+    #[serde(default)]
+    pub events: Vec<String>,
+    #[serde(default)]
+    pub transcript: Vec<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub live_summary: String,
+}
+
 /// Model selected for a specific phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseModel {
@@ -80,6 +100,8 @@ pub struct SessionState {
     pub builder: BuilderState,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub phase_attempts: std::collections::BTreeMap<String, Vec<PhaseAttempt>>,
 }
 
 impl SessionState {
@@ -94,6 +116,7 @@ impl SessionState {
             spec_reviewers: Vec::new(),
             builder: BuilderState::default(),
             archived: false,
+            phase_attempts: std::collections::BTreeMap::new(),
         }
     }
 
@@ -169,6 +192,29 @@ mod tests {
 
         let loaded: SessionState = toml::from_str(&toml).unwrap();
         assert!(loaded.archived);
+    }
+
+    #[test]
+    fn test_phase_attempts_roundtrip() {
+        let mut state = SessionState::new("test".to_string());
+        state.phase_attempts.insert(
+            "brainstorm".to_string(),
+            vec![PhaseAttempt {
+                status: AttemptStatus::Failed,
+                summary: "spec generation failed".to_string(),
+                events: vec!["error: timeout".to_string()],
+                transcript: Vec::new(),
+                error: Some("timeout".to_string()),
+                live_summary: "working on section 3...".to_string(),
+            }],
+        );
+        let toml = toml::to_string(&state).unwrap();
+        let loaded: SessionState = toml::from_str(&toml).unwrap();
+        assert_eq!(loaded.phase_attempts.len(), 1);
+        let attempts = loaded.phase_attempts.get("brainstorm").unwrap();
+        assert_eq!(attempts[0].status, AttemptStatus::Failed);
+        assert_eq!(attempts[0].summary, "spec generation failed");
+        assert_eq!(attempts[0].live_summary, "working on section 3...");
     }
 
     #[test]

@@ -92,20 +92,6 @@ pub enum AttemptStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PhaseAttempt {
-    pub status: AttemptStatus,
-    pub summary: String,
-    #[serde(default)]
-    pub events: Vec<String>,
-    #[serde(default)]
-    pub transcript: Vec<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
-    pub live_summary: String,
-}
-
 /// Model selected for a specific phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseModel {
@@ -129,14 +115,6 @@ pub struct BuilderState {
     /// Global iteration counter — one coder+reviewer cycle is one iteration.
     #[serde(default)]
     pub iteration: u32,
-    /// True if we've launched the coder for the current iteration at least
-    /// once — subsequent launches use the CLI's --continue flag to resume
-    /// the session rather than start fresh.
-    #[serde(default)]
-    pub coder_started: bool,
-    /// Same, for the reviewer.
-    #[serde(default)]
-    pub reviewer_started: bool,
     /// Last reviewer verdict status ("done", "revise", "blocked") — used to
     /// decide where to resume on restart.
     #[serde(default)]
@@ -157,22 +135,11 @@ pub struct SessionState {
     pub selected_model: Option<String>,
     #[serde(default)]
     pub agent_error: Option<String>,
-    /// Model used per phase, keyed by phase label string
-    #[serde(default)]
-    pub phase_models: std::collections::BTreeMap<String, PhaseModel>,
-    /// All spec reviewers in order (may be multiple rounds)
-    #[serde(default)]
-    pub spec_reviewers: Vec<PhaseModel>,
-    /// All plan reviewers in order (may be multiple rounds)
-    #[serde(default)]
-    pub plan_reviewers: Vec<PhaseModel>,
     /// Builder loop state (empty until sharding completes)
     #[serde(default)]
     pub builder: BuilderState,
     #[serde(default)]
     pub archived: bool,
-    #[serde(default)]
-    pub phase_attempts: std::collections::BTreeMap<String, Vec<PhaseAttempt>>,
 }
 
 impl SessionState {
@@ -185,12 +152,8 @@ impl SessionState {
             idea_text: None,
             selected_model: None,
             agent_error: None,
-            phase_models: std::collections::BTreeMap::new(),
-            spec_reviewers: Vec::new(),
-            plan_reviewers: Vec::new(),
             builder: BuilderState::default(),
             archived: false,
-            phase_attempts: std::collections::BTreeMap::new(),
         }
     }
 
@@ -314,6 +277,57 @@ impl SessionState {
             .max()
             .unwrap_or(0)
             + 1
+    }
+
+    /// Resume running runs on session load. Returns the current run ID if exactly one Running run exists and its window is live.
+    pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
+        let running_ids: Vec<u64> = self.agent_runs.iter()
+            .filter(|r| r.status == RunStatus::Running)
+            .map(|r| r.id)
+            .collect();
+
+        if running_ids.is_empty() {
+            return Ok(None);
+        }
+
+        if running_ids.len() > 1 {
+            anyhow::bail!(
+                "session {} has {} concurrent runs; repair manually by editing session.toml",
+                self.session_id,
+                running_ids.len()
+            );
+        }
+
+        let run_id = running_ids[0];
+        let window_name = self.agent_runs.iter()
+            .find(|r| r.id == run_id)
+            .map(|r| r.window_name.clone())
+            .unwrap_or_default();
+        let window_live = live_windows.contains(&window_name);
+
+        if !window_live {
+            // Finalize as Failed
+            let run_idx = self.agent_runs.iter().position(|r| r.id == run_id).unwrap();
+            self.agent_runs[run_idx].status = RunStatus::Failed;
+            self.agent_runs[run_idx].ended_at = Some(chrono::Utc::now());
+            self.agent_runs[run_idx].error = Some("window missing on resume".to_string());
+
+            let duration = self.agent_runs[run_idx]
+                .ended_at
+                .unwrap()
+                .signed_duration_since(self.agent_runs[run_idx].started_at);
+            let msg = Message {
+                ts: chrono::Utc::now(),
+                run_id,
+                kind: MessageKind::End,
+                text: format!("failed in {}s: window missing on resume", duration.num_seconds()),
+            };
+            let _ = self.append_message(&msg); // Best-effort
+            self.save()?;
+            return Ok(None);
+        }
+
+        Ok(Some(run_id))
     }
 }
 
@@ -606,6 +620,99 @@ current_phase = "IdeaInput"
     }
 
     #[test]
+    fn test_resume_one_running_live_window() {
+        let mut state = SessionState::new("test-resume".to_string());
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let live_windows = vec!["[Brainstorm]".to_string()];
+        let result = state.resume_running_runs(&live_windows);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some(1));
+        assert_eq!(state.agent_runs[0].status, RunStatus::Running);
+    }
+
+    #[test]
+    fn test_resume_one_running_missing_window() {
+        let mut state = SessionState::new("test-resume-missing".to_string());
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let live_windows = vec![]; // No live windows
+        let result = state.resume_running_runs(&live_windows);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+        assert_eq!(state.agent_runs[0].status, RunStatus::Failed);
+        assert_eq!(state.agent_runs[0].error, Some("window missing on resume".to_string()));
+    }
+
+    #[test]
+    fn test_resume_multiple_running_runs() {
+        let mut state = SessionState::new("test-resume-multi".to_string());
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "spec".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let live_windows = vec!["[Brainstorm]".to_string(), "[Spec]".to_string()];
+        let result = state.resume_running_runs(&live_windows);
+
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("concurrent runs"));
+    }
+
+    #[test]
     fn test_session_state_archived_defaults_false() {
         let state = SessionState::new("test-session".to_string());
         assert!(!state.archived);
@@ -624,26 +731,28 @@ current_phase = "IdeaInput"
     }
 
     #[test]
-    fn test_phase_attempts_roundtrip() {
+    fn test_agent_runs_roundtrip() {
         let mut state = SessionState::new("test".to_string());
-        state.phase_attempts.insert(
-            "brainstorm".to_string(),
-            vec![PhaseAttempt {
-                status: AttemptStatus::Failed,
-                summary: "spec generation failed".to_string(),
-                events: vec!["error: timeout".to_string()],
-                transcript: Vec::new(),
-                error: Some("timeout".to_string()),
-                live_summary: "working on section 3...".to_string(),
-            }],
-        );
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
         let toml = toml::to_string(&state).unwrap();
         let loaded: SessionState = toml::from_str(&toml).unwrap();
-        assert_eq!(loaded.phase_attempts.len(), 1);
-        let attempts = loaded.phase_attempts.get("brainstorm").unwrap();
-        assert_eq!(attempts[0].status, AttemptStatus::Failed);
-        assert_eq!(attempts[0].summary, "spec generation failed");
-        assert_eq!(attempts[0].live_summary, "working on section 3...");
+        assert_eq!(loaded.agent_runs.len(), 1);
+        assert_eq!(loaded.agent_runs[0].id, 1);
+        assert_eq!(loaded.agent_runs[0].stage, "brainstorm");
+        assert_eq!(loaded.agent_runs[0].status, RunStatus::Done);
     }
 
     #[test]
@@ -655,21 +764,14 @@ current_phase = "IdeaInput"
     }
 
     #[test]
-    fn test_plan_reviewers_defaults_empty() {
+    fn test_agent_runs_defaults_empty() {
         let state = SessionState::new("test".to_string());
-        assert!(state.plan_reviewers.is_empty());
+        assert!(state.agent_runs.is_empty());
     }
 
     #[test]
-    fn test_plan_reviewers_roundtrip() {
-        let mut state = SessionState::new("test".to_string());
-        state.plan_reviewers.push(PhaseModel {
-            model: "o3".to_string(),
-            vendor: "openai".to_string(),
-        });
-        let toml = toml::to_string(&state).unwrap();
-        let loaded: SessionState = toml::from_str(&toml).unwrap();
-        assert_eq!(loaded.plan_reviewers.len(), 1);
-        assert_eq!(loaded.plan_reviewers[0].model, "o3");
+    fn test_schema_version_defaults_to_2() {
+        let state = SessionState::new("test".to_string());
+        assert_eq!(state.schema_version, 2);
     }
 }

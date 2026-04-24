@@ -7,11 +7,10 @@ mod state;
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
     cache,
-    review,
     selection::{self, ModelStatus, QuotaError, select_for_review},
-    state::{self as session_state, Phase, PhaseModel, SessionState},
+    state::{self as session_state, Phase, SessionState},
     tasks,
-    tmux::{self, TmuxContext},
+    tmux::TmuxContext,
     tui::AppTerminal,
 };
 use anyhow::Result;
@@ -200,12 +199,10 @@ impl App {
             }
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
                 kill_window("[Spec Review]");
-                for i in 1..=self.state.spec_reviewers.len().max(1) {
-                    let _ = fs::remove_file(artifacts.join(format!("spec-review-{i}.md")));
-                    let _ = fs::remove_file(prompts.join(format!("spec-review-{i}.md")));
-                }
-                self.state.spec_reviewers.clear();
-                self.state.phase_models.remove("spec-review");
+                let _ = fs::remove_file(artifacts.join("spec-review-1.md"));
+                let _ = fs::remove_file(prompts.join("spec-review-1.md"));
+                // TODO(Task 2): clean up all review artifacts by RunRecord instead of the
+                // removed spec_reviewers/phase_models state.
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
             }
             Phase::PlanningRunning => {
@@ -214,23 +211,18 @@ impl App {
                 let _ = self.state.transition_to(Phase::SpecReviewRunning);
             }
             Phase::PlanReviewRunning => {
-                let review_n = self.state.plan_reviewers.len() + 1;
-                kill_window(&format!("[Plan Review {review_n}]"));
-                let _ = fs::remove_file(artifacts.join(format!("plan-review-{review_n}.md")));
-                let _ = fs::remove_file(prompts.join(format!("plan-review-{review_n}.md")));
-                let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
-                let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
+                kill_window("[Plan Review 1]");
+                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
+                let _ = fs::remove_file(prompts.join("plan-review-1.md"));
+                let plan_backup = artifacts.join("plan.pre-review-1.md");
+                let spec_backup = artifacts.join("spec.pre-review-1.md");
                 restore_artifacts(&[
                     (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
-                self.state.phase_models.remove("plan-review");
                 self.state.agent_error = None;
-                if self.state.plan_reviewers.is_empty() {
-                    let _ = self.state.transition_to(Phase::PlanningRunning);
-                } else {
-                    let _ = self.state.transition_to(Phase::PlanReviewPaused);
-                }
+                // TODO(Task 2): restore the paused/running distinction from RunRecord state.
+                let _ = self.state.transition_to(Phase::PlanningRunning);
             }
             Phase::PlanReviewPaused => {
                 let plan_backup = artifacts.join("plan.pre-review-1.md");
@@ -239,21 +231,19 @@ impl App {
                     (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
-                for i in 1..=self.state.plan_reviewers.len() {
-                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{i}.md")));
-                    let _ = fs::remove_file(prompts.join(format!("plan-review-{i}.md")));
-                    let _ = fs::remove_file(artifacts.join(format!("plan.pre-review-{i}.md")));
-                    let _ = fs::remove_file(artifacts.join(format!("spec.pre-review-{i}.md")));
-                }
-                self.state.plan_reviewers.clear();
-                self.state.phase_models.remove("plan-review");
+                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
+                let _ = fs::remove_file(prompts.join("plan-review-1.md"));
+                let _ = fs::remove_file(artifacts.join("plan.pre-review-1.md"));
+                let _ = fs::remove_file(artifacts.join("spec.pre-review-1.md"));
+                // TODO(Task 2): clean up all plan review artifacts by RunRecord history.
                 let _ = self.state.transition_to(Phase::PlanningRunning);
             }
             Phase::ShardingRunning => {
                 kill_window("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
-                self.state.phase_models.remove("sharding");
+                // TODO(Task 2): remove sharding launch metadata from RunRecord instead of the
+                // removed phase_models state.
                 let _ = self.state.transition_to(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {
@@ -283,21 +273,8 @@ impl App {
         self.selected = current_section_index(&self.sections);
     }
 
-    fn record_attempt(&mut self, status: crate::state::AttemptStatus) {
-        let section_idx = current_section_index(&self.sections);
-        let section = &self.sections[section_idx];
-        let key = phase_attempt_key(self.state.current_phase);
-
-        let attempt = crate::state::PhaseAttempt {
-            status,
-            summary: section.summary.clone(),
-            events: section.events.clone(),
-            transcript: section.transcript.clone(),
-            error: self.state.agent_error.clone(),
-            live_summary: self.live_summary.clone(),
-        };
-
-        self.state.phase_attempts.entry(key).or_default().push(attempt);
+    fn record_attempt(&mut self, _status: crate::state::AttemptStatus) {
+        // TODO(Task 2): restore attempt persistence against the RunRecord/message model.
     }
 
     fn poll_live_summary(&mut self) {
@@ -353,7 +330,8 @@ impl App {
             Phase::BrainstormRunning => "[Brainstorm]",
             Phase::SpecReviewRunning => "[Spec Review]",
             Phase::PlanReviewRunning => {
-                window_name_owned = format!("[Plan Review {}]", self.state.plan_reviewers.len() + 1);
+                // TODO(Task 2): resume the precise plan-review window from RunRecord state.
+                window_name_owned = "[Plan Review 1]".to_string();
                 &window_name_owned
             }
             Phase::PlanningRunning => "[Planning]",
@@ -404,202 +382,9 @@ impl App {
             return;
         }
 
-        let session_dir = session_state::session_dir(&self.state.session_id);
-        let coder_window: String;
-        let reviewer_window: String;
-        let plan_review_window: String;
-        let (window_name, artifact_path, next_phase) = match self.state.current_phase {
-            Phase::BrainstormRunning => (
-                "[Brainstorm]",
-                session_dir.join("artifacts").join("spec.md"),
-                Phase::SpecReviewRunning,
-            ),
-            Phase::SpecReviewRunning => (
-                "[Spec Review]",
-                session_dir.join("artifacts")
-                    .join(format!("spec-review-{}.md", self.state.spec_reviewers.len() + 1)),
-                Phase::SpecReviewPaused,
-            ),
-            Phase::PlanningRunning => (
-                "[Planning]",
-                session_dir.join("artifacts").join("plan.md"),
-                Phase::PlanReviewRunning,
-            ),
-            Phase::PlanReviewRunning => {
-                let review_n = self.state.plan_reviewers.len() + 1;
-                plan_review_window = format!("[Plan Review {review_n}]");
-                (
-                    plan_review_window.as_str(),
-                    session_dir.join("artifacts")
-                        .join(format!("plan-review-{review_n}.md")),
-                    Phase::PlanReviewPaused,
-                )
-            },
-            Phase::ShardingRunning => (
-                "[Sharding]",
-                session_dir.join("artifacts").join("tasks.toml"),
-                Phase::ImplementationRound(1),
-            ),
-            Phase::ImplementationRound(r) => {
-                let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
-                coder_window = format!("[Coder r{r}]");
-                (
-                    coder_window.as_str(),
-                    round_dir.join("commit.txt"),
-                    Phase::ReviewRound(r),
-                )
-            }
-            Phase::ReviewRound(r) => {
-                let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
-                reviewer_window = format!("[Review r{r}]");
-                (
-                    reviewer_window.as_str(),
-                    round_dir.join("review.toml"),
-                    Phase::ImplementationRound(r + 1),
-                )
-            }
-            _ => return,
-        };
-
-        if tmux::window_exists(window_name) {
-            return;
-        }
-
-        self.window_launched = false;
-
-        let mut attempt_status = crate::state::AttemptStatus::Failed;
-        let mut validation_error: Option<String> = None;
-        let mut resolved_next_phase = None;
-
-        if !artifact_path.exists() {
-            validation_error = Some(format!(
-                "agent window closed without producing {}",
-                artifact_path.display()
-            ));
-        } else {
-            // Artifact exists, proceed with validation
-            if self.state.current_phase == Phase::ShardingRunning {
-                match tasks::validate(&artifact_path) {
-                    Ok(file) => {
-                        self.state.agent_error = None;
-                        let ids: Vec<u32> = file.tasks.iter().map(|t| t.id).collect();
-                        self.state.builder = session_state::BuilderState {
-                            pending: ids,
-                            done: Vec::new(),
-                            current_task: None,
-                            iteration: 0,
-                            coder_started: false,
-                            reviewer_started: false,
-                            last_verdict: None,
-                        };
-                        attempt_status = crate::state::AttemptStatus::Done;
-                    }
-                    Err(e) => {
-                        validation_error = Some(format!(
-                            "tasks.toml invalid: {e} — retry or edit the file"
-                        ));
-                    }
-                }
-            } else if self.state.current_phase == Phase::SpecReviewRunning {
-                if let Some(pm) = self.state.phase_models.get("spec-review").cloned() {
-                    self.state.spec_reviewers.push(pm);
-                }
-                attempt_status = crate::state::AttemptStatus::Done;
-            } else if self.state.current_phase == Phase::PlanReviewRunning {
-                // Check that the artifact is non-empty
-                match std::fs::read_to_string(&artifact_path) {
-                    Ok(content) if !content.trim().is_empty() => {
-                        if let Some(pm) = self.state.phase_models.get("plan-review").cloned() {
-                            self.state.plan_reviewers.push(pm);
-                        }
-                        attempt_status = crate::state::AttemptStatus::Done;
-                    }
-                    Ok(_) => {
-                        validation_error = Some(
-                            "plan review changelog is empty — retry or manually add content".to_string()
-                        );
-                    }
-                    Err(e) => {
-                        validation_error = Some(format!("failed to read plan review artifact: {e}"));
-                    }
-                }
-            } else if let Phase::ReviewRound(r) = self.state.current_phase {
-                match review::validate(&artifact_path) {
-                    Ok(v) => {
-                        self.state.builder.last_verdict = Some(match v.status {
-                            review::ReviewStatus::Done => "done",
-                            review::ReviewStatus::Revise => "revise",
-                            review::ReviewStatus::Blocked => "blocked",
-                        }.to_string());
-                        self.state.builder.reviewer_started = false;
-                        resolved_next_phase = Some(match v.status {
-                            review::ReviewStatus::Done => {
-                                if let Some(id) = self.state.builder.current_task.take() {
-                                    self.state.builder.done.push(id);
-                                }
-                                for t in v.new_tasks {
-                                    self.state.builder.pending.push(t.id);
-                                }
-                                if self.state.builder.pending.is_empty() {
-                                    Phase::Done
-                                } else {
-                                    self.state.builder.coder_started = false;
-                                    Phase::ImplementationRound(r + 1)
-                                }
-                            }
-                            review::ReviewStatus::Revise => {
-                                self.state.builder.coder_started = true;
-                                Phase::ImplementationRound(r + 1)
-                            }
-                            review::ReviewStatus::Blocked => Phase::BlockedNeedsUser,
-                        });
-                        attempt_status = crate::state::AttemptStatus::Done;
-                    }
-                    Err(e) => {
-                        validation_error = Some(format!("review TOML invalid: {e}"));
-                    }
-                }
-            } else if matches!(self.state.current_phase, Phase::ImplementationRound(_)) {
-                self.state.builder.coder_started = false;
-                resolved_next_phase = Some(next_phase);
-                attempt_status = crate::state::AttemptStatus::Done;
-            } else {
-                resolved_next_phase = Some(next_phase);
-                attempt_status = crate::state::AttemptStatus::Done;
-            }
-        }
-
-        if let Some(error) = validation_error {
-            self.state.agent_error = Some(error);
-            if self.state.current_phase == Phase::PlanReviewRunning {
-                let artifacts = session_dir.join("artifacts");
-                let review_n = self.state.plan_reviewers.len() + 1;
-                let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
-                let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
-                restore_artifacts(&[
-                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
-                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
-                ]);
-            }
-        } else {
-            self.state.agent_error = None;
-        }
-
-        self.record_attempt(attempt_status);
-        let _ = self.state.save();
-
-        if self.state.agent_error.is_some() && matches!(self.state.current_phase, Phase::ShardingRunning | Phase::ReviewRound(_)) {
-            // Do not transition if there's a validation error that requires user intervention
-        } else if let Some(phase) = resolved_next_phase {
-            let _ = self.state.transition_to(phase);
-        } else if self.state.agent_error.is_none() {
-            // For phases like BrainstormRunning, PlanningRunning, etc. that don't have a specific resolved_next_phase from validation
-            let _ = self.state.transition_to(next_phase);
-        }
-
-        self.sections = build_sections(&self.state, self.window_launched);
-        self.section_scroll.resize(self.sections.len(), usize::MAX);
-        self.selected = current_section_index(&self.sections);
+        // TODO(Task 2): rebuild window polling and artifact validation against RunRecord,
+        // Message, and the tree-based pipeline view. The legacy implementation depended on
+        // removed phase_models/reviewer lists/builder-start flags.
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
@@ -666,10 +451,8 @@ impl App {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
-                self.state.phase_models.insert(
-                    "brainstorm".to_string(),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
+                let _ = vendor;
+                // TODO(Task 2): persist brainstorm launch metadata via RunRecord.
                 let _ = self.state.transition_to(Phase::BrainstormRunning);
                 self.window_launched = true;
                 self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
@@ -688,78 +471,11 @@ impl App {
     }
 
     fn launch_spec_review(&mut self) {
-        self.state.agent_error = None;
-
-        if self.models.is_empty() {
-            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
-            let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
-            return;
-        }
-
-        let session_id = self.state.session_id.clone();
-        let spec_path = session_state::session_dir(&session_id).join("artifacts").join("spec.md");
-        let review_n = self.state.spec_reviewers.len() + 1;
-        let review_path = session_state::session_dir(&session_id).join("artifacts")
-            .join(format!("spec-review-{review_n}.md"));
-
-        let mut excluded = self.state.spec_reviewers.clone();
-        if let Some(pm) = self.state.phase_models.get("brainstorm").cloned() {
-            excluded.push(pm);
-        }
-
-        let chosen = select_for_review(&self.models, &excluded)
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()));
-
-        let (model, vendor_kind, vendor) = match chosen {
-            Some(c) => c,
-            None => {
-                self.state.agent_error = Some("no unused model available for review".to_string());
-                let _ = self.state.save();
-                self.sections = build_sections(&self.state, self.window_launched);
-                return;
-            }
-        };
-
-        let _ = std::fs::remove_file(&review_path);
-
-        let prompt_path = session_state::session_dir(&session_id).join("prompts")
-            .join(format!("spec-review-{review_n}.md"));
-        if let Some(parent) = prompt_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let live_summary_path = session_state::session_dir(&session_id).join("artifacts").join("live_summary.txt");
-        let prompt = spec_review_prompt(&spec_path.display().to_string(), &review_path.display().to_string(), &live_summary_path.display().to_string());
-        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
-            return;
-        }
-
-        let run = AgentRun {
-            model: model.clone(),
-            prompt_path: prompt_path.clone(),
-        };
-
-        let adapter = adapter_for_vendor(vendor_kind);
-        match launch_noninteractive("[Spec Review]", &run, adapter.as_ref()) {
-            Ok(()) => {
-                self.state.phase_models.insert(
-                    "spec-review".to_string(),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
-            }
-            Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch spec review: {e}"));
-            }
-        }
+        self.state.agent_error = Some(
+            "TODO(Task 2): spec review launch is temporarily disabled until RunRecord-backed review tracking is wired in".to_string(),
+        );
+        let _ = self.state.save();
+        self.sections = build_sections(&self.state, self.window_launched);
     }
 
     fn launch_planning(&mut self) {
@@ -777,10 +493,8 @@ impl App {
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
 
-        let review_paths: Vec<std::path::PathBuf> = (1..=self.state.spec_reviewers.len())
-            .map(|i| session_dir.join("artifacts").join(format!("spec-review-{i}.md")))
-            .filter(|p| p.exists())
-            .collect();
+        // TODO(Task 2): gather completed review artifacts from RunRecord/message state.
+        let review_paths: Vec<std::path::PathBuf> = Vec::new();
 
         let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
@@ -813,10 +527,8 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_interactive("[Planning]", &run, adapter.as_ref(), true) {
             Ok(()) => {
-                self.state.phase_models.insert(
-                    "planning".to_string(),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
+                let _ = vendor;
+                // TODO(Task 2): persist planning launch metadata via RunRecord.
                 let _ = self.state.save();
                 self.window_launched = true;
                 self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
@@ -833,93 +545,11 @@ impl App {
     }
 
     fn launch_plan_review(&mut self) {
-        self.state.agent_error = None;
-
-        if self.models.is_empty() {
-            self.state.agent_error = Some("model list not yet loaded — wait a moment and try again".to_string());
-            let _ = self.state.save();
-            self.sections = build_sections(&self.state, self.window_launched);
-            return;
-        }
-
-        let session_id = self.state.session_id.clone();
-        let session_dir = session_state::session_dir(&session_id);
-        let artifacts = session_dir.join("artifacts");
-        let review_n = self.state.plan_reviewers.len() + 1;
-
-        let plan_path = artifacts.join("plan.md");
-        let spec_path = artifacts.join("spec.md");
-        let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
-        let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
-        let review_path = artifacts.join(format!("plan-review-{review_n}.md"));
-
-        backup_artifacts(&[
-            (plan_path.as_path(), plan_backup.as_path()),
-            (spec_path.as_path(), spec_backup.as_path()),
-        ]);
-
-        let mut excluded = self.state.plan_reviewers.clone();
-        if let Some(pm) = self.state.phase_models.get("planning").cloned() {
-            excluded.push(pm);
-        }
-
-        let chosen = select_for_review(&self.models, &excluded)
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()));
-
-        let (model, vendor_kind, vendor) = match chosen {
-            Some(c) => c,
-            None => {
-                self.state.agent_error = Some("no unused model available for plan review".to_string());
-                let _ = self.state.save();
-                self.sections = build_sections(&self.state, self.window_launched);
-                return;
-            }
-        };
-
-        let _ = std::fs::remove_file(&review_path);
-
-        let prompt_path = session_dir.join("prompts")
-            .join(format!("plan-review-{review_n}.md"));
-        if let Some(parent) = prompt_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let live_summary_path = artifacts.join("live_summary.txt");
-        let prompt = plan_review_prompt(
-            &spec_path.display().to_string(),
-            &plan_path.display().to_string(),
-            &review_path.display().to_string(),
-            &live_summary_path.display().to_string(),
+        self.state.agent_error = Some(
+            "TODO(Task 2): plan review launch is temporarily disabled until RunRecord-backed review tracking is wired in".to_string(),
         );
-        if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
-            return;
-        }
-
-        let run = AgentRun {
-            model: model.clone(),
-            prompt_path: prompt_path.clone(),
-        };
-
-        let adapter = adapter_for_vendor(vendor_kind);
-        match launch_noninteractive(&format!("[Plan Review {review_n}]"), &run, adapter.as_ref()) {
-            Ok(()) => {
-                self.state.phase_models.insert(
-                    "plan-review".to_string(),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
-                let _ = self.state.save();
-                self.window_launched = true;
-                self.live_summary_path = Some(artifacts.join("live_summary.txt"));
-                self.live_summary.clear();
-                self.live_summary_mtime = None;
-                self.sections = build_sections(&self.state, self.window_launched);
-                self.section_scroll.resize(self.sections.len(), usize::MAX);
-                self.selected = current_section_index(&self.sections);
-            }
-            Err(e) => {
-                self.sections[self.selected].events.push(format!("failed to launch plan review: {e}"));
-            }
-        }
+        let _ = self.state.save();
+        self.sections = build_sections(&self.state, self.window_launched);
     }
 
     fn launch_sharding(&mut self) {
@@ -969,10 +599,8 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive("[Sharding]", &run, adapter.as_ref()) {
             Ok(()) => {
-                self.state.phase_models.insert(
-                    "sharding".to_string(),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
+                let _ = vendor;
+                // TODO(Task 2): persist sharding launch metadata via RunRecord.
                 let _ = self.state.save();
                 self.window_launched = true;
                 self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
@@ -1032,7 +660,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let resume = self.state.builder.coder_started;
+        // TODO(Task 2): derive resume state from persisted RunRecord data.
+        let resume = false;
         let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &commit_file, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
@@ -1047,11 +676,8 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive(&format!("[Coder r{r}]"), &run, adapter.as_ref()) {
             Ok(()) => {
-                self.state.phase_models.insert(
-                    format!("coder-r{r}"),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
-                self.state.builder.coder_started = true;
+                let _ = vendor;
+                // TODO(Task 2): persist coder launch metadata via RunRecord.
                 let _ = self.state.save();
                 self.window_launched = true;
                 self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));
@@ -1091,8 +717,9 @@ impl App {
 
         let _ = std::fs::remove_file(&review_path);
 
-        let coder_pm = self.state.phase_models.get(&format!("coder-r{r}")).cloned();
-        let excluded = coder_pm.into_iter().collect::<Vec<_>>();
+        // TODO(Task 2): exclude the active coder model from RunRecord metadata instead of the
+        // removed phase_models map.
+        let excluded = Vec::new();
         let Some(chosen) = select_for_review(&self.models, &excluded)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
@@ -1117,11 +744,8 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         match launch_noninteractive(&format!("[Review r{r}]"), &run, adapter.as_ref()) {
             Ok(()) => {
-                self.state.phase_models.insert(
-                    format!("reviewer-r{r}"),
-                    PhaseModel { model: model.clone(), vendor: vendor.clone() },
-                );
-                self.state.builder.reviewer_started = true;
+                let _ = vendor;
+                // TODO(Task 2): persist reviewer launch metadata via RunRecord.
                 let _ = self.state.save();
                 self.window_launched = true;
                 self.live_summary_path = Some(session_state::session_dir(&self.state.session_id).join("artifacts").join("live_summary.txt"));

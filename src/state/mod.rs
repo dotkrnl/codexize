@@ -339,6 +339,22 @@ pub fn session_dir(session_id: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        static TEST_ROOT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let _guard = TEST_ROOT_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+
+        std::env::set_current_dir(temp.path()).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        std::env::set_current_dir(cwd).unwrap();
+        result.unwrap()
+    }
 
     #[test]
     fn test_run_record_lifecycle_create_to_done() {
@@ -447,153 +463,123 @@ mod tests {
 
     #[test]
     fn test_session_state_schema_v2() {
-        use tempfile::TempDir;
-        use std::env;
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-session".to_string());
+            state.schema_version = 2;
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "claude-opus-4-7".to_string(),
+                vendor: "anthropic".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
 
-        let temp = TempDir::new().unwrap();
-        unsafe {
-            env::set_var("CODEXIZE_ROOT", temp.path());
-        }
+            state.save().unwrap();
+            let loaded = SessionState::load("test-session").unwrap();
 
-        let mut state = SessionState::new("test-session".to_string());
-        state.schema_version = 2;
-        state.agent_runs.push(RunRecord {
-            id: 1,
-            stage: "brainstorm".to_string(),
-            task_id: None,
-            round: 1,
-            attempt: 1,
-            model: "claude-opus-4-7".to_string(),
-            vendor: "anthropic".to_string(),
-            window_name: "[Brainstorm]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: None,
-            status: RunStatus::Running,
-            error: None,
+            assert_eq!(loaded.schema_version, 2);
+            assert_eq!(loaded.agent_runs.len(), 1);
+            assert_eq!(loaded.agent_runs[0].id, 1);
         });
-
-        state.save().unwrap();
-        let loaded = SessionState::load("test-session").unwrap();
-
-        assert_eq!(loaded.schema_version, 2);
-        assert_eq!(loaded.agent_runs.len(), 1);
-        assert_eq!(loaded.agent_runs[0].id, 1);
     }
 
     #[test]
     fn test_session_state_v1_rejection() {
-        use tempfile::TempDir;
-        use std::env;
-
-        let temp = TempDir::new().unwrap();
-        unsafe {
-            env::set_var("CODEXIZE_ROOT", temp.path());
-        }
-
-        // Manually write a v1 session file (no schema_version field)
-        let dir = session_dir("test-v1-session");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("session.toml");
-        std::fs::write(&path, r#"
+        with_temp_root(|| {
+            // Manually write a v1 session file (no schema_version field)
+            let dir = session_dir("test-v1-session");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("session.toml");
+            std::fs::write(&path, r#"
 session_id = "test-v1-session"
 current_phase = "IdeaInput"
 "#).unwrap();
 
-        let result = SessionState::load("test-v1-session");
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("schema v1") || err_msg.contains("archive"));
+            let result = SessionState::load("test-v1-session");
+            assert!(result.is_err());
+            let err_msg = format!("{:?}", result.unwrap_err());
+            assert!(err_msg.contains("schema v1") || err_msg.contains("archive"));
+        });
     }
 
     #[test]
     fn test_append_message() {
-        use tempfile::TempDir;
-        use std::env;
+        with_temp_root(|| {
+            let state = SessionState::new("test-msg-session".to_string());
+            state.save().unwrap();
 
-        let temp = TempDir::new().unwrap();
-        unsafe {
-            env::set_var("CODEXIZE_ROOT", temp.path());
-        }
+            let msg = Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::Brief,
+                text: "Exploring code".to_string(),
+            };
 
-        let state = SessionState::new("test-msg-session".to_string());
-        state.save().unwrap();
+            state.append_message(&msg).unwrap();
 
-        let msg = Message {
-            ts: chrono::Utc::now(),
-            run_id: 1,
-            kind: MessageKind::Brief,
-            text: "Exploring code".to_string(),
-        };
-
-        state.append_message(&msg).unwrap();
-
-        // Verify file exists and contains the message
-        let path = session_dir("test-msg-session").join("messages.jsonl");
-        assert!(path.exists());
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("Exploring code"));
+            // Verify file exists and contains the message
+            let path = session_dir("test-msg-session").join("messages.jsonl");
+            assert!(path.exists());
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.contains("Exploring code"));
+        });
     }
 
     #[test]
     fn test_load_messages() {
-        use tempfile::TempDir;
-        use std::env;
+        with_temp_root(|| {
+            let state = SessionState::new("test-load-msg".to_string());
+            state.save().unwrap();
 
-        let temp = TempDir::new().unwrap();
-        unsafe {
-            env::set_var("CODEXIZE_ROOT", temp.path());
-        }
+            let msg1 = Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::Brief,
+                text: "First".to_string(),
+            };
+            let msg2 = Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::End,
+                text: "done in 1m".to_string(),
+            };
 
-        let state = SessionState::new("test-load-msg".to_string());
-        state.save().unwrap();
+            state.append_message(&msg1).unwrap();
+            state.append_message(&msg2).unwrap();
 
-        let msg1 = Message {
-            ts: chrono::Utc::now(),
-            run_id: 1,
-            kind: MessageKind::Brief,
-            text: "First".to_string(),
-        };
-        let msg2 = Message {
-            ts: chrono::Utc::now(),
-            run_id: 1,
-            kind: MessageKind::End,
-            text: "done in 1m".to_string(),
-        };
-
-        state.append_message(&msg1).unwrap();
-        state.append_message(&msg2).unwrap();
-
-        let loaded = SessionState::load_messages("test-load-msg").unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].text, "First");
-        assert_eq!(loaded[1].text, "done in 1m");
+            let loaded = SessionState::load_messages("test-load-msg").unwrap();
+            assert_eq!(loaded.len(), 2);
+            assert_eq!(loaded[0].text, "First");
+            assert_eq!(loaded[1].text, "done in 1m");
+        });
     }
 
     #[test]
     fn test_load_messages_with_corrupt_line() {
-        use tempfile::TempDir;
-        use std::env;
+        with_temp_root(|| {
+            let state = SessionState::new("test-corrupt-msg".to_string());
+            state.save().unwrap();
 
-        let temp = TempDir::new().unwrap();
-        unsafe {
-            env::set_var("CODEXIZE_ROOT", temp.path());
-        }
-
-        let state = SessionState::new("test-corrupt-msg".to_string());
-        state.save().unwrap();
-
-        // Manually write messages.jsonl with one corrupt line
-        let dir = session_dir("test-corrupt-msg");
-        let path = dir.join("messages.jsonl");
-        std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","text":"Good"}
+            // Manually write messages.jsonl with one corrupt line
+            let dir = session_dir("test-corrupt-msg");
+            let path = dir.join("messages.jsonl");
+            std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","text":"Good"}
 {corrupt json line here}
 {"ts":"2026-04-24T00:01:00Z","run_id":1,"kind":"End","text":"done"}
 "#).unwrap();
 
-        let loaded = SessionState::load_messages("test-corrupt-msg").unwrap();
-        assert_eq!(loaded.len(), 2); // Corrupt line skipped
-        assert_eq!(loaded[0].text, "Good");
-        assert_eq!(loaded[1].text, "done");
+            let loaded = SessionState::load_messages("test-corrupt-msg").unwrap();
+            assert_eq!(loaded.len(), 2); // Corrupt line skipped
+            assert_eq!(loaded[0].text, "Good");
+            assert_eq!(loaded[1].text, "done");
+        });
     }
 
     #[test]

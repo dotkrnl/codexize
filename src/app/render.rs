@@ -429,29 +429,17 @@ impl App {
             .collect::<Vec<_>>();
 
         if section.status == SectionStatus::Running && self.window_launched {
-            let phase_key = match self.state.current_phase {
-                Phase::BrainstormRunning => Some("brainstorm"),
-                Phase::SpecReviewRunning => Some("spec-review"),
-                Phase::PlanningRunning => Some("planning"),
-                Phase::ShardingRunning => Some("sharding"),
-                _ => None,
-            };
-            if let Some(key) = phase_key {
-                let model_label = self.state.phase_models.get(key)
-                    .map(|pm| format!("{} ({})", pm.model, pm.vendor))
-                    .unwrap_or_else(|| "unknown model".to_string());
-                let spin = spinner_frame(self.agent_line_count);
-                lines.insert(0, Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(spin, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                    Span::raw("  "),
-                    Span::styled(model_label, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-                    Span::styled(
-                        format!(" · {} lines", self.agent_line_count),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]));
-            }
+            // TODO(Task 2): derive the running label from RunRecord once the tree/chat renderer
+            // replaces the legacy section model.
+            let spin = spinner_frame(self.agent_line_count);
+            lines.insert(0, Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(spin, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("  running · {} lines", self.agent_line_count),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
         }
 
         // Live summary for currently running agent

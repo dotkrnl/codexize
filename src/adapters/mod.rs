@@ -34,6 +34,20 @@ pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {
     }
 }
 
+/// Short display form of a model name for tmux window titles. Strips the
+/// `claude-` prefix since it's long and the vendor is obvious in context;
+/// other vendor prefixes stay because they're already compact.
+pub fn short_model(model: &str) -> String {
+    model.strip_prefix("claude-").unwrap_or(model).to_string()
+}
+
+/// Build a tmux window name that embeds the model, e.g. `[Coder r1] sonnet-4.6`.
+/// The base (including brackets) is preserved verbatim as a prefix so kill /
+/// lookup paths can match by base.
+pub fn window_name_with_model(base: &str, model: &str) -> String {
+    format!("{base} {}", short_model(model))
+}
+
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,

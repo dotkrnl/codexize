@@ -6,7 +6,10 @@ mod state;
 mod tree;
 
 use crate::{
-    adapters::{AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive},
+    adapters::{
+        AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive,
+        window_name_with_model,
+    },
     cache, review,
     selection::{self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review},
     state::{
@@ -1084,8 +1087,9 @@ impl App {
         let attempt = self.attempt_for("brainstorm", None, 1);
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
+        let window_name = window_name_with_model("[Brainstorm]", &model);
         match launch_interactive(
-            "[Brainstorm]",
+            &window_name,
             &run,
             adapter.as_ref(),
             true,
@@ -1101,7 +1105,7 @@ impl App {
                     1,
                     model,
                     vendor,
-                    "[Brainstorm]".to_string(),
+                    window_name,
                 );
             }
             Err(e) => {
@@ -1205,7 +1209,7 @@ impl App {
             model: model.clone(),
             prompt_path,
         };
-        let window_name = format!("[Spec Review {round}]");
+        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
@@ -1296,12 +1300,13 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         let attempt = self.attempt_for("planning", None, 1);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
+        let window_name = window_name_with_model("[Planning]", &model);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
             result
         } else if interactive {
-            launch_interactive("[Planning]", &run, adapter.as_ref(), true, &status_path)
+            launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path)
         } else {
-            launch_noninteractive("[Planning]", &run, adapter.as_ref(), &status_path)
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
         };
         match launch_result {
             Ok(()) => {
@@ -1311,7 +1316,7 @@ impl App {
                     1,
                     model,
                     vendor,
-                    "[Planning]".to_string(),
+                    window_name,
                 );
                 true
             }
@@ -1399,7 +1404,7 @@ impl App {
             model: model.clone(),
             prompt_path,
         };
-        let window_name = format!("[Plan Review {round}]");
+        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
@@ -1473,11 +1478,12 @@ impl App {
 
         let attempt = self.attempt_for("sharding", None, 1);
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
+        let window_name = window_name_with_model("[Sharding]", &model);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
             result
         } else {
             let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive("[Sharding]", &run, adapter.as_ref(), &status_path)
+            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
         };
         match launch_result {
             Ok(()) => {
@@ -1487,7 +1493,7 @@ impl App {
                     1,
                     model,
                     vendor,
-                    "[Sharding]".to_string(),
+                    window_name,
                 );
                 true
             }
@@ -1569,7 +1575,7 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let window_name = format!("[Coder r{r}]");
+        let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
         let attempt = self.attempt_for("coder", Some(task_id), r);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&commit_file)) {
@@ -1671,7 +1677,7 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let window_name = format!("[Review r{r}]");
+        let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
@@ -1843,10 +1849,25 @@ impl App {
     }
 }
 
-fn kill_window(name: &str) {
-    let _ = std::process::Command::new("tmux")
-        .args(["kill-window", "-t", name])
-        .output();
+fn kill_window(base: &str) {
+    // Windows are now named "[Base] <model>", so match by prefix: exact match
+    // or the base followed by a space. The base ends with `]`, which prevents
+    // `[Coder r1]` from accidentally matching `[Coder r10]`, etc.
+    let prefix = format!("{base} ");
+    let Ok(output) = std::process::Command::new("tmux")
+        .args(["list-windows", "-F", "#{window_name}"])
+        .output()
+    else {
+        return;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for name in stdout.lines() {
+        if name == base || name.starts_with(&prefix) {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-window", "-t", name])
+                .output();
+        }
+    }
 }
 
 fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {

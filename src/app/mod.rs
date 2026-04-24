@@ -1,5 +1,6 @@
 pub mod chat_widget;
 mod events;
+mod guard;
 mod models;
 mod render;
 mod state;
@@ -542,6 +543,53 @@ impl App {
         self.run_status_path_for(&run.stage, run.task_id, run.round, run.attempt)
     }
 
+    fn guard_dir_for(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) -> std::path::PathBuf {
+        let task = task_id
+            .map(|id| format!("task-{id}"))
+            .unwrap_or_else(|| "stage".to_string());
+        session_state::session_dir(&self.state.session_id)
+            .join(".guards")
+            .join(format!("{stage}-{task}-r{round}-a{attempt}"))
+    }
+
+    /// Snapshot the run's immutability state. Non-coder agents must leave the
+    /// git tree unchanged; the coder must not edit session control files.
+    /// No-op under the test harness (no real git available).
+    fn capture_run_guard(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) {
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            return;
+        }
+        let dir = self.guard_dir_for(stage, task_id, round, attempt);
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let _ = if stage == "coder" {
+            guard::capture_coder(&dir, &session_dir, round)
+        } else {
+            guard::capture_non_coder(&dir)
+        };
+    }
+
+    fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> Option<String> {
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            return None;
+        }
+        let dir = self.guard_dir_for(&run.stage, run.task_id, run.round, run.attempt);
+        guard::verify(&dir, &run.stage)
+    }
+
     fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
         std::fs::read_to_string(self.run_status_path(run))
             .ok()
@@ -675,6 +723,12 @@ impl App {
             }
             _ => None,
         };
+
+        // Immutability check runs regardless of stage-specific outcome so
+        // that a misbehaving agent that happened to produce the right
+        // artifact is still caught. Guard reason takes precedence.
+        let guard_reason = self.enforce_run_guard(run);
+        let reason = guard_reason.or(reason);
 
         // REVIEWER: if the wrapped command never wrote a status file, we fall back to
         // artifact validation because the tmux window disappearance alone does not preserve
@@ -1139,6 +1193,7 @@ impl App {
 
         let attempt = self.attempt_for("brainstorm", None, 1);
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
+        self.capture_run_guard("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
         match launch_interactive(
@@ -1265,6 +1320,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
+        self.capture_run_guard("spec-review", None, round, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
             result
         } else {
@@ -1353,6 +1409,7 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         let attempt = self.attempt_for("planning", None, 1);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
+        self.capture_run_guard("planning", None, 1, attempt);
         let window_name = window_name_with_model("[Planning]", &model);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
             result
@@ -1460,6 +1517,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
+        self.capture_run_guard("plan-review", None, round, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
             result
         } else {
@@ -1531,6 +1589,7 @@ impl App {
 
         let attempt = self.attempt_for("sharding", None, 1);
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
+        self.capture_run_guard("sharding", None, 1, attempt);
         let window_name = window_name_with_model("[Sharding]", &model);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
             result
@@ -1631,6 +1690,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
         let attempt = self.attempt_for("coder", Some(task_id), r);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
+        self.capture_run_guard("coder", Some(task_id), r, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, None) {
             result
         } else {
@@ -1754,6 +1814,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
+        self.capture_run_guard("reviewer", Some(task_id), r, attempt);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
             result
         } else {

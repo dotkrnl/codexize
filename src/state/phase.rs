@@ -7,6 +7,8 @@ pub enum Phase {
     SpecReviewRunning,
     SpecReviewPaused,
     PlanningRunning,
+    PlanReviewRunning,
+    PlanReviewPaused,
     ShardingRunning,
     /// Coder agent is working on the current task in round N.
     ImplementationRound(u32),
@@ -35,6 +37,8 @@ impl Phase {
             Phase::SpecReviewRunning => "Spec Review".to_string(),
             Phase::SpecReviewPaused => "Spec Review".to_string(),
             Phase::PlanningRunning => "Planning".to_string(),
+            Phase::PlanReviewRunning => "Plan Review".to_string(),
+            Phase::PlanReviewPaused => "Plan Review".to_string(),
             Phase::ShardingRunning => "Sharding".to_string(),
             Phase::ImplementationRound(r) => format!("Builder: coder r{r}"),
             Phase::ReviewRound(r) => format!("Builder: reviewer r{r}"),
@@ -57,7 +61,14 @@ impl Phase {
             (SpecReviewPaused, SpecReviewRunning) => true,
             (SpecReviewPaused, PlanningRunning) => true,
             (SpecReviewPaused, BlockedNeedsUser) => true,
-            (PlanningRunning, ShardingRunning) => true,
+            // New forward transitions for Plan Review
+            (PlanningRunning, PlanReviewRunning) => true,
+            (PlanReviewRunning, ShardingRunning) => true,
+            (PlanReviewRunning, BlockedNeedsUser) => true,
+            (PlanReviewPaused, PlanReviewRunning) => true,
+            (PlanReviewPaused, ShardingRunning) => true,
+            (PlanReviewPaused, BlockedNeedsUser) => true,
+            (BlockedNeedsUser, PlanReviewRunning) => true,
             (PlanningRunning, BlockedNeedsUser) => true,
             (ShardingRunning, ImplementationRound(1)) => true,
             (ShardingRunning, BlockedNeedsUser) => true,
@@ -76,7 +87,11 @@ impl Phase {
             (SpecReviewRunning, BrainstormRunning) => true,
             (SpecReviewPaused, BrainstormRunning) => true,
             (PlanningRunning, SpecReviewRunning) => true,
-            (ShardingRunning, PlanningRunning) => true,
+            (ShardingRunning, PlanReviewRunning) => true, // Changed from PlanningRunning
+            // New backward transitions for Plan Review
+            (PlanReviewRunning, PlanningRunning) => true,
+            (PlanReviewRunning, PlanReviewPaused) => true,
+            (PlanReviewPaused, PlanningRunning) => true,
             (ImplementationRound(r), ShardingRunning) if *r <= 1 => true,
             (ImplementationRound(r), ReviewRound(r2)) if *r2 == *r - 1 => true,
             (ReviewRound(r), ImplementationRound(r2)) if *r == *r2 => true,
@@ -90,6 +105,8 @@ impl Phase {
         match self {
             Phase::SpecReviewRunning => vec![ArtifactKind::Spec],
             Phase::PlanningRunning => vec![ArtifactKind::Spec, ArtifactKind::Plan],
+            Phase::PlanReviewRunning => vec![ArtifactKind::Spec, ArtifactKind::Plan],
+            Phase::PlanReviewPaused => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::ShardingRunning => vec![ArtifactKind::Plan],
             Phase::ImplementationRound(_) => {
                 vec![ArtifactKind::Plan, ArtifactKind::Implementation]
@@ -108,6 +125,8 @@ impl Phase {
             Phase::SpecReviewRunning => "AI agent reviewing specification",
             Phase::SpecReviewPaused => "Specification review paused",
             Phase::PlanningRunning => "AI agent creating implementation plan",
+            Phase::PlanReviewRunning => "AI agent reviewing implementation plan",
+            Phase::PlanReviewPaused => "Plan review paused",
             Phase::ShardingRunning => "Splitting plan into actionable tasks",
             Phase::ImplementationRound(_) => "AI agent implementing code",
             Phase::ReviewRound(_) => "AI agent reviewing implementation",
@@ -126,3 +145,48 @@ impl Phase {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::Phase;
+
+    #[test]
+    fn plan_review_forward_transitions() {
+        assert!(Phase::PlanningRunning.can_transition_to(&Phase::PlanReviewRunning));
+        assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
+        assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::ShardingRunning));
+        assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::BlockedNeedsUser));
+        assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::PlanReviewRunning));
+        assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::ShardingRunning));
+        assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::BlockedNeedsUser));
+        assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::PlanReviewRunning));
+    }
+
+    #[test]
+    fn plan_review_backward_transitions() {
+        assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanningRunning));
+        assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
+        assert!(Phase::PlanReviewPaused.can_transition_to(&Phase::PlanningRunning));
+        assert!(Phase::ShardingRunning.can_transition_to(&Phase::PlanReviewRunning));
+    }
+
+    #[test]
+    fn plan_review_invalid_transitions() {
+        assert!(!Phase::PlanReviewPaused.can_transition_to(&Phase::PlanReviewPaused));
+        assert!(!Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewRunning));
+        assert!(!Phase::PlanReviewPaused.can_transition_to(&Phase::Done));
+        assert!(!Phase::IdeaInput.can_transition_to(&Phase::PlanReviewRunning));
+    }
+
+    #[test]
+    fn sharding_no_longer_goes_back_to_planning() {
+        assert!(!Phase::ShardingRunning.can_transition_to(&Phase::PlanningRunning));
+    }
+
+    #[test]
+    fn plan_review_labels() {
+        assert_eq!(Phase::PlanReviewRunning.label(), "Plan Review");
+        assert_eq!(Phase::PlanReviewPaused.label(), "Plan Review");
+        assert_eq!(Phase::PlanReviewRunning.display_name(), "Plan Review");
+        assert_eq!(Phase::PlanReviewPaused.display_name(), "Plan Review");
+    }
+}

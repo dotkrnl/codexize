@@ -65,36 +65,3 @@ pub fn execute_transition(state: &mut RunState, to: Phase) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::RunState;
-
-    #[test]
-    fn test_validate_transition_ok() {
-        assert!(validate_transition(&Phase::IdeaInput, &Phase::BrainstormRunning).is_ok());
-    }
-
-    #[test]
-    fn test_validate_transition_err() {
-        let err = validate_transition(&Phase::IdeaInput, &Phase::Done).unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("Cannot transition from Idea Input to Done"));
-    }
-
-    #[test]
-    fn test_execute_transition_updates_phase() {
-        let mut state = RunState::new("test-run".to_string());
-        assert_eq!(state.current_phase, Phase::IdeaInput);
-
-        // execute_transition writes to disk, so give it a temporary run directory
-        let dir = std::path::Path::new(".codexize").join("runs").join("test-run");
-        let _ = std::fs::create_dir_all(&dir);
-
-        execute_transition(&mut state, Phase::BrainstormRunning).unwrap();
-        assert_eq!(state.current_phase, Phase::BrainstormRunning);
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}

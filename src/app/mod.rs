@@ -22,9 +22,11 @@ use crate::{
     tasks, tmux,
     tmux::TmuxContext,
     tui::AppTerminal,
+    artifacts::{ArtifactKind, SkipToImplProposal, Spec},
 };
 use anyhow::Result;
 use crossterm::event::{self, Event};
+use tokio::fs;
 
 use self::{
     models::{spawn_refresh, vendor_tag},
@@ -332,6 +334,40 @@ impl App {
             }
         }
         self.selected = current_node_index(&self.nodes);
+        Ok(())
+    }
+
+    pub async fn accept_skip_to_implementation(&mut self) -> Result<()> {
+        use crate::synthetic_artifacts::generate_synthetic_artifacts;
+        use anyhow::Context;
+
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let spec_path = session_dir.join("artifacts").join(ArtifactKind::Spec.filename());
+        let spec_content = tokio::fs::read_to_string(&spec_path)
+            .await
+            .with_context(|| format!("cannot read {}", spec_path.display()))?;
+        let parsed_spec = Spec {
+            content: spec_content,
+            spec_refs: vec![], // This will be populated from the actual spec later
+        };
+
+        generate_synthetic_artifacts(&session_dir, &parsed_spec).await?;
+
+        // Initialize BuilderState similarly to ShardingRunning completion
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+        let parsed_tasks = tasks::validate(&tasks_path)
+            .with_context(|| format!("invalid {}", tasks_path.display()))?;
+
+        self.state.builder.pending = parsed_tasks.tasks.iter().map(|task| task.id).collect();
+        self.state.builder.task_titles = parsed_tasks.tasks.iter().map(|t| (t.id, t.title.clone())).collect();
+        self.state.builder.current_task = None;
+        self.state.builder.done.clear();
+        self.state.builder.iteration = 0;
+        self.state.builder.last_verdict = None;
+
+        self.transition_to_phase(Phase::ImplementationRound(1))?;
+        self.state.save()?; // Persist state after transition and builder setup
+
         Ok(())
     }
 
@@ -1300,9 +1336,24 @@ impl App {
         }
         match self.state.current_phase {
             Phase::BrainstormRunning => {
+                let skip_artifact_path = session_dir
+                    .join("artifacts")
+                    .join("skip_to_impl.json");
+                let proposal = SkipToImplProposal::read_from_path(&skip_artifact_path).await?;
+
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
-                self.transition_to_phase(Phase::SpecReviewRunning)?;
+
+                if let Some(p) = proposal {
+                    if p.proposed {
+                        self.state.skip_to_impl_rationale = Some(p.rationale);
+                        self.transition_to_phase(Phase::SkipToImplPending)?;
+                    } else {
+                        self.transition_to_phase(Phase::SpecReviewRunning)?;
+                    }
+                } else {
+                    self.transition_to_phase(Phase::SpecReviewRunning)?;
+                }
             }
             Phase::SpecReviewRunning => {
                 self.finalize_run_record(run.id, true, None);

@@ -39,7 +39,8 @@ impl SkipToImplProposal {
 // Minimal Spec struct for synthetic artifact generation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Spec {
-    pub spec_refs: Vec<String>,
+    pub content: String,
+    pub spec_refs: Vec<String>, // Keep spec_refs for now to pass to Task.
     // Add other fields as they become relevant, or keep it minimal
 }
 

@@ -18,7 +18,7 @@ This is a synthetic plan generated because the task was deemed simple enough for
 ",
         spec_filename = ArtifactKind::Spec.filename()
     );
-    tokio::fs::write(&plan_path, plan_content.as_bytes()).await?; // write_all requires bytes
+    tokio::fs::write(&plan_path, plan_content.as_bytes()).await?;
 
     // Generate synthetic tasks.toml
     let tasks_path = session_dir.join(ArtifactKind::Tasks.filename());

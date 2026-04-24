@@ -1985,9 +1985,12 @@ fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
 
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
-        "\n\nPeriodically write a concise plain-text summary of your current progress \
-         and next intended action to:\n  {}\nUpdate this file every 2–3 minutes or \
-         whenever your major sub-goal changes. One paragraph is enough.\n",
+        "\n\nEvery 2–3 min (and whenever your sub-goal changes), overwrite {} \
+         with one plain-text line formatted as: `<≤5-word essence> | <current \
+         progress> | <next action>`. The first field MUST capture the real \
+         essence, not a generic label. Your process is killed if this file \
+         isn't updated for 10 min of wall time (time spent inside tool calls \
+         is excluded from that budget).\n",
         path.display()
     )
 }
@@ -1995,23 +1998,16 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
 fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &str) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
-        r#"You are reviewing a spec written by another agent. This is a NON-INTERACTIVE run —
-the operator is NOT available. Do not ask clarifying questions; make your best
-judgement based only on the spec. Do NOT modify any code in the repository; write
-ONLY the review file.
+        r#"You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
+spec alone. Do NOT modify code; write ONLY the review file.
 
-Read the spec at:
-{spec_path}
+Spec:   {spec_path}
+Output: {review_path}
 
-Your task:
-1. Read the spec carefully.
-2. Evaluate: is the spec clear, complete, and buildable? What risks or gaps do you see?
-3. Write your review to: {review_path}
-
-The review must cover:
-- Overall verdict (approve / approve-with-changes / reject)
-- Specific issues found (if any), each with a suggested fix
-- Open risks the spec does not address
+Evaluate clarity, completeness, buildability, risks, and gaps. The review MUST cover:
+  - Verdict: approve / approve-with-changes / reject
+  - Specific issues (if any), each with a suggested fix
+  - Open risks the spec does not address
 {instr}"#
     )
 }
@@ -2024,54 +2020,37 @@ fn plan_review_prompt(
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
-        r#"You are reviewing an implementation plan written by another agent. This is a
-NON-INTERACTIVE run — the operator is NOT available. Do not ask clarifying
-questions; make your best judgement.
+        r#"You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
 
-Read the plan and spec:
-  - Plan: {plan_path}
-  - Spec: {spec_path}
+Inputs:
+  Plan: {plan_path}
+  Spec: {spec_path}
 
-Your task:
-1. Read both files carefully.
-2. Review the plan ONLY for CRITICAL issues that would block or break the
-   implementation. A critical issue is something like:
-     - A spec requirement that has no corresponding plan step (missing work).
-     - Plan steps ordered in a way that makes them unbuildable (e.g., a step
-       depends on something a later step creates).
-     - Contradictions between the plan and spec, or internal contradictions
-       that would lead an implementer to build the wrong thing.
-     - File paths, function names, or interfaces that are inconsistent
-       across steps in a way that would cause real breakage.
-     - Spec-level ambiguity so severe that an implementer could not proceed.
-   The existence of multiple valid implementations is NOT a plan defect. Do
-   not request added detail just to force one internal design choice when
-   several reasonable options satisfy the spec and any explicit interfaces.
-3. If — and ONLY if — you find critical issues, directly edit {plan_path}
-   (and {spec_path} if the issue is spec-level) to fix them. Make the
-   smallest edit that resolves the problem.
-4. Write a changelog to: {review_path}
-   The changelog is a markdown bullet list of what you changed and why.
-   If you found no critical issues, write a single bullet saying so — do
-   not invent issues to fill space.
+Flag ONLY critical issues — things that would block or break implementation:
+  - Spec requirement with no corresponding plan step.
+  - Plan steps ordered unbuildably (a step depends on something a later step creates).
+  - Contradictions plan↔spec, or internal contradictions that would lead to the
+    wrong build.
+  - File paths, function names, or interfaces inconsistent across steps in a way
+    that would cause real breakage.
+  - Spec-level ambiguity severe enough that an implementer could not proceed.
+Multiple valid implementations is NOT a defect; don't force one internal design
+when several options satisfy the spec and any explicit interfaces.
 
-DO NOT flag or fix:
-  - Typos, grammar, wording, or formatting.
-  - Style, tone, or structural polish.
-  - Missing low-level implementation detail (the implementer figures that
-    out — the plan is a plan, not the code).
-  - Absence of prescribed helper/function structure.
-  - Multiple possible implementation approaches, unless the plan/spec makes
-    an explicit interface commitment that is internally contradictory.
-  - Hypothetical edge cases the spec does not require.
-  - Minor nitpicks, suggestions, or "nice-to-have" improvements.
+If — and only if — you find critical issues, directly edit {plan_path} (and
+{spec_path} if spec-level) with the smallest fix. Then write a markdown-bullet
+changelog of what you changed and why to {review_path}. If nothing was critical,
+write a single bullet saying so — do NOT invent issues to fill space.
 
-When in doubt, leave it alone. Over-editing a plan is worse than under-editing.
+Do NOT flag or fix: typos, grammar, wording, formatting, style, tone, structural
+polish, missing low-level implementation detail, absence of prescribed helper/
+function structure, multiple possible approaches (unless the plan/spec makes an
+explicit interface commitment that is internally contradictory), hypothetical
+edge cases the spec does not require, or minor nitpicks. When in doubt, leave it
+alone — over-editing is worse than under-editing.
 
-Rules:
-  - Do NOT create or modify any source code files.
-  - Do NOT run git commands or modify version control state.
-  - Do NOT ask questions or request operator input.
+Rules: do NOT create or modify source code; do NOT run git or modify version
+control; do NOT ask the operator.
 {instr}"#
     )
 }
@@ -2081,30 +2060,25 @@ fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> St
     format!(
         r#"Invoke your brainstorming skill now.
 
-The idea to brainstorm:
-
+Idea:
 ---
 {idea}
 ---
 
-When the brainstorming skill asks you to write the design doc, write it to:
-{spec_path}
+When the skill asks where to write the design doc, write it to {spec_path}.
 
-IMPORTANT: this is a spec-only phase. Do NOT write or modify any code in the
-repository. Your only output should be the spec file. Implementation happens
-in a later phase.
+This is a spec-only phase: do NOT write or modify any code; the spec file is
+your only output. Implementation happens in a later phase.
 
-HARD RULES — override anything the superpowers / brainstorming skill suggests:
-  - Do NOT `git add`, `git commit`, `git stash`, or otherwise change version
-    control state. The spec file lives untracked; a later phase commits.
-  - Do NOT ask the operator whether to continue, proceed to planning,
-    move to the next stage, or run any follow-up skill. When the spec is
-    written, STOP and exit. The orchestrator drives stage transitions,
-    not you.
-  - If the skill offers a "continue to next stage" prompt inline, ignore
-    it and exit.
+HARD rules — override anything the superpowers / brainstorming skill suggests:
+  - Do NOT `git add`, `git commit`, `git stash`, or touch version control. The
+    spec stays untracked; a later phase commits.
+  - Do NOT ask the operator whether to continue, proceed to planning, move on,
+    or run any follow-up skill — including any inline "continue to next stage"
+    prompt the skill may offer. When the spec is written, STOP and exit. The
+    orchestrator drives stage transitions.
 
-The operator is here and ready to respond to your questions ABOUT THE DESIGN.
+The operator IS available to answer questions ABOUT THE DESIGN itself.
 {instr}"#
     )
 }
@@ -2127,62 +2101,53 @@ fn planning_prompt(
             .join("\n")
     };
     format!(
-        r#"Invoke your writing-plans skill now (superpowers:writing-plans).
+        r#"Invoke your superpowers:writing-plans skill now.
 
-You are turning an approved spec — plus any spec reviews — into a concrete
-implementation plan.
+You are turning an approved spec + any spec reviews into an implementation plan.
 
-Inputs to read first:
-  - Spec:    {spec}
-  - Reviews:
+Inputs:
+  Spec:    {spec}
+  Reviews:
 {reviews}
 
-Triage the reviews before planning:
-  - Reviews may contradict each other. Read each one and decide which
-    feedback to incorporate, which to reject, and why.
-  - If the triage involves a real trade-off or a decision you cannot
-    confidently make alone, ASK the operator — this is an interactive
-    session.
+Triage reviews first: they may contradict each other. Decide what to incorporate,
+what to reject, and why. If a trade-off is real and you cannot confidently make
+it alone, ASK the operator — this is interactive.
 
-When every trade-off is resolved, do TWO things in this order:
+Once every trade-off is resolved, do TWO things IN THIS ORDER:
+  1. UPDATE the spec in place at {spec} so it reflects accepted feedback and
+     every decision you just made. Another agent reading ONLY the spec must not
+     be surprised by anything in the plan.
+  2. Write the plan to {plan}.
 
-  1. UPDATE the spec file in place ({spec}) so it reflects the
-     accepted review feedback and every decision you just made. The
-     spec must end up representing the final, agreed-on design —
-     another agent reading only the spec should not be surprised by
-     anything in the plan.
-  2. Write the plan to: {plan}
-
-Hard rules — override anything the superpowers / writing-plans skill suggests:
-  - Do NOT write or modify any code (source files, configs, build
-    scripts). You may only edit the spec and write the plan.
-  - Do NOT `git add`, `git commit`, `git stash`, or otherwise touch
-    version control. The spec and plan stay untracked; a later phase
-    commits. If the skill offers to commit, refuse.
+Hard rules — override anything the writing-plans skill suggests:
+  - Do NOT write or modify any code (source, configs, build scripts). You may
+    only edit the spec and write the plan.
+  - Do NOT `git add`, `git commit`, `git stash`, or touch version control; both
+    files stay untracked (a later phase commits). Refuse if the skill offers to
+    commit. Do NOT offer to run tests, commit, or push.
   - The plan MUST be an execution map for coordination. It SHOULD include:
-      - Sequencing and dependencies between work items (what order matters, and why)
-      - Interfaces, integration points, and execution seams that must be honored
-      - Constraints from the spec that narrow the correct solution space
-      - Optional likely file/module touchpoints ONLY as orientation when helpful
-  - The plan MUST NOT read like a pseudo-implementation or patch recipe:
-      - No checkbox to-do lists or step-by-step coding instructions
-      - No helper/function decomposition scripts or function-by-function edit sequences
-      - No patch-like ordering of edits, "change this line then that line", or mini diffs
-      - No mandated internal code shape (struct fields, method signatures, class layout)
-        unless required by the spec or an explicit interface commitment needed for coordination
-  - Authority rule:
-      - The spec is the design contract and wins any conflict.
-      - The plan is advisory for implementation shape.
-      - The plan is authoritative ONLY for sequencing and explicit interface commitments
-        it names for coordination. Do not turn advisory detail into an implementation contract.
-  - Do NOT ask the operator whether to continue, proceed, start
-    implementing, jump to coding, run the next skill, or skip any
-    downstream stage. When the plan is written, STOP and exit — the
-    orchestrator drives stage transitions, not you.
-  - Do NOT offer to run tests, commit, or push anything.
+      sequencing and dependencies (what order matters, and why); interfaces,
+      integration points, and execution seams that must be honored; constraints
+      from the spec that narrow the correct solution space; optional likely
+      file/module touchpoints ONLY as orientation.
+  - The plan MUST NOT read like a pseudo-implementation or patch recipe: no
+      checkbox to-do lists or step-by-step coding instructions; no helper/
+      function decomposition or function-by-function edit sequences; no patch-
+      like ordering, "change this line then that line", or mini diffs; no
+      mandated internal code shape (struct fields, method signatures, class
+      layout) unless required by the spec or an explicit interface commitment
+      needed for coordination.
+  - Authority rule: the spec is the design contract and wins any conflict; the
+      plan is advisory for implementation shape; the plan is authoritative ONLY
+      for sequencing and explicit interface commitments it names. Do not turn
+      advisory detail into an implementation contract.
+  - Do NOT ask the operator whether to continue, proceed, start implementing,
+      jump to coding, run the next skill, or skip any downstream stage. When
+      the plan is written, STOP and exit — the orchestrator drives stage
+      transitions.
 
-The operator is here and ready to respond to clarifying questions
-about the design itself.
+The operator IS available for clarifying questions about the design itself.
 {instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,
@@ -2199,56 +2164,58 @@ fn sharding_prompt(
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     format!(
-        r#"You are splitting an approved plan into actionable, self-contained,
-testable tasks. This is a NON-INTERACTIVE run — the operator is NOT
-available. Do NOT modify any code in the repository; your ONLY output
-is the tasks TOML file.
+        r#"You split an approved plan into actionable, self-contained, buildable tasks.
+NON-INTERACTIVE — do NOT modify any code; your ONLY output is the tasks TOML.
 
 Inputs:
-  - Spec: {spec}
-  - Plan: {plan}
-
+  Spec: {spec}
+  Plan: {plan}
 Read both carefully before sharding.
 
-Rules:
-  1. Decompose the plan into a sequence of tasks ONLY if the plan is
-     large enough to warrant it. If the whole plan can reasonably be
-     implemented by one coding session at ~200k tokens, a single-task
-     tasks.toml is the correct answer — do NOT force artificial splits.
-     Each task must be self-contained (buildable by one coding agent
-     session without requiring another task to have shipped first,
-     unless explicitly listed as a dependency in the task's description).
-  2. Size each task at roughly 200_000 tokens of implementation effort —
-     small enough that a coding agent can finish it in one session
-     without context compaction, large enough to be meaningful. For a
-     small plan this means exactly one task; for a bigger plan, split
-     along natural seams (by subsystem, by layer, by phase).
-  3. Each task MUST include:
-       - id             sequential integer starting at 1
-       - title          one-line summary
-       - description    detailed what-to-do (multi-line TOML string allowed)
-       - test           concrete verification steps (how will we know it's done)
-       - estimated_tokens  your integer estimate (target ~200_000)
-       - spec_refs      array of {{ path, lines }} pointing into the spec
-       - plan_refs      array of {{ path, lines }} pointing into the plan
-     The `lines` field is a range like "12-45" or a single number.
+Sizing:
+  - Target ~100_000 tokens of implementation effort per task — small enough for
+    one coding session without context compaction, large enough to be meaningful.
+  - Decompose only when the plan warrants it. If the whole plan fits one ~100k
+    session, a single-task tasks.toml is correct — do NOT force artificial
+    splits. Bigger plans split along natural seams (subsystem / layer / phase).
+  - Each task must be self-contained: buildable on its own (compiles / links /
+    type-checks) by a single coding session. A task does NOT have to be
+    independently testable — scaffolding or groundwork tasks that only become
+    testable after a later task lands are allowed, AS LONG AS they still build
+    cleanly on their own.
+  - Unless a dependency is explicitly listed in a task's description, no task
+    may assume another task has shipped first.
 
-Hard rules — keep tasks outcome- and coordination-oriented:
-  - Each task `description` SHOULD focus on required outcomes, dependencies /
-    ordering constraints, acceptance checks, and relevant interfaces or
-    touchpoints (including likely file/module touchpoints only as orientation).
-  - Task descriptions MUST NOT be recipe-style coding scripts:
-      - No step-by-step coding instructions ("do X, then Y, then Z")
-      - No miniature edit scripts or pseudo-patch sequences
-      - No mandated internal design or helper/function decomposition unless
-        required by the spec or an explicit interface commitment needed for coordination
+Required fields per task:
+  - id               sequential integer starting at 1
+  - title            one-line summary
+  - description      detailed what-to-do (multi-line TOML string allowed)
+  - test             concrete verification steps, OR the literal string
+                     "not testable" followed by a one-line reason (e.g.
+                     "not testable — scaffolding; verified by task 4's tests").
+                     Use "not testable" ONLY for genuine intermediate/
+                     scaffolding tasks. The reviewer honors this by skipping
+                     the test-pass check for such tasks, but still requires
+                     the code to build.
+  - estimated_tokens integer estimate (target ~100_000)
+  - spec_refs        array of {{ path, lines }} pointing into the spec
+  - plan_refs        array of {{ path, lines }} pointing into the plan
+  `lines` is a range like "12-45" or a single number.
+
+Description rules — outcome- and coordination-oriented:
+  - SHOULD focus on required outcomes, dependencies/ordering, acceptance checks,
+    and relevant interfaces/touchpoints (file/module touchpoints only as
+    orientation).
+  - MUST NOT be recipe-style: no step-by-step coding instructions; no miniature
+    edit scripts or pseudo-patch sequences; no mandated internal design or
+    helper/function decomposition unless required by the spec or an explicit
+    interface commitment needed for coordination.
   - `plan_refs` MUST point to plan content about goals, sequencing,
-    dependencies, or interface commitments. Do not point primarily to
-    recipe-like implementation instructions.
+    dependencies, or interface commitments — not primarily to recipe-like
+    implementation instructions.
 
-Output: write the TOML to {tasks}
-in EXACTLY this shape (double quotes for strings, triple quotes for
-multi-line, arrays of inline tables for refs):
+Output: write the TOML to {tasks} in EXACTLY this shape (double-quoted strings;
+triple-quoted for multi-line; arrays of inline tables for refs):
 
     [[tasks]]
     id = 1
@@ -2259,7 +2226,7 @@ multi-line, arrays of inline tables for refs):
     test = """
     Run `cargo test pool::` — the new tests must pass.
     """
-    estimated_tokens = 180000
+    estimated_tokens = 90000
     spec_refs = [
       {{ path = "artifacts/spec.md", lines = "10-45" }},
     ]
@@ -2272,8 +2239,8 @@ multi-line, arrays of inline tables for refs):
     id = 2
     …
 
-The file will be validated programmatically — missing or empty fields
-will cause rejection. Do not emit any prose around the TOML.
+The file is validated programmatically — missing or empty fields cause
+rejection. Do NOT emit any prose around the TOML.
 {instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),
@@ -2346,67 +2313,60 @@ fn coder_prompt(
     let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
     let instr = live_summary_instruction(&live_summary_path);
     format!(
-        r#"You are the coder for task {task_id}, round {round}. This is a
-NON-INTERACTIVE run — the operator is NOT available during coding.
-Make your own judgement calls, document them in the commit message,
-and flag anything genuinely ambiguous in a line comment for the
-reviewer to catch.
+        r#"You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
+operator is NOT available. Make your own judgement calls, document them in the
+commit message, and leave a line comment for the reviewer on anything genuinely
+ambiguous.
 
-Task spec:      {task}
-Spec (design):  {spec}
-Plan:           {plan}
+Inputs:
+  Task:  {task}   (lists what to do, test steps, and line refs into spec/plan)
+  Spec:  {spec}
+  Plan:  {plan}
 {prev_review}{resume_hint}
-Your job:
-  1. Read the task file first. It lists what to do, what to test, and line
-     refs into the spec and plan for background.
-  2. Implement the task end-to-end on the current branch.
-  3. Make the tests described in the task pass.
-  4. Commit your work on the current branch as a series of small, atomic
-     commits (see commit rules below). The reviewer inspects the aggregate
-     `base..HEAD` range for this round, where `base` was pinned by the
-     orchestrator before you started. Do NOT write any SHA file — the TUI
-     detects completion by observing that HEAD has advanced past base.
+Job:
+  1. Read the task file first.
+  2. Implement end-to-end on the current branch.
+  3. Make the tests described in the task pass — UNLESS the task's `test`
+     field starts with "not testable" (genuine scaffolding/intermediate
+     task). In that case you may skip writing tests, but the code you land
+     MUST still build cleanly (compiles / links / type-checks) on its own.
+  4. Commit as a series of small atomic commits (see below). The reviewer
+     inspects the aggregate `base..HEAD` range for this round, where `base`
+     was pinned by the orchestrator before you started; the TUI detects
+     completion by observing HEAD advanced past base.
 
-Commit granularity rules (MANDATORY):
-  - Prefer many small, atomic commits over one large one. Each commit
-    should represent ONE logical change that stands on its own: a single
-    refactor step, a single new function with its test, a single bug fix,
-    a single rename. A reviewer should be able to read any one commit in
-    isolation and understand the intent.
-  - Each commit should leave the tree in a consistent state — code compiles
-    and tests relevant to the change pass. Do not split a change such that
-    an intermediate commit is broken.
-  - Do NOT mix unrelated changes in one commit (e.g. a rename + a bug fix +
-    a new feature). Separate them.
-  - Do NOT bundle formatting/whitespace churn into a functional commit.
-    Make it a separate `style:` or `chore:` commit if needed at all.
-  - If a single commit's diff exceeds roughly ~200 changed lines of real
-    logic (excluding generated files, lockfiles, large fixtures), consider
-    whether it should be split.
-  - A one-task-one-commit round is acceptable ONLY when the task genuinely
-    is one atomic change. Otherwise split.
+Commit granularity (MANDATORY):
+  - Prefer many small atomic commits over one large one. Each commit = ONE
+    logical change that stands on its own (a single refactor step, a new
+    function + its test, a single bug fix, a single rename). Any commit read
+    in isolation should reveal its intent.
+  - Each commit leaves the tree consistent: code compiles and tests relevant
+    to that change pass. Do NOT split so an intermediate commit is broken.
+  - Do NOT mix unrelated changes in one commit (e.g. rename + bug fix + new
+    feature). Do NOT bundle formatting/whitespace churn into a functional
+    commit — make it a separate `style:`/`chore:` commit if at all.
+  - If a commit's real-logic diff (excluding generated files, lockfiles, large
+    fixtures) exceeds ~200 lines, consider splitting.
+  - One-task-one-commit is acceptable ONLY when the task genuinely is one
+    atomic change. Otherwise split.
 
-Commit message rules (MANDATORY — the reviewer WILL reject violations):
-  - Use Conventional Commits: `type(scope): summary`, e.g.
-    `feat(auth): add refresh-token rotation`, `fix(db): close pool on shutdown`.
-    Common types: feat, fix, refactor, test, docs, chore, perf, style, build.
-  - Do NOT add `Co-Authored-By:` trailers or any other co-author attribution.
-  - Do NOT mention the orchestrator's internal vocabulary in the message:
-    no "task <N>", no "round <N>", no "plan", no "shard", no "phase",
-    no references to this prompt. Write the message as if a human engineer
+Commit message (MANDATORY — reviewer rejects violations):
+  - Conventional Commits: `type(scope): summary` (feat, fix, refactor, test,
+    docs, chore, perf, style, build). E.g. `feat(auth): add refresh-token
+    rotation`, `fix(db): close pool on shutdown`.
+  - No `Co-Authored-By:` trailers or other co-author attribution.
+  - No orchestrator vocabulary: no "task <N>", "round <N>", "plan", "shard",
+    "phase", or references to this prompt. Write as if a human engineer
     authored the change standalone.
 
-Productivity rule — delegate tedious work to subagents:
-  - For repetitive, multi-file, or exploration-heavy chores (bulk renames,
-    codebase audits, test sweeps, dependency tracing, large refactors),
-    dispatch a subagent. They run in parallel, stay focused, and finish
-    faster than you doing it sequentially. Give each subagent a clear,
-    self-contained brief and verify their output before committing.
+Delegate tedious chores to subagents — bulk renames, codebase audits, test
+sweeps, dependency tracing, large refactors. They run in parallel. Give each
+a clear, self-contained brief and verify their output before committing.
 
 Hard rules:
-  - Do NOT ask clarifying questions; work from the task + spec + plan.
-  - Stay within the scope of this one task. If you uncover follow-up work,
-    do NOT do it yourself — note it for the reviewer instead.
+  - Do NOT ask clarifying questions; work from task + spec + plan.
+  - Stay within this one task's scope. Follow-up work you uncover → note for
+    the reviewer; do NOT do it yourself.
   - Do NOT force-push, rebase history, or delete branches.
   - Do NOT proceed to the next task; one task per round.
 {instr}"#,
@@ -2435,32 +2395,40 @@ fn reviewer_prompt(
     let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
     let instr = live_summary_instruction(&live_summary_path);
     format!(
-        r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
-the operator is NOT available. Do NOT modify code. Write ONLY the review TOML.
+        r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
+operator. Do NOT modify code. Write ONLY the review TOML.
 
 Inputs:
-  Task:         {task}
-  Spec:         {spec}
-  Plan:         {plan}
-  Base SHA:     {base} (contents are one SHA — HEAD at round start)
-  Commit list:  {commits} (one SHA per line in `base..HEAD`, may be empty
-                 if git was unavailable — fall back to `git log` yourself)
+  Task:        {task}
+  Spec:        {spec}
+  Plan:        {plan}
+  Base SHA:    {base}     (one SHA = HEAD at round start)
+  Commit list: {commits}  (one SHA per line in base..HEAD; may be empty if
+                           git was unavailable — fall back to `git log` yourself)
 
-Review the change carefully:
+Review:
   1. BASE=$(cat {base})
-     `git log --oneline $BASE..HEAD`  — see every commit in this round.
-     `git diff $BASE..HEAD`            — see the aggregate change.
-     `git show <sha>`                  — drill into any individual commit.
+     `git log --oneline $BASE..HEAD` — every commit in this round.
+     `git diff $BASE..HEAD`           — aggregate change.
+     `git show <sha>`                 — drill into any commit.
      The coder may have made one or more commits; judge the aggregate delta
      against the task. Per-commit structure is the coder's choice.
-  2. Verify the task's test description passes (run it, inspect code).
-  3. Check for issues: correctness, missing edge cases, broken contracts,
-     bad error handling, test gaps. Uncommitted working-tree changes are
-     NOT in scope — review only what's in `base..HEAD`.
+  2. Judge task completion: does the aggregate delta actually deliver what's
+     required? Read the task `description` AND the spec/plan sections it
+     points to (via `spec_refs` and `plan_refs` in the task file) — the task
+     is complete only when the delta satisfies all of them. A green test run
+     does NOT by itself prove completion, and a missing test run does NOT by
+     itself prove failure — read the code against those requirements.
+  3. Verify the task's test description passes (run it, inspect code). If the
+     task's `test` field starts with "not testable" (scaffolding/intermediate
+     task), SKIP the test-pass check — but still require the code to build
+     cleanly (compiles / links / type-checks). Completion still matters.
+  4. Check correctness, missing edge cases, broken contracts, bad error
+     handling, test gaps. Uncommitted working-tree changes are NOT in scope —
+     review only `base..HEAD`.
 
-Emit the verdict to: {review}
-in EXACTLY this TOML shape (double-quoted strings; triple-quoted for
-multi-line; arrays of inline tables for any new task refs):
+Emit the verdict to {review} in EXACTLY this TOML shape (double-quoted strings;
+triple-quoted for multi-line; arrays of inline tables for any new task refs):
 
     status  = "done" | "revise" | "blocked"
     summary = "One-paragraph summary of what was done and your verdict."
@@ -2469,8 +2437,8 @@ multi-line; arrays of inline tables for any new task refs):
       "One item per string.",
     ]
 
-    # Optional: follow-up tasks to add to the queue when you find work
-    # that is genuinely out-of-scope for this task but needed later.
+    # Optional: follow-up tasks for work genuinely out-of-scope for this task
+    # but needed later.
     [[new_tasks]]
     id = 100
     title = "…"
@@ -2481,11 +2449,10 @@ multi-line; arrays of inline tables for any new task refs):
     plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
 
 Rules:
-  - status = "done"    → the task is complete and meets its tests.
-  - status = "revise"  → the coder must iterate; feedback MUST list the
-                          specific issues.
-  - status = "blocked" → human judgement is required; feedback MUST explain
-                          what's unclear or stuck.
+  - done    → task outcomes are delivered AND (tests pass, OR task is marked
+              "not testable" and the code builds cleanly).
+  - revise  → coder must iterate; feedback MUST list the specific issues.
+  - blocked → human judgement required; feedback MUST explain what's unclear.
   - Do NOT leave feedback empty for revise/blocked.
   - Do NOT emit prose outside the TOML.
 {instr}"#,

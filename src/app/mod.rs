@@ -1172,9 +1172,6 @@ impl App {
     }
 
     fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
-        if failed_run.stage == "brainstorm" {
-            return false;
-        }
         if failed_run.error.as_deref() == Some("user_forced_retry") {
             return false;
         }
@@ -1398,6 +1395,14 @@ impl App {
     }
 
     fn launch_brainstorm(&mut self, idea: String) {
+        let _ = self.launch_brainstorm_with_model(idea, None);
+    }
+
+    fn launch_brainstorm_with_model(
+        &mut self,
+        idea: String,
+        override_model: Option<ModelStatus>,
+    ) -> bool {
         self.state.agent_error = None;
 
         if self.models.is_empty() {
@@ -1405,17 +1410,19 @@ impl App {
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         }
 
-        let Some(chosen) = Self::select_brainstorm_model(&self.models)
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| Self::select_brainstorm_model(&self.models))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error =
                 Some("no model available with quota — check model strip".to_string());
             let _ = self.state.save();
             self.nodes = build_tree(&self.state);
-            return;
+            return false;
         };
         let (model, vendor_kind, vendor) = chosen;
 
@@ -1442,7 +1449,7 @@ impl App {
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.state.agent_error = Some(format!("error writing prompt: {e}"));
-            return;
+            return false;
         }
 
         let run = AgentRun {
@@ -1455,15 +1462,23 @@ impl App {
         self.capture_run_guard("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
-        match launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path) {
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&spec_path)) {
+                result
+            } else {
+                launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path)
+            };
+        match launch_result {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
                 self.start_run_tracking("brainstorm", None, 1, model, vendor, window_name);
+                true
             }
             Err(e) => {
                 self.state.agent_error = Some(format!("failed to launch brainstorm: {e}"));
+                false
             }
         }
     }
@@ -1480,6 +1495,12 @@ impl App {
         chosen: ModelStatus,
     ) -> bool {
         match failed_run.stage.as_str() {
+            "brainstorm" => {
+                let Some(idea) = self.state.idea_text.clone() else {
+                    return false;
+                };
+                self.launch_brainstorm_with_model(idea, Some(chosen))
+            }
             "spec-review" => self.launch_spec_review_with_model(Some(chosen)),
             "planning" => self.launch_planning_with_model(Some(chosen), true),
             "plan-review" => self.launch_plan_review_with_model(Some(chosen)),
@@ -3911,11 +3932,12 @@ estimated_tokens = 1
     }
 
     #[test]
-    fn brainstorm_failures_do_not_retry_or_populate_failed_models() {
+    fn brainstorm_failure_auto_retries_with_next_model() {
         with_temp_root(|| {
-            let session_id = "brainstorm-no-retry";
+            let session_id = "brainstorm-retry";
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::BrainstormRunning;
+            state.idea_text = Some("idea".to_string());
             let run = RunRecord {
                 id: 1,
                 stage: "brainstorm".to_string(),
@@ -3932,37 +3954,34 @@ estimated_tokens = 1
             };
             state.agent_runs.push(run.clone());
             let mut app = idle_app(state);
-            app.models = vec![ranked_model(
-                selection::VendorKind::Claude,
-                "claude-sonnet",
-                1,
-                1,
-                1,
-            )];
+            app.models = vec![
+                ranked_model(selection::VendorKind::Claude, "claude-sonnet", 1, 1, 1),
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 1, 1),
+            ];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
             std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
                 .expect("create status dir");
             std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
 
             app.finalize_current_run(&run)
                 .expect("finalize brainstorm failure");
-            assert!(app.failed_models.is_empty());
-            assert_eq!(app.state.agent_runs.len(), 1);
+            assert_eq!(
+                app.failed_models
+                    .get(&("brainstorm".to_string(), None, 1))
+                    .map(|set| set.len()),
+                Some(1)
+            );
+            assert_eq!(app.state.agent_runs.len(), 2);
             assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
-            assert_eq!(app.state.agent_runs[0].error.as_deref(), Some("exit(1)"));
-            assert_eq!(app.state.agent_error.as_deref(), Some("exit(1)"));
-
-            let session_dir = session_state::session_dir(session_id);
-            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
-                .expect("recreate status dir");
-            std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
-            std::fs::write(session_dir.join("artifacts").join("spec.md"), "spec")
-                .expect("write spec");
-            app.state.agent_runs[0].status = RunStatus::Running;
-            app.state.agent_runs[0].error = None;
-            app.finalize_current_run(&run)
-                .expect("finalize brainstorm success");
-            assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
-            assert!(app.failed_models.is_empty());
+            assert_eq!(app.state.agent_runs[1].status, RunStatus::Running);
+            assert_eq!(app.state.agent_runs[1].stage, "brainstorm");
         });
     }
 }

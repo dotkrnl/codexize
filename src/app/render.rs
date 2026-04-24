@@ -294,7 +294,7 @@ impl App {
                     run,
                     scroll_offset,
                     *local_offset,
-                    self.agent_line_count,
+                    self.spinner_tick,
                 );
                 widget.render(area, buf);
                 return;
@@ -512,7 +512,7 @@ impl App {
                     &msgs,
                     run,
                     local_offset,
-                    self.agent_line_count,
+                    self.spinner_tick,
                     available_width,
                 );
             }
@@ -523,7 +523,7 @@ impl App {
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         if node.status == NodeStatus::Running && self.window_launched {
-            let spin = spinner_frame(self.agent_line_count);
+            let spin = spinner_frame(self.spinner_tick);
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
                 Span::styled(

@@ -74,6 +74,9 @@ pub struct App {
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,
     agent_line_count: usize,
+    agent_content_hash: u64,
+    agent_last_change: Option<Instant>,
+    spinner_tick: usize,
     live_summary_watcher: Option<notify::RecommendedWatcher>,
     live_summary_change_rx: Option<mpsc::Receiver<()>>,
     live_summary_path: Option<std::path::PathBuf>,
@@ -127,6 +130,9 @@ impl App {
             quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
+            agent_content_hash: 0,
+            agent_last_change: None,
+            spinner_tick: 0,
             live_summary_path: None,
             live_summary_watcher: None,
             live_summary_change_rx: None,
@@ -968,15 +974,34 @@ impl App {
     fn update_agent_progress(&mut self) {
         let Some(run) = self.running_run() else {
             self.agent_line_count = 0;
+            self.agent_content_hash = 0;
+            self.agent_last_change = None;
             return;
         };
         let output = std::process::Command::new("tmux")
             .args(["capture-pane", "-t", &run.window_name, "-p", "-J"])
             .output();
-        if let Ok(out) = output {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let lines = text.lines().filter(|l| !l.trim().is_empty()).count();
-            self.agent_line_count = lines;
+        let Ok(out) = output else { return };
+        let text = String::from_utf8_lossy(&out.stdout);
+        self.agent_line_count = text.lines().filter(|l| !l.trim().is_empty()).count();
+
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let now = Instant::now();
+        if self.agent_content_hash == 0 || hash != self.agent_content_hash {
+            self.agent_content_hash = hash;
+            self.agent_last_change = Some(now);
+            self.spinner_tick = self.spinner_tick.wrapping_add(1);
+            return;
+        }
+        // Keep spinning while the stall is under 30s; freeze after that.
+        if let Some(last) = self.agent_last_change {
+            if now.duration_since(last) < Duration::from_secs(30) {
+                self.spinner_tick = self.spinner_tick.wrapping_add(1);
+            }
         }
     }
 
@@ -3282,6 +3307,9 @@ mod tests {
             quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
+            agent_content_hash: 0,
+            agent_last_change: None,
+            spinner_tick: 0,
             live_summary_watcher: None,
             live_summary_change_rx: None,
             live_summary_path: None,
@@ -3544,6 +3572,9 @@ mod tests {
             quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
+            agent_content_hash: 0,
+            agent_last_change: None,
+            spinner_tick: 0,
             live_summary_watcher: None,
             live_summary_change_rx: None,
             live_summary_path: None,

@@ -1,12 +1,12 @@
+use super::config::{SELECTION_CONFIG, SelectionPhase};
+use super::quota;
+use super::ranking;
+use super::types::{Candidate, ModelStatus, QuotaError, TaskKind, VendorKind};
+use super::vendor;
+use crate::dashboard;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::dashboard;
-use super::config::{SelectionPhase, SELECTION_CONFIG};
-use super::types::{Candidate, ModelStatus, QuotaError, TaskKind, VendorKind};
-use super::quota;
-use super::ranking;
-use super::vendor;
 
 pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     let dashboard_models = match dashboard::load_models() {
@@ -26,11 +26,14 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
 
     // Collapse all Kimi candidates into a single "kimi-latest" entry using
     // the best-scoring kimi as the source (the kimi CLI only has one model).
-    let best_kimi_idx = candidates.iter()
+    let best_kimi_idx = candidates
+        .iter()
         .enumerate()
         .filter(|(_, c)| c.vendor == VendorKind::Kimi)
         .max_by(|(_, a), (_, b)| {
-            a.overall_score.partial_cmp(&b.overall_score).unwrap_or(Ordering::Equal)
+            a.overall_score
+                .partial_cmp(&b.overall_score)
+                .unwrap_or(Ordering::Equal)
         })
         .map(|(i, _)| i);
     if let Some(i) = best_kimi_idx {
@@ -82,13 +85,15 @@ pub fn select_for_review<'a>(
     models: &'a [ModelStatus],
     used: &[crate::state::RunRecord],
 ) -> Option<&'a ModelStatus> {
-    let used_vendors: Vec<VendorKind> = used.iter()
+    let used_vendors: Vec<VendorKind> = used
+        .iter()
         .filter_map(|r| vendor::str_to_vendor(&r.vendor))
         .collect();
     let used_names: Vec<&str> = used.iter().map(|r| r.model.as_str()).collect();
 
     // 1. Different vendor AND different model
-    let fresh_vendor: Vec<&ModelStatus> = models.iter()
+    let fresh_vendor: Vec<&ModelStatus> = models
+        .iter()
         .filter(|m| !used_vendors.contains(&m.vendor) && !used_names.contains(&m.name.as_str()))
         .collect();
     if let Some(m) = weighted_sample(&fresh_vendor, TaskKind::Review) {
@@ -96,7 +101,8 @@ pub fn select_for_review<'a>(
     }
 
     // 2. Same vendor but different model
-    let fresh_model: Vec<&ModelStatus> = models.iter()
+    let fresh_model: Vec<&ModelStatus> = models
+        .iter()
         .filter(|m| !used_names.contains(&m.name.as_str()))
         .collect();
     weighted_sample(&fresh_model, TaskKind::Review)
@@ -106,14 +112,7 @@ fn weighted_sample<'a>(candidates: &[&'a ModelStatus], task: TaskKind) -> Option
     if candidates.is_empty() {
         return None;
     }
-    let weights: Vec<f64> = candidates
-        .iter()
-        .map(|m| match task {
-            TaskKind::Planning => m.planning_weight,
-            TaskKind::Build => m.build_weight,
-            TaskKind::Review => m.review_weight,
-        })
-        .collect();
+    let weights: Vec<f64> = candidates.iter().map(|m| weight_for(m, task)).collect();
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
         return candidates.iter().min_by_key(|m| m.rank_for(task)).copied();
@@ -131,6 +130,15 @@ fn weighted_sample<'a>(candidates: &[&'a ModelStatus], task: TaskKind) -> Option
         }
     }
     candidates.last().copied()
+}
+
+fn weight_for(model: &ModelStatus, task: TaskKind) -> f64 {
+    match task {
+        TaskKind::Idea => model.idea_weight,
+        TaskKind::Planning => model.planning_weight,
+        TaskKind::Build => model.build_weight,
+        TaskKind::Review => model.review_weight,
+    }
 }
 
 /// Probabilistically select a model for the given task using weighted probabilities.
@@ -204,9 +212,7 @@ fn apply_version_penalties(candidates: &mut [Candidate]) {
         let rank = version
             .and_then(|v| unique.iter().position(|u| *u == v))
             .unwrap_or(0);
-        let interactive_penalty = cfg
-            .version_penalty_per_step_interactive
-            .powi(rank as i32);
+        let interactive_penalty = cfg.version_penalty_per_step_interactive.powi(rank as i32);
         let headless_penalty = cfg.version_penalty_per_step_headless.powi(rank as i32);
         candidate.idea_probability *= interactive_penalty;
         candidate.planning_probability *= interactive_penalty;
@@ -229,10 +235,18 @@ fn apply_top_third_cutoff(candidates: &mut [Candidate]) {
     let review_cut = cutoff(candidates, |c| c.review_probability);
 
     for c in candidates.iter_mut() {
-        if c.idea_probability < idea_cut { c.idea_probability = 0.0; }
-        if c.planning_probability < planning_cut { c.planning_probability = 0.0; }
-        if c.build_probability < build_cut { c.build_probability = 0.0; }
-        if c.review_probability < review_cut { c.review_probability = 0.0; }
+        if c.idea_probability < idea_cut {
+            c.idea_probability = 0.0;
+        }
+        if c.planning_probability < planning_cut {
+            c.planning_probability = 0.0;
+        }
+        if c.build_probability < build_cut {
+            c.build_probability = 0.0;
+        }
+        if c.review_probability < review_cut {
+            c.review_probability = 0.0;
+        }
     }
 }
 
@@ -272,4 +286,56 @@ fn build_candidate(
         build_probability,
         review_probability,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_model_status() -> ModelStatus {
+        ModelStatus {
+            vendor: VendorKind::Claude,
+            name: "claude-sonnet".to_string(),
+            stupid_level: Some(7),
+            quota_percent: Some(80),
+            idea_rank: 4,
+            planning_rank: 3,
+            build_rank: 2,
+            review_rank: 1,
+            idea_weight: 0.6,
+            planning_weight: 0.5,
+            build_weight: 0.4,
+            review_weight: 0.3,
+        }
+    }
+
+    #[test]
+    fn idea_task_uses_idea_weight() {
+        let model = sample_model_status();
+
+        assert_eq!(weight_for(&model, TaskKind::Idea), 0.6);
+    }
+
+    #[test]
+    fn select_uses_idea_weights_for_idea_task() {
+        let mut idea_choice = sample_model_status();
+        idea_choice.name = "idea-choice".to_string();
+        idea_choice.idea_weight = 1.0;
+        idea_choice.build_weight = 0.0;
+        idea_choice.planning_weight = 0.0;
+        idea_choice.review_weight = 0.0;
+
+        let mut build_choice = sample_model_status();
+        build_choice.name = "build-choice".to_string();
+        build_choice.idea_weight = 0.0;
+        build_choice.build_weight = 1.0;
+        build_choice.planning_weight = 1.0;
+        build_choice.review_weight = 1.0;
+
+        let models = vec![idea_choice, build_choice];
+
+        let chosen = select(&models, TaskKind::Idea).expect("expected idea task selection");
+
+        assert_eq!(chosen.name, "idea-choice");
+    }
 }

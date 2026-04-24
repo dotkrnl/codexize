@@ -30,6 +30,7 @@ pub struct ModelStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskKind {
+    Idea,
     Planning,
     Build,
     Review,
@@ -52,9 +53,39 @@ pub struct Candidate {
 impl ModelStatus {
     pub fn rank_for(&self, task: TaskKind) -> u8 {
         match task {
+            TaskKind::Idea => self.idea_rank,
             TaskKind::Planning => self.planning_rank,
             TaskKind::Build => self.build_rank,
             TaskKind::Review => self.review_rank,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_model_status() -> ModelStatus {
+        ModelStatus {
+            vendor: VendorKind::Claude,
+            name: "claude-sonnet".to_string(),
+            stupid_level: Some(7),
+            quota_percent: Some(80),
+            idea_rank: 1,
+            planning_rank: 2,
+            build_rank: 3,
+            review_rank: 4,
+            idea_weight: 0.4,
+            planning_weight: 0.3,
+            build_weight: 0.2,
+            review_weight: 0.1,
+        }
+    }
+
+    #[test]
+    fn rank_for_idea_returns_idea_rank() {
+        let model = sample_model_status();
+
+        assert_eq!(model.rank_for(TaskKind::Idea), 1);
     }
 }

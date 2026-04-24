@@ -767,7 +767,7 @@ impl App {
             return;
         }
 
-        let Some(chosen) = selection::select(&self.models, selection::TaskKind::Build)
+        let Some(chosen) = Self::select_brainstorm_model(&self.models)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error =
@@ -828,6 +828,12 @@ impl App {
                 self.state.agent_error = Some(format!("failed to launch brainstorm: {e}"));
             }
         }
+    }
+
+    fn select_brainstorm_model(
+        models: &[selection::ModelStatus],
+    ) -> Option<&selection::ModelStatus> {
+        selection::select(models, selection::TaskKind::Idea)
     }
 
     fn launch_spec_review(&mut self) {
@@ -2097,7 +2103,9 @@ mod tests {
             .position(|n| n.label == "Brainstorm")
             .unwrap();
         assert_eq!(
-            app.stage_scroll.get(&app.nodes[bs_idx_after].label).copied(),
+            app.stage_scroll
+                .get(&app.nodes[bs_idx_after].label)
+                .copied(),
             Some(7)
         );
     }
@@ -2211,5 +2219,34 @@ mod tests {
             .unwrap();
         app.toggle_expand_focused();
         assert_ne!(app.expanded, before);
+    }
+
+    fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::ModelStatus {
+        selection::ModelStatus {
+            vendor: selection::VendorKind::Claude,
+            name: name.to_string(),
+            stupid_level: Some(7),
+            quota_percent: Some(80),
+            idea_rank,
+            planning_rank: 10,
+            build_rank,
+            review_rank: 10,
+            idea_weight: 0.0,
+            planning_weight: 0.0,
+            build_weight: 0.0,
+            review_weight: 0.0,
+        }
+    }
+
+    #[test]
+    fn brainstorm_selection_uses_idea_task_kind() {
+        let models = vec![
+            sample_model("idea-first", 1, 2),
+            sample_model("build-first", 2, 1),
+        ];
+
+        let chosen = App::select_brainstorm_model(&models).expect("expected brainstorm model");
+
+        assert_eq!(chosen.name, "idea-first");
     }
 }

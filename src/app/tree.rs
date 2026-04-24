@@ -18,14 +18,7 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
 fn build_idea_node(state: &SessionState) -> Node {
     let (status, summary) = match state.current_phase {
         Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
-        _ => (
-            NodeStatus::Done,
-            state
-                .idea_text
-                .as_deref()
-                .unwrap_or("idea captured")
-                .to_string(),
-        ),
+        _ => (NodeStatus::Done, "idea captured".to_string()),
     };
     Node {
         label: "Idea".to_string(),

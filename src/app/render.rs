@@ -552,6 +552,33 @@ impl App {
                 ]));
             }
         }
+        // Captured idea shown in the body (not the title)
+        if node.label == "Idea" && node.status == NodeStatus::Done {
+            if let Some(idea) = self.state.idea_text.as_deref() {
+                let width = 64usize;
+                let inner_width = width.saturating_sub(4);
+                let label = " idea ";
+                let fill = width.saturating_sub(label.len() + 2);
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("  ╭{label}{}╮", "─".repeat(fill)),
+                    Style::default().fg(Color::DarkGray),
+                )));
+                for chunk in wrap_input(idea, inner_width) {
+                    let padding = inner_width.saturating_sub(chunk.chars().count());
+                    lines.push(Line::from(vec![
+                        Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(chunk, Style::default().fg(Color::White)),
+                        Span::raw(" ".repeat(padding)),
+                        Span::styled(" │", Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("  ╰{}╯", "─".repeat(width.saturating_sub(2))),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
         // Input box for Idea stage
         if node.label == "Idea" && node.status == NodeStatus::WaitingUser {
             let active = self.input_mode && index == self.selected;

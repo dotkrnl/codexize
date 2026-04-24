@@ -63,12 +63,16 @@ impl Phase {
             (IdeaInput, BrainstormRunning) => true,
             (BrainstormRunning, SpecReviewRunning) => true,
             (BrainstormRunning, BlockedNeedsUser) => true,
+            (BrainstormRunning, SkipToImplPending) => true, // New transition
             (SpecReviewRunning, SpecReviewPaused) => true,
             (SpecReviewRunning, PlanningRunning) => true,
             (SpecReviewRunning, BlockedNeedsUser) => true,
             (SpecReviewPaused, SpecReviewRunning) => true,
             (SpecReviewPaused, PlanningRunning) => true,
             (SpecReviewPaused, BlockedNeedsUser) => true,
+            (SkipToImplPending, ImplementationRound(_)) => true, // New transition
+            (SkipToImplPending, SpecReviewRunning) => true, // New transition
+            (SkipToImplPending, BlockedNeedsUser) => true, // New transition
             // New forward transitions for Plan Review
             (PlanningRunning, PlanReviewRunning) => true,
             (PlanReviewRunning, ShardingRunning) => true,

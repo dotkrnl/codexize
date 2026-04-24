@@ -157,7 +157,9 @@ impl App {
             Phase::BrainstormRunning
             | Phase::SpecReviewRunning
             | Phase::SpecReviewPaused => artifacts.join("spec.md"),
-            Phase::PlanningRunning => artifacts.join("plan.md"),
+            Phase::PlanningRunning
+            | Phase::PlanReviewRunning
+            | Phase::PlanReviewPaused => artifacts.join("plan.md"),
             Phase::ShardingRunning => artifacts.join("tasks.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
                 session_dir.join("rounds").join(format!("{r:03}")).join("task.md")
@@ -212,12 +214,48 @@ impl App {
                 let _ = fs::remove_file(artifacts.join("plan.md"));
                 let _ = self.state.transition_to(Phase::SpecReviewRunning);
             }
+            Phase::PlanReviewRunning => {
+                let review_n = self.state.plan_reviewers.len() + 1;
+                kill_window(&format!("[Plan Review {review_n}]"));
+                let _ = fs::remove_file(artifacts.join(format!("plan-review-{review_n}.md")));
+                let _ = fs::remove_file(prompts.join(format!("plan-review-{review_n}.md")));
+                let plan_backup = artifacts.join(format!("plan.pre-review-{review_n}.md"));
+                let spec_backup = artifacts.join(format!("spec.pre-review-{review_n}.md"));
+                restore_artifacts(&[
+                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
+                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
+                ]);
+                self.state.phase_models.remove("plan-review");
+                self.state.agent_error = None;
+                if self.state.plan_reviewers.is_empty() {
+                    let _ = self.state.transition_to(Phase::PlanningRunning);
+                } else {
+                    let _ = self.state.transition_to(Phase::PlanReviewPaused);
+                }
+            }
+            Phase::PlanReviewPaused => {
+                let plan_backup = artifacts.join("plan.pre-review-1.md");
+                let spec_backup = artifacts.join("spec.pre-review-1.md");
+                restore_artifacts(&[
+                    (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
+                    (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
+                ]);
+                for i in 1..=self.state.plan_reviewers.len() {
+                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{i}.md")));
+                    let _ = fs::remove_file(prompts.join(format!("plan-review-{i}.md")));
+                    let _ = fs::remove_file(artifacts.join(format!("plan.pre-review-{i}.md")));
+                    let _ = fs::remove_file(artifacts.join(format!("spec.pre-review-{i}.md")));
+                }
+                self.state.plan_reviewers.clear();
+                self.state.phase_models.remove("plan-review");
+                let _ = self.state.transition_to(Phase::PlanningRunning);
+            }
             Phase::ShardingRunning => {
                 kill_window("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
                 self.state.phase_models.remove("sharding");
-                let _ = self.state.transition_to(Phase::PlanningRunning);
+                let _ = self.state.transition_to(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {
                 kill_window(&format!("[Coder r{r}]"));
@@ -317,6 +355,10 @@ impl App {
         let window_name: &str = match self.state.current_phase {
             Phase::BrainstormRunning => "[Brainstorm]",
             Phase::SpecReviewRunning => "[Spec Review]",
+            Phase::PlanReviewRunning => {
+                window_name_owned = format!("[Plan Review {}]", self.state.plan_reviewers.len() + 1);
+                &window_name_owned
+            }
             Phase::PlanningRunning => "[Planning]",
             Phase::ShardingRunning => "[Sharding]",
             Phase::ImplementationRound(r) => {
@@ -352,6 +394,7 @@ impl App {
         }
         match self.state.current_phase {
             Phase::SpecReviewRunning => self.launch_spec_review(),
+            Phase::PlanReviewRunning => self.launch_plan_review(),
             Phase::ShardingRunning => self.launch_sharding(),
             Phase::ImplementationRound(_) => self.launch_coder(),
             Phase::ReviewRound(_) => self.launch_reviewer(),

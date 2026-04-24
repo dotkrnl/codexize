@@ -52,6 +52,11 @@ impl App {
                         self.launch_spec_review();
                         return false;
                     }
+                    if self.state.current_phase == Phase::PlanReviewPaused {
+                        let _ = self.state.transition_to(Phase::PlanReviewRunning);
+                        self.launch_plan_review();
+                        return false;
+                    }
                     if self.state.current_phase == Phase::BrainstormRunning
                         && (self.state.agent_error.is_some() || !self.window_launched)
                     {
@@ -69,6 +74,12 @@ impl App {
                         && (self.state.agent_error.is_some() || !self.window_launched)
                     {
                         self.launch_planning();
+                        return false;
+                    }
+                    if self.state.current_phase == Phase::PlanReviewRunning
+                        && (self.state.agent_error.is_some() || !self.window_launched)
+                    {
+                        self.launch_plan_review();
                         return false;
                     }
                     if self.state.current_phase == Phase::ShardingRunning
@@ -98,16 +109,27 @@ impl App {
                 false
             }
             KeyCode::Char('n') => {
-                let can_skip = self.state.current_phase == Phase::SpecReviewPaused
+                let can_skip_spec = self.state.current_phase == Phase::SpecReviewPaused
                     || (self.state.current_phase == Phase::SpecReviewRunning
                         && self.state.agent_error.is_some());
-                if can_skip {
+                let can_skip_plan = self.state.current_phase == Phase::PlanReviewPaused
+                    || (self.state.current_phase == Phase::PlanReviewRunning
+                        && self.state.agent_error.is_some());
+                if can_skip_spec {
                     self.state.agent_error = None;
                     let _ = self.state.transition_to(Phase::PlanningRunning);
                     self.sections = build_sections(&self.state, self.window_launched);
                     self.section_scroll.resize(self.sections.len(), usize::MAX);
                     self.selected = self.sections.iter()
                         .position(|s| s.name == "Planning")
+                        .unwrap_or_else(|| current_section_index(&self.sections));
+                } else if can_skip_plan {
+                    self.state.agent_error = None;
+                    let _ = self.state.transition_to(Phase::ShardingRunning);
+                    self.sections = build_sections(&self.state, self.window_launched);
+                    self.section_scroll.resize(self.sections.len(), usize::MAX);
+                    self.selected = self.sections.iter()
+                        .position(|s| s.name == "Sharding")
                         .unwrap_or_else(|| current_section_index(&self.sections));
                 }
                 false

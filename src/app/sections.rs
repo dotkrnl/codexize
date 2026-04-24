@@ -192,7 +192,67 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
             Phase::IdeaInput | Phase::BrainstormRunning
             | Phase::SpecReviewRunning | Phase::SpecReviewPaused
             | Phase::PlanningRunning => {
-                PipelineSection::pending("Sharding", "blocked on planning")
+                PipelineSection::pending("Plan Review", "blocked on planning")
+            }
+            Phase::PlanReviewRunning if window_launched => PipelineSection::running(
+                "Plan Review",
+                "agent running in [Plan Review] window",
+                vec!["waiting for plan-review.md artifact".to_string()],
+            ),
+            Phase::PlanReviewRunning => {
+                if let Some(err) = &state.agent_error {
+                    let n_done = state.plan_reviewers.len();
+                    let mut events = Vec::new();
+                    for (i, r) in state.plan_reviewers.iter().enumerate() {
+                        events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
+                    }
+                    if n_done > 0 {
+                        events.push(String::new());
+                    }
+                    events.push(format!("  ✗ round {} failed: {err}", n_done + 1));
+                    events.push(String::new());
+                    events.push(if n_done > 0 {
+                        format!("[Enter] retry  ·  [n] proceed with {n_done} review{}",
+                            if n_done == 1 { "" } else { "s" })
+                    } else {
+                        "[Enter] retry  ·  [n] skip review, proceed to sharding".to_string()
+                    });
+                    PipelineSection::action("Plan Review", "failed", events)
+                } else {
+                    PipelineSection::action(
+                        "Plan Review",
+                        "press Enter to run",
+                        Vec::<String>::new(),
+                    )
+                }
+            }
+            Phase::PlanReviewPaused => {
+                let n = state.plan_reviewers.len();
+                let mut events = Vec::new();
+                for (i, r) in state.plan_reviewers.iter().enumerate() {
+                    events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
+                }
+                events.push(String::new());
+                events.push("[Enter] add another review · [n] proceed to sharding".to_string());
+                PipelineSection::action(
+                    "Plan Review",
+                    format!("{n} review{} done", if n == 1 { "" } else { "s" }),
+                    events,
+                )
+            }
+            _ => PipelineSection::done(
+                "Plan Review",
+                phase_done_summary(state, "plan-review", "review complete"),
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        }.with_attempts(build_attempts(state, "plan-review")),
+        match phase {
+            Phase::IdeaInput | Phase::BrainstormRunning
+            | Phase::SpecReviewRunning | Phase::SpecReviewPaused
+            | Phase::PlanningRunning | Phase::PlanReviewRunning
+            | Phase::PlanReviewPaused => {
+                PipelineSection::pending("Sharding", "blocked on plan review")
             }
             Phase::ShardingRunning if window_launched => PipelineSection::running(
                 "Sharding",
@@ -227,6 +287,8 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
             | Phase::SpecReviewRunning
             | Phase::SpecReviewPaused
             | Phase::PlanningRunning
+            | Phase::PlanReviewRunning
+            | Phase::PlanReviewPaused
             | Phase::ShardingRunning => {
                 PipelineSection::pending("Builder Loop", "blocked on sharding")
             }

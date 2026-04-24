@@ -439,6 +439,8 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::SpecReviewRunning => ("spec review".to_string(), Color::Cyan, "●"),
         Phase::SpecReviewPaused => ("spec review".to_string(), Color::Cyan, "○"),
         Phase::PlanningRunning => ("planning".to_string(), Color::Cyan, "●"),
+        Phase::PlanReviewRunning => ("plan review".to_string(), Color::Cyan, "●"),
+        Phase::PlanReviewPaused => ("plan review".to_string(), Color::Cyan, "○"),
         Phase::ShardingRunning => ("sharding".to_string(), Color::Cyan, "●"),
         Phase::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
         Phase::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),

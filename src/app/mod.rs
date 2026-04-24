@@ -26,7 +26,6 @@ use crate::{
 };
 use anyhow::Result;
 use crossterm::event::{self, Event};
-use tokio::fs;
 
 use self::{
     models::{spawn_refresh, vendor_tag},
@@ -337,21 +336,20 @@ impl App {
         Ok(())
     }
 
-    pub async fn accept_skip_to_implementation(&mut self) -> Result<()> {
+    pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
         use crate::synthetic_artifacts::generate_synthetic_artifacts;
         use anyhow::Context;
 
         let session_dir = session_state::session_dir(&self.state.session_id);
         let spec_path = session_dir.join("artifacts").join(ArtifactKind::Spec.filename());
-        let spec_content = tokio::fs::read_to_string(&spec_path)
-            .await
+        let spec_content = std::fs::read_to_string(&spec_path)
             .with_context(|| format!("cannot read {}", spec_path.display()))?;
         let parsed_spec = Spec {
             content: spec_content,
-            spec_refs: vec![], // This will be populated from the actual spec later
+            spec_refs: vec![],
         };
 
-        generate_synthetic_artifacts(&session_dir, &parsed_spec).await?;
+        generate_synthetic_artifacts(&session_dir, &parsed_spec)?;
 
         // Initialize BuilderState similarly to ShardingRunning completion
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
@@ -394,7 +392,7 @@ impl App {
                 .join("rounds")
                 .join(format!("{r:03}"))
                 .join("task.md"),
-            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser => return None,
+            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser | Phase::SkipToImplPending => return None,
         };
         if path.exists() { Some(path) } else { None }
     }
@@ -506,6 +504,13 @@ impl App {
                 // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
                 // the triggering review round so the operator can intervene.
                 let _ = self.transition_to_phase(Phase::ReviewRound(r));
+            }
+            Phase::SkipToImplPending => {
+                kill_window("[Skip Confirm]");
+                let _ = fs::remove_file(artifacts.join("skip_to_impl.json"));
+                self.state.skip_to_impl_rationale = None;
+                self.state.agent_error = None;
+                let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }
@@ -1349,21 +1354,28 @@ impl App {
             Phase::BrainstormRunning => {
                 let skip_artifact_path = session_dir
                     .join("artifacts")
-                    .join("skip_to_impl.json");
-                let proposal = SkipToImplProposal::read_from_path(&skip_artifact_path).await?;
+                    .join(ArtifactKind::SkipToImpl.filename());
+                let proposal = match SkipToImplProposal::read_from_path(&skip_artifact_path) {
+                    Ok(p) => p,
+                    Err(err) => {
+                        let _ = self.state.log_event(format!(
+                            "warning: skip_to_impl.json malformed or invalid, falling through to spec review: {err:#}"
+                        ));
+                        None
+                    }
+                };
 
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
 
-                if let Some(p) = proposal {
-                    if p.proposed {
+                match proposal {
+                    Some(p) if p.proposed => {
                         self.state.skip_to_impl_rationale = Some(p.rationale);
                         self.transition_to_phase(Phase::SkipToImplPending)?;
-                    } else {
+                    }
+                    _ => {
                         self.transition_to_phase(Phase::SpecReviewRunning)?;
                     }
-                } else {
-                    self.transition_to_phase(Phase::SpecReviewRunning)?;
                 }
             }
             Phase::SpecReviewRunning => {
@@ -1480,6 +1492,7 @@ impl App {
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
             | Phase::BlockedNeedsUser
+            | Phase::SkipToImplPending
             | Phase::Done => {}
         }
         Ok(())

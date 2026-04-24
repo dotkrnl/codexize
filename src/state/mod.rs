@@ -72,6 +72,7 @@ pub enum NodeKind {
     Stage,
     Task,
     Round,
+    Mode,
     AgentRun,
 }
 

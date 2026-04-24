@@ -225,4 +225,18 @@ mod tests {
             "AI agent repairing builder artifacts"
         );
     }
+
+    #[test]
+    fn skip_to_impl_pending_transitions() {
+        assert!(Phase::BrainstormRunning.can_transition_to(&Phase::SkipToImplPending));
+        assert!(Phase::SkipToImplPending.can_transition_to(&Phase::ImplementationRound(1)));
+        assert!(Phase::SkipToImplPending.can_transition_to(&Phase::SpecReviewRunning));
+        assert!(Phase::SkipToImplPending.can_transition_to(&Phase::BlockedNeedsUser));
+
+        // Negative tests
+        assert!(!Phase::SpecReviewRunning.can_transition_to(&Phase::SkipToImplPending));
+        assert!(!Phase::PlanningRunning.can_transition_to(&Phase::SkipToImplPending));
+        assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::BrainstormRunning));
+        assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::PlanningRunning));
+    }
 }

@@ -305,6 +305,16 @@ impl SessionState {
 
         Ok(messages)
     }
+
+    /// Return the next available agent_run_id (monotonic within session).
+    pub fn next_agent_run_id(&self) -> u64 {
+        self.agent_runs
+            .iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
 }
 
 /// Return the directory path for a given session ID.
@@ -570,6 +580,29 @@ current_phase = "IdeaInput"
         assert_eq!(loaded.len(), 2); // Corrupt line skipped
         assert_eq!(loaded[0].text, "Good");
         assert_eq!(loaded[1].text, "done");
+    }
+
+    #[test]
+    fn test_next_agent_run_id() {
+        let mut state = SessionState::new("test-id".to_string());
+        assert_eq!(state.next_agent_run_id(), 1);
+
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        assert_eq!(state.next_agent_run_id(), 2);
     }
 
     #[test]

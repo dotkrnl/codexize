@@ -14,7 +14,7 @@ impl AgentAdapter for CodexAdapter {
 
     fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
         format!(
-            r#"codex --yolo -m {model} "$(cat {prompt_path})""#,
+            r#"codex --yolo -c 'disable_warnings=["model_migrations"]' -m {model} "$(cat {prompt_path})""#,
             model = super::shell_escape(model),
             prompt_path = super::shell_escape(prompt_path),
         )

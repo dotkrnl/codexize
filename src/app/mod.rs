@@ -1771,8 +1771,9 @@ impl App {
                         .agent_runs
                         .iter()
                         .filter(|run| {
-                            run.stage == "spec-review"
-                                && run.round == round
+                            (run.stage == "brainstorm"
+                                || (run.stage == "spec-review"
+                                    && run.round == round))
                                 && run.status == RunStatus::Done
                         })
                         .cloned()
@@ -1963,8 +1964,9 @@ impl App {
                         .agent_runs
                         .iter()
                         .filter(|run| {
-                            run.stage == "plan-review"
-                                && run.round == round
+                            (run.stage == "planning"
+                                || (run.stage == "plan-review"
+                                    && run.round == round))
                                 && run.status == RunStatus::Done
                         })
                         .cloned()

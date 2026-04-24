@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 
 use chrono::Offset;
@@ -18,6 +19,117 @@ use super::{
 use crate::selection::VendorKind;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+struct PipelineWidget<'a> {
+    app: &'a App,
+}
+
+impl Widget for PipelineWidget<'_> {
+    fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
+        let block = Block::default().title("Pipeline").borders(Borders::ALL);
+        let inner = block.inner(area);
+        block.render(area, buf);
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+
+        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
+        let selected_limit = self.app.selected_body_limit();
+        let current = self.app.current_node();
+
+        // First pass: determine how many lines exist, and where the selected header lands.
+        let mut total_lines = 0usize;
+        let mut selected_header_line = 0usize;
+        let mut preview_cache: Vec<Option<Vec<Line<'static>>>> = vec![None; self.app.nodes.len()];
+
+        for (index, node) in self.app.nodes.iter().enumerate() {
+            let expanded = self.app.is_expanded(index);
+            if index == self.app.selected {
+                selected_header_line = total_lines;
+            }
+            total_lines += 1; // header
+
+            if expanded {
+                if index == self.app.selected {
+                    total_lines += selected_limit;
+                } else {
+                    // REVIEWER: retain the existing "preview the last few lines" behavior for
+                    // non-selected expanded nodes to avoid changing navigation semantics here.
+                    let body = self
+                        .app
+                        .node_body_with_offset(index, inner.width as usize, &local_offset);
+                    let preview = self.app.preview_body(&body);
+                    total_lines += preview.len();
+                    preview_cache[index] = Some(preview);
+                }
+            } else if index > current && node.status == NodeStatus::Pending {
+                // keep pending future phases terse
+            }
+        }
+
+        let viewport = inner.height as usize;
+        let max_scroll = total_lines.saturating_sub(viewport);
+        let scroll = selected_header_line.saturating_sub(1).min(max_scroll);
+
+        // Second pass: render only what fits in the viewport.
+        let mut line_idx = 0usize;
+        let mut cursor_y = inner.y;
+        let bottom_y = inner.y.saturating_add(inner.height);
+
+        for (index, node) in self.app.nodes.iter().enumerate() {
+            if cursor_y >= bottom_y {
+                break;
+            }
+
+            let expanded = self.app.is_expanded(index);
+            let header = self.app.node_header(index, expanded, node);
+            if line_idx >= scroll {
+                buf.set_line(inner.x, cursor_y, &header, inner.width);
+                cursor_y += 1;
+                if cursor_y >= bottom_y {
+                    break;
+                }
+            }
+            line_idx += 1;
+
+            if expanded {
+                if index == self.app.selected {
+                    let body_height = selected_limit.min((bottom_y - cursor_y) as usize) as u16;
+                    if body_height == 0 {
+                        break;
+                    }
+
+                    let body_area = ratatui::layout::Rect {
+                        x: inner.x,
+                        y: cursor_y,
+                        width: inner.width,
+                        height: body_height,
+                    };
+
+                    self.app.render_selected_chat_body(body_area, buf, &local_offset, index);
+                    cursor_y += body_height;
+                    line_idx += selected_limit;
+                } else {
+                    let preview = preview_cache[index]
+                        .take()
+                        .unwrap_or_else(|| Vec::new());
+                    for line in preview {
+                        if cursor_y >= bottom_y {
+                            break;
+                        }
+                        if line_idx >= scroll {
+                            buf.set_line(inner.x, cursor_y, &line, inner.width);
+                            cursor_y += 1;
+                        }
+                        line_idx += 1;
+                    }
+                }
+            } else if index > current && node.status == NodeStatus::Pending {
+                // keep pending future phases terse
+            }
+        }
+    }
+}
 
 fn probability_percent(weight: f64, total: f64) -> u8 {
     if total <= 0.0 || weight <= 0.0 {
@@ -151,10 +263,11 @@ impl App {
             .split(frame.area());
 
         self.body_inner_height = root[1].height.saturating_sub(2) as usize;
+        self.body_inner_width = root[1].width.saturating_sub(2) as usize;
         self.clamp_scroll();
 
         frame.render_widget(self.header(), root[0]);
-        frame.render_widget(self.pipeline_view(), root[1]);
+        frame.render_widget(PipelineWidget { app: self }, root[1]);
         frame.render_widget(self.model_strip(), root[2]);
     }
 
@@ -194,40 +307,42 @@ impl App {
         ]))
     }
 
-    fn pipeline_view(&self) -> Paragraph<'static> {
-        let mut lines = Vec::new();
-        let current = self.current_node();
-        let selected_limit = self.selected_body_limit();
-        let mut selected_header_line = 0usize;
-
-        for (index, node) in self.nodes.iter().enumerate() {
-            let expanded = self.is_expanded(index);
-            if index == self.selected {
-                selected_header_line = lines.len();
-            }
-
-            lines.push(self.node_header(index, expanded, node));
-
-            if expanded {
-                let body_lines = self.node_body(index);
-                if index == self.selected {
-                    let visible = self.visible_selected_body(&body_lines, selected_limit, index);
-                    lines.extend(visible);
-                } else {
-                    lines.extend(self.preview_body(&body_lines));
-                }
-            } else if index > current && node.status == NodeStatus::Pending {
-                // keep pending future phases terse
+    fn render_selected_chat_body(
+        &self,
+        area: ratatui::layout::Rect,
+        buf: &mut Buffer,
+        local_offset: &chrono::FixedOffset,
+        index: usize,
+    ) {
+        let node = &self.nodes[index];
+        let run_id = node.run_id.or(node.leaf_run_id);
+        if let Some(id) = run_id {
+            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
+                let msgs: Vec<_> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m.run_id == id)
+                    .cloned()
+                    .collect();
+                let scroll_offset = self.node_scroll.get(index).copied().unwrap_or(usize::MAX);
+                let widget = chat_widget::ChatWidget::new(
+                    &msgs,
+                    run,
+                    scroll_offset,
+                    *local_offset,
+                    self.agent_line_count,
+                );
+                widget.render(area, buf);
+                return;
             }
         }
 
-        let viewport = self.body_inner_height;
-        let max_scroll = lines.len().saturating_sub(viewport);
-        let scroll = selected_header_line.saturating_sub(1).min(max_scroll) as u16;
-
-        Paragraph::new(lines)
-            .block(Block::default().title("Pipeline").borders(Borders::ALL))
-            .scroll((scroll, 0))
+        // If there is no run to render, fall back to the compact body content.
+        let body = self.node_body_with_offset(index, area.width as usize, local_offset);
+        for (i, line) in body.iter().take(area.height as usize).enumerate() {
+            let y = area.y.saturating_add(i as u16);
+            buf.set_line(area.x, y, line, area.width);
+        }
     }
 
     fn model_strip(&self) -> Paragraph<'static> {
@@ -402,20 +517,33 @@ impl App {
     }
 
     pub(super) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
+        let width = self.body_inner_width.max(1);
+        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
+        self.node_body_with_offset(index, width, &local_offset)
+    }
+
+    fn node_body_with_offset(
+        &self,
+        index: usize,
+        available_width: usize,
+        local_offset: &chrono::FixedOffset,
+    ) -> Vec<Line<'static>> {
         let node = &self.nodes[index];
         let run_id = node.run_id.or(node.leaf_run_id);
         if let Some(id) = run_id {
             if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
-                let msgs: Vec<_> = self.messages.iter().filter(|m| m.run_id == id).cloned().collect();
-                let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-                return chat_widget::chat_lines(
+                let msgs: Vec<_> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m.run_id == id)
+                    .cloned()
+                    .collect();
+                return chat_widget::message_lines(
                     &msgs,
                     run,
-                    usize::MAX, // no scroll clipping at this layer; visible_selected_body handles it
-                    &local_offset,
+                    local_offset,
                     self.agent_line_count,
-                    80, // nominal width; actual clipping is done by ratatui
-                    usize::MAX,
+                    available_width,
                 );
             }
         }
@@ -518,40 +646,6 @@ impl App {
             )));
         }
         lines
-    }
-
-    fn visible_selected_body(
-        &self,
-        body_lines: &[Line<'static>],
-        limit: usize,
-        index: usize,
-    ) -> Vec<Line<'static>> {
-        if body_lines.is_empty() {
-            return Vec::new();
-        }
-
-        let max_offset = body_lines.len().saturating_sub(limit);
-        let offset = self.node_scroll_offset(index, body_lines.len(), limit);
-        let end = (offset + limit).min(body_lines.len());
-        let mut visible = Vec::new();
-
-        if offset > 0 {
-            visible.push(Line::from(Span::styled(
-                "  ... older ...",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        visible.extend(body_lines[offset..end].iter().cloned());
-
-        if offset < max_offset {
-            visible.push(Line::from(Span::styled(
-                "  ... newer ...",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        visible
     }
 
     fn preview_body(&self, body_lines: &[Line<'static>]) -> Vec<Line<'static>> {

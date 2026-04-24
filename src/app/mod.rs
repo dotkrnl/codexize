@@ -46,6 +46,7 @@ pub struct App {
     expanded: BTreeSet<usize>,
     node_scroll: Vec<usize>,
     body_inner_height: usize,
+    body_inner_width: usize,
     input_mode: bool,
     input_buffer: String,
     confirm_back: bool,
@@ -81,6 +82,7 @@ impl App {
             expanded: BTreeSet::new(),
             node_scroll: vec![usize::MAX; node_count],
             body_inner_height: 0,
+            body_inner_width: 0,
             input_mode: false,
             input_buffer: String::new(),
             confirm_back: false,
@@ -182,15 +184,6 @@ impl App {
             .count();
         let reserved = self.nodes.len() + expanded_preview_count * PREVIEW_LINES;
         self.body_inner_height.saturating_sub(reserved).max(6)
-    }
-
-    fn node_scroll_offset(&self, index: usize, total: usize, limit: usize) -> usize {
-        let max_offset = total.saturating_sub(limit);
-        if self.node_scroll[index] == usize::MAX {
-            max_offset
-        } else {
-            self.node_scroll[index].min(max_offset)
-        }
     }
 
     fn stage_scroll_key(node: &Node) -> Option<String> {

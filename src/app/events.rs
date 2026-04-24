@@ -208,8 +208,17 @@ impl App {
 
         let limit = self.selected_body_limit();
         let total = self.node_body(self.selected).len();
-        let max_offset = total.saturating_sub(limit) as isize;
-        let current = self.node_scroll_offset(self.selected, total, limit) as isize;
+        let max_offset = if total > limit {
+            total.saturating_sub(limit.saturating_sub(1)) as isize
+        } else {
+            0
+        };
+        let stored = self.node_scroll.get(self.selected).copied().unwrap_or(usize::MAX);
+        let current = if stored == usize::MAX {
+            max_offset
+        } else {
+            (stored as isize).clamp(0, max_offset)
+        };
         let next = (current + delta).clamp(0, max_offset);
         self.node_scroll[self.selected] = next as usize;
     }
@@ -217,7 +226,11 @@ impl App {
     pub(super) fn clamp_scroll(&mut self) {
         let limit = self.selected_body_limit();
         let total = self.node_body(self.selected).len();
-        let max_offset = total.saturating_sub(limit);
+        let max_offset = if total > limit {
+            total.saturating_sub(limit.saturating_sub(1))
+        } else {
+            0
+        };
 
         if self.node_scroll[self.selected] != usize::MAX {
             self.node_scroll[self.selected] = self.node_scroll[self.selected].min(max_offset);

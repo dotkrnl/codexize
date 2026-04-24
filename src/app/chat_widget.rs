@@ -161,6 +161,19 @@ struct RenderedLine {
     spans: Vec<Span<'static>>,
 }
 
+pub fn message_lines(
+    messages: &[Message],
+    run: &RunRecord,
+    local_offset: &FixedOffset,
+    spinner_tick: usize,
+    available_width: usize,
+) -> Vec<Line<'static>> {
+    render_messages(messages, run, local_offset, available_width, spinner_tick)
+        .into_iter()
+        .map(|rendered| Line::from(rendered.spans))
+        .collect()
+}
+
 fn render_messages(
     messages: &[Message],
     run: &RunRecord,
@@ -240,31 +253,37 @@ impl Widget for ChatWidget<'_> {
         let width = area.width as usize;
         let height = area.height as usize;
 
-        let all_lines =
-            render_messages(self.messages, self.run, &self.local_offset, width, self.spinner_tick);
+        let all_lines = message_lines(
+            self.messages,
+            self.run,
+            &self.local_offset,
+            self.spinner_tick,
+            width,
+        );
 
         let total = all_lines.len();
         if total == 0 {
             return;
         }
 
-        let max_offset = total.saturating_sub(height);
+        let has_overflow = total > height;
+        let max_offset = if has_overflow {
+            total.saturating_sub(height.saturating_sub(1))
+        } else {
+            0
+        };
         let offset = self.scroll_offset.min(max_offset);
 
-        let above = offset;
-        let below = total.saturating_sub(offset + height);
-
-        let mut usable_height = height;
-        let show_above_indicator = above > 0;
-        let show_below_indicator = below > 0;
-        if show_above_indicator {
-            usable_height = usable_height.saturating_sub(1);
-        }
+        let show_above_indicator = offset > 0;
+        let mut message_rows = height.saturating_sub(show_above_indicator as usize);
+        let show_below_indicator = total > offset.saturating_add(message_rows);
         if show_below_indicator {
-            usable_height = usable_height.saturating_sub(1);
+            message_rows = message_rows.saturating_sub(1);
         }
 
-        let vis_end = (offset + usable_height).min(total);
+        let vis_end = (offset + message_rows).min(total);
+        let above = offset;
+        let below = total.saturating_sub(vis_end);
 
         let mut row = area.y;
 
@@ -275,8 +294,8 @@ impl Widget for ChatWidget<'_> {
             row += 1;
         }
 
-        for rendered in &all_lines[offset..vis_end] {
-            let line = Line::from(rendered.spans.clone());
+        for line in &all_lines[offset..vis_end] {
+            let line = line.clone();
             buf.set_line(area.x, row, &line, area.width);
             row += 1;
         }
@@ -298,31 +317,31 @@ pub fn chat_lines(
     available_width: usize,
     available_height: usize,
 ) -> Vec<Line<'static>> {
-    let all_lines =
-        render_messages(messages, run, local_offset, available_width, spinner_tick);
+    let all_lines = message_lines(messages, run, local_offset, spinner_tick, available_width);
 
     let total = all_lines.len();
     if total == 0 {
         return Vec::new();
     }
 
-    let max_offset = total.saturating_sub(available_height);
+    let has_overflow = total > available_height;
+    let max_offset = if has_overflow {
+        total.saturating_sub(available_height.saturating_sub(1))
+    } else {
+        0
+    };
     let offset = scroll_offset.min(max_offset);
 
-    let above = offset;
-    let below = total.saturating_sub(offset + available_height);
-
-    let mut usable_height = available_height;
-    let show_above = above > 0;
-    let show_below = below > 0;
-    if show_above {
-        usable_height = usable_height.saturating_sub(1);
-    }
+    let show_above = offset > 0;
+    let mut message_rows = available_height.saturating_sub(show_above as usize);
+    let show_below = total > offset.saturating_add(message_rows);
     if show_below {
-        usable_height = usable_height.saturating_sub(1);
+        message_rows = message_rows.saturating_sub(1);
     }
 
-    let vis_end = (offset + usable_height).min(total);
+    let vis_end = (offset + message_rows).min(total);
+    let above = offset;
+    let below = total.saturating_sub(vis_end);
 
     let mut lines = Vec::new();
 
@@ -333,8 +352,8 @@ pub fn chat_lines(
         )));
     }
 
-    for rendered in &all_lines[offset..vis_end] {
-        lines.push(Line::from(rendered.spans.clone()));
+    for line in &all_lines[offset..vis_end] {
+        lines.push(line.clone());
     }
 
     if show_below {
@@ -501,9 +520,9 @@ mod tests {
         let first_text: String = lines[0].spans.iter().map(|s| s.content.to_string()).collect();
         let last_text: String = lines.last().unwrap().spans.iter().map(|s| s.content.to_string()).collect();
         assert!(first_text.contains("↑"), "should show above indicator");
-        assert!(first_text.contains("more above"));
+        assert!(first_text.contains("5 more above"));
         assert!(last_text.contains("↓"), "should show below indicator");
-        assert!(last_text.contains("more below"));
+        assert!(last_text.contains("7 more below"));
     }
 
     #[test]
@@ -523,5 +542,23 @@ mod tests {
         // Second line should be indented (starts with spaces)
         let second_text: String = lines[1].spans.iter().map(|s| s.content.to_string()).collect();
         assert!(second_text.starts_with("        "), "wrapped line should indent to match prefix width (8 spaces)");
+    }
+
+    #[test]
+    fn chat_lines_allows_scrolling_to_bottom_with_indicators() {
+        let mut msgs = Vec::new();
+        for i in 0..11 {
+            msgs.push(make_msg(MessageKind::Brief, &format!("message {i}")));
+        }
+        let run = make_run(RunStatus::Done);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        // Height 5 means overflow; at bottom, we should be able to reach the last message.
+        // Max offset should be `total - (height - 1)` when overflow.
+        let lines = chat_lines(&msgs, &run, 999, &offset, 0, 60, 5);
+        let last_text: String = lines.last().unwrap().spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(
+            last_text.contains("message 10"),
+            "bottom view should include the last message"
+        );
     }
 }

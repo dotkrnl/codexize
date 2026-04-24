@@ -22,6 +22,43 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RunStatus {
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub id: u64,
+    pub stage: String,
+    pub task_id: Option<u32>,
+    pub round: u32,
+    pub attempt: u32,
+    pub model: String,
+    pub vendor: String,
+    pub window_name: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub status: RunStatus,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MessageKind {
+    Brief,
+    End,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub ts: chrono::DateTime<chrono::Utc>,
+    pub run_id: u64,
+    pub kind: MessageKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AttemptStatus {
     Done,
     Failed,
@@ -179,6 +216,94 @@ pub fn session_dir(session_id: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_run_record_lifecycle_create_to_done() {
+        let mut runs = Vec::new();
+        let run = RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        };
+        runs.push(run);
+
+        assert_eq!(runs[0].status, RunStatus::Running);
+        assert!(runs[0].ended_at.is_none());
+    }
+
+    #[test]
+    fn test_run_record_transition_to_done() {
+        let mut run = RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        };
+
+        run.status = RunStatus::Done;
+        run.ended_at = Some(chrono::Utc::now());
+
+        assert_eq!(run.status, RunStatus::Done);
+        assert!(run.ended_at.is_some());
+        assert!(run.error.is_none());
+    }
+
+    #[test]
+    fn test_run_record_transition_to_failed() {
+        let mut run = RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude-opus-4-7".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        };
+
+        run.status = RunStatus::Failed;
+        run.ended_at = Some(chrono::Utc::now());
+        run.error = Some("validation failed".to_string());
+
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(run.ended_at.is_some());
+        assert_eq!(run.error.as_deref(), Some("validation failed"));
+    }
+
+    #[test]
+    fn test_message_creation() {
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id: 1,
+            kind: MessageKind::Brief,
+            text: "Exploring codebase".to_string(),
+        };
+
+        assert_eq!(msg.run_id, 1);
+        assert_eq!(msg.kind, MessageKind::Brief);
+        assert_eq!(msg.text, "Exploring codebase");
+    }
 
     #[test]
     fn test_session_state_archived_defaults_false() {

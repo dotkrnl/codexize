@@ -100,6 +100,7 @@ impl App {
         loop {
             self.refresh_models_if_due();
             self.poll_agent_window();
+            self.maybe_auto_launch();
             self.update_agent_progress();
             self.poll_live_summary();
             terminal.draw(|frame| self.draw(frame))?;
@@ -335,6 +336,26 @@ impl App {
             let text = String::from_utf8_lossy(&out.stdout);
             let lines = text.lines().filter(|l| !l.trim().is_empty()).count();
             self.agent_line_count = lines;
+        }
+    }
+
+    /// Auto-launch the agent for the current phase if it's a non-interactive
+    /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
+    /// window is already up, if models aren't loaded, or if the last run
+    /// errored (user needs to intervene).
+    fn maybe_auto_launch(&mut self) {
+        if self.window_launched
+            || self.state.agent_error.is_some()
+            || self.models.is_empty()
+        {
+            return;
+        }
+        match self.state.current_phase {
+            Phase::SpecReviewRunning => self.launch_spec_review(),
+            Phase::ShardingRunning => self.launch_sharding(),
+            Phase::ImplementationRound(_) => self.launch_coder(),
+            Phase::ReviewRound(_) => self.launch_reviewer(),
+            _ => {}
         }
     }
 

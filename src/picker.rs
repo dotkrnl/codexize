@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 use std::{
     fs,
@@ -187,7 +187,8 @@ impl SessionPicker {
                 Block::default()
                     .borders(Borders::ALL)
                     .title("New Session — Describe your idea...  [Enter] Create  [Esc] Cancel"),
-            );
+            )
+            .wrap(Wrap { trim: false });
         frame.render_widget(input, area);
     }
 

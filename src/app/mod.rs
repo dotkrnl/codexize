@@ -1283,7 +1283,10 @@ impl App {
         let minutes = total_seconds / 60;
         let seconds = total_seconds % 60;
         let text = if success {
-            format!("done in {minutes}m{seconds:02}s")
+            format!(
+                "done in {minutes}m{seconds:02}s · {} ({})",
+                run.model, run.vendor
+            )
         } else {
             format!(
                 "attempt {} failed: {}",

@@ -2928,8 +2928,8 @@ Commit granularity (MANDATORY):
     logical change that stands on its own (a single refactor step, a new
     function + its test, a single bug fix, a single rename). Any commit read
     in isolation should reveal its intent.
-  - Each commit leaves the tree consistent: code compiles and tests relevant
-    to that change pass. Do NOT split so an intermediate commit is broken.
+  - Every commit MUST build on its own (compiles / links / type-checks at
+    that SHA). Never split in a way that leaves an intermediate commit broken.
   - Do NOT mix unrelated changes in one commit (e.g. rename + bug fix + new
     feature). Do NOT bundle formatting/whitespace churn into a functional
     commit — make it a separate `style:`/`chore:` commit if at all.

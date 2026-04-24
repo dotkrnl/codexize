@@ -48,6 +48,7 @@ pub struct RunRecord {
 pub enum MessageKind {
     Started,
     Brief,
+    Summary,
     End,
 }
 

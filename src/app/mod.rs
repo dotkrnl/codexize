@@ -1451,6 +1451,27 @@ impl App {
                     .join("review.toml");
                 match review::validate(&review_path) {
                     Ok(verdict) => {
+                        let summary_text = verdict.summary.trim();
+                        if !summary_text.is_empty() {
+                            let msg = Message {
+                                ts: chrono::Utc::now(),
+                                run_id: run.id,
+                                kind: MessageKind::Summary,
+                                sender: MessageSender::Agent {
+                                    model: run.model.clone(),
+                                    vendor: run.vendor.clone(),
+                                },
+                                text: summary_text.to_string(),
+                            };
+                            if let Err(err) = self.state.append_message(&msg) {
+                                let _ = self.state.log_event(format!(
+                                    "failed to append review summary message for run {}: {err}",
+                                    run.id
+                                ));
+                            } else {
+                                self.messages.push(msg);
+                            }
+                        }
                         self.finalize_run_record(run.id, true, None);
                         self.state.agent_error = None;
                         self.state.builder.last_verdict =

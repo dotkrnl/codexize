@@ -52,6 +52,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
             symbol: "◐",
             color: Color::Cyan,
         },
+        MessageKind::Summary => SymbolStyle {
+            symbol: "✓",
+            color: Color::Green,
+        },
         MessageKind::End => match run_status {
             RunStatus::Done => SymbolStyle {
                 symbol: "●",
@@ -253,6 +257,11 @@ fn render_messages(
         }
 
         let wrapped = wrap_text(&msg.text, content_width);
+        let body_style = if msg.kind == MessageKind::Summary {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default()
+        };
 
         for (i, chunk) in wrapped.iter().enumerate() {
             if i == 0 {
@@ -266,12 +275,12 @@ fn render_messages(
                             format!("{} ", sym.symbol),
                             Style::default().fg(sym.color),
                         ),
-                        Span::raw(chunk.clone()),
+                        Span::styled(chunk.clone(), body_style),
                     ],
                 });
             } else {
                 lines.push(RenderedLine {
-                    spans: vec![Span::raw(format!("{}{}", indent, chunk))],
+                    spans: vec![Span::styled(format!("{}{}", indent, chunk), body_style)],
                 });
             }
         }

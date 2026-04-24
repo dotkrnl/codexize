@@ -2361,11 +2361,30 @@ Your job:
      refs into the spec and plan for background.
   2. Implement the task end-to-end on the current branch.
   3. Make the tests described in the task pass.
-  4. Commit your work on the current branch with a clear message (see commit
-     rules below). You may make one or more commits; the reviewer inspects
-     the aggregate `base..HEAD` range for this round, where `base` was pinned
-     by the orchestrator before you started. Do NOT write any SHA file — the
-     TUI detects completion by observing that HEAD has advanced past base.
+  4. Commit your work on the current branch as a series of small, atomic
+     commits (see commit rules below). The reviewer inspects the aggregate
+     `base..HEAD` range for this round, where `base` was pinned by the
+     orchestrator before you started. Do NOT write any SHA file — the TUI
+     detects completion by observing that HEAD has advanced past base.
+
+Commit granularity rules (MANDATORY):
+  - Prefer many small, atomic commits over one large one. Each commit
+    should represent ONE logical change that stands on its own: a single
+    refactor step, a single new function with its test, a single bug fix,
+    a single rename. A reviewer should be able to read any one commit in
+    isolation and understand the intent.
+  - Each commit should leave the tree in a consistent state — code compiles
+    and tests relevant to the change pass. Do not split a change such that
+    an intermediate commit is broken.
+  - Do NOT mix unrelated changes in one commit (e.g. a rename + a bug fix +
+    a new feature). Separate them.
+  - Do NOT bundle formatting/whitespace churn into a functional commit.
+    Make it a separate `style:` or `chore:` commit if needed at all.
+  - If a single commit's diff exceeds roughly ~200 changed lines of real
+    logic (excluding generated files, lockfiles, large fixtures), consider
+    whether it should be split.
+  - A one-task-one-commit round is acceptable ONLY when the task genuinely
+    is one atomic change. Otherwise split.
 
 Commit message rules (MANDATORY — the reviewer WILL reject violations):
   - Use Conventional Commits: `type(scope): summary`, e.g.

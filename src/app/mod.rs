@@ -730,7 +730,15 @@ impl App {
         let _ = if stage == "coder" {
             guard::capture_coder(&dir, &session_dir, round)
         } else {
-            guard::capture_non_coder(&dir)
+            guard::capture_non_coder(
+                &dir,
+                &format!(
+                    "{stage}-{}-r{round}-a{attempt}",
+                    task_id
+                        .map(|id| format!("task{id}"))
+                        .unwrap_or_else(|| "stage".to_string())
+                ),
+            )
         };
     }
 
@@ -809,53 +817,56 @@ impl App {
     }
 
     fn normalized_failure_reason(&self, run: &crate::state::RunRecord) -> Result<Option<String>> {
-        let exit_code = self.read_exit_status_code(run);
-        if let Some(code) = exit_code {
-            if code != 0 {
-                if code > 128 {
-                    return Ok(Some(format!("killed({})", code - 128)));
-                }
-                return Ok(Some(format!("exit({code})")));
-            }
-        }
-
         let session_dir = session_state::session_dir(&self.state.session_id);
-        let reason = match run.stage.as_str() {
+        let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
             "brainstorm" => {
                 let spec_path = session_dir.join("artifacts").join("spec.md");
-                (!Self::artifact_present(&spec_path)).then(|| "artifact_missing".to_string())
+                (
+                    true,
+                    (!Self::artifact_present(&spec_path)).then(|| "artifact_missing".to_string()),
+                )
             }
             "spec-review" => {
                 let review_path = session_dir
                     .join("artifacts")
                     .join(format!("spec-review-{}.md", run.round));
-                (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string())
+                (
+                    true,
+                    (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string()),
+                )
             }
             "planning" => {
                 let plan_path = session_dir.join("artifacts").join("plan.md");
-                (!Self::artifact_present(&plan_path)).then(|| "artifact_missing".to_string())
+                (
+                    true,
+                    (!Self::artifact_present(&plan_path)).then(|| "artifact_missing".to_string()),
+                )
             }
             "plan-review" => {
                 let review_path = session_dir
                     .join("artifacts")
                     .join(format!("plan-review-{}.md", run.round));
-                (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string())
+                (
+                    true,
+                    (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string()),
+                )
             }
             "sharding" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-                if !Self::artifact_present(&tasks_path) {
+                let reason = if !Self::artifact_present(&tasks_path) {
                     Some("artifact_missing".to_string())
                 } else {
                     tasks::validate(&tasks_path)
                         .err()
                         .map(|err| format!("artifact_invalid: {err}"))
-                }
+                };
+                (true, reason)
             }
             "recovery" => {
                 let spec_path = session_dir.join("artifacts").join("spec.md");
                 let plan_path = session_dir.join("artifacts").join("plan.md");
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-                if !Self::artifact_present(&spec_path)
+                let reason = if !Self::artifact_present(&spec_path)
                     || !Self::artifact_present(&plan_path)
                     || !Self::artifact_present(&tasks_path)
                 {
@@ -864,38 +875,69 @@ impl App {
                     tasks::validate(&tasks_path)
                         .err()
                         .map(|err| format!("artifact_invalid: {err}"))
-                }
+                };
+                (true, reason)
             }
             "coder" => {
+                // Coder's real deliverable is a git commit, not a file. We
+                // can't robustly verify "did the agent actually commit
+                // anything meaningful" from the file system alone, so the
+                // wrapped process's exit code stays authoritative here.
                 let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
-                self.coder_gate_reason(&round_dir)
+                (false, self.coder_gate_reason(&round_dir))
             }
             "reviewer" => {
                 let review_path = session_dir
                     .join("rounds")
                     .join(format!("{:03}", run.round))
                     .join("review.toml");
-                if !Self::artifact_present(&review_path) {
+                let reason = if !Self::artifact_present(&review_path) {
                     Some("artifact_missing".to_string())
                 } else {
                     review::validate(&review_path)
                         .err()
                         .map(|err| format!("artifact_invalid: {err}"))
-                }
+                };
+                (true, reason)
             }
-            _ => None,
+            _ => (false, None),
         };
 
-        // Immutability check runs regardless of stage-specific outcome so
-        // that a misbehaving agent that happened to produce the right
-        // artifact is still caught. Guard reason takes precedence.
-        let guard_reason = self.enforce_run_guard(run);
-        let reason = guard_reason.or(reason);
+        // If the stage produced a valid artifact, treat the run as successful
+        // regardless of the wrapped pipeline's exit code. Agent commands like
+        // `codex exec --json | jq ...` can return non-zero (e.g., a stray
+        // non-JSON line from the agent makes jq exit 4/5) even after the
+        // agent has already written a well-formed artifact. The immutability
+        // guard is still enforced, but verify_non_coder now auto-stashes
+        // stray changes instead of failing the run.
+        if has_artifact_check && artifact_reason.is_none() {
+            if let Some(code) = self.read_exit_status_code(run) {
+                if code != 0 {
+                    let _ = self.state.log_event(format!(
+                        "run {} ({}) exited {code} but produced a valid artifact; treating as success",
+                        run.id, run.stage
+                    ));
+                }
+            }
+            let _ = self.enforce_run_guard(run);
+            return Ok(None);
+        }
 
-        // REVIEWER: if the wrapped command never wrote a status file, we fall back to
-        // artifact validation because the tmux window disappearance alone does not preserve
-        // a trustworthy exit code.
-        Ok(reason)
+        // No artifact (unknown stage) or artifact missing/invalid: exit code
+        // takes precedence so the operator sees the real failure first.
+        if let Some(code) = self.read_exit_status_code(run) {
+            if code != 0 {
+                if code > 128 {
+                    return Ok(Some(format!("killed({})", code - 128)));
+                }
+                return Ok(Some(format!("exit({code})")));
+            }
+        }
+
+        // Guard reason beats artifact reason (coder control-file edits are a
+        // real protocol violation; non-coder guard always returns None now).
+        let guard_reason = self.enforce_run_guard(run);
+        Ok(guard_reason.or(artifact_reason))
     }
 
     fn append_system_message(&mut self, run_id: u64, kind: MessageKind, text: String) {

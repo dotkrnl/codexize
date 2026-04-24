@@ -1354,6 +1354,8 @@ impl App {
     fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
         use anyhow::Context;
 
+        self.drain_live_summary(run);
+
         let session_dir = session_state::session_dir(&self.state.session_id);
         if let Some(error) = self.normalized_failure_reason(run)? {
             self.finalize_run_record(run.id, false, Some(error.clone()));
@@ -2445,6 +2447,41 @@ impl App {
         }
         self.live_summary_cached_text = sanitized;
         self.live_summary_cached_mtime = Some(mtime);
+    }
+
+    /// Final read + cleanup of the live-summary file when a run finishes.
+    /// Emits any last summary as a Brief message, then deletes the file so
+    /// the next run starts with a clean slate.
+    fn drain_live_summary(&mut self, run: &crate::state::RunRecord) {
+        let path = session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join("live_summary.txt");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let sanitized = render::sanitize_live_summary(&content);
+            if !sanitized.is_empty() && sanitized != self.live_summary_cached_text {
+                let msg = Message {
+                    ts: chrono::Utc::now(),
+                    run_id: run.id,
+                    kind: MessageKind::Brief,
+                    sender: MessageSender::Agent {
+                        model: run.model.clone(),
+                        vendor: run.vendor.clone(),
+                    },
+                    text: sanitized,
+                };
+                if let Err(err) = self.state.append_message(&msg) {
+                    let _ = self.state.log_event(format!(
+                        "failed to append final brief message for run {}: {err}",
+                        run.id
+                    ));
+                } else {
+                    self.messages.push(msg);
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
     }
 }
 

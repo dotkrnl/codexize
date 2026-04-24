@@ -143,8 +143,8 @@ impl App {
     }
 
     fn editable_artifact(&self) -> Option<std::path::PathBuf> {
-        let run_dir = session_state::session_dir(&self.state.session_id);
-        let artifacts = run_dir.join("artifacts");
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
         let path = match self.state.current_phase {
             Phase::BrainstormRunning
             | Phase::SpecReviewRunning
@@ -152,7 +152,7 @@ impl App {
             Phase::PlanningRunning => artifacts.join("plan.md"),
             Phase::ShardingRunning => artifacts.join("tasks.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => {
-                run_dir.join("rounds").join(format!("{r:03}")).join("task.md")
+                session_dir.join("rounds").join(format!("{r:03}")).join("task.md")
             }
             Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser => return None,
         };
@@ -177,9 +177,9 @@ impl App {
     fn go_back(&mut self) {
         use std::fs;
 
-        let run_dir = session_state::session_dir(&self.state.session_id);
-        let artifacts = run_dir.join("artifacts");
-        let prompts = run_dir.join("prompts");
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let prompts = session_dir.join("prompts");
 
         match self.state.current_phase {
             Phase::BrainstormRunning => {
@@ -213,7 +213,7 @@ impl App {
             }
             Phase::ImplementationRound(r) => {
                 kill_window(&format!("[Coder r{r}]"));
-                let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
+                let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
                     self.state.builder = session_state::BuilderState::default();
                     Phase::ShardingRunning
@@ -224,7 +224,7 @@ impl App {
             }
             Phase::ReviewRound(r) => {
                 kill_window(&format!("[Review r{r}]"));
-                let _ = fs::remove_dir_all(run_dir.join("rounds").join(format!("{r:03}")));
+                let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let _ = self.state.transition_to(Phase::ImplementationRound(r));
             }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
@@ -274,33 +274,33 @@ impl App {
             return;
         }
 
-        let run_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = session_state::session_dir(&self.state.session_id);
         let coder_window: String;
         let reviewer_window: String;
         let (window_name, artifact_path, next_phase) = match self.state.current_phase {
             Phase::BrainstormRunning => (
                 "[Brainstorm]",
-                run_dir.join("artifacts").join("spec.md"),
+                session_dir.join("artifacts").join("spec.md"),
                 Phase::SpecReviewRunning,
             ),
             Phase::SpecReviewRunning => (
                 "[Spec Review]",
-                run_dir.join("artifacts")
+                session_dir.join("artifacts")
                     .join(format!("spec-review-{}.md", self.state.spec_reviewers.len() + 1)),
                 Phase::SpecReviewPaused,
             ),
             Phase::PlanningRunning => (
                 "[Planning]",
-                run_dir.join("artifacts").join("plan.md"),
+                session_dir.join("artifacts").join("plan.md"),
                 Phase::ShardingRunning,
             ),
             Phase::ShardingRunning => (
                 "[Sharding]",
-                run_dir.join("artifacts").join("tasks.toml"),
+                session_dir.join("artifacts").join("tasks.toml"),
                 Phase::ImplementationRound(1),
             ),
             Phase::ImplementationRound(r) => {
-                let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+                let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
                 coder_window = format!("[Coder r{r}]");
                 (
                     coder_window.as_str(),
@@ -309,7 +309,7 @@ impl App {
                 )
             }
             Phase::ReviewRound(r) => {
-                let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+                let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
                 reviewer_window = format!("[Review r{r}]");
                 (
                     reviewer_window.as_str(),
@@ -459,9 +459,9 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
-        let run_id = &self.state.session_id;
-        let prompt_path = session_state::session_dir(run_id).join("prompts").join("brainstorm.md");
-        let spec_path = session_state::session_dir(run_id).join("artifacts").join("spec.md");
+        let session_id = &self.state.session_id;
+        let prompt_path = session_state::session_dir(session_id).join("prompts").join("brainstorm.md");
+        let spec_path = session_state::session_dir(session_id).join("artifacts").join("spec.md");
 
         let _ = std::fs::remove_file(&spec_path);
 
@@ -514,10 +514,10 @@ impl App {
             return;
         }
 
-        let run_id = self.state.session_id.clone();
-        let spec_path = session_state::session_dir(&run_id).join("artifacts").join("spec.md");
+        let session_id = self.state.session_id.clone();
+        let spec_path = session_state::session_dir(&session_id).join("artifacts").join("spec.md");
         let review_n = self.state.spec_reviewers.len() + 1;
-        let review_path = session_state::session_dir(&run_id).join("artifacts")
+        let review_path = session_state::session_dir(&session_id).join("artifacts")
             .join(format!("spec-review-{review_n}.md"));
 
         let mut excluded = self.state.spec_reviewers.clone();
@@ -540,7 +540,7 @@ impl App {
 
         let _ = std::fs::remove_file(&review_path);
 
-        let prompt_path = session_state::session_dir(&run_id).join("prompts")
+        let prompt_path = session_state::session_dir(&session_id).join("prompts")
             .join(format!("spec-review-{review_n}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -585,13 +585,13 @@ impl App {
             return;
         }
 
-        let run_id = self.state.session_id.clone();
-        let run_dir = session_state::session_dir(&run_id);
-        let spec_path = run_dir.join("artifacts").join("spec.md");
-        let plan_path = run_dir.join("artifacts").join("plan.md");
+        let session_id = self.state.session_id.clone();
+        let session_dir = session_state::session_dir(&session_id);
+        let spec_path = session_dir.join("artifacts").join("spec.md");
+        let plan_path = session_dir.join("artifacts").join("plan.md");
 
         let review_paths: Vec<std::path::PathBuf> = (1..=self.state.spec_reviewers.len())
-            .map(|i| run_dir.join("artifacts").join(format!("spec-review-{i}.md")))
+            .map(|i| session_dir.join("artifacts").join(format!("spec-review-{i}.md")))
             .filter(|p| p.exists())
             .collect();
 
@@ -607,7 +607,7 @@ impl App {
 
         let _ = std::fs::remove_file(&plan_path);
 
-        let prompt_path = run_dir.join("prompts").join("planning.md");
+        let prompt_path = session_dir.join("prompts").join("planning.md");
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -651,11 +651,11 @@ impl App {
             return;
         }
 
-        let run_id = self.state.session_id.clone();
-        let run_dir = session_state::session_dir(&run_id);
-        let spec_path = run_dir.join("artifacts").join("spec.md");
-        let plan_path = run_dir.join("artifacts").join("plan.md");
-        let tasks_path = run_dir.join("artifacts").join("tasks.toml");
+        let session_id = self.state.session_id.clone();
+        let session_dir = session_state::session_dir(&session_id);
+        let spec_path = session_dir.join("artifacts").join("spec.md");
+        let plan_path = session_dir.join("artifacts").join("plan.md");
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
         let Some(chosen) = selection::select(&self.models, selection::TaskKind::Planning)
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
@@ -669,7 +669,7 @@ impl App {
 
         let _ = std::fs::remove_file(&tasks_path);
 
-        let prompt_path = run_dir.join("prompts").join("sharding.md");
+        let prompt_path = session_dir.join("prompts").join("sharding.md");
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -719,14 +719,14 @@ impl App {
             return;
         };
 
-        let run_id = self.state.session_id.clone();
-        let run_dir = session_state::session_dir(&run_id);
-        let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+        let session_id = self.state.session_id.clone();
+        let session_dir = session_state::session_dir(&session_id);
+        let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let task_file = round_dir.join("task.md");
         let commit_file = round_dir.join("commit.txt");
 
         if !task_file.exists() {
-            let body = task_body_for(&run_dir, task_id).unwrap_or_else(|e| {
+            let body = task_body_for(&session_dir, task_id).unwrap_or_else(|e| {
                 format!("(task body could not be loaded: {e})\n\nTask id: {task_id}\n")
             });
             let _ = std::fs::write(&task_file, body);
@@ -743,12 +743,12 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
-        let prompt_path = run_dir.join("prompts").join(format!("coder-r{r}.md"));
+        let prompt_path = session_dir.join("prompts").join(format!("coder-r{r}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let resume = self.state.builder.coder_started;
-        let prompt = coder_prompt(&run_dir, task_id, r, &task_file, &commit_file, resume);
+        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &commit_file, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
             return;
@@ -794,9 +794,9 @@ impl App {
             return;
         };
 
-        let run_id = self.state.session_id.clone();
-        let run_dir = session_state::session_dir(&run_id);
-        let round_dir = run_dir.join("rounds").join(format!("{r:03}"));
+        let session_id = self.state.session_id.clone();
+        let session_dir = session_state::session_dir(&session_id);
+        let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let review_path = round_dir.join("review.toml");
         let commit_file = round_dir.join("commit.txt");
         let task_file = round_dir.join("task.md");
@@ -814,8 +814,8 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
-        let prompt_path = run_dir.join("prompts").join(format!("reviewer-r{r}.md"));
-        let prompt = reviewer_prompt(&run_dir, task_id, r, &task_file, &commit_file, &review_path);
+        let prompt_path = session_dir.join("prompts").join(format!("reviewer-r{r}.md"));
+        let prompt = reviewer_prompt(&session_dir, task_id, r, &task_file, &commit_file, &review_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.sections[self.selected].events.push(format!("error writing prompt: {e}"));
             return;
@@ -853,9 +853,9 @@ fn kill_window(name: &str) {
         .output();
 }
 
-fn task_body_for(run_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
+fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
     use anyhow::Context;
-    let tasks_path = run_dir.join("artifacts").join("tasks.toml");
+    let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;
     let task = parsed.tasks.iter().find(|t| t.id == task_id)
         .ok_or_else(|| anyhow::anyhow!("task id {task_id} not found"))?;
@@ -1060,17 +1060,17 @@ will cause rejection. Do not emit any prose around the TOML.
 }
 
 fn coder_prompt(
-    run_dir: &std::path::Path,
+    session_dir: &std::path::Path,
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
     commit_file: &std::path::Path,
     resume: bool,
 ) -> String {
-    let spec = run_dir.join("artifacts/spec.md");
-    let plan = run_dir.join("artifacts/plan.md");
+    let spec = session_dir.join("artifacts/spec.md");
+    let plan = session_dir.join("artifacts/plan.md");
     let prev_review = if round > 1 {
-        let p = run_dir.join("rounds").join(format!("{:03}", round - 1)).join("review.toml");
+        let p = session_dir.join("rounds").join(format!("{:03}", round - 1)).join("review.toml");
         if p.exists() {
             format!("\nPrevious reviewer feedback (round {}): {}\nRead it first and address every feedback item.\n", round - 1, p.display())
         } else {
@@ -1124,15 +1124,15 @@ Hard rules:
 }
 
 fn reviewer_prompt(
-    run_dir: &std::path::Path,
+    session_dir: &std::path::Path,
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
     commit_file: &std::path::Path,
     review_file: &std::path::Path,
 ) -> String {
-    let spec = run_dir.join("artifacts/spec.md");
-    let plan = run_dir.join("artifacts/plan.md");
+    let spec = session_dir.join("artifacts/spec.md");
+    let plan = session_dir.join("artifacts/plan.md");
     format!(
         r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
 the operator is NOT available. Do NOT modify code. Write ONLY the review TOML.

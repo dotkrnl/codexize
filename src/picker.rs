@@ -409,7 +409,9 @@ pub fn generate_session_id() -> String {
 
 fn truncate_idea(idea: &Option<String>) -> String {
     match idea {
-        Some(text) if text.len() > 80 => format!("{}...", &text[..80]),
+        Some(text) if text.chars().count() > 80 => {
+            format!("{}...", text.chars().take(80).collect::<String>())
+        }
         Some(text) => text.clone(),
         None => "(no idea yet)".to_string(),
     }

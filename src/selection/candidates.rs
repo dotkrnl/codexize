@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::dashboard;
+use super::config::{SelectionPhase, SELECTION_CONFIG};
 use super::types::{Candidate, ModelStatus, QuotaError, TaskKind, VendorKind};
 use super::quota;
 use super::ranking;
@@ -180,7 +181,7 @@ fn extract_version(name: &str) -> Option<(u32, u32)> {
     None
 }
 
-/// Apply a 0.7-per-version-step penalty to all probability weights.
+/// Apply a configurable per-version-step penalty to all probability weights.
 /// Unique versions are ranked newest-first; same version = same penalty.
 fn apply_version_penalties(candidates: &mut Vec<Candidate>) {
     let versions: Vec<Option<(u32, u32)>> = candidates
@@ -197,15 +198,19 @@ fn apply_version_penalties(candidates: &mut Vec<Candidate>) {
         return; // nothing to penalise
     }
 
+    let cfg = &SELECTION_CONFIG;
     for (candidate, version) in candidates.iter_mut().zip(versions.iter()) {
         let rank = version
             .and_then(|v| unique.iter().position(|u| *u == v))
             .unwrap_or(0);
-        let penalty = 0.7f64.powi(rank as i32);
-        candidate.idea_probability *= penalty;
-        candidate.planning_probability *= penalty;
-        candidate.build_probability *= penalty;
-        candidate.review_probability *= penalty;
+        let interactive_penalty = cfg
+            .version_penalty_per_step_interactive
+            .powi(rank as i32);
+        let headless_penalty = cfg.version_penalty_per_step_headless.powi(rank as i32);
+        candidate.idea_probability *= interactive_penalty;
+        candidate.planning_probability *= interactive_penalty;
+        candidate.build_probability *= headless_penalty;
+        candidate.review_probability *= headless_penalty;
     }
 }
 
@@ -224,10 +229,14 @@ fn build_candidate(
         // If no exact match, use heuristics to find appropriate quota
         .or_else(|| quota::find_quota_by_heuristic(&model.name, vendor, quotas));
 
-    let idea_probability = ranking::selection_probability(&model, quota_percent, ranking::IDEA_AXES);
-    let planning_probability = ranking::selection_probability(&model, quota_percent, ranking::PLAN_AXES);
-    let build_probability = ranking::selection_probability(&model, quota_percent, ranking::BUILD_AXES);
-    let review_probability = ranking::selection_probability(&model, quota_percent, ranking::REVIEW_AXES);
+    let idea_probability =
+        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Idea);
+    let planning_probability =
+        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Planning);
+    let build_probability =
+        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Build);
+    let review_probability =
+        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Review);
 
     Some(Candidate {
         vendor,

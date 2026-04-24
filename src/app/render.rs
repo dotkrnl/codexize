@@ -26,21 +26,30 @@ fn probability_percent(weight: f64, total: f64) -> u8 {
     (weight / total * 100.0).round().clamp(0.0, 99.0) as u8
 }
 
-fn probability_color(pct: u8) -> Color {
-    match pct {
-        0 => Color::DarkGray,
-        1..=5 => Color::Gray,
-        6..=15 => Color::Blue,
-        16..=30 => Color::Cyan,
-        31..=50 => Color::Yellow,
-        _ => Color::Green,
+fn probability_color(pct: u8, max_pct: u8) -> Color {
+    if pct == 0 {
+        return Color::DarkGray;
     }
+    // Normalise relative to the column max so the top entry always reads as
+    // full green, regardless of absolute magnitude.
+    let t = if max_pct == 0 {
+        0.0
+    } else {
+        (pct as f64 / max_pct as f64).clamp(0.0, 1.0)
+    };
+    let (r, g) = if t < 0.5 {
+        let k = t / 0.5;
+        (220, (40.0 + (220.0 - 40.0) * k) as u8)
+    } else {
+        let k = (t - 0.5) / 0.5;
+        ((220.0 - (220.0 - 60.0) * k) as u8, 220)
+    };
+    Color::Rgb(r, g, 60)
 }
 
-fn probability_span(label: &str, pct: u8) -> Span<'static> {
-    let color = probability_color(pct);
-    let mut style = Style::default().fg(color);
-    if pct >= 31 {
+fn probability_span(label: &str, pct: u8, max_pct: u8) -> Span<'static> {
+    let mut style = Style::default().fg(probability_color(pct, max_pct));
+    if max_pct > 0 && pct == max_pct {
         style = style.add_modifier(Modifier::BOLD);
     }
     Span::styled(format!("{}{:>2}", label, pct), style)
@@ -201,6 +210,31 @@ impl App {
         let total_build: f64 = self.models.iter().map(|m| m.build_weight).sum();
         let total_review: f64 = self.models.iter().map(|m| m.review_weight).sum();
 
+        let max_idea = self
+            .models
+            .iter()
+            .map(|m| probability_percent(m.idea_weight, total_idea))
+            .max()
+            .unwrap_or(0);
+        let max_planning = self
+            .models
+            .iter()
+            .map(|m| probability_percent(m.planning_weight, total_planning))
+            .max()
+            .unwrap_or(0);
+        let max_build = self
+            .models
+            .iter()
+            .map(|m| probability_percent(m.build_weight, total_build))
+            .max()
+            .unwrap_or(0);
+        let max_review = self
+            .models
+            .iter()
+            .map(|m| probability_percent(m.review_weight, total_review))
+            .max()
+            .unwrap_or(0);
+
         let mut lines: Vec<Line<'static>> = Vec::new();
         for vendor in &vendor_order {
             let tag = vendor_tag(*vendor);
@@ -248,13 +282,13 @@ impl App {
                     Span::raw("  "),
                     Span::styled(quota, Style::default().fg(Color::Green)),
                     Span::raw("  "),
-                    probability_span("I", idea_pct),
+                    probability_span("I", idea_pct, max_idea),
                     Span::raw(" "),
-                    probability_span("P", planning_pct),
+                    probability_span("P", planning_pct, max_planning),
                     Span::raw(" "),
-                    probability_span("B", build_pct),
+                    probability_span("B", build_pct, max_build),
                     Span::raw(" "),
-                    probability_span("R", review_pct),
+                    probability_span("R", review_pct, max_review),
                 ]));
             }
         }

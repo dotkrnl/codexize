@@ -484,8 +484,12 @@ impl App {
                 kill_window(&format!("[Coder r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
-                    self.state.builder = session_state::BuilderState::default();
-                    Phase::ShardingRunning
+                    if self.state.skip_to_impl_rationale.is_some() {
+                        Phase::BrainstormRunning
+                    } else {
+                        self.state.builder = session_state::BuilderState::default();
+                        Phase::ShardingRunning
+                    }
                 } else {
                     Phase::ReviewRound(r - 1)
                 };

@@ -363,6 +363,9 @@ fn stage_status_from_runs(
         };
     }
     if phase_matches {
+        if runs.is_empty() {
+            return NodeStatus::Pending;
+        }
         return NodeStatus::Running;
     }
     if runs.is_empty() {

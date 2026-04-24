@@ -968,7 +968,13 @@ impl App {
             return;
         }
         match self.state.current_phase {
+            Phase::BrainstormRunning => {
+                if let Some(idea) = self.state.idea_text.clone() {
+                    self.launch_brainstorm(idea);
+                }
+            }
             Phase::SpecReviewRunning => self.launch_spec_review(),
+            Phase::PlanningRunning => self.launch_planning(),
             Phase::PlanReviewRunning => self.launch_plan_review(),
             Phase::ShardingRunning => self.launch_sharding(),
             Phase::ImplementationRound(_) => self.launch_coder(),
@@ -2597,7 +2603,9 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
          single short paragraph covering current progress and next action in \
          normal prose. Your process is killed if this file isn't updated for \
          10 min of wall time (time spent inside tool calls is excluded from \
-         that budget).\n",
+         that budget).\n\n\
+         When you finish, end your final message with an explicit line asking \
+         the operator to run `/exit` if they have no further comments.\n",
         path.display()
     )
 }

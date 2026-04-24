@@ -214,7 +214,11 @@ impl App {
         frame.render_widget(self.model_strip(), root[2]);
 
         if self.state.current_phase == Phase::SkipToImplPending {
-            render_skip_to_impl_modal(frame, self.state.skip_to_impl_rationale.as_deref());
+            render_skip_to_impl_modal(
+                frame,
+                self.state.skip_to_impl_rationale.as_deref(),
+                self.state.skip_to_impl_kind,
+            );
         }
     }
 
@@ -610,13 +614,35 @@ impl App {
 
 }
 
-fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
+fn render_skip_to_impl_modal(
+    frame: &mut Frame<'_>,
+    rationale: Option<&str>,
+    kind: Option<crate::artifacts::SkipToImplKind>,
+) {
+    use crate::artifacts::SkipToImplKind;
     let area = frame.area();
     let modal_width = area.width.saturating_sub(8).min(70).max(30);
 
+    let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
+    let (header, accept_line, decline_line, title) = if is_nothing {
+        (
+            "The brainstorm agent found nothing to implement.",
+            "[Y]/Enter  accept — mark session done",
+            "[N]/Esc    decline — re-run brainstorm",
+            "Nothing to implement?",
+        )
+    } else {
+        (
+            "The brainstorm agent proposes skipping directly to implementation.",
+            "[Y]/Enter  accept — jump to implementation round 1",
+            "[N]/Esc    decline — continue through spec review",
+            "Skip to implementation?",
+        )
+    };
+
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(Span::styled(
-        "The brainstorm agent proposes skipping directly to implementation.",
+        header.to_string(),
         Style::default().fg(Color::White),
     )));
     lines.push(Line::from(""));
@@ -630,11 +656,11 @@ fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[Y]/Enter  accept — jump to implementation round 1",
+        accept_line.to_string(),
         Style::default().fg(Color::Green),
     )));
     lines.push(Line::from(Span::styled(
-        "[N]/Esc    decline — continue through spec review",
+        decline_line.to_string(),
         Style::default().fg(Color::Red),
     )));
 
@@ -662,7 +688,7 @@ fn render_skip_to_impl_modal(frame: &mut Frame<'_>, rationale: Option<&str>) {
     frame.render_widget(ratatui::widgets::Clear, rect);
 
     let block = Block::default()
-        .title("Skip to implementation?")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(Color::Black));

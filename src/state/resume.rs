@@ -58,12 +58,14 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
         match SkipToImplProposal::read_from_path(&path) {
             Ok(Some(p)) if p.proposed => {
                 state.skip_to_impl_rationale = Some(p.rationale);
+                state.skip_to_impl_kind = Some(p.kind);
             }
             Ok(_) => {
                 let _ = state.log_event(
                     "resume: skip_to_impl artifact missing or not proposed, falling through to SpecReviewRunning",
                 );
                 state.skip_to_impl_rationale = None;
+                state.skip_to_impl_kind = None;
                 state.current_phase = Phase::SpecReviewRunning;
                 let _ = state.save();
             }
@@ -72,6 +74,7 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
                     "resume: skip_to_impl artifact malformed, falling through to SpecReviewRunning: {err:#}"
                 ));
                 state.skip_to_impl_rationale = None;
+                state.skip_to_impl_kind = None;
                 state.current_phase = Phase::SpecReviewRunning;
                 let _ = state.save();
             }

@@ -65,6 +65,8 @@ impl Phase {
             (SkipToImplPending, ImplementationRound(_)) => true, // New transition
             (SkipToImplPending, SpecReviewRunning) => true, // New transition
             (SkipToImplPending, BlockedNeedsUser) => true, // New transition
+            (SkipToImplPending, Done) => true, // nothing-to-do outcome
+            (SkipToImplPending, BrainstormRunning) => true, // decline nothing-to-do → retry
             // New forward transitions for Plan Review
             (PlanningRunning, PlanReviewRunning) => true,
             (PlanReviewRunning, ShardingRunning) => true,
@@ -231,7 +233,6 @@ mod tests {
         // Negative tests
         assert!(!Phase::SpecReviewRunning.can_transition_to(&Phase::SkipToImplPending));
         assert!(!Phase::PlanningRunning.can_transition_to(&Phase::SkipToImplPending));
-        assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::BrainstormRunning));
         assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::PlanningRunning));
     }
 

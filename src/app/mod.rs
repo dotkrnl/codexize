@@ -337,10 +337,18 @@ impl App {
     }
 
     pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
+        use crate::artifacts::SkipToImplKind;
         use crate::synthetic_artifacts::generate_synthetic_artifacts;
         use anyhow::Context;
 
         let session_dir = session_state::session_dir(&self.state.session_id);
+
+        if self.state.skip_to_impl_kind == Some(SkipToImplKind::NothingToDo) {
+            self.transition_to_phase(Phase::Done)?;
+            self.state.save()?;
+            return Ok(());
+        }
+
         let spec_path = session_dir.join("artifacts").join(ArtifactKind::Spec.filename());
         let spec_content = std::fs::read_to_string(&spec_path)
             .with_context(|| format!("cannot read {}", spec_path.display()))?;
@@ -370,9 +378,17 @@ impl App {
     }
 
     pub fn decline_skip_to_implementation(&mut self) -> Result<()> {
-        self.state.skip_to_impl_rationale = None; // Clear the rationale
-        self.transition_to_phase(Phase::SpecReviewRunning)?;
-        self.state.save()?; // Persist state after transition
+        use crate::artifacts::SkipToImplKind;
+        let kind = self.state.skip_to_impl_kind;
+        self.state.skip_to_impl_rationale = None;
+        self.state.skip_to_impl_kind = None;
+        let target = if kind == Some(SkipToImplKind::NothingToDo) {
+            Phase::BrainstormRunning
+        } else {
+            Phase::SpecReviewRunning
+        };
+        self.transition_to_phase(target)?;
+        self.state.save()?;
         Ok(())
     }
 
@@ -509,6 +525,7 @@ impl App {
                 kill_window("[Skip Confirm]");
                 let _ = fs::remove_file(artifacts.join("skip_to_impl.json"));
                 self.state.skip_to_impl_rationale = None;
+                self.state.skip_to_impl_kind = None;
                 self.state.agent_error = None;
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
@@ -1371,6 +1388,7 @@ impl App {
                 match proposal {
                     Some(p) if p.proposed => {
                         self.state.skip_to_impl_rationale = Some(p.rationale);
+                        self.state.skip_to_impl_kind = Some(p.kind);
                         self.transition_to_phase(Phase::SkipToImplPending)?;
                     }
                     _ => {
@@ -2582,7 +2600,7 @@ is small and self-contained enough that separate planning and sharding phases
 would add no value (e.g. a single-file change, a bug fix with an obvious edit
 site, a trivial refactor), you MAY write a skip proposal to
 `artifacts/skip_to_impl.json` ALONGSIDE the spec. Format:
-    {{"proposed": true, "rationale": "<=500 chars explaining why"}}
+    {{"proposed": true, "kind": "skip_to_impl", "rationale": "<=500 chars explaining why"}}
 Only emit this when the spec genuinely needs no further breakdown. When in
 doubt, omit the file — the normal spec-review → planning → sharding pipeline
 is the default. If you emit `"proposed": true`, the rationale MUST be a
@@ -2590,6 +2608,11 @@ non-empty, <=500 character explanation the operator will read before
 accepting. When proposing the skip, keep the spec concise — just enough for a
 coder to implement directly (goal, edit sites, acceptance check); skip the
 long-form sections a planning phase would normally expand.
+
+NOTHING-TO-IMPLEMENT (optional): if there is genuinely nothing to do (already
+in place, invalid premise, pure question), skip the spec and write ONLY:
+    {{"proposed": true, "kind": "nothing_to_do", "rationale": "<=500 chars"}}
+The operator confirms and the session ends. Use sparingly.
 
 HARD rules — override anything the superpowers / brainstorming skill suggests:
   - Do NOT `git add`, `git commit`, `git stash`, or touch version control. The

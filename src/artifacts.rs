@@ -1,15 +1,25 @@
 // artifacts.rs — artifact path helpers and typed wrappers.
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipToImplKind {
+    #[default]
+    SkipToImpl,
+    NothingToDo,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkipToImplProposal {
     pub proposed: bool,
+    #[serde(default)]
+    pub kind: SkipToImplKind,
     pub rationale: String,
 }
 
 impl SkipToImplProposal {
     pub fn new(proposed: bool, rationale: String) -> Self {
-        Self { proposed, rationale }
+        Self { proposed, kind: SkipToImplKind::SkipToImpl, rationale }
     }
 
     /// Read the skip-to-implementation proposal artifact from `path`.

@@ -184,6 +184,8 @@ pub struct SessionState {
     pub archived: bool,
     #[serde(default)]
     pub skip_to_impl_rationale: Option<String>,
+    #[serde(default)]
+    pub skip_to_impl_kind: Option<crate::artifacts::SkipToImplKind>,
 }
 
 impl SessionState {
@@ -199,6 +201,7 @@ impl SessionState {
             builder: BuilderState::default(),
             archived: false,
             skip_to_impl_rationale: None,
+            skip_to_impl_kind: None,
         }
     }
 

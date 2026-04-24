@@ -33,6 +33,8 @@ pub fn run(
         writeln!(log_file, "Required artifacts: {artifacts:?}")?;
     }
 
+    print_title_box(&phase, &role, &command);
+
     let mut child = Command::new(&command[0])
         .args(&command[1..])
         .stdout(Stdio::piped())
@@ -86,4 +88,36 @@ pub fn run(
     }
 
     Ok(())
+}
+
+fn extract_model(command: &[String]) -> String {
+    let mut it = command.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--model" || arg == "-m" {
+            if let Some(val) = it.next() {
+                return val.clone();
+            }
+        } else if let Some(val) = arg.strip_prefix("--model=") {
+            return val.to_string();
+        }
+    }
+    command
+        .first()
+        .and_then(|bin| std::path::Path::new(bin).file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn print_title_box(phase: &str, role: &str, command: &[String]) {
+    let model = extract_model(command);
+    let line = format!(" {role} · {phase} · model: {model} ");
+    let width = line.chars().count().max(40);
+    let pad = width - line.chars().count();
+    let top = format!("╭{}╮", "─".repeat(width));
+    let mid = format!("│{line}{}│", " ".repeat(pad));
+    let bot = format!("╰{}╯", "─".repeat(width));
+    println!("{top}");
+    println!("{mid}");
+    println!("{bot}");
 }

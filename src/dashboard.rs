@@ -181,6 +181,20 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     axes: sc.axes.clone(),
                     display_order: sc.display_order,
                 }
+            } else if let Some(sc) = sibling_score(&inv.name, &scores) {
+                eprintln!(
+                    "warning: no ranking-API score for {} yet; falling back to {}'s score",
+                    inv.name, sc.name
+                );
+                DashboardModel {
+                    name: inv.name,
+                    vendor: if !inv.vendor.is_empty() { inv.vendor } else { sc.vendor.clone() },
+                    overall_score: sc.overall_score,
+                    current_score: sc.current_score,
+                    standard_error: sc.standard_error,
+                    axes: sc.axes.clone(),
+                    display_order: sc.display_order,
+                }
             } else {
                 // Model is in the inventory but not yet scored — include with zeroed scores
                 DashboardModel {
@@ -249,6 +263,34 @@ fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
             display_order: inv.display_order,
         })
         .collect()
+}
+
+// Strip a trailing point-version segment (e.g. "gpt-5.5" -> "gpt-5",
+// "claude-sonnet-4.6" -> "claude-sonnet-4"). Returns None when the last
+// `.`-separated segment isn't purely numeric, so we don't fall back across
+// major versions.
+fn version_stem(name: &str) -> Option<&str> {
+    let (prefix, tail) = name.rsplit_once('.')?;
+    if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
+        Some(prefix)
+    } else {
+        None
+    }
+}
+
+// Find the best-scoring sibling with the same version stem — e.g. use
+// gpt-5.4's score for gpt-5.5 until the ranking API catches up. Returns
+// None when there is no sibling (no fallback applied).
+fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEntry> {
+    let stem = version_stem(name)?;
+    scores
+        .iter()
+        .filter(|sc| sc.name != name && version_stem(&sc.name) == Some(stem))
+        .max_by(|a, b| {
+            a.overall_score
+                .partial_cmp(&b.overall_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {

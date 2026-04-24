@@ -1250,22 +1250,38 @@ Read the plan and spec:
 
 Your task:
 1. Read both files carefully.
-2. Review the plan for clarity, completeness, correctness, and buildability.
-   Check that every spec requirement maps to a concrete plan step, that steps
-   are ordered correctly, that file paths and function names are consistent
-   across steps, and that test instructions are specific.
-3. Directly edit {plan_path} to fix any issues you find: reorganize steps,
-   fill gaps, fix inconsistencies, add missing details, improve specificity.
-4. If plan review reveals spec-level issues (contradictions, ambiguities,
-   missing requirements), you may also edit {spec_path}.
-5. Write a changelog to: {review_path}
+2. Review the plan ONLY for CRITICAL issues that would block or break the
+   implementation. A critical issue is something like:
+     - A spec requirement that has no corresponding plan step (missing work).
+     - Plan steps ordered in a way that makes them unbuildable (e.g., a step
+       depends on something a later step creates).
+     - Contradictions between the plan and spec, or internal contradictions
+       that would lead an implementer to build the wrong thing.
+     - File paths, function names, or interfaces that are inconsistent
+       across steps in a way that would cause real breakage.
+     - Spec-level ambiguity so severe that an implementer could not proceed.
+3. If — and ONLY if — you find critical issues, directly edit {plan_path}
+   (and {spec_path} if the issue is spec-level) to fix them. Make the
+   smallest edit that resolves the problem.
+4. Write a changelog to: {review_path}
    The changelog is a markdown bullet list of what you changed and why.
+   If you found no critical issues, write a single bullet saying so — do
+   not invent issues to fill space.
+
+DO NOT flag or fix:
+  - Typos, grammar, wording, or formatting.
+  - Style, tone, or structural polish.
+  - Missing low-level implementation detail (the implementer figures that
+    out — the plan is a plan, not the code).
+  - Hypothetical edge cases the spec does not require.
+  - Minor nitpicks, suggestions, or "nice-to-have" improvements.
+
+When in doubt, leave it alone. Over-editing a plan is worse than under-editing.
 
 Rules:
   - Do NOT create or modify any source code files.
   - Do NOT run git commands or modify version control state.
   - Do NOT ask questions or request operator input.
-  - Focus edits on substance, not style — don't reformat for formatting's sake.
 {instr}"#
     )
 }

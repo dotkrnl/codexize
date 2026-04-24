@@ -77,16 +77,16 @@ impl SessionPicker {
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
-            if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
-                    match self.handle_key(key)? {
-                        KeyAction::Continue => continue,
-                        KeyAction::SelectSession(id) => return Ok(Some(id)),
-                        KeyAction::Quit => return Ok(None),
-                    }
+            if event::poll(Duration::from_millis(250))?
+                && let Event::Key(key) = event::read()?
+            {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match self.handle_key(key)? {
+                    KeyAction::Continue => continue,
+                    KeyAction::SelectSession(id) => return Ok(Some(id)),
+                    KeyAction::Quit => return Ok(None),
                 }
             }
         }
@@ -340,13 +340,13 @@ impl SessionPicker {
     }
 
     fn handle_restore(&mut self) -> Result<KeyAction> {
-        if let Some(entry) = self.selected_entry() {
-            if entry.archived {
-                let mut state = SessionState::load(&entry.session_id)?;
-                state.archived = false;
-                state.save()?;
-                self.refresh()?;
-            }
+        if let Some(entry) = self.selected_entry()
+            && entry.archived
+        {
+            let mut state = SessionState::load(&entry.session_id)?;
+            state.archived = false;
+            state.save()?;
+            self.refresh()?;
         }
         Ok(KeyAction::Continue)
     }

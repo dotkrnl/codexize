@@ -89,12 +89,11 @@ fn resolve_api_key() -> Result<String> {
             }
 
             // Re-read after potential refresh
-            if let Ok(refreshed) = fs::read_to_string(&creds_file) {
-                if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&refreshed) {
-                    if let Some(token) = obj.get("access_token").and_then(Value::as_str) {
-                        return Ok(token.to_string());
-                    }
-                }
+            if let Ok(refreshed) = fs::read_to_string(&creds_file)
+                && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&refreshed)
+                && let Some(token) = obj.get("access_token").and_then(Value::as_str)
+            {
+                return Ok(token.to_string());
             }
         }
 

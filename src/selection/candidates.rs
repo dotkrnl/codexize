@@ -50,7 +50,7 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     let build_ranks = ranking::rank_map(&candidates, |candidate| candidate.build_probability);
     let review_ranks = ranking::rank_map(&candidates, |candidate| candidate.review_probability);
 
-    candidates.sort_by(|left, right| ranking::compare_candidates(left, right));
+    candidates.sort_by(ranking::compare_candidates);
 
     let mut statuses: Vec<ModelStatus> = candidates
         .into_iter()
@@ -183,7 +183,7 @@ fn extract_version(name: &str) -> Option<(u32, u32)> {
 
 /// Apply a configurable per-version-step penalty to all probability weights.
 /// Unique versions are ranked newest-first; same version = same penalty.
-fn apply_version_penalties(candidates: &mut Vec<Candidate>) {
+fn apply_version_penalties(candidates: &mut [Candidate]) {
     let versions: Vec<Option<(u32, u32)>> = candidates
         .iter()
         .map(|c| extract_version(&c.name))

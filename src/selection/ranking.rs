@@ -37,7 +37,7 @@ pub fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
         |candidate: &Candidate| candidate.review_probability,
     ] {
         let mut ranked = candidates.iter().collect::<Vec<_>>();
-        ranked.sort_by(|left, right| compare_probability(*left, *right, selector));
+        ranked.sort_by(|left, right| compare_probability(left, right, selector));
         for candidate in ranked.into_iter().take(3) {
             retained.insert(candidate.name.clone());
         }
@@ -51,7 +51,7 @@ pub fn rank_map(
     selector: impl Fn(&Candidate) -> f64 + Copy,
 ) -> BTreeMap<String, u8> {
     let mut ranked = candidates.iter().collect::<Vec<_>>();
-    ranked.sort_by(|left, right| compare_probability(*left, *right, selector));
+    ranked.sort_by(|left, right| compare_probability(left, right, selector));
     ranked
         .into_iter()
         .enumerate()

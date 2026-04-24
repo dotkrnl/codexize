@@ -4,6 +4,7 @@ use std::thread;
 use crate::providers::{self, LiveModel};
 use super::types::{VendorKind, QuotaError};
 
+#[allow(clippy::type_complexity)]
 pub fn load_quota_maps() -> (BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>, Vec<QuotaError>) {
     let (tx, rx) = mpsc::channel();
     thread::scope(|scope| {
@@ -132,10 +133,10 @@ fn live_map_codex(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
         "gpt-4o-latest",
     ] {
         let model_name = known_model.to_string();
-        if !mapped.contains_key(&model_name) {
-            let quota = if model_name.contains("spark") { spark } else { shared };
-            mapped.insert(model_name, quota);
-        }
+        let has_spark = model_name.contains("spark");
+        mapped.entry(model_name).or_insert_with(|| {
+            if has_spark { spark } else { shared }
+        });
     }
 
     mapped
@@ -180,9 +181,7 @@ fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
         "claude-3-haiku",
     ] {
         let model_name = known_model.to_string();
-        if !mapped.contains_key(&model_name) {
-            mapped.insert(model_name, shared);
-        }
+        mapped.entry(model_name).or_insert(shared);
     }
 
     mapped

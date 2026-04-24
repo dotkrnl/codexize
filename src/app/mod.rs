@@ -105,12 +105,11 @@ impl App {
             self.poll_live_summary();
             terminal.draw(|frame| self.draw(frame))?;
 
-            if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    if self.handle_key(key) {
-                        return Ok(());
-                    }
-                }
+            if event::poll(Duration::from_millis(250))?
+                && let Event::Key(key) = event::read()?
+                && self.handle_key(key)
+            {
+                return Ok(());
             }
         }
     }
@@ -338,11 +337,9 @@ impl App {
             Some(cached) => mtime > cached,
         };
 
-        if should_read {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                self.live_summary = content.trim().to_string();
-                self.live_summary_mtime = Some(mtime);
-            }
+        if should_read && let Ok(content) = std::fs::read_to_string(&path) {
+            self.live_summary = content.trim().to_string();
+            self.live_summary_mtime = Some(mtime);
         }
     }
 
@@ -509,10 +506,23 @@ impl App {
                 }
                 attempt_status = crate::state::AttemptStatus::Done;
             } else if self.state.current_phase == Phase::PlanReviewRunning {
-                if let Some(pm) = self.state.phase_models.get("plan-review").cloned() {
-                    self.state.plan_reviewers.push(pm);
+                // Check that the artifact is non-empty
+                match std::fs::read_to_string(&artifact_path) {
+                    Ok(content) if !content.trim().is_empty() => {
+                        if let Some(pm) = self.state.phase_models.get("plan-review").cloned() {
+                            self.state.plan_reviewers.push(pm);
+                        }
+                        attempt_status = crate::state::AttemptStatus::Done;
+                    }
+                    Ok(_) => {
+                        validation_error = Some(
+                            "plan review changelog is empty — retry or manually add content".to_string()
+                        );
+                    }
+                    Err(e) => {
+                        validation_error = Some(format!("failed to read plan review artifact: {e}"));
+                    }
                 }
-                attempt_status = crate::state::AttemptStatus::Done;
             } else if let Phase::ReviewRound(r) = self.state.current_phase {
                 match review::validate(&artifact_path) {
                     Ok(v) => {

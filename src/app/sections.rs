@@ -1,5 +1,6 @@
 use crate::state::{AttemptStatus, Phase, PhaseAttempt, SessionState};
 
+use super::session_state;
 use super::state::{AttemptSection, PipelineSection, SectionStatus};
 
 fn attempt_section_from(phase_attempt: &PhaseAttempt, label: String) -> AttemptSection {
@@ -141,7 +142,7 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
                     events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
                 }
                 events.push(String::new());
-                events.push(format!("[Enter] add another review · [n] proceed to planning"));
+                events.push("[Enter] add another review · [n] proceed to planning".to_string());
                 PipelineSection::action(
                     "Spec Review",
                     format!("{n} review{} done", if n == 1 { "" } else { "s" }),
@@ -229,8 +230,23 @@ pub(super) fn build_sections(state: &SessionState, window_launched: bool) -> Vec
             Phase::PlanReviewPaused => {
                 let n = state.plan_reviewers.len();
                 let mut events = Vec::new();
+                let session_dir = session_state::session_dir(&state.session_id);
+                let artifacts = session_dir.join("artifacts");
+
                 for (i, r) in state.plan_reviewers.iter().enumerate() {
-                    events.push(format!("  ✓ round {}  {} ({})", i + 1, r.model, r.vendor));
+                    let round = i + 1;
+                    events.push(format!("  ✓ round {}  {} ({})", round, r.model, r.vendor));
+
+                    // Read and display the changelog from plan-review-{round}.md
+                    let changelog_path = artifacts.join(format!("plan-review-{}.md", round));
+                    if let Ok(content) = std::fs::read_to_string(&changelog_path) {
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                events.push(format!("    {}", trimmed));
+                            }
+                        }
+                    }
                 }
                 events.push(String::new());
                 events.push("[Enter] add another review · [n] proceed to sharding".to_string());

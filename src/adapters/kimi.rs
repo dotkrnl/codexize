@@ -19,6 +19,8 @@ impl AgentAdapter for KimiAdapter {
         // kimi's `-p/--prompt` always exits after the query (one-shot), so we
         // background a tmux paste that polls for TUI readiness before firing,
         // then exec kimi in interactive mode.
+        // The readiness glyphs are based on Kimi's current TUI prompt; if they
+        // change, the bounded loop still falls back to pasting after timeout.
         format!(
             concat!(
                 r#"(for i in $(seq 1 {max_polls}); do "#,

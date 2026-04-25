@@ -3,6 +3,7 @@ use std::process::Command;
 
 const KIMI_READY_MAX_POLLS: u32 = 50;
 const KIMI_READY_POLL_INTERVAL: f32 = 0.2;
+const KIMI_READY_INITIAL_DELAY: f32 = 1.5;
 
 pub struct KimiAdapter;
 
@@ -23,7 +24,7 @@ impl AgentAdapter for KimiAdapter {
         // change, the bounded loop still falls back to pasting after timeout.
         format!(
             concat!(
-                r#"(for i in $(seq 1 {max_polls}); do "#,
+                r#"(sleep {initial_delay}; for i in $(seq 1 {max_polls}); do "#,
                 r#"tmux capture-pane -p -t "$TMUX_PANE" 2>/dev/null | grep -qE '[❯>]' && break; "#,
                 r#"sleep {poll_interval}; "#,
                 r#"done && "#,
@@ -33,6 +34,7 @@ impl AgentAdapter for KimiAdapter {
             ),
             max_polls = KIMI_READY_MAX_POLLS,
             poll_interval = KIMI_READY_POLL_INTERVAL,
+            initial_delay = KIMI_READY_INITIAL_DELAY,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
@@ -57,8 +59,8 @@ mod tests {
         let cmd = adapter.interactive_command("any-model", "/tmp/prompt.txt");
 
         assert!(
-            !cmd.contains("sleep 1"),
-            "should not use a fixed sleep for startup"
+            cmd.contains("sleep 1.5"),
+            "should wait briefly before polling so kimi can initialise"
         );
         assert!(
             cmd.contains("capture-pane"),

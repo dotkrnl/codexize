@@ -227,8 +227,10 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
     weighted_sample(&all, task)
 }
 
-/// Extract the first `xx[-yy]` version from a model name where each component
+/// Extract the first `xx[.|-yy]` version from a model name where each component
 /// is at most 2 digits. Longer digit runs (e.g. dates like 20250514) are skipped.
+/// Both `.` (e.g. `gpt-5.5`, `gemini-2.5-flash`) and `-` (e.g. `claude-sonnet-4-6`)
+/// count as the major-minor separator.
 /// Returns (major, minor) if both components found, or (major, 0) for major-only.
 fn extract_version(name: &str) -> Option<(u32, u32)> {
     let bytes = name.as_bytes();
@@ -247,8 +249,8 @@ fn extract_version(name: &str) -> Option<(u32, u32)> {
             }
             let major: u32 = name[start..i].parse().ok()?;
 
-            // Optionally consume a `-yy` minor component (1-2 digits)
-            if i < bytes.len() && bytes[i] == b'-' {
+            // Optionally consume a `[.|-]yy` minor component (1-2 digits)
+            if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'.') {
                 let j = i + 1;
                 if j < bytes.len() && bytes[j].is_ascii_digit() {
                     let mut k = j;
@@ -657,5 +659,85 @@ mod tests {
             assert_ne!(chosen.name, flash_name);
         }
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn extract_version_treats_dot_as_minor_separator() {
+        assert_eq!(extract_version("gpt-5.5"), Some((5, 5)));
+        assert_eq!(extract_version("gpt-5.4"), Some((5, 4)));
+        assert_eq!(extract_version("gpt-5.2"), Some((5, 2)));
+        assert_eq!(extract_version("gemini-3.1-pro"), Some((3, 1)));
+        assert_eq!(extract_version("gemini-2.5-flash"), Some((2, 5)));
+        assert_eq!(extract_version("gemini-3-pro-preview"), Some((3, 0)));
+        assert_eq!(extract_version("gemini-3-flash"), Some((3, 0)));
+        // Existing dash-separated minor still works.
+        assert_eq!(extract_version("claude-sonnet-4-6"), Some((4, 6)));
+        // Date-shaped digit runs are skipped.
+        assert_eq!(extract_version("gpt-4-turbo-2024-04-09"), Some((4, 0)));
+    }
+
+    fn candidate_with_version(name: &str, score: f64) -> Candidate {
+        Candidate {
+            vendor: VendorKind::Codex,
+            name: name.to_string(),
+            stupid_level: Some(50),
+            quota_percent: Some(80),
+            overall_score: score,
+            display_order: 0,
+            idea_probability: 1.0,
+            planning_probability: 1.0,
+            build_probability: 1.0,
+            review_probability: 1.0,
+            fallback_from: None,
+        }
+    }
+
+    #[test]
+    fn synthesized_gpt_5_5_makes_5_4_carry_version_penalty() {
+        // gpt-5.5 is synthesized (borrows gpt-5.2's score) but should still
+        // count as the newest version. gpt-5.4 must end up with a smaller
+        // weight than gpt-5.5 thanks to apply_version_penalties.
+        let mut candidates = vec![
+            candidate_with_version("gpt-5.5", 70.0),
+            candidate_with_version("gpt-5.4", 70.0),
+            candidate_with_version("gpt-5.2", 70.0),
+        ];
+        apply_version_penalties(&mut candidates);
+
+        let by_name = |n: &str| {
+            candidates
+                .iter()
+                .find(|c| c.name == n)
+                .unwrap()
+                .build_probability
+        };
+        assert!(by_name("gpt-5.5") > by_name("gpt-5.4"));
+        assert!(by_name("gpt-5.4") > by_name("gpt-5.2"));
+    }
+
+    #[test]
+    fn synthesized_gemini_3_1_pro_makes_3_pro_preview_carry_penalty() {
+        let mut candidates = vec![
+            Candidate {
+                vendor: VendorKind::Gemini,
+                ..candidate_with_version("gemini-3.1-pro", 80.0)
+            },
+            Candidate {
+                vendor: VendorKind::Gemini,
+                ..candidate_with_version("gemini-3-pro-preview", 80.0)
+            },
+        ];
+        apply_version_penalties(&mut candidates);
+
+        let pro_31 = candidates
+            .iter()
+            .find(|c| c.name == "gemini-3.1-pro")
+            .unwrap();
+        let preview = candidates
+            .iter()
+            .find(|c| c.name == "gemini-3-pro-preview")
+            .unwrap();
+        assert!(pro_31.idea_probability > preview.idea_probability);
+        assert!(pro_31.build_probability > preview.build_probability);
     }
 }

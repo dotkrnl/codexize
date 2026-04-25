@@ -299,11 +299,21 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
         })
 }
 
+// Hardcoded fallbacks for cases the same-stem heuristic can't express
+// (cross-major-version or non-numeric suffix differences). Listed in
+// preference order; first match wins. Used when the ranking API hasn't
+// scored the new model yet but quota probes already see it.
+const EXPLICIT_FALLBACKS: &[(&str, &str)] = &[
+    ("gemini-3.1-pro", "gemini-3-pro-preview"),
+    ("gemini-3-flash", "gemini-2.5-flash"),
+];
+
 // Synthesize a DashboardModel for a name absent from the ranking API by
-// borrowing the best-scoring sibling's numbers (same version stem). Used by
-// the selection layer to keep live-quota-only models (e.g. "gpt-5.5" before
-// aistupidlevel catches up) in the candidate pool. The synthesized model
-// carries `fallback_from = Some(sibling.name)` so the UI can surface the
+// borrowing a sibling's numbers — preferring an explicit hardcoded mapping
+// (e.g. gemini-3.1-pro → gemini-3-pro-preview), then falling back to the
+// best-scoring same-stem sibling. Used by the selection layer to keep
+// live-quota-only models in the candidate pool. The synthesized model
+// carries `fallback_from = Some(sibling.name)` so the UI surfaces the
 // fallback only for models that actually survive selection; once the real
 // score lands in `existing`, the caller finds an exact match and never
 // calls this.
@@ -312,15 +322,17 @@ pub fn synthesize_sibling(
     vendor: &str,
     existing: &[DashboardModel],
 ) -> Option<DashboardModel> {
-    let stem = version_stem(name)?;
-    let sibling = existing
-        .iter()
-        .filter(|m| m.name != name && version_stem(&m.name) == Some(stem))
-        .max_by(|a, b| {
-            a.overall_score
-                .partial_cmp(&b.overall_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })?;
+    let sibling = explicit_fallback(name, existing).or_else(|| {
+        let stem = version_stem(name)?;
+        existing
+            .iter()
+            .filter(|m| m.name != name && version_stem(&m.name) == Some(stem))
+            .max_by(|a, b| {
+                a.overall_score
+                    .partial_cmp(&b.overall_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    })?;
 
     Some(DashboardModel {
         name: name.to_string(),
@@ -332,6 +344,14 @@ pub fn synthesize_sibling(
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
+}
+
+fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
+    let target = EXPLICIT_FALLBACKS
+        .iter()
+        .find(|(from, _)| *from == name)
+        .map(|(_, to)| *to)?;
+    existing.iter().find(|m| m.name == target)
 }
 
 fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {
@@ -357,5 +377,52 @@ fn value_to_string(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(name: &str, score: f64) -> DashboardModel {
+        DashboardModel {
+            name: name.to_string(),
+            vendor: String::new(),
+            overall_score: score,
+            current_score: score,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            display_order: 0,
+            fallback_from: None,
+        }
+    }
+
+    #[test]
+    fn synthesize_gemini_3_1_pro_uses_explicit_preview_fallback() {
+        let existing = vec![
+            model("gemini-3-pro-preview", 80.0),
+            model("gemini-3-pro", 70.0),
+        ];
+        let synth = synthesize_sibling("gemini-3.1-pro", "google", &existing).unwrap();
+        assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
+        assert_eq!(synth.overall_score, 80.0);
+    }
+
+    #[test]
+    fn synthesize_gemini_3_flash_falls_back_to_2_5_flash() {
+        let existing = vec![
+            model("gemini-2.5-flash", 60.0),
+            model("gemini-2.5-pro", 75.0),
+        ];
+        let synth = synthesize_sibling("gemini-3-flash", "google", &existing).unwrap();
+        assert_eq!(synth.fallback_from.as_deref(), Some("gemini-2.5-flash"));
+        assert_eq!(synth.overall_score, 60.0);
+    }
+
+    #[test]
+    fn synthesize_gpt_5_5_uses_same_stem_sibling() {
+        let existing = vec![model("gpt-5.2", 70.0), model("gpt-4.1", 50.0)];
+        let synth = synthesize_sibling("gpt-5.5", "openai", &existing).unwrap();
+        assert_eq!(synth.fallback_from.as_deref(), Some("gpt-5.2"));
     }
 }

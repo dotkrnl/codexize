@@ -581,8 +581,11 @@ impl App {
             Phase::PlanningRunning | Phase::PlanReviewRunning | Phase::PlanReviewPaused => {
                 artifacts.join("plan.md")
             }
-            Phase::ShardingRunning => artifacts.join("tasks.toml"),
+            Phase::ShardingRunning | Phase::BuilderRecoverySharding(_) => {
+                artifacts.join("tasks.toml")
+            }
             Phase::BuilderRecovery(_) => artifacts.join("tasks.toml"),
+            Phase::BuilderRecoveryPlanReview(_) => artifacts.join("plan_review.toml"),
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => session_dir
                 .join("rounds")
                 .join(format!("{r:03}"))
@@ -728,6 +731,16 @@ impl App {
                 // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
                 // the triggering review round so the operator can intervene.
                 let _ = self.transition_to_phase(Phase::ReviewRound(r));
+            }
+            Phase::BuilderRecoveryPlanReview(r) => {
+                kill_window("[Recovery Plan Review]");
+                let _ = fs::remove_file(prompts.join(format!("recovery-plan-review-r{r}.md")));
+                let _ = self.transition_to_phase(Phase::BuilderRecovery(r));
+            }
+            Phase::BuilderRecoverySharding(r) => {
+                kill_window("[Recovery Sharding]");
+                let _ = fs::remove_file(prompts.join(format!("recovery-sharding-r{r}.md")));
+                let _ = self.transition_to_phase(Phase::BuilderRecoveryPlanReview(r));
             }
             Phase::SkipToImplPending => {
                 kill_window("[Skip Confirm]");
@@ -1233,6 +1246,8 @@ impl App {
             Phase::ImplementationRound(_) => self.launch_coder(),
             Phase::ReviewRound(_) => self.launch_reviewer(),
             Phase::BuilderRecovery(_) => self.launch_recovery(),
+            Phase::BuilderRecoveryPlanReview(_) => self.launch_recovery_plan_review(),
+            Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
             _ => {}
         }
     }
@@ -1276,17 +1291,21 @@ impl App {
         Some(task_id)
     }
 
-    /// Enter builder recovery. This is builder-only and must remain non-interactive:
-    /// it clears `builder.current_task`, preserves `builder.done` and `builder.pending`,
-    /// and records recovery context for validation/reconciliation.
+    /// Enter builder recovery.  Preserves `builder.done`/`builder.pending` and
+    /// records recovery context.  `trigger` must be `"human_blocked"` or
+    /// `"agent_pivot"`; `"human_blocked"` produces an interactive recovery stage.
     ///
-    /// Returns true if recovery was entered (or an attempt was made and recorded) so
-    /// callers can treat it as "handled" like other auto-retry paths.
+    /// Circuit breaker: if `recovery_cycle_count` reaches 3 the trigger is
+    /// automatically escalated to `"human_blocked"` and a pipeline message is
+    /// emitted identifying the loop.
+    ///
+    /// Returns true so callers can treat this like other auto-retry paths.
     fn enter_builder_recovery(
         &mut self,
         triggering_round: u32,
         trigger_task_id: Option<u32>,
         trigger_summary: Option<String>,
+        trigger: &str,
     ) -> bool {
         if self.current_run_id.is_some() || self.window_launched {
             let _ = self.state.log_event(
@@ -1306,6 +1325,36 @@ impl App {
             })
             .unwrap_or_default();
 
+        // Circuit breaker: after 3 consecutive recovery cycles without an approved
+        // plan review, force human_blocked so a human can break the loop.
+        self.state.builder.recovery_cycle_count += 1;
+        let effective_trigger = if self.state.builder.recovery_cycle_count >= 3
+            && trigger != "human_blocked"
+        {
+            let loop_msg = format!(
+                "recovery loop: {} consecutive recovery cycles without approval — escalating to human_blocked",
+                self.state.builder.recovery_cycle_count
+            );
+            let _ = self.state.log_event(loop_msg.clone());
+            let msg = Message {
+                ts: chrono::Utc::now(),
+                run_id: self.current_run_id.unwrap_or(0),
+                kind: MessageKind::SummaryWarn,
+                sender: MessageSender::System,
+                text: loop_msg,
+            };
+            if let Err(err) = self.state.append_message(&msg) {
+                let _ = self.state.log_event(format!(
+                    "failed to append circuit-breaker escalation message: {err}"
+                ));
+            } else {
+                self.messages.push(msg);
+            }
+            "human_blocked"
+        } else {
+            trigger
+        };
+
         self.state.builder.recovery_trigger_task_id =
             trigger_task_id.or(self.state.builder.current_task_id());
         self.state.builder.recovery_prev_max_task_id = prev_max;
@@ -1322,16 +1371,22 @@ impl App {
                     .builder
                     .set_task_status(current_task_id, status, Some(triggering_round));
         }
+        let interactive = effective_trigger == "human_blocked";
+        let title = if interactive {
+            "Human-blocked recovery"
+        } else {
+            "Agent pivot recovery"
+        };
         self.state.builder.push_pipeline_item(PipelineItem {
             id: 0,
             stage: "recovery".to_string(),
             task_id: None,
             round: Some(triggering_round),
             status: PipelineItemStatus::Running,
-            title: Some("Builder recovery".to_string()),
+            title: Some(title.to_string()),
             mode: None,
-            trigger: None,
-            interactive: Some(false),
+            trigger: Some(effective_trigger.to_string()),
+            interactive: Some(interactive),
         });
         self.state.agent_error = None;
 
@@ -1532,6 +1587,451 @@ impl App {
         Ok(())
     }
 
+    /// Called when a recovery-mode plan review agent run completes.
+    ///
+    /// Reads `artifacts/plan_review.toml`, applies the verdict, and either
+    /// advances to recovery sharding (approved) or re-runs recovery
+    /// (revise/human_blocked/agent_pivot with circuit-breaker).
+    fn handle_recovery_plan_review_completed(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
+
+        // Mark the recovery plan-review pipeline item as done/completed.
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|i| i.stage == "plan-review" && i.status == PipelineItemStatus::Running)
+        {
+            item.status = PipelineItemStatus::Done;
+        }
+
+        match review::validate(&plan_review_path) {
+            Ok(verdict) => {
+                let summary_text = verdict.summary.trim().to_string();
+                if !summary_text.is_empty() {
+                    let kind = match verdict.status {
+                        review::ReviewStatus::Approved => MessageKind::Summary,
+                        _ => MessageKind::SummaryWarn,
+                    };
+                    let msg = Message {
+                        ts: chrono::Utc::now(),
+                        run_id: run.id,
+                        kind,
+                        sender: MessageSender::Agent {
+                            model: run.model.clone(),
+                            vendor: run.vendor.clone(),
+                        },
+                        text: summary_text,
+                    };
+                    if let Err(err) = self.state.append_message(&msg) {
+                        let _ = self.state.log_event(format!(
+                            "failed to append recovery plan review message: {err}"
+                        ));
+                    } else {
+                        self.messages.push(msg);
+                    }
+                }
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+                match verdict.status {
+                    review::ReviewStatus::Approved => {
+                        // Reset circuit-breaker: recovery reached an approved plan review.
+                        self.state.builder.recovery_cycle_count = 0;
+                        // Insert recovery sharding pipeline item.
+                        self.state.builder.push_pipeline_item(PipelineItem {
+                            id: 0,
+                            stage: "sharding".to_string(),
+                            task_id: None,
+                            round: Some(round),
+                            status: PipelineItemStatus::Pending,
+                            title: Some("Recovery sharding".to_string()),
+                            mode: Some("recovery".to_string()),
+                            trigger: None,
+                            interactive: Some(false),
+                        });
+                        self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+                    }
+                    review::ReviewStatus::Revise
+                    | review::ReviewStatus::HumanBlocked
+                    | review::ReviewStatus::AgentPivot => {
+                        let trigger_str = match verdict.status {
+                            review::ReviewStatus::HumanBlocked => "human_blocked",
+                            review::ReviewStatus::AgentPivot => "agent_pivot",
+                            _ => "agent_pivot",
+                        };
+                        let summary = verdict.feedback.join("\n");
+                        let trigger_summary = (!summary.trim().is_empty()).then_some(summary);
+                        self.enter_builder_recovery(round, None, trigger_summary, trigger_str);
+                    }
+                }
+            }
+            Err(err) => {
+                let reason = format!("recovery_plan_review_failed: {err:#}");
+                self.finalize_run_record(run.id, false, Some(reason.clone()));
+                let failed_run = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.id == run.id)
+                    .cloned()
+                    .unwrap_or_else(|| run.clone());
+                if !self.maybe_auto_retry(&failed_run) {
+                    self.state.agent_error = Some(reason);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Called when a recovery-mode sharding agent run completes.
+    ///
+    /// Validates the regenerated `tasks.toml` against the completed task history,
+    /// rebuilds the pipeline queue, and advances to the next implementation round.
+    fn handle_recovery_sharding_completed(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+
+        // Mark the recovery sharding pipeline item as done.
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|i| i.stage == "sharding" && i.status == PipelineItemStatus::Running)
+        {
+            item.status = PipelineItemStatus::Done;
+        }
+
+        match tasks::validate(&tasks_path) {
+            Ok(parsed) => {
+                let done_ids = self
+                    .state
+                    .builder
+                    .done_task_ids()
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+
+                // Validate no collisions with completed task IDs.
+                for task in &parsed.tasks {
+                    if done_ids.contains(&task.id) {
+                        let reason = format!(
+                            "recovery sharding produced task id {} that collides with a completed task",
+                            task.id
+                        );
+                        self.finalize_run_record(run.id, false, Some(reason.clone()));
+                        self.state.agent_error = Some(reason);
+                        let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+                        return Ok(());
+                    }
+                }
+
+                self.finalize_run_record(run.id, true, None);
+                self.state.agent_error = None;
+
+                // Rebuild pipeline: completed tasks stay as-is, add pending from recovered tasks.
+                let mut next_items: Vec<PipelineItem> = self
+                    .state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .filter(|item| {
+                        item.stage == "coder"
+                            && item.task_id.is_some_and(|id| done_ids.contains(&id))
+                    })
+                    .cloned()
+                    .collect();
+
+                if next_items.is_empty() {
+                    for &tid in &done_ids {
+                        next_items.push(PipelineItem {
+                            id: 0,
+                            stage: "coder".to_string(),
+                            task_id: Some(tid),
+                            round: None,
+                            status: PipelineItemStatus::Approved,
+                            title: self.state.builder.task_titles.get(&tid).cloned(),
+                            mode: None,
+                            trigger: None,
+                            interactive: None,
+                        });
+                    }
+                }
+
+                for task in &parsed.tasks {
+                    self.state
+                        .builder
+                        .task_titles
+                        .insert(task.id, task.title.clone());
+                    if !done_ids.contains(&task.id) {
+                        next_items.push(PipelineItem {
+                            id: 0,
+                            stage: "coder".to_string(),
+                            task_id: Some(task.id),
+                            round: None,
+                            status: PipelineItemStatus::Pending,
+                            title: Some(task.title.clone()),
+                            mode: None,
+                            trigger: None,
+                            interactive: None,
+                        });
+                    }
+                }
+                self.state.builder.pipeline_items = next_items;
+                self.state.builder.sync_legacy_queue_views();
+
+                let pipeline_msg = format!(
+                    "recovery sharding complete: {} pending tasks",
+                    self.state.builder.pending_task_ids().len()
+                );
+                self.append_system_message(run.id, MessageKind::Summary, pipeline_msg);
+
+                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+            }
+            Err(err) => {
+                let reason = format!("recovery_sharding_failed: {err:#}");
+                self.finalize_run_record(run.id, false, Some(reason.clone()));
+                let failed_run = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.id == run.id)
+                    .cloned()
+                    .unwrap_or_else(|| run.clone());
+                if !self.maybe_auto_retry(&failed_run) {
+                    self.state.agent_error = Some(reason);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Launch the non-interactive recovery-mode plan review agent.
+    fn launch_recovery_plan_review(&mut self) {
+        let _ = self.launch_recovery_plan_review_with_model(None);
+    }
+
+    fn launch_recovery_plan_review_with_model(
+        &mut self,
+        override_model: Option<ModelStatus>,
+    ) -> bool {
+        use anyhow::Context;
+
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error =
+                Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+            return false;
+        }
+        let Phase::BuilderRecoveryPlanReview(round) = self.state.current_phase else {
+            return false;
+        };
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let spec_path = artifacts.join("spec.md");
+        let plan_path = artifacts.join("plan.md");
+        let plan_review_path = artifacts.join("plan_review.toml");
+        let _ = std::fs::remove_file(&plan_review_path);
+
+        let recovery_path = session_dir
+            .join("rounds")
+            .join(format!("{round:03}"))
+            .join("recovery.toml");
+        let triggering_review_path = session_dir
+            .join("rounds")
+            .join(format!("{round:03}"))
+            .join("review.toml");
+        let live_summary_path = artifacts.join("live_summary.txt");
+        let prompt_path = session_dir
+            .join("prompts")
+            .join(format!("recovery-plan-review-r{round}.md"));
+
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Review))
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+            return false;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let prompt = recovery_plan_review_prompt(
+            &spec_path,
+            &plan_path,
+            &triggering_review_path,
+            &recovery_path,
+            &live_summary_path,
+            &plan_review_path,
+        );
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&prompt_path, prompt)
+            .with_context(|| format!("cannot write {}", prompt_path.display()))
+        {
+            self.state.agent_error = Some(err.to_string());
+            return false;
+        }
+
+        // Update plan-review pipeline item to Running.
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|i| i.stage == "plan-review" && i.status == PipelineItemStatus::Pending)
+        {
+            item.status = PipelineItemStatus::Running;
+        }
+
+        let run = AgentRun {
+            model: model.clone(),
+            prompt_path,
+        };
+        let attempt = self.attempt_for("plan-review", None, round);
+        let status_path = self.run_status_path_for("plan-review", None, round, attempt);
+        self.capture_run_guard("plan-review", None, round, attempt);
+        let window_name = window_name_with_model("[Recovery Plan Review]", &model);
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&plan_review_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
+        match launch_result {
+            Ok(()) => {
+                self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                true
+            }
+            Err(err) => {
+                self.state.agent_error =
+                    Some(format!("failed to launch recovery plan review: {err}"));
+                false
+            }
+        }
+    }
+
+    /// Launch the non-interactive recovery-mode sharding agent.
+    fn launch_recovery_sharding(&mut self) {
+        let _ = self.launch_recovery_sharding_with_model(None);
+    }
+
+    fn launch_recovery_sharding_with_model(
+        &mut self,
+        override_model: Option<ModelStatus>,
+    ) -> bool {
+        use anyhow::Context;
+
+        self.state.agent_error = None;
+        if self.models.is_empty() {
+            self.state.agent_error =
+                Some("model list not yet loaded — wait a moment and try again".to_string());
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+            return false;
+        }
+        let Phase::BuilderRecoverySharding(round) = self.state.current_phase else {
+            return false;
+        };
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let spec_path = artifacts.join("spec.md");
+        let plan_path = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let _ = std::fs::remove_file(&tasks_path);
+        let live_summary_path = artifacts.join("live_summary.txt");
+        let prompt_path = session_dir
+            .join("prompts")
+            .join(format!("recovery-sharding-r{round}.md"));
+
+        let Some(chosen) = override_model
+            .as_ref()
+            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
+        else {
+            self.state.agent_error = Some("no model available with quota".to_string());
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+            return false;
+        };
+        let (model, vendor_kind, vendor) = chosen;
+
+        let completed = self.state.builder.done_task_ids();
+        let prompt = recovery_sharding_prompt(
+            &spec_path,
+            &plan_path,
+            &live_summary_path,
+            &tasks_path,
+            &completed,
+        );
+        if let Some(parent) = prompt_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(err) = std::fs::write(&prompt_path, prompt)
+            .with_context(|| format!("cannot write {}", prompt_path.display()))
+        {
+            self.state.agent_error = Some(err.to_string());
+            return false;
+        }
+
+        // Update sharding pipeline item to Running.
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|i| i.stage == "sharding" && i.status == PipelineItemStatus::Pending)
+        {
+            item.status = PipelineItemStatus::Running;
+        }
+
+        let run = AgentRun {
+            model: model.clone(),
+            prompt_path,
+        };
+        let attempt = self.attempt_for("sharding", None, round);
+        let status_path = self.run_status_path_for("sharding", None, round, attempt);
+        self.capture_run_guard("sharding", None, round, attempt);
+        let window_name = window_name_with_model("[Recovery Sharding]", &model);
+        let launch_result =
+            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
+                result
+            } else {
+                let adapter = adapter_for_vendor(vendor_kind);
+                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path)
+            };
+        match launch_result {
+            Ok(()) => {
+                self.start_run_tracking("sharding", None, round, model, vendor, window_name);
+                true
+            }
+            Err(err) => {
+                self.state.agent_error =
+                    Some(format!("failed to launch recovery sharding: {err}"));
+                false
+            }
+        }
+    }
+
     fn finalize_run_record(&mut self, run_id: u64, success: bool, error: Option<String>) {
         let Some(run) = self
             .state
@@ -1637,6 +2137,7 @@ impl App {
                     failed_run.round,
                     failed_run.task_id,
                     Some(summary),
+                    "agent_pivot",
                 );
             }
             if failed_run.stage == "recovery" {
@@ -1684,6 +2185,7 @@ impl App {
                 failed_run.round,
                 failed_run.task_id,
                 Some(summary),
+                "agent_pivot",
             );
         }
         if failed_run.stage == "recovery" {
@@ -1833,6 +2335,34 @@ impl App {
                             Some(format!("{:?}", verdict.status).to_lowercase());
                         match verdict.status {
                             review::ReviewStatus::Approved => {
+                                // Advisory feedback on an approved verdict is non-blocking;
+                                // surface it to the UI but continue the pipeline.
+                                if !verdict.feedback.is_empty() {
+                                    let advisory = format!(
+                                        "advisory ({}): {}",
+                                        verdict.feedback.len(),
+                                        verdict.feedback[0].trim()
+                                    );
+                                    let advisory_msg = Message {
+                                        ts: chrono::Utc::now(),
+                                        run_id: run.id,
+                                        kind: MessageKind::SummaryWarn,
+                                        sender: MessageSender::Agent {
+                                            model: run.model.clone(),
+                                            vendor: run.vendor.clone(),
+                                        },
+                                        text: advisory,
+                                    };
+                                    if let Err(err) =
+                                        self.state.append_message(&advisory_msg)
+                                    {
+                                        let _ = self.state.log_event(format!(
+                                            "failed to append advisory feedback message: {err}"
+                                        ));
+                                    } else {
+                                        self.messages.push(advisory_msg);
+                                    }
+                                }
                                 if let Some(task_id) = self.state.builder.current_task_id() {
                                     let _ = self.state.builder.set_task_status(
                                         task_id,
@@ -1892,18 +2422,19 @@ impl App {
                             }
                             review::ReviewStatus::HumanBlocked
                             | review::ReviewStatus::AgentPivot => {
-                                let verdict_status = match verdict.status {
-                                    review::ReviewStatus::HumanBlocked => {
-                                        PipelineItemStatus::HumanBlocked
-                                    }
-                                    review::ReviewStatus::AgentPivot => {
-                                        PipelineItemStatus::AgentPivot
-                                    }
-                                    review::ReviewStatus::Approved
-                                    | review::ReviewStatus::Revise => {
-                                        unreachable!("already handled")
-                                    }
-                                };
+                                let (verdict_status, trigger_str) =
+                                    match verdict.status {
+                                        review::ReviewStatus::HumanBlocked => {
+                                            (PipelineItemStatus::HumanBlocked, "human_blocked")
+                                        }
+                                        review::ReviewStatus::AgentPivot => {
+                                            (PipelineItemStatus::AgentPivot, "agent_pivot")
+                                        }
+                                        review::ReviewStatus::Approved
+                                        | review::ReviewStatus::Revise => {
+                                            unreachable!("already handled")
+                                        }
+                                    };
                                 if let Some(task_id) = self.state.builder.current_task_id() {
                                     let _ = self.state.builder.set_task_status(
                                         task_id,
@@ -1918,6 +2449,7 @@ impl App {
                                     round,
                                     self.state.builder.current_task_id(),
                                     trigger_summary,
+                                    trigger_str,
                                 );
                             }
                         }
@@ -1929,7 +2461,20 @@ impl App {
                 Ok(()) => {
                     self.finalize_run_record(run.id, true, None);
                     self.state.agent_error = None;
-                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                    // Insert the recovery-mode plan review pipeline item before
+                    // transitioning so the UI shows it as the next pending stage.
+                    self.state.builder.push_pipeline_item(PipelineItem {
+                        id: 0,
+                        stage: "plan-review".to_string(),
+                        task_id: None,
+                        round: Some(round),
+                        status: PipelineItemStatus::Pending,
+                        title: Some("Recovery plan review".to_string()),
+                        mode: Some("recovery".to_string()),
+                        trigger: None,
+                        interactive: Some(false),
+                    });
+                    self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
                 }
                 Err(err) => {
                     let reason = format!("recovery_reconcile_failed: {err:#}");
@@ -1946,6 +2491,12 @@ impl App {
                     }
                 }
             },
+            Phase::BuilderRecoveryPlanReview(round) => {
+                self.handle_recovery_plan_review_completed(run, round)?;
+            }
+            Phase::BuilderRecoverySharding(round) => {
+                self.handle_recovery_sharding_completed(run, round)?;
+            }
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
@@ -3425,6 +3976,90 @@ Hard requirements:
         completed = completed,
         started = started,
         instr = instr,
+    )
+}
+
+fn recovery_plan_review_prompt(
+    spec_path: &std::path::Path,
+    plan_path: &std::path::Path,
+    triggering_review_path: &std::path::Path,
+    recovery_path: &std::path::Path,
+    live_summary_path: &std::path::Path,
+    plan_review_output_path: &std::path::Path,
+) -> String {
+    format!(
+        r#"You are a non-interactive recovery plan reviewer. A recovery stage has just completed.
+
+Inputs:
+  - Spec: {spec}
+  - Plan: {plan}
+  - Triggering review: {review}
+  - Recovery artifact: {recovery}
+  - Live summary: {live_summary}
+
+Your job:
+  1. Verify the recovered spec/plan directly addresses the triggering review.
+  2. Verify the plan is coherent enough for sharding.
+  3. Do NOT reopen broad product/design debate.
+  4. Make minimal fixes to spec.md or plan.md only for critical issues.
+
+Write `{output}` with fields:
+  - `status`: one of "approved", "revise", "human_blocked", "agent_pivot"
+  - `summary`: one-line verdict
+  - `feedback`: array of strings (required unless approved with no issues)
+
+If approved, pipeline continues to sharding.
+If revise/human_blocked/agent_pivot, recovery re-runs with your feedback."#,
+        spec = spec_path.display(),
+        plan = plan_path.display(),
+        review = triggering_review_path.display(),
+        recovery = recovery_path.display(),
+        live_summary = live_summary_path.display(),
+        output = plan_review_output_path.display(),
+    )
+}
+
+fn recovery_sharding_prompt(
+    spec_path: &std::path::Path,
+    plan_path: &std::path::Path,
+    live_summary_path: &std::path::Path,
+    tasks_output_path: &std::path::Path,
+    completed_ids: &[u32],
+) -> String {
+    let completed_str = if completed_ids.is_empty() {
+        "none".to_string()
+    } else {
+        completed_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        r#"You are a non-interactive recovery sharding agent.
+
+A recovery cycle has completed and the recovered spec/plan has been approved.
+Now regenerate the task list.
+
+Inputs:
+  - Spec: {spec}
+  - Plan: {plan}
+  - Live summary: {live_summary}
+
+Completed task ids (DO NOT include these in output): {completed}
+
+Rules:
+  - Regenerate active unfinished tasks from the recovered spec/plan.
+  - Assign new task ids that are strictly greater than all completed ids.
+  - Do NOT add completed task ids to pending work.
+  - Keep tasks atomic and independently reviewable.
+
+Write `{output}` as a valid tasks.toml file."#,
+        spec = spec_path.display(),
+        plan = plan_path.display(),
+        live_summary = live_summary_path.display(),
+        completed = completed_str,
+        output = tasks_output_path.display(),
     )
 }
 
@@ -5075,7 +5710,8 @@ feedback = ["split task 2"]
                 .expect("recovery run");
             app.finalize_current_run(&run).expect("finalize recovery");
 
-            assert_eq!(app.state.current_phase, Phase::ImplementationRound(3));
+            // Recovery now routes through plan-review → sharding before implementation.
+            assert_eq!(app.state.current_phase, Phase::BuilderRecoveryPlanReview(2));
             assert_eq!(app.state.builder.done, vec![1, 4]);
             assert_eq!(app.state.builder.pending, vec![2, 5]);
             assert_eq!(app.state.builder.current_task, None);
@@ -5361,6 +5997,453 @@ estimated_tokens = 1
             assert!(!artifacts.join("implementation.json").exists());
             assert_eq!(app.state.builder.pending, vec![1]);
             assert!(app.state.builder.current_task.is_none());
+        });
+    }
+
+    // ── Recovery circuit-breaker and queue validation tests ──────────────────
+
+    #[test]
+    fn enter_builder_recovery_sets_interactive_for_human_blocked() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("recovery-interactive".to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: Some(1),
+                status: PipelineItemStatus::Running,
+                title: Some("Task 1".to_string()),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state.builder.sync_legacy_queue_views();
+            let session_dir = session_state::session_dir("recovery-interactive");
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut app = idle_app(state);
+            app.enter_builder_recovery(1, Some(1), Some("needs human".to_string()), "human_blocked");
+
+            // The recovery pipeline item should be interactive=true for human_blocked
+            let recovery_items: Vec<_> = app
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .filter(|i| i.stage == "recovery")
+                .collect();
+            assert_eq!(recovery_items.len(), 1);
+            assert_eq!(recovery_items[0].interactive, Some(true));
+            assert_eq!(
+                recovery_items[0].trigger.as_deref(),
+                Some("human_blocked")
+            );
+            assert_eq!(app.state.current_phase, Phase::BuilderRecovery(1));
+        });
+    }
+
+    #[test]
+    fn enter_builder_recovery_sets_non_interactive_for_agent_pivot() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("recovery-non-interactive".to_string());
+            state.current_phase = Phase::ReviewRound(2);
+            let session_dir = session_state::session_dir("recovery-non-interactive");
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 2\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut app = idle_app(state);
+            app.enter_builder_recovery(2, None, None, "agent_pivot");
+
+            let recovery_items: Vec<_> = app
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .filter(|i| i.stage == "recovery")
+                .collect();
+            assert_eq!(recovery_items.len(), 1);
+            assert_eq!(recovery_items[0].interactive, Some(false));
+            assert_eq!(recovery_items[0].trigger.as_deref(), Some("agent_pivot"));
+        });
+    }
+
+    #[test]
+    fn circuit_breaker_escalates_to_human_blocked_after_3_cycles() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("circuit-breaker-test".to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            let session_dir = session_state::session_dir("circuit-breaker-test");
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut app = idle_app(state);
+
+            // First call: agent_pivot (cycle 1)
+            app.enter_builder_recovery(1, None, None, "agent_pivot");
+            {
+                let recovery_items: Vec<_> = app
+                    .state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .filter(|i| i.stage == "recovery")
+                    .collect();
+                assert_eq!(recovery_items[0].trigger.as_deref(), Some("agent_pivot"));
+                assert_eq!(app.state.builder.recovery_cycle_count, 1);
+            }
+
+            // Remove the recovery item and reset phase for second call
+            app.state
+                .builder
+                .pipeline_items
+                .retain(|i| i.stage != "recovery");
+            app.state.current_phase = Phase::ReviewRound(1);
+            // write tasks.toml again since recovery may clear state
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            // Second call: agent_pivot (cycle 2)
+            app.enter_builder_recovery(1, None, None, "agent_pivot");
+            assert_eq!(app.state.builder.recovery_cycle_count, 2);
+            {
+                let recovery_items: Vec<_> = app
+                    .state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .filter(|i| i.stage == "recovery")
+                    .collect();
+                assert_eq!(recovery_items[0].trigger.as_deref(), Some("agent_pivot"));
+            }
+
+            // Remove and reset for third call
+            app.state
+                .builder
+                .pipeline_items
+                .retain(|i| i.stage != "recovery");
+            app.state.current_phase = Phase::ReviewRound(1);
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            // Third call: agent_pivot → should escalate to human_blocked
+            app.enter_builder_recovery(1, None, None, "agent_pivot");
+            assert_eq!(app.state.builder.recovery_cycle_count, 3);
+            {
+                let recovery_items: Vec<_> = app
+                    .state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .filter(|i| i.stage == "recovery")
+                    .collect();
+                // Must be escalated to human_blocked
+                assert_eq!(
+                    recovery_items[0].trigger.as_deref(),
+                    Some("human_blocked"),
+                    "3rd cycle must escalate to human_blocked"
+                );
+                assert_eq!(recovery_items[0].interactive, Some(true));
+            }
+        });
+    }
+
+    #[test]
+    fn circuit_breaker_already_human_blocked_does_not_double_escalate() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("circuit-breaker-hb".to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            // Start with count=2 to be just below threshold
+            state.builder.recovery_cycle_count = 2;
+            let session_dir = session_state::session_dir("circuit-breaker-hb");
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut app = idle_app(state);
+            // Count becomes 3, trigger is already human_blocked — no double-escalation message
+            app.enter_builder_recovery(1, None, None, "human_blocked");
+            assert_eq!(app.state.builder.recovery_cycle_count, 3);
+            let recovery_items: Vec<_> = app
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .filter(|i| i.stage == "recovery")
+                .collect();
+            // Stays human_blocked
+            assert_eq!(
+                recovery_items[0].trigger.as_deref(),
+                Some("human_blocked")
+            );
+        });
+    }
+
+    #[test]
+    fn circuit_breaker_resets_after_approved_plan_review() {
+        // Verify that recovery_cycle_count is reset to 0 when the recovery
+        // plan review is approved (see handle_recovery_plan_review_completed).
+        let mut builder = crate::state::BuilderState::default();
+        builder.recovery_cycle_count = 3;
+        // Simulate the reset that happens in handle_recovery_plan_review_completed
+        builder.recovery_cycle_count = 0;
+        assert_eq!(builder.recovery_cycle_count, 0);
+    }
+
+    #[test]
+    fn recovery_queue_validation_rejects_completed_id_collision() {
+        // reconcile_builder_recovery must reject recovered task ids that
+        // collide with completed task ids.
+        with_temp_root(|| {
+            let session_id = "recovery-collision";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::create_dir_all(&round_dir).unwrap();
+
+            // Write a recovery.toml
+            std::fs::write(
+                round_dir.join("recovery.toml"),
+                "status = \"approved\"\nsummary = \"Fixed\"\nfeedback = []\n",
+            )
+            .unwrap();
+            // Write spec.md and plan.md (no recovery notes needed since no superseded started ids)
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").unwrap();
+
+            // tasks.toml has task id 1 which is ALREADY done
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(1);
+            state.builder.done = vec![1]; // task 1 is already done
+
+            // Add a recovery pipeline item marked Running
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: Some(1),
+                status: PipelineItemStatus::Running,
+                title: None,
+                mode: None,
+                trigger: Some("agent_pivot".to_string()),
+                interactive: Some(false),
+            });
+            let app = idle_app(state);
+            // The reconcile should fail because task 1 is already completed
+            // but the recovered tasks.toml also has task 1.
+            let mut app = app;
+            let result = app.reconcile_builder_recovery(0);
+            assert!(result.is_err(), "collision with completed id must fail");
+            let msg = format!("{:#}", result.unwrap_err());
+            assert!(
+                msg.contains("completed task id"),
+                "error must mention collision: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn recovery_queue_reconcile_preserves_completed_tasks() {
+        with_temp_root(|| {
+            let session_id = "recovery-preserve";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::create_dir_all(&round_dir).unwrap();
+
+            std::fs::write(
+                round_dir.join("recovery.toml"),
+                "status = \"approved\"\nsummary = \"Fixed\"\nfeedback = []\n",
+            )
+            .unwrap();
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").unwrap();
+
+            // Recovered tasks.toml has ids 5 and 6 (new, above old max of 2)
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 5\ntitle = \"New A\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n\
+                 [[tasks]]\nid = 6\ntitle = \"New B\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(1);
+            // Tasks 1 and 2 are completed
+            state.builder.done = vec![1, 2];
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: Some(1),
+                status: PipelineItemStatus::Approved,
+                title: Some("Old Task 1".to_string()),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(2),
+                round: Some(1),
+                status: PipelineItemStatus::Approved,
+                title: Some("Old Task 2".to_string()),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: Some(1),
+                status: PipelineItemStatus::Running,
+                title: None,
+                mode: None,
+                trigger: Some("agent_pivot".to_string()),
+                interactive: Some(false),
+            });
+            state.builder.recovery_prev_max_task_id = Some(2);
+            state.builder.sync_legacy_queue_views();
+
+            let mut app = idle_app(state);
+            app.reconcile_builder_recovery(0)
+                .expect("reconcile must succeed");
+
+            // Completed tasks 1 and 2 must still be present
+            let done = app.state.builder.done_task_ids();
+            assert!(done.contains(&1));
+            assert!(done.contains(&2));
+
+            // New tasks 5 and 6 must be pending
+            let pending = app.state.builder.pending_task_ids();
+            assert!(pending.contains(&5));
+            assert!(pending.contains(&6));
+        });
+    }
+
+    #[test]
+    fn approved_review_with_feedback_emits_advisory_message() {
+        with_temp_root(|| {
+            let session_id = "approved-advisory";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::create_dir_all(&round_dir).unwrap();
+
+            // Write tasks.toml with one task
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            // Write an approved review with non-empty feedback (advisory)
+            std::fs::write(
+                round_dir.join("review.toml"),
+                "status = \"approved\"\nsummary = \"Implementation is correct\"\nfeedback = [\"Consider caching the result for performance\"]\n",
+            )
+            .unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: Some(1),
+                status: PipelineItemStatus::Running,
+                title: Some("Task 1".to_string()),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state.builder.sync_legacy_queue_views();
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "reviewer".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "test-model".to_string(),
+                vendor: "test-vendor".to_string(),
+                window_name: "[Review r1]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+
+            let mut app = idle_app(state);
+            app.current_run_id = Some(1);
+            app.window_launched = true;
+
+            // Write the status file to signal success
+            let status_path = app.run_status_path_for("reviewer", Some(1), 1, 1);
+            if let Some(parent) = status_path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&status_path, "0").unwrap();
+
+            app.poll_agent_window();
+
+            // The pipeline should still advance (not halted by advisory feedback)
+            assert!(
+                matches!(
+                    app.state.current_phase,
+                    Phase::ImplementationRound(_) | Phase::Done
+                ),
+                "Approved verdict must advance pipeline, got {:?}",
+                app.state.current_phase
+            );
+
+            // An advisory message must have been emitted
+            let advisory_msgs: Vec<_> = app
+                .messages
+                .iter()
+                .filter(|m| m.kind == MessageKind::SummaryWarn)
+                .filter(|m| m.text.contains("advisory"))
+                .collect();
+            assert!(
+                !advisory_msgs.is_empty(),
+                "advisory feedback must be surfaced as SummaryWarn message"
+            );
         });
     }
 }

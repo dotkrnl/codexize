@@ -205,10 +205,7 @@ impl SessionPicker {
         let (left, right) = self.input_buffer.split_at(byte);
         let line = ratatui::text::Line::from(vec![
             ratatui::text::Span::raw(left.to_string()),
-            ratatui::text::Span::styled(
-                "▌",
-                Style::default().fg(Color::Yellow),
-            ),
+            ratatui::text::Span::styled("▌", Style::default().fg(Color::Yellow)),
             ratatui::text::Span::raw(right.to_string()),
         ]);
         let input = Paragraph::new(line)
@@ -321,11 +318,7 @@ impl SessionPicker {
             }
             _ => {}
         }
-        let _ = crate::input_editor::apply(
-            &mut self.input_buffer,
-            &mut self.input_cursor,
-            key,
-        );
+        let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         Ok(KeyAction::Continue)
     }
 
@@ -473,6 +466,8 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
         Phase::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
         Phase::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
+        Phase::BuilderRecoveryPlanReview(_) => ("recovery plan review".to_string(), Color::Cyan, "●"),
+        Phase::BuilderRecoverySharding(_) => ("recovery sharding".to_string(), Color::Cyan, "●"),
         Phase::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
         Phase::Done => ("done".to_string(), Color::Green, "✓"),
         Phase::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),

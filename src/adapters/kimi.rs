@@ -62,14 +62,8 @@ mod tests {
             cmd.contains("capture-pane"),
             "should poll tmux pane content for readiness"
         );
-        assert!(
-            cmd.contains("grep"),
-            "should grep for the prompt indicator"
-        );
-        assert!(
-            cmd.contains("seq 1"),
-            "should loop with bounded retries"
-        );
+        assert!(cmd.contains("grep"), "should grep for the prompt indicator");
+        assert!(cmd.contains("seq 1"), "should loop with bounded retries");
         assert!(
             cmd.contains("exec kimi --yolo"),
             "should still exec kimi in interactive mode"
@@ -92,9 +86,6 @@ mod tests {
         let adapter = KimiAdapter;
         let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt");
 
-        assert_eq!(
-            cmd,
-            r#"kimi --yolo -p "$(cat /tmp/prompt.txt)""#,
-        );
+        assert_eq!(cmd, r#"kimi --yolo -p "$(cat /tmp/prompt.txt)""#,);
     }
 }

@@ -963,17 +963,21 @@ impl App {
     /// Snapshot the run's immutability state. Non-coder agents must leave the
     /// git tree unchanged; the coder must not edit session control files.
     /// No-op under the test harness (no real git available).
-    fn capture_run_guard(&self, stage: &str, task_id: Option<u32>, round: u32, attempt: u32) {
+    /// Snapshot the run's immutability state. Returns `true` if the working
+    /// tree was dirty at capture time (non-coder only; always `false` for coder).
+    fn capture_run_guard(&self, stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> bool {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return;
+            return false;
         }
         let dir = self.guard_dir_for(stage, task_id, round, attempt);
         let session_dir = session_state::session_dir(&self.state.session_id);
-        let _ = if stage == "coder" {
-            guard::capture_coder(&dir, &session_dir, round)
+        if stage == "coder" {
+            let _ = guard::capture_coder(&dir, &session_dir, round);
+            false
         } else {
-            guard::capture_non_coder(
+            let dirty = guard::git_status_dirty();
+            let _ = guard::capture_non_coder(
                 &dir,
                 &format!(
                     "{stage}-{}-r{round}-a{attempt}",
@@ -981,14 +985,15 @@ impl App {
                         .map(|id| format!("task{id}"))
                         .unwrap_or_else(|| "stage".to_string())
                 ),
-            )
-        };
+            );
+            dirty
+        }
     }
 
-    fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> Option<String> {
+    fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> (Option<String>, Vec<String>) {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return None;
+            return (None, vec![]);
         }
         let dir = self.guard_dir_for(&run.stage, run.task_id, run.round, run.attempt);
         guard::verify(&dir, &run.stage)
@@ -1050,6 +1055,8 @@ impl App {
         }
         let reachable = std::process::Command::new("git")
             .args(["merge-base", "--is-ancestor", &base, &head])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
@@ -1059,7 +1066,7 @@ impl App {
         None
     }
 
-    fn normalized_failure_reason(&self, run: &crate::state::RunRecord) -> Result<Option<String>> {
+    fn normalized_failure_reason(&mut self, run: &crate::state::RunRecord) -> Result<Option<String>> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
             "brainstorm" => {
@@ -1160,8 +1167,7 @@ impl App {
         // `codex exec --json | jq ...` can return non-zero (e.g., a stray
         // non-JSON line from the agent makes jq exit 4/5) even after the
         // agent has already written a well-formed artifact. The immutability
-        // guard is still enforced, but verify_non_coder now auto-stashes
-        // stray changes instead of failing the run.
+        // guard is still enforced; warnings are emitted but the run succeeds.
         if has_artifact_check && artifact_reason.is_none() {
             if let Some(code) = self.read_exit_status_code(run)
                 && code != 0
@@ -1171,7 +1177,10 @@ impl App {
                     run.id, run.stage
                 ));
             }
-            let _ = self.enforce_run_guard(run);
+            let (_, guard_warnings) = self.enforce_run_guard(run);
+            for w in guard_warnings {
+                self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+            }
             return Ok(None);
         }
 
@@ -1187,8 +1196,11 @@ impl App {
         }
 
         // Guard reason beats artifact reason (coder control-file edits are a
-        // real protocol violation; non-coder guard always returns None now).
-        let guard_reason = self.enforce_run_guard(run);
+        // real protocol violation; non-coder HEAD advances are hard errors).
+        let (guard_reason, guard_warnings) = self.enforce_run_guard(run);
+        for w in guard_warnings {
+            self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+        }
         Ok(guard_reason.or(artifact_reason))
     }
 
@@ -1206,6 +1218,17 @@ impl App {
             ));
         } else {
             self.messages.push(message);
+        }
+    }
+
+    fn emit_dirty_tree_warning(&mut self) {
+        if let Some(run_id) = self.current_run_id {
+            self.append_system_message(
+                run_id,
+                MessageKind::SummaryWarn,
+                "working tree is dirty \u{2014} agent will run against uncommitted changes"
+                    .to_string(),
+            );
         }
     }
 
@@ -1980,7 +2003,7 @@ impl App {
         };
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        self.capture_run_guard("plan-review", None, round, attempt);
+        let dirty = self.capture_run_guard("plan-review", None, round, attempt);
         let window_name = window_name_with_model("[Recovery Plan Review]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&plan_review_path)) {
@@ -1992,6 +2015,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(err) => {
@@ -2083,7 +2107,7 @@ impl App {
         };
         let attempt = self.attempt_for("sharding", None, round);
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
-        self.capture_run_guard("sharding", None, round, attempt);
+        let dirty = self.capture_run_guard("sharding", None, round, attempt);
         let window_name = window_name_with_model("[Recovery Sharding]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -2095,6 +2119,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("sharding", None, round, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(err) => {
@@ -2650,7 +2675,7 @@ impl App {
 
         let attempt = self.attempt_for("brainstorm", None, 1);
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
-        self.capture_run_guard("brainstorm", None, 1, attempt);
+        let dirty = self.capture_run_guard("brainstorm", None, 1, attempt);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
         let launch_result =
@@ -2665,6 +2690,7 @@ impl App {
                 self.state.selected_model = Some(model.clone());
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
                 self.start_run_tracking("brainstorm", None, 1, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(e) => {
@@ -2780,7 +2806,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
-        self.capture_run_guard("spec-review", None, round, attempt);
+        let dirty = self.capture_run_guard("spec-review", None, round, attempt);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result
@@ -2791,6 +2817,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(err) => {
@@ -2870,7 +2897,7 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         let attempt = self.attempt_for("planning", None, 1);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
-        self.capture_run_guard("planning", None, 1, attempt);
+        let dirty = self.capture_run_guard("planning", None, 1, attempt);
         let window_name = window_name_with_model("[Planning]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
@@ -2883,6 +2910,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("planning", None, 1, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(e) => {
@@ -2973,7 +3001,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        self.capture_run_guard("plan-review", None, round, attempt);
+        let dirty = self.capture_run_guard("plan-review", None, round, attempt);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result
@@ -2984,6 +3012,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(err) => {
@@ -3046,7 +3075,7 @@ impl App {
 
         let attempt = self.attempt_for("sharding", None, 1);
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
-        self.capture_run_guard("sharding", None, 1, attempt);
+        let dirty = self.capture_run_guard("sharding", None, 1, attempt);
         let window_name = window_name_with_model("[Sharding]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -3058,6 +3087,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("sharding", None, 1, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(e) => {
@@ -3156,7 +3186,7 @@ impl App {
         };
         let attempt = self.attempt_for("recovery", None, round);
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
-        self.capture_run_guard("recovery", None, round, attempt);
+        let dirty = self.capture_run_guard("recovery", None, round, attempt);
         let window_name = window_name_with_model("[Recovery]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -3172,6 +3202,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("recovery", None, round, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(err) => {
@@ -3349,7 +3380,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
-        self.capture_run_guard("reviewer", Some(task_id), r, attempt);
+        let dirty = self.capture_run_guard("reviewer", Some(task_id), r, attempt);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result
@@ -3360,6 +3391,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("reviewer", Some(task_id), r, model, vendor, window_name);
+                if dirty { self.emit_dirty_tree_warning(); }
                 true
             }
             Err(e) => {
@@ -5276,7 +5308,7 @@ mod tests {
             let session_dir = session_state::session_dir(session_id);
             std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
             let state = SessionState::new(session_id.to_string());
-            let app = mk_app(state);
+            let mut app = mk_app(state);
             let run = RunRecord {
                 id: 9,
                 stage: "planning".to_string(),
@@ -5743,7 +5775,7 @@ estimated_tokens = 10
                 status: RunStatus::Running,
                 error: None,
             });
-            let app = idle_app(state);
+            let mut app = idle_app(state);
             let run = app.state.agent_runs[0].clone();
             let reason = app
                 .normalized_failure_reason(&run)

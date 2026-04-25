@@ -752,6 +752,14 @@ fn stage_status_from_runs(
         if is_pending {
             return NodeStatus::Pending;
         }
+        // skip-to-implementation jumped past these intermediate stages without
+        // ever running them. Surface that as Skipped (yellow) rather than Done
+        // (green) so the user sees a clear "this was bypassed" signal.
+        if state.skip_to_impl_kind.is_some()
+            && matches!(stage_key, "spec-review" | "planning" | "plan-review" | "sharding")
+        {
+            return NodeStatus::Skipped;
+        }
         return NodeStatus::Done;
     }
     if runs.iter().all(|r| r.status == RunStatus::Done) {

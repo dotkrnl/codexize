@@ -85,6 +85,7 @@ pub enum NodeStatus {
     Running,
     WaitingUser,
     Done,
+    Skipped,
     Failed,
 }
 
@@ -95,6 +96,7 @@ impl NodeStatus {
             Self::Running => "running",
             Self::WaitingUser => "waiting-user",
             Self::Done => "done",
+            Self::Skipped => "skipped",
             Self::Failed => "failed",
         }
     }
@@ -106,6 +108,7 @@ impl NodeStatus {
             Self::Running => Style::default().fg(Color::Cyan),
             Self::WaitingUser => Style::default().fg(Color::Yellow),
             Self::Done => Style::default().fg(Color::Green),
+            Self::Skipped => Style::default().fg(Color::Yellow),
             Self::Failed => Style::default().fg(Color::Red),
         }
     }

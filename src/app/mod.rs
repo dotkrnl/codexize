@@ -101,6 +101,36 @@ pub struct App {
     messages: Vec<Message>,
 }
 
+fn default_expansion(
+    row: &VisibleNodeRow,
+    current_node: usize,
+    active_keys: &BTreeSet<NodeKey>,
+) -> bool {
+    if !row.is_expandable() {
+        return false;
+    }
+    if row.depth == 0 {
+        return row.path.first().copied() == Some(current_node);
+    }
+    active_keys.contains(&row.key)
+}
+
+fn effective_expansion(
+    row: &VisibleNodeRow,
+    current_node: usize,
+    active_keys: &BTreeSet<NodeKey>,
+    overrides: &BTreeMap<NodeKey, ExpansionOverride>,
+) -> bool {
+    if !row.is_expandable() {
+        return false;
+    }
+    match overrides.get(&row.key) {
+        Some(ExpansionOverride::Expanded) => true,
+        Some(ExpansionOverride::Collapsed) => false,
+        None => default_expansion(row, current_node, active_keys),
+    }
+}
+
 impl App {
     pub fn new(tmux: TmuxContext, mut state: SessionState) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
@@ -291,13 +321,7 @@ impl App {
     }
 
     fn default_expanded(&self, row: &VisibleNodeRow) -> bool {
-        if !row.is_expandable() {
-            return false;
-        }
-        if row.depth == 0 {
-            return row.path.first().copied() == Some(self.current_node());
-        }
-        self.active_path_keys().contains(&row.key)
+        default_expansion(row, self.current_node(), &self.active_path_keys())
     }
 
     fn rebuild_visible_rows(&mut self) {
@@ -305,23 +329,7 @@ impl App {
         let current = self.current_node();
         let overrides = self.collapsed_overrides.clone();
         self.visible_rows = flatten_visible_rows(&self.nodes, |row| {
-            if !row.is_expandable() {
-                return false;
-            }
-            if active_keys.contains(&row.key) {
-                return true;
-            }
-            match overrides.get(&row.key) {
-                Some(ExpansionOverride::Expanded) => true,
-                Some(ExpansionOverride::Collapsed) => false,
-                None => {
-                    if row.depth == 0 {
-                        row.path.first().copied() == Some(current)
-                    } else {
-                        active_keys.contains(&row.key)
-                    }
-                }
-            }
+            effective_expansion(row, current, &active_keys, &overrides)
         });
     }
 
@@ -380,23 +388,15 @@ impl App {
     }
 
     pub(super) fn is_expanded(&self, index: usize) -> bool {
-        if index == self.current_row() {
-            return true;
-        }
         let Some(row) = self.visible_rows.get(index) else {
             return false;
         };
-        if !row.is_expandable() {
-            return false;
-        }
-        if self.active_path_keys().contains(&row.key) {
-            return true;
-        }
-        match self.collapsed_overrides.get(&row.key) {
-            Some(ExpansionOverride::Expanded) => true,
-            Some(ExpansionOverride::Collapsed) => false,
-            None => self.default_expanded(row),
-        }
+        effective_expansion(
+            row,
+            self.current_node(),
+            &self.active_path_keys(),
+            &self.collapsed_overrides,
+        )
     }
 
     pub(super) fn is_expanded_transcript(&self, index: usize) -> bool {
@@ -3653,7 +3653,7 @@ mod tests {
     }
 
     #[test]
-    fn active_current_stage_collapse_override_does_not_hide_row() {
+    fn active_current_stage_collapse_override_collapses_row() {
         let mut app = mk_app(mk_state_with_runs());
         let current = app.current_row();
         let current_key = app.visible_rows[current].key.clone();
@@ -3663,11 +3663,11 @@ mod tests {
             app.collapsed_overrides.get(&current_key),
             Some(&ExpansionOverride::Collapsed)
         );
-        assert!(app.is_expanded(current));
+        assert!(!app.is_expanded(current));
     }
 
     #[test]
-    fn active_path_reopens_collapsed_ancestors() {
+    fn active_path_respects_collapsed_ancestors() {
         let mut state = SessionState::new("active-path".to_string());
         state.current_phase = Phase::ImplementationRound(1);
         state.builder.current_task = Some(7);
@@ -3698,9 +3698,9 @@ mod tests {
         app.rebuild_tree_view(None);
 
         assert!(row_index_opt(&app, "Task 7").is_some());
-        assert!(row_index_opt(&app, "Coder").is_some());
         let task_idx = row_index(&app, "Task 7");
-        assert!(app.is_expanded(task_idx));
+        assert!(!app.is_expanded(task_idx));
+        assert!(row_index_opt(&app, "Coder").is_none());
     }
 
     #[test]
@@ -3918,7 +3918,7 @@ mod tests {
     }
 
     #[test]
-    fn space_collapse_override_cannot_hide_active_path_row() {
+    fn space_collapse_override_collapses_active_path_row() {
         let mut state = SessionState::new("active-space".to_string());
         state.current_phase = Phase::ImplementationRound(1);
         state.builder.current_task = Some(7);
@@ -3943,12 +3943,12 @@ mod tests {
 
         app.toggle_expand_focused();
 
-        let coder_idx = row_index(&app, "Coder");
-        assert!(app.is_expanded(coder_idx));
         assert_eq!(
             app.collapsed_overrides.get(&coder_key),
             Some(&ExpansionOverride::Collapsed)
         );
+        let coder_idx = row_index(&app, "Coder");
+        assert!(!app.is_expanded(coder_idx));
     }
 
     #[test]

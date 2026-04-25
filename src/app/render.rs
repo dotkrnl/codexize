@@ -217,6 +217,7 @@ impl App {
 
         self.body_inner_height = root[1].height.saturating_sub(2) as usize;
         self.body_inner_width = root[1].width.saturating_sub(2) as usize;
+        self.latch_visible_expansions();
         self.clamp_viewport();
 
         frame.render_widget(self.header(), root[0]);

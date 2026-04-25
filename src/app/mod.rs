@@ -463,6 +463,23 @@ impl App {
         };
     }
 
+    /// Pin every row that's currently effectively expanded as an explicit
+    /// Expanded override. Called once per render so that whatever the user
+    /// is currently looking at stays expanded across later state changes
+    /// (e.g., the active stage rolling over to Done before a phase advance,
+    /// which would otherwise drop it off the auto-expand active path).
+    pub(super) fn latch_visible_expansions(&mut self) {
+        let to_pin: Vec<NodeKey> = (0..self.visible_rows.len())
+            .filter(|&i| self.is_expanded(i))
+            .filter_map(|i| self.visible_rows.get(i).map(|row| row.key.clone()))
+            .filter(|key| !self.collapsed_overrides.contains_key(key))
+            .collect();
+        for key in to_pin {
+            self.collapsed_overrides
+                .insert(key, ExpansionOverride::Expanded);
+        }
+    }
+
     pub(super) fn unread_below_count(&self) -> usize {
         match self.tail_detach_baseline {
             Some(baseline) => self.messages.len().saturating_sub(baseline),
@@ -471,19 +488,6 @@ impl App {
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
-        // Pin currently-expanded sections as explicit overrides before the phase
-        // changes, so the previous stage doesn't auto-collapse when it's no
-        // longer on the active path. The user's expand state should persist.
-        let pre_transition_expanded: Vec<NodeKey> = (0..self.visible_rows.len())
-            .filter(|&i| self.is_expanded(i))
-            .filter_map(|i| self.visible_rows.get(i).map(|row| row.key.clone()))
-            .collect();
-        for key in pre_transition_expanded {
-            self.collapsed_overrides
-                .entry(key)
-                .or_insert(ExpansionOverride::Expanded);
-        }
-
         self.state.transition_to(next_phase)?;
         self.agent_line_count = 0;
         self.live_summary_cached_text.clear();
@@ -3613,6 +3617,49 @@ mod tests {
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
         app
+    }
+
+    #[test]
+    fn previous_stage_stays_expanded_after_phase_advance() {
+        with_temp_root(|| {
+            // Mid-Brainstorm: Brainstorm row is the current stage so it auto-expands.
+            let mut state = SessionState::new("phase-keep".to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+            let mut app = mk_app(state);
+            let bs_idx = row_index(&app, "Brainstorm");
+            assert!(app.is_expanded(bs_idx), "precondition: Brainstorm expanded");
+            // Simulate a render cycle: any visible expanded row gets latched
+            // as an explicit Expanded override so it survives later state
+            // shifts (run rollup, current_node moving forward).
+            app.latch_visible_expansions();
+
+            // Mark Brainstorm Done and advance phase.
+            if let Some(run) = app.state.agent_runs.iter_mut().find(|r| r.stage == "brainstorm") {
+                run.status = RunStatus::Done;
+                run.ended_at = Some(chrono::Utc::now());
+            }
+            app.transition_to_phase(Phase::SpecReviewRunning).unwrap();
+
+            let bs_idx = row_index(&app, "Brainstorm");
+            assert!(
+                app.is_expanded(bs_idx),
+                "Brainstorm should stay expanded after phase advance"
+            );
+        });
     }
 
     #[test]

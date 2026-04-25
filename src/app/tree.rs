@@ -1,4 +1,6 @@
-use crate::state::{Node, NodeKind, NodeStatus, Phase, RunRecord, RunStatus, SessionState};
+use crate::state::{
+    Node, NodeKind, NodeStatus, Phase, PipelineItemStatus, RunRecord, RunStatus, SessionState,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub type NodePath = Vec<usize>;
@@ -436,21 +438,43 @@ fn build_builder_stage(state: &SessionState) -> Node {
     let summary = builder_summary(state, &recovery_runs);
     let mut ordered_task_ids = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    for id in &state.builder.done {
-        if seen.insert(*id) {
-            ordered_task_ids.push(*id);
+    if state.builder.pipeline_items.is_empty() {
+        for id in &state.builder.done {
+            if seen.insert(*id) {
+                ordered_task_ids.push(*id);
+            }
+        }
+        if let Some(id) = state.builder.current_task
+            && seen.insert(id)
+        {
+            ordered_task_ids.push(id);
+        }
+        for id in &state.builder.pending {
+            if seen.insert(*id) {
+                ordered_task_ids.push(*id);
+            }
+        }
+    } else {
+        for item in state
+            .builder
+            .pipeline_items
+            .iter()
+            .filter(|item| item.stage == "coder")
+        {
+            if let Some(task_id) = item.task_id
+                && seen.insert(task_id)
+            {
+                ordered_task_ids.push(task_id);
+            }
         }
     }
-    if let Some(id) = state.builder.current_task
-        && seen.insert(id)
-    {
-        ordered_task_ids.push(id);
-    }
-    for id in &state.builder.pending {
-        if seen.insert(*id) {
-            ordered_task_ids.push(*id);
-        }
-    }
+    let task_status_by_id = state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|item| item.stage == "coder")
+        .filter_map(|item| item.task_id.map(|task_id| (task_id, item.status)))
+        .collect::<BTreeMap<_, _>>();
     let mut children = Vec::new();
     for task_id in ordered_task_ids {
         let task_coder: Vec<&RunRecord> = coder_runs
@@ -521,14 +545,26 @@ fn build_builder_stage(state: &SessionState) -> Node {
                 leaf_run_id: None,
             });
         }
-        let task_status = if round_nodes.iter().any(|c| c.status == NodeStatus::Running) {
-            NodeStatus::Running
-        } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
-            NodeStatus::Done
-        } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
-            NodeStatus::Failed
-        } else {
-            NodeStatus::Pending
+        let task_status = match task_status_by_id.get(&task_id).copied() {
+            Some(PipelineItemStatus::Running) => NodeStatus::Running,
+            Some(PipelineItemStatus::Approved | PipelineItemStatus::Done) => NodeStatus::Done,
+            Some(
+                PipelineItemStatus::Failed
+                | PipelineItemStatus::HumanBlocked
+                | PipelineItemStatus::AgentPivot,
+            ) => NodeStatus::Failed,
+            Some(PipelineItemStatus::Pending | PipelineItemStatus::Revise) => NodeStatus::Pending,
+            None => {
+                if round_nodes.iter().any(|c| c.status == NodeStatus::Running) {
+                    NodeStatus::Running
+                } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
+                    NodeStatus::Done
+                } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+                    NodeStatus::Failed
+                } else {
+                    NodeStatus::Pending
+                }
+            }
         };
         let label = match state.builder.task_titles.get(&task_id) {
             Some(title) if !title.trim().is_empty() => {
@@ -603,7 +639,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
             run_id: None,
             leaf_run_id: None,
         };
-        let done_count = state.builder.done.len();
+        let done_count = state.builder.done_task_ids().len();
         children.insert(done_count.min(children.len()), recovery_node);
     }
     Node {
@@ -842,13 +878,13 @@ fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String
     {
         return "builder resumed after recovery".to_string();
     }
-    let total = state.builder.done.len()
-        + state.builder.current_task.iter().len()
-        + state.builder.pending.len();
+    let total = state.builder.done_task_ids().len()
+        + state.builder.current_task_id().iter().len()
+        + state.builder.pending_task_ids().len();
     if total == 0 {
         return String::new();
     }
-    let done = state.builder.done.len();
+    let done = state.builder.done_task_ids().len();
     if done == total {
         return "all tasks complete".to_string();
     }

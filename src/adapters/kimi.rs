@@ -44,3 +44,57 @@ impl AgentAdapter for KimiAdapter {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interactive_command_polls_for_readiness() {
+        let adapter = KimiAdapter;
+        let cmd = adapter.interactive_command("any-model", "/tmp/prompt.txt");
+
+        assert!(
+            !cmd.contains("sleep 1"),
+            "should not use a fixed sleep for startup"
+        );
+        assert!(
+            cmd.contains("capture-pane"),
+            "should poll tmux pane content for readiness"
+        );
+        assert!(
+            cmd.contains("grep"),
+            "should grep for the prompt indicator"
+        );
+        assert!(
+            cmd.contains("seq 1"),
+            "should loop with bounded retries"
+        );
+        assert!(
+            cmd.contains("exec kimi --yolo"),
+            "should still exec kimi in interactive mode"
+        );
+    }
+
+    #[test]
+    fn interactive_command_escapes_prompt_path() {
+        let adapter = KimiAdapter;
+        let cmd = adapter.interactive_command("m", "/tmp/path with spaces/prompt.txt");
+
+        assert!(
+            cmd.contains("'/tmp/path with spaces/prompt.txt'"),
+            "should shell-escape paths with spaces"
+        );
+    }
+
+    #[test]
+    fn noninteractive_command_unchanged() {
+        let adapter = KimiAdapter;
+        let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt");
+
+        assert_eq!(
+            cmd,
+            r#"kimi --yolo -p "$(cat /tmp/prompt.txt)""#,
+        );
+    }
+}

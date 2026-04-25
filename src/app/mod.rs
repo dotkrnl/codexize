@@ -17,8 +17,8 @@ use crate::{
         self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review,
     },
     state::{
-        self as session_state, Message, MessageKind, MessageSender, Node, Phase, RunStatus,
-        SessionState,
+        self as session_state, Message, MessageKind, MessageSender, Node, Phase, PipelineItem,
+        PipelineItemStatus, RunStatus, SessionState,
     },
     tasks, tmux,
     tmux::TmuxContext,
@@ -538,16 +538,17 @@ impl App {
         let parsed_tasks = tasks::validate(&tasks_path)
             .with_context(|| format!("invalid {}", tasks_path.display()))?;
 
-        self.state.builder.pending = parsed_tasks.tasks.iter().map(|task| task.id).collect();
         self.state.builder.task_titles = parsed_tasks
             .tasks
             .iter()
             .map(|t| (t.id, t.title.clone()))
             .collect();
-        self.state.builder.current_task = None;
-        self.state.builder.done.clear();
-        self.state.builder.iteration = 0;
-        self.state.builder.last_verdict = None;
+        self.state.builder.reset_task_pipeline(
+            parsed_tasks
+                .tasks
+                .iter()
+                .map(|task| (task.id, Some(task.title.clone()))),
+        );
 
         self.transition_to_phase(Phase::ImplementationRound(1))?;
         self.state.save()?; // Persist state after transition and builder setup
@@ -1258,20 +1259,12 @@ impl App {
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
-        if self.state.builder.current_task.is_none() {
-            if let Some(id) = self.state.builder.pending.first().copied() {
-                self.state.builder.pending.remove(0);
-                self.state.builder.current_task = Some(id);
-            } else {
-                return None;
-            }
-        }
-        self.state.builder.iteration = round;
+        let task_id = self.state.builder.ensure_task_for_round(round)?;
         let round_dir = session_state::session_dir(&self.state.session_id)
             .join("rounds")
             .join(format!("{round:03}"));
         let _ = std::fs::create_dir_all(&round_dir);
-        self.state.builder.current_task
+        Some(task_id)
     }
 
     /// Enter builder recovery. This is builder-only and must remain non-interactive:
@@ -1305,11 +1298,32 @@ impl App {
             .unwrap_or_default();
 
         self.state.builder.recovery_trigger_task_id =
-            trigger_task_id.or(self.state.builder.current_task);
+            trigger_task_id.or(self.state.builder.current_task_id());
         self.state.builder.recovery_prev_max_task_id = prev_max;
         self.state.builder.recovery_prev_task_ids = prev_task_ids;
         self.state.builder.recovery_trigger_summary = trigger_summary;
-        self.state.builder.current_task = None;
+        if let Some(current_task_id) = self.state.builder.current_task_id() {
+            let status = if self.state.builder.pipeline_items.is_empty() {
+                PipelineItemStatus::Pending
+            } else {
+                PipelineItemStatus::Failed
+            };
+            let _ =
+                self.state
+                    .builder
+                    .set_task_status(current_task_id, status, Some(triggering_round));
+        }
+        self.state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: Some(triggering_round),
+            status: PipelineItemStatus::Running,
+            title: Some("Builder recovery".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: Some(false),
+        });
         self.state.agent_error = None;
 
         if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
@@ -1440,14 +1454,67 @@ impl App {
                 .with_context(|| format!("invalid {}", plan_path.display()))?;
         }
 
-        self.state.builder.pending = recovered_ids;
+        let completed_ids = self.state.builder.done_task_ids();
+        let completed_set = completed_ids.iter().copied().collect::<BTreeSet<_>>();
+        let mut next_items = self
+            .state
+            .builder
+            .pipeline_items
+            .iter()
+            .filter(|item| {
+                item.stage == "coder"
+                    && item
+                        .task_id
+                        .is_some_and(|task_id| completed_set.contains(&task_id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if next_items.is_empty() {
+            for task_id in &completed_ids {
+                next_items.push(PipelineItem {
+                    id: 0,
+                    stage: "coder".to_string(),
+                    task_id: Some(*task_id),
+                    round: None,
+                    status: PipelineItemStatus::Approved,
+                    title: self.state.builder.task_titles.get(task_id).cloned(),
+                    mode: None,
+                    trigger: None,
+                    interactive: None,
+                });
+            }
+        }
         for task in &parsed.tasks {
             self.state
                 .builder
                 .task_titles
                 .insert(task.id, task.title.clone());
+            if !completed_set.contains(&task.id) {
+                next_items.push(PipelineItem {
+                    id: 0,
+                    stage: "coder".to_string(),
+                    task_id: Some(task.id),
+                    round: None,
+                    status: PipelineItemStatus::Pending,
+                    title: Some(task.title.clone()),
+                    mode: None,
+                    trigger: None,
+                    interactive: None,
+                });
+            }
         }
-        self.state.builder.current_task = None;
+        self.state.builder.pipeline_items = next_items;
+        self.state.builder.sync_legacy_queue_views();
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|item| item.stage == "recovery" && item.status == PipelineItemStatus::Running)
+        {
+            item.status = PipelineItemStatus::Done;
+        }
         self.state.builder.retry_reset_run_id_cutoff = Some(recovery_run_id);
         self.state.builder.recovery_trigger_task_id = None;
         self.state.builder.recovery_prev_max_task_id = None;
@@ -1694,17 +1761,17 @@ impl App {
                     .with_context(|| format!("invalid {}", tasks_path.display()));
                 match parsed {
                     Ok(parsed) => {
-                        self.state.builder.pending =
-                            parsed.tasks.iter().map(|task| task.id).collect();
                         self.state.builder.task_titles = parsed
                             .tasks
                             .iter()
                             .map(|t| (t.id, t.title.clone()))
                             .collect();
-                        self.state.builder.current_task = None;
-                        self.state.builder.done.clear();
-                        self.state.builder.iteration = 0;
-                        self.state.builder.last_verdict = None;
+                        self.state.builder.reset_task_pipeline(
+                            parsed
+                                .tasks
+                                .iter()
+                                .map(|task| (task.id, Some(task.title.clone()))),
+                        );
                         self.finalize_run_record(run.id, true, None);
                         self.state.agent_error = None;
                         self.transition_to_phase(Phase::ImplementationRound(1))?;
@@ -1757,10 +1824,14 @@ impl App {
                             Some(format!("{:?}", verdict.status).to_lowercase());
                         match verdict.status {
                             review::ReviewStatus::Approved => {
-                                if let Some(task_id) = self.state.builder.current_task.take() {
-                                    self.state.builder.done.push(task_id);
+                                if let Some(task_id) = self.state.builder.current_task_id() {
+                                    let _ = self.state.builder.set_task_status(
+                                        task_id,
+                                        PipelineItemStatus::Approved,
+                                        Some(round),
+                                    );
                                 }
-                                if self.state.builder.pending.is_empty() {
+                                if !self.state.builder.has_unfinished_tasks() {
                                     self.transition_to_phase(Phase::Done)?;
                                 } else {
                                     self.transition_to_phase(Phase::ImplementationRound(
@@ -1769,18 +1840,44 @@ impl App {
                                 }
                             }
                             review::ReviewStatus::Revise => {
+                                if let Some(task_id) = self.state.builder.current_task_id() {
+                                    let _ = self.state.builder.set_task_status(
+                                        task_id,
+                                        PipelineItemStatus::Revise,
+                                        Some(round),
+                                    );
+                                }
                                 // REVIEWER: full revise/new_tasks routing is handled by later queue work;
                                 // this schema migration preserves the existing retry iteration behavior.
                                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
                             }
                             review::ReviewStatus::HumanBlocked
                             | review::ReviewStatus::AgentPivot => {
+                                let verdict_status = match verdict.status {
+                                    review::ReviewStatus::HumanBlocked => {
+                                        PipelineItemStatus::HumanBlocked
+                                    }
+                                    review::ReviewStatus::AgentPivot => {
+                                        PipelineItemStatus::AgentPivot
+                                    }
+                                    review::ReviewStatus::Approved
+                                    | review::ReviewStatus::Revise => {
+                                        unreachable!("already handled")
+                                    }
+                                };
+                                if let Some(task_id) = self.state.builder.current_task_id() {
+                                    let _ = self.state.builder.set_task_status(
+                                        task_id,
+                                        verdict_status,
+                                        Some(round),
+                                    );
+                                }
                                 let summary = verdict.feedback.join("\n");
                                 let trigger_summary =
                                     (!summary.trim().is_empty()).then_some(summary);
                                 self.enter_builder_recovery(
                                     round,
-                                    self.state.builder.current_task,
+                                    self.state.builder.current_task_id(),
                                     trigger_summary,
                                 );
                             }
@@ -2348,7 +2445,7 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
-        let completed = self.state.builder.done.clone();
+        let completed = self.state.builder.done_task_ids();
         let mut started = self
             .started_builder_task_ids()
             .into_iter()
@@ -2508,7 +2605,7 @@ impl App {
         let Phase::ReviewRound(r) = self.state.current_phase else {
             return false;
         };
-        let Some(task_id) = self.state.builder.current_task else {
+        let Some(task_id) = self.state.builder.current_task_id() else {
             self.state.agent_error = Some("no current task".to_string());
             let _ = self.state.save();
             return false;

@@ -273,6 +273,9 @@ impl App {
                     };
                     let show_n = self.state.current_phase == Phase::SpecReviewPaused
                         || (self.state.current_phase == Phase::SpecReviewRunning
+                            && self.state.agent_error.is_some())
+                        || self.state.current_phase == Phase::PlanReviewPaused
+                        || (self.state.current_phase == Phase::PlanReviewRunning
                             && self.state.agent_error.is_some());
                     let n = if show_n { " n" } else { "" };
                     format!(" | Up/Down Space Enter t PgUp/PgDn b{e}{n} q")

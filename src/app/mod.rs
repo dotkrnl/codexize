@@ -2357,6 +2357,11 @@ impl App {
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
                 self.transition_to_phase(Phase::SpecReviewPaused)?;
+                self.append_system_message(
+                    run.id,
+                    MessageKind::Summary,
+                    "Spec review complete. Press Enter to continue to planning, or n to run another review round.".to_string(),
+                );
             }
             Phase::PlanningRunning => {
                 self.finalize_run_record(run.id, true, None);
@@ -2367,6 +2372,11 @@ impl App {
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
                 self.transition_to_phase(Phase::PlanReviewPaused)?;
+                self.append_system_message(
+                    run.id,
+                    MessageKind::Summary,
+                    "Plan review complete. Press Enter to continue to sharding, or n to run another review round.".to_string(),
+                );
             }
             Phase::ShardingRunning => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");

@@ -51,13 +51,15 @@ impl App {
                 let on_current = self.selected == self.current_row();
                 if on_current {
                     if self.state.current_phase == Phase::SpecReviewPaused {
-                        let _ = self.transition_to_phase(Phase::SpecReviewRunning);
-                        self.launch_spec_review();
+                        self.state.agent_error = None;
+                        self.queue_view_of_current_artifact("spec.md");
+                        let _ = self.transition_to_phase(Phase::PlanningRunning);
                         return false;
                     }
                     if self.state.current_phase == Phase::PlanReviewPaused {
-                        let _ = self.transition_to_phase(Phase::PlanReviewRunning);
-                        self.launch_plan_review();
+                        self.state.agent_error = None;
+                        self.queue_view_of_current_artifact("plan.md");
+                        let _ = self.transition_to_phase(Phase::ShardingRunning);
                         return false;
                     }
                     if self.state.current_phase == Phase::BrainstormRunning
@@ -113,20 +115,18 @@ impl App {
                 false
             }
             KeyCode::Char('n') => {
-                let can_skip_spec = self.state.current_phase == Phase::SpecReviewPaused
+                let can_redo_spec = self.state.current_phase == Phase::SpecReviewPaused
                     || (self.state.current_phase == Phase::SpecReviewRunning
                         && self.state.agent_error.is_some());
-                let can_skip_plan = self.state.current_phase == Phase::PlanReviewPaused
+                let can_redo_plan = self.state.current_phase == Phase::PlanReviewPaused
                     || (self.state.current_phase == Phase::PlanReviewRunning
                         && self.state.agent_error.is_some());
-                if can_skip_spec {
-                    self.state.agent_error = None;
-                    self.queue_view_of_current_artifact("spec.md");
-                    let _ = self.transition_to_phase(Phase::PlanningRunning);
-                } else if can_skip_plan {
-                    self.state.agent_error = None;
-                    self.queue_view_of_current_artifact("plan.md");
-                    let _ = self.transition_to_phase(Phase::ShardingRunning);
+                if can_redo_spec {
+                    let _ = self.transition_to_phase(Phase::SpecReviewRunning);
+                    self.launch_spec_review();
+                } else if can_redo_plan {
+                    let _ = self.transition_to_phase(Phase::PlanReviewRunning);
+                    self.launch_plan_review();
                 }
                 false
             }

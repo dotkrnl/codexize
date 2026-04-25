@@ -78,6 +78,9 @@ pub struct App {
     collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
     viewport_top: usize,
     follow_tail: bool,
+    /// When true, the viewport was intentionally paged away from the focused
+    /// row and clamp_viewport should not pull it back toward focus.
+    explicit_viewport_scroll: bool,
     /// Snapshot of `messages.len()` taken when tail-follow was last
     /// disengaged. None while following. Used to count missed messages
     /// for the "↓ N new" badge.
@@ -169,6 +172,7 @@ impl App {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            explicit_viewport_scroll: false,
             tail_detach_baseline: None,
             body_inner_height: 0,
             body_inner_width: 0,
@@ -337,6 +341,7 @@ impl App {
     }
 
     fn restore_selection(&mut self, preferred_key: Option<NodeKey>, previous_selected: usize) {
+        self.explicit_viewport_scroll = false;
         let target = preferred_key.or_else(|| self.default_selected_key());
         if let Some(key) = target {
             if let Some(index) = self.visible_rows.iter().position(|row| row.key == key) {
@@ -462,6 +467,9 @@ impl App {
         } else {
             Some(self.messages.len())
         };
+        if follow {
+            self.explicit_viewport_scroll = false;
+        }
     }
 
     /// Pin every row that's currently effectively expanded as an explicit
@@ -4508,6 +4516,7 @@ mod tests {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            explicit_viewport_scroll: false,
             tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,
@@ -5084,6 +5093,7 @@ mod tests {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            explicit_viewport_scroll: false,
             tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,

@@ -52,18 +52,13 @@ impl Widget for PipelineWidget<'_> {
                 break;
             }
 
-            if expanded {
-                // Always leave one row per still-unrendered node so every
-                // section title remains visible even when an earlier body
-                // (especially a long chat) would otherwise eat the whole
-                // pane.
+            if expanded && self.app.is_expanded_transcript(index) {
                 let headers_after = self.app.visible_rows.len().saturating_sub(index + 1);
-                let remaining = (bottom_y - cursor_y) as usize;
-                let usable = remaining.saturating_sub(headers_after);
-                let natural = self
+                let usable = (bottom_y - cursor_y).saturating_sub(headers_after as u16) as usize;
+                let body_height = self
                     .app
-                    .natural_stage_body_height(index, inner.width as usize, &local_offset);
-                let body_height = natural.min(usable) as u16;
+                    .transcript_body_height_for(index, inner.height as usize)
+                    .min(usable) as u16;
                 if body_height == 0 {
                     continue;
                 }
@@ -274,16 +269,6 @@ impl App {
         ]))
     }
 
-    fn natural_stage_body_height(
-        &self,
-        index: usize,
-        available_width: usize,
-        local_offset: &chrono::FixedOffset,
-    ) -> usize {
-        let lines = self.node_body_with_offset(index, available_width, local_offset);
-        lines.len().max(1)
-    }
-
     fn render_stage_body(
         &self,
         area: ratatui::layout::Rect,
@@ -315,15 +300,7 @@ impl App {
                     self.spinner_tick,
                 );
                 widget.render(area, buf);
-                return;
             }
-        }
-
-        // If there is no run to render, fall back to the compact body content.
-        let body = self.node_body_with_offset(index, area.width as usize, local_offset);
-        for (i, line) in body.iter().take(area.height as usize).enumerate() {
-            let y = area.y.saturating_add(i as u16);
-            buf.set_line(area.x, y, line, area.width);
         }
     }
 
@@ -798,4 +775,308 @@ fn render_skip_to_impl_modal(
         .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(paragraph, rect);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        app::tree::{collect_all_rows, flatten_visible_rows, node_key_at_path},
+        state::{
+            Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
+            SessionState,
+        },
+        tmux::TmuxContext,
+    };
+    use ratatui::layout::Rect;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        time::{Duration, Instant},
+    };
+
+    fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> App {
+        let mut state = SessionState::new("render-test".to_string());
+        state.agent_runs = runs;
+        let selected_key = node_key_at_path(&nodes, &[0]);
+        let visible_rows = flatten_visible_rows(&nodes, |row| row.is_expandable());
+        let collapsed_overrides = visible_rows
+            .iter()
+            .filter(|row| row.is_expandable())
+            .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
+            .collect();
+        App {
+            tmux: TmuxContext {
+                session_name: "test".to_string(),
+                window_index: "0".to_string(),
+                window_name: "test".to_string(),
+            },
+            state,
+            nodes,
+            visible_rows,
+            models: Vec::new(),
+            model_refresh: ModelRefreshState::Idle(Instant::now()),
+            selected: 0,
+            selected_key,
+            collapsed_overrides,
+            stage_scroll: BTreeMap::new(),
+            body_inner_height: 20,
+            body_inner_width: 80,
+            input_mode: false,
+            input_buffer: String::new(),
+            input_cursor: 0,
+            pending_view_path: None,
+            confirm_back: false,
+            window_launched: false,
+            quota_errors: Vec::new(),
+            quota_retry_delay: Duration::from_secs(60),
+            agent_line_count: 0,
+            agent_content_hash: 0,
+            agent_last_change: None,
+            spinner_tick: 0,
+            live_summary_watcher: None,
+            live_summary_change_rx: None,
+            live_summary_path: None,
+            live_summary_cached_text: String::new(),
+            live_summary_cached_mtime: None,
+            current_run_id: None,
+            failed_models: HashMap::new(),
+            test_launch_harness: None,
+            messages,
+        }
+    }
+
+    fn run_record(id: u64, status: RunStatus) -> RunRecord {
+        RunRecord {
+            id,
+            stage: format!("run-{id}"),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "model".to_string(),
+            vendor: "vendor".to_string(),
+            window_name: format!("[Run {id}]"),
+            started_at: chrono::Utc::now(),
+            ended_at: if status == RunStatus::Running {
+                None
+            } else {
+                Some(chrono::Utc::now())
+            },
+            status,
+            error: None,
+        }
+    }
+
+    fn message(run_id: u64, text: &str) -> Message {
+        Message {
+            ts: chrono::Utc::now(),
+            run_id,
+            kind: MessageKind::Summary,
+            sender: MessageSender::Agent {
+                model: "model".to_string(),
+                vendor: "vendor".to_string(),
+            },
+            text: text.to_string(),
+        }
+    }
+
+    fn node(
+        label: &str,
+        kind: NodeKind,
+        status: NodeStatus,
+        children: Vec<Node>,
+        run_id: Option<u64>,
+        leaf_run_id: Option<u64>,
+    ) -> Node {
+        Node {
+            label: label.to_string(),
+            kind,
+            status,
+            summary: format!("{label} summary"),
+            children,
+            run_id,
+            leaf_run_id,
+        }
+    }
+
+    fn nested_transcript_tree() -> Vec<Node> {
+        vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![node(
+                "Task A",
+                NodeKind::Task,
+                NodeStatus::Running,
+                vec![node(
+                    "Coder",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(1),
+                    None,
+                )],
+                None,
+                None,
+            )],
+            None,
+            None,
+        )]
+    }
+
+    fn line_text(buf: &Buffer, y: u16, width: u16) -> String {
+        (0..width)
+            .map(|x| buf[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    fn render_lines(app: &App, height: u16) -> Vec<String> {
+        let width = 80;
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        PipelineWidget { app }.render(area, &mut buf);
+        (0..height).map(|y| line_text(&buf, y, width)).collect()
+    }
+
+    #[test]
+    fn renders_depth_indented_visible_rows_and_inline_transcript() {
+        let app = test_app(
+            nested_transcript_tree(),
+            vec![run_record(1, RunStatus::Running)],
+            vec![message(1, "coder transcript body")],
+        );
+
+        let lines = render_lines(&app, 10);
+
+        assert!(lines.iter().any(|line| line.contains("▾ Root | running")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("  ▾ Task A | running")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("    ▾ Coder | running")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("coder transcript body")));
+    }
+
+    #[test]
+    fn expanded_structural_parents_do_not_render_duplicate_child_list_body() {
+        let app = test_app(
+            nested_transcript_tree(),
+            vec![run_record(1, RunStatus::Running)],
+            vec![message(1, "only the transcript body")],
+        );
+
+        let lines = render_lines(&app, 12);
+
+        assert!(!lines.iter().any(|line| line.contains("── Task A")));
+        assert!(!lines.iter().any(|line| line.contains("── Coder")));
+    }
+
+    #[test]
+    fn collapsed_absorbed_simple_stage_renders_direct_transcript() {
+        let app = test_app(
+            vec![node(
+                "Brainstorm",
+                NodeKind::Stage,
+                NodeStatus::Done,
+                Vec::new(),
+                None,
+                Some(7),
+            )],
+            vec![run_record(7, RunStatus::Done)],
+            vec![message(7, "absorbed transcript body")],
+        );
+
+        let lines = render_lines(&app, 8);
+
+        assert!(lines.iter().any(|line| line.contains("Brainstorm | done")));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("absorbed transcript body")));
+    }
+
+    #[test]
+    fn multiple_open_transcripts_share_body_height_in_visible_order() {
+        let nodes = vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![
+                node(
+                    "First",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(1),
+                    None,
+                ),
+                node(
+                    "Second",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(2),
+                    None,
+                ),
+            ],
+            None,
+            None,
+        )];
+        let app = test_app(
+            nodes,
+            vec![
+                run_record(1, RunStatus::Running),
+                run_record(2, RunStatus::Running),
+            ],
+            vec![
+                message(1, "first transcript"),
+                message(2, "second transcript"),
+            ],
+        );
+
+        let lines = render_lines(&app, 9);
+        let first_body = lines
+            .iter()
+            .position(|line| line.contains("first transcript"))
+            .expect("first body rendered");
+        let second_header = lines
+            .iter()
+            .position(|line| line.contains("Second | running"))
+            .expect("second header rendered");
+        let second_body = lines
+            .iter()
+            .position(|line| line.contains("second transcript"))
+            .expect("second body rendered");
+
+        assert!(first_body < second_header);
+        assert!(second_header < second_body);
+    }
+
+    #[test]
+    fn header_only_viewports_render_headers_without_scroll_mutation() {
+        let mut app = test_app(
+            nested_transcript_tree(),
+            vec![run_record(1, RunStatus::Running)],
+            vec![message(1, "hidden transcript body")],
+        );
+        let coder_key = collect_all_rows(&app.nodes)
+            .into_iter()
+            .find(|row| row.has_transcript)
+            .expect("transcript row")
+            .key;
+        app.stage_scroll.insert(coder_key.clone(), 4);
+
+        let lines = render_lines(&app, 5);
+
+        assert!(lines.iter().any(|line| line.contains("Root | running")));
+        assert!(lines.iter().any(|line| line.contains("Task A | running")));
+        assert!(lines.iter().any(|line| line.contains("Coder | running")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains("hidden transcript body")));
+        assert_eq!(app.stage_scroll.get(&coder_key).copied(), Some(4));
+    }
 }

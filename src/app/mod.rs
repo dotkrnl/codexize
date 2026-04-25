@@ -398,19 +398,50 @@ impl App {
     }
 
     pub(super) fn page_step(&self) -> usize {
-        self.stage_body_height().saturating_sub(2).max(1)
-    }
-
-    pub(super) fn expanded_stage_count(&self) -> usize {
-        (0..self.visible_rows.len())
-            .filter(|i| self.is_expanded(*i))
-            .count()
+        self.stage_body_height_for(self.selected)
+            .saturating_sub(2)
             .max(1)
     }
 
-    pub(super) fn stage_body_height(&self) -> usize {
-        let body = self.body_inner_height.saturating_sub(self.visible_rows.len());
-        (body / self.expanded_stage_count()).max(3)
+    pub(super) fn is_expanded_transcript(&self, index: usize) -> bool {
+        self.is_expanded(index)
+            && self
+                .visible_rows
+                .get(index)
+                .is_some_and(|row| row.has_transcript)
+    }
+
+    pub(super) fn stage_body_height_for(&self, index: usize) -> usize {
+        self.transcript_body_height_for(index, self.body_inner_height)
+    }
+
+    pub(super) fn transcript_body_height_for(&self, index: usize, total_height: usize) -> usize {
+        if !self.is_expanded_transcript(index) {
+            return 0;
+        }
+
+        let body_rows = total_height.saturating_sub(self.visible_rows.len());
+        if body_rows == 0 {
+            return 0;
+        }
+
+        let transcript_position = (0..self.visible_rows.len())
+            .filter(|i| self.is_expanded_transcript(*i))
+            .position(|i| i == index);
+        let Some(position) = transcript_position else {
+            return 0;
+        };
+
+        let transcript_count = (0..self.visible_rows.len())
+            .filter(|i| self.is_expanded_transcript(*i))
+            .count();
+        if transcript_count == 0 {
+            return 0;
+        }
+
+        let base = body_rows / transcript_count;
+        let remainder = body_rows % transcript_count;
+        base + usize::from(position < remainder)
     }
 
     pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(NodeKey, Option<usize>)> {
@@ -429,10 +460,13 @@ impl App {
     }
 
     pub(super) fn stage_max_offset(&self, index: usize) -> usize {
-        if !self.is_expanded(index) {
+        if !self.is_expanded_transcript(index) {
             return 0;
         }
-        let height = self.stage_body_height();
+        let height = self.stage_body_height_for(index);
+        if height == 0 {
+            return 0;
+        }
         let total = self.node_body(index).len();
         if total > height {
             total.saturating_sub(height.saturating_sub(1))

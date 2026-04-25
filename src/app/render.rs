@@ -50,11 +50,17 @@ impl Widget for PipelineWidget<'_> {
             }
 
             if expanded {
+                // Always leave one row per still-unrendered node so every
+                // section title remains visible even when an earlier body
+                // (especially a long chat) would otherwise eat the whole
+                // pane.
+                let headers_after = self.app.nodes.len().saturating_sub(index + 1);
                 let remaining = (bottom_y - cursor_y) as usize;
+                let usable = remaining.saturating_sub(headers_after);
                 let natural = self
                     .app
                     .natural_stage_body_height(index, inner.width as usize, &local_offset);
-                let body_height = natural.min(remaining) as u16;
+                let body_height = natural.min(usable) as u16;
                 if body_height == 0 {
                     continue;
                 }

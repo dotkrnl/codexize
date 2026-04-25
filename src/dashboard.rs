@@ -304,6 +304,7 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
 // preference order; first match wins. Used when the ranking API hasn't
 // scored the new model yet but quota probes already see it.
 const EXPLICIT_FALLBACKS: &[(&str, &str)] = &[
+    ("gemini-3.1-pro-preview", "gemini-3-pro-preview"),
     ("gemini-3-flash-preview", "gemini-2.5-flash"),
 ];
 
@@ -394,6 +395,18 @@ mod tests {
             display_order: 0,
             fallback_from: None,
         }
+    }
+
+    #[test]
+    fn synthesize_gemini_3_1_pro_preview_falls_back_to_3_pro_preview() {
+        let existing = vec![
+            model("gemini-3-pro-preview", 80.0),
+            model("gemini-2.5-pro", 70.0),
+        ];
+        let synth =
+            synthesize_sibling("gemini-3.1-pro-preview", "google", &existing).unwrap();
+        assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
+        assert_eq!(synth.overall_score, 80.0);
     }
 
     #[test]

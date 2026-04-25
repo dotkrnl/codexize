@@ -69,17 +69,20 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
         candidates.push(canonical);
     }
 
-    // Apply version penalties first so synthesized newer-version models
-    // (e.g. gemini-3-flash-preview borrowing 2.5-flash's score) outrank their
-    // sources by probability before top_model_union's "top-N" selector
-    // runs — otherwise tied probabilities lose a lex/display-order
-    // tiebreak to the source and the new model gets retained out.
+    // Order matters:
+    //   1. Apply version penalties so synthesized newer-version models
+    //      (e.g. gemini-3-flash-preview borrowing 2.5-flash's score) outrank
+    //      their sources before later filtering looks at probability.
+    //   2. Zero out below-third probabilities so cutoff-losers don't
+    //      occupy a top_model_union "top-N by probability" slot.
+    //   3. THEN take top_model_union — its "best per vendor by
+    //      overall_score" rule still keeps every vendor represented even
+    //      when all that vendor's probabilities were cut to zero.
     apply_version_penalties(&mut candidates);
+    apply_top_third_cutoff(&mut candidates);
 
     let retained_names = ranking::top_model_union(&candidates);
     candidates.retain(|candidate| retained_names.contains(&candidate.name));
-
-    apply_top_third_cutoff(&mut candidates);
 
     let idea_ranks = ranking::rank_map(&candidates, |candidate| candidate.idea_probability);
     let planning_ranks = ranking::rank_map(&candidates, |candidate| candidate.planning_probability);

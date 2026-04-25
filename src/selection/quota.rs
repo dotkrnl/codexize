@@ -200,6 +200,7 @@ fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     // default.
     let shared = mapped.values().find_map(|q| *q);
     for known in &[
+        "gemini-3.1-pro-preview",
         "gemini-3-pro-preview",
         "gemini-3-flash-preview",
         "gemini-2.5-pro",

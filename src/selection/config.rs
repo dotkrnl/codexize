@@ -65,7 +65,7 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     quota_soft_threshold: 25.0,
     min_role_score_weight: 0.05,
     version_penalty_per_step_interactive: 1.0 / 3.0,
-    version_penalty_per_step_headless: 1.0 / 2.0,
+    version_penalty_per_step_headless: 2.0 / 3.0,
     high_variance_std_err: 5.0,
     high_variance_extra_penalty: 10.0,
     std_err_penalty_multiplier: 1.0,

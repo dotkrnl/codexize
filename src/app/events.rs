@@ -52,7 +52,6 @@ impl App {
                 if on_current {
                     if self.state.current_phase == Phase::SpecReviewPaused {
                         self.state.agent_error = None;
-                        self.queue_view_of_current_artifact("spec.md");
                         let _ = self.transition_to_phase(Phase::PlanningRunning);
                         return false;
                     }

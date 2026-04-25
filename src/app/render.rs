@@ -822,6 +822,7 @@ mod tests {
             collapsed_overrides,
             viewport_top: 0,
             follow_tail: true,
+            explicit_viewport_scroll: false,
             tail_detach_baseline: None,
             body_inner_height: 20,
             body_inner_width: 80,
@@ -1085,5 +1086,95 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("hidden transcript body"))
         );
+    }
+
+    fn tall_app() -> App {
+        let nodes = nested_transcript_tree();
+        let mut messages = Vec::new();
+        for i in 0..50 {
+            messages.push(message(1, &format!("message {i}")));
+        }
+        let runs = vec![run_record(1, RunStatus::Running)];
+        let mut app = test_app(nodes, runs, messages);
+        app.body_inner_height = 5;
+        app.body_inner_width = 80;
+        app
+    }
+
+    #[test]
+    fn explicit_page_scroll_moves_viewport_without_focus_clamping() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.selected = 0;
+        let step = app.body_inner_height.saturating_sub(1).max(1) as isize;
+        app.scroll_viewport(step, true);
+        assert_eq!(app.selected, 0);
+        assert!(app.explicit_viewport_scroll);
+        app.clamp_viewport();
+        assert_eq!(app.selected, 0);
+        assert!(app.viewport_top > 0);
+    }
+
+    #[test]
+    fn page_scroll_to_bottom_reattaches_tail_and_hides_badge() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.messages.push(message(1, "new unread"));
+        let max_top = app.max_viewport_top();
+        app.scroll_viewport(max_top as isize, true);
+        app.clamp_viewport();
+        assert!(app.follow_tail);
+        assert_eq!(app.tail_detach_baseline, None);
+        let lines = render_lines(&app, app.body_inner_height as u16 + 2);
+        assert!(!lines.iter().any(|l| l.contains("↓")));
+    }
+
+    #[test]
+    fn unread_badge_shows_when_new_content_below_viewport() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.messages.push(message(1, "new unread"));
+        app.viewport_top = 0;
+        app.clamp_viewport();
+        let lines = render_lines(&app, app.body_inner_height as u16 + 2);
+        assert!(lines.iter().any(|l| l.contains("↓ 1 new")));
+    }
+
+    #[test]
+    fn page_up_scrolls_viewport_without_moving_focus() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.viewport_top = app.max_viewport_top();
+        app.selected = 2;
+        let initial_selected = app.selected;
+        let step = app.body_inner_height.saturating_sub(1).max(1) as isize;
+        app.scroll_viewport(-step, true);
+        assert_eq!(app.selected, initial_selected);
+        assert!(app.viewport_top < app.max_viewport_top());
+        app.clamp_viewport();
+        assert_eq!(app.selected, initial_selected);
+    }
+
+    #[test]
+    fn focus_driven_scroll_clears_explicit_flag() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.scroll_viewport(5, true);
+        assert!(app.explicit_viewport_scroll);
+        app.scroll_viewport(1, false);
+        assert!(!app.explicit_viewport_scroll);
+    }
+
+    #[test]
+    fn clamp_viewport_restores_focus_visibility_after_focus_movement() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.viewport_top = 10;
+        app.selected = 0;
+        app.explicit_viewport_scroll = false;
+        app.clamp_viewport();
+        let (ys, _) = app.header_y_offsets();
+        let section_bottom = ys.get(1).copied().unwrap_or(ys.len());
+        assert!(app.viewport_top < section_bottom);
     }
 }

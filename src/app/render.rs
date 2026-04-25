@@ -62,7 +62,8 @@ impl Widget for PipelineWidget<'_> {
         // "↓ N new" badge centered along the bottom of the pipeline frame
         // when tail-follow is detached and messages have arrived since.
         let unread = self.app.unread_below_count();
-        if unread > 0 && area.height >= 1 {
+        let at_bottom = self.app.viewport_top >= self.app.max_viewport_top();
+        if unread > 0 && !at_bottom && area.height >= 1 {
             let label = format!(" ↓ {unread} new ");
             let label_w = label.chars().count() as u16;
             if label_w + 2 <= area.width {

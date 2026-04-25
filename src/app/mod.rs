@@ -6506,4 +6506,190 @@ estimated_tokens = 1
             );
         });
     }
+
+    #[test]
+    fn recovery_prompt_interactive_requires_operator_confirmation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prompt = recovery_prompt(
+            &tmp.path().join("spec.md"),
+            &tmp.path().join("plan.md"),
+            &tmp.path().join("tasks.toml"),
+            Some(1),
+            Some("needs human judgment"),
+            &[],
+            &[1],
+            &tmp.path().join("live_summary.txt"),
+            &tmp.path().join("recovery.toml"),
+            true,
+        );
+        assert!(
+            prompt.contains("INTERACTIVE"),
+            "human_blocked prompt must be marked INTERACTIVE"
+        );
+        assert!(
+            !prompt.contains("NON-INTERACTIVE"),
+            "human_blocked prompt must not contain NON-INTERACTIVE"
+        );
+        assert!(
+            prompt.contains("operator confirms"),
+            "human_blocked prompt must require operator confirmation"
+        );
+    }
+
+    #[test]
+    fn recovery_prompt_non_interactive_for_agent_pivot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let prompt = recovery_prompt(
+            &tmp.path().join("spec.md"),
+            &tmp.path().join("plan.md"),
+            &tmp.path().join("tasks.toml"),
+            Some(2),
+            Some("plan is wrong"),
+            &[],
+            &[2],
+            &tmp.path().join("live_summary.txt"),
+            &tmp.path().join("recovery.toml"),
+            false,
+        );
+        assert!(
+            prompt.contains("NON-INTERACTIVE"),
+            "agent_pivot prompt must be NON-INTERACTIVE"
+        );
+        assert!(
+            !prompt.contains("INTERACTIVE — the operator"),
+            "agent_pivot prompt must not be marked INTERACTIVE"
+        );
+    }
+
+    #[test]
+    fn launch_recovery_uses_interactive_prompt_for_human_blocked() {
+        use crate::state::PipelineItemStatus;
+        with_temp_root(|| {
+            let session_id = "recovery-interactive-launch";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(1);
+            state.builder.recovery_trigger_task_id = Some(1);
+            state.builder.recovery_trigger_summary =
+                Some("needs human judgment".to_string());
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: Some(1),
+                status: PipelineItemStatus::Running,
+                title: Some("Human-blocked recovery".to_string()),
+                mode: None,
+                trigger: Some("human_blocked".to_string()),
+                interactive: Some(true),
+            });
+
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                1,
+                10,
+                10,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            let ok = app.launch_recovery_with_model(None);
+            assert!(ok, "launch_recovery_with_model must succeed");
+
+            let prompt_path = session_dir
+                .join("prompts")
+                .join("recovery-r1.md");
+            let prompt = std::fs::read_to_string(&prompt_path).unwrap();
+            assert!(
+                prompt.contains("INTERACTIVE"),
+                "human_blocked recovery prompt file must be INTERACTIVE"
+            );
+            assert!(
+                !prompt.contains("NON-INTERACTIVE"),
+                "human_blocked recovery prompt file must not be NON-INTERACTIVE"
+            );
+        });
+    }
+
+    #[test]
+    fn launch_recovery_uses_noninteractive_prompt_for_agent_pivot() {
+        use crate::state::PipelineItemStatus;
+        with_temp_root(|| {
+            let session_id = "recovery-noninteractive-launch";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").unwrap();
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                "[[tasks]]\nid = 1\ntitle = \"T\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+            )
+            .unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(2);
+            state.builder.recovery_trigger_task_id = Some(1);
+            state.builder.recovery_trigger_summary =
+                Some("plan is wrong".to_string());
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: Some(2),
+                status: PipelineItemStatus::Running,
+                title: Some("Agent pivot recovery".to_string()),
+                mode: None,
+                trigger: Some("agent_pivot".to_string()),
+                interactive: Some(false),
+            });
+
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                1,
+                10,
+                10,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            let ok = app.launch_recovery_with_model(None);
+            assert!(ok, "launch_recovery_with_model must succeed");
+
+            let prompt_path = session_dir
+                .join("prompts")
+                .join("recovery-r2.md");
+            let prompt = std::fs::read_to_string(&prompt_path).unwrap();
+            assert!(
+                prompt.contains("NON-INTERACTIVE"),
+                "agent_pivot recovery prompt file must be NON-INTERACTIVE"
+            );
+        });
+    }
 }

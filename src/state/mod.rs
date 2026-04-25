@@ -49,6 +49,9 @@ pub enum MessageKind {
     Started,
     Brief,
     Summary,
+    /// A summary that flags non-success verdicts (e.g., reviewer asked
+    /// for revisions). Rendered as a warning rather than green success.
+    SummaryWarn,
     End,
 }
 

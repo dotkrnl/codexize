@@ -1721,10 +1721,16 @@ impl App {
                     Ok(verdict) => {
                         let summary_text = verdict.summary.trim();
                         if !summary_text.is_empty() {
+                            let kind = match verdict.status {
+                                review::ReviewStatus::Done => MessageKind::Summary,
+                                review::ReviewStatus::Revise | review::ReviewStatus::Blocked => {
+                                    MessageKind::SummaryWarn
+                                }
+                            };
                             let msg = Message {
                                 ts: chrono::Utc::now(),
                                 run_id: run.id,
-                                kind: MessageKind::Summary,
+                                kind,
                                 sender: MessageSender::Agent {
                                     model: run.model.clone(),
                                     vendor: run.vendor.clone(),

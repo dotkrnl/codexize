@@ -56,6 +56,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
             symbol: "✓",
             color: Color::Green,
         },
+        MessageKind::SummaryWarn => SymbolStyle {
+            symbol: "⚠",
+            color: Color::Yellow,
+        },
         MessageKind::End => match run_status {
             RunStatus::Done => SymbolStyle {
                 symbol: "●",
@@ -257,10 +261,10 @@ fn render_messages(
         }
 
         let wrapped = wrap_text(&msg.text, content_width);
-        let body_style = if msg.kind == MessageKind::Summary {
-            Style::default().fg(Color::Green)
-        } else {
-            Style::default().fg(Color::White)
+        let body_style = match msg.kind {
+            MessageKind::Summary => Style::default().fg(Color::Green),
+            MessageKind::SummaryWarn => Style::default().fg(Color::Yellow),
+            _ => Style::default().fg(Color::White),
         };
 
         for (i, chunk) in wrapped.iter().enumerate() {

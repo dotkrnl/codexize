@@ -2842,6 +2842,11 @@ fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
     ))
 }
 
+/// Prepended to every agent prompt. Surfaces project-specific guidance
+/// (CLAUDE.md / AGENTS.md) before the agent acts.
+const PROJECT_DOC_INSTR: &str =
+    "If CLAUDE.md or AGENTS.md exist in the repo, read it first and follow those directions carefully.\n\n";
+
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
         "\n\nEvery 2–3 min (and whenever your sub-goal changes), overwrite {} \
@@ -2862,7 +2867,7 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
 fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &str) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
-        r#"You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
+        r#"{PROJECT_DOC_INSTR}You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
 spec alone. Do NOT modify code; write ONLY the review file.
 
 Spec:   {spec_path}
@@ -2884,7 +2889,7 @@ fn plan_review_prompt(
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
-        r#"You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
+        r#"{PROJECT_DOC_INSTR}You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
 
 Inputs:
   Plan: {plan_path}
@@ -2922,7 +2927,7 @@ control; do NOT ask the operator.
 fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     format!(
-        r#"Invoke your brainstorming skill now.
+        r#"{PROJECT_DOC_INSTR}Invoke your brainstorming skill now.
 
 Idea:
 ---
@@ -2990,7 +2995,7 @@ fn planning_prompt(
             .join("\n")
     };
     format!(
-        r#"Invoke your superpowers:writing-plans skill now.
+        r#"{PROJECT_DOC_INSTR}Invoke your superpowers:writing-plans skill now.
 
 You are turning an approved spec + any spec reviews into an implementation plan.
 
@@ -3058,7 +3063,7 @@ fn sharding_prompt(
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     format!(
-        r#"You split an approved plan into actionable, self-contained, buildable tasks.
+        r#"{PROJECT_DOC_INSTR}You split an approved plan into actionable, self-contained, buildable tasks.
 NON-INTERACTIVE — do NOT modify any code; your ONLY output is the tasks TOML.
 
 Inputs:
@@ -3178,7 +3183,7 @@ fn recovery_prompt(
             .join(", ")
     };
     format!(
-        r#"You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
+        r#"{PROJECT_DOC_INSTR}You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
 
 Your job is to repair builder artifacts so orchestration can reconcile and resume.
 You may edit ONLY:
@@ -3316,7 +3321,7 @@ fn coder_prompt(
     let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
     let instr = live_summary_instruction(&live_summary_path);
     format!(
-        r#"You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
+        r#"{PROJECT_DOC_INSTR}You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
 operator is NOT available. Make your own judgement calls, document them in the
 commit message, and leave a line comment for the reviewer on anything genuinely
 ambiguous.
@@ -3333,6 +3338,8 @@ Job:
      field starts with "not testable" (genuine scaffolding/intermediate
      task). In that case you may skip writing tests, but the code you land
      MUST still build cleanly (compiles / links / type-checks) on its own.
+     Lint is faster than full tests: run lint first and fix any warnings
+     before the final full test run.
   4. Commit as a series of small atomic commits (see below). The reviewer
      inspects the aggregate `base..HEAD` range for this round, where `base`
      was pinned by the orchestrator before you started; the TUI detects
@@ -3398,7 +3405,7 @@ fn reviewer_prompt(
     let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
     let instr = live_summary_instruction(&live_summary_path);
     format!(
-        r#"You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
+        r#"{PROJECT_DOC_INSTR}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
 operator. Do NOT modify code. Write ONLY the review TOML.
 
 Inputs:

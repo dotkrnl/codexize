@@ -69,10 +69,16 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
         candidates.push(canonical);
     }
 
+    // Apply version penalties first so synthesized newer-version models
+    // (e.g. gemini-3.1-pro borrowing 3-pro-preview's score) outrank their
+    // sources by probability before top_model_union's "top-N" selector
+    // runs — otherwise tied probabilities lose a lex/display-order
+    // tiebreak to the source and the new model gets retained out.
+    apply_version_penalties(&mut candidates);
+
     let retained_names = ranking::top_model_union(&candidates);
     candidates.retain(|candidate| retained_names.contains(&candidate.name));
 
-    apply_version_penalties(&mut candidates);
     apply_top_third_cutoff(&mut candidates);
 
     let idea_ranks = ranking::rank_map(&candidates, |candidate| candidate.idea_probability);
@@ -232,7 +238,7 @@ pub fn select(models: &[ModelStatus], task: TaskKind) -> Option<&ModelStatus> {
 /// Both `.` (e.g. `gpt-5.5`, `gemini-2.5-flash`) and `-` (e.g. `claude-sonnet-4-6`)
 /// count as the major-minor separator.
 /// Returns (major, minor) if both components found, or (major, 0) for major-only.
-fn extract_version(name: &str) -> Option<(u32, u32)> {
+pub(super) fn extract_version(name: &str) -> Option<(u32, u32)> {
     let bytes = name.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -273,24 +279,36 @@ fn extract_version(name: &str) -> Option<(u32, u32)> {
 }
 
 /// Apply a configurable per-version-step penalty to all probability weights.
-/// Unique versions are ranked newest-first; same version = same penalty.
+/// Versions are bucketed per-vendor so e.g. claude-opus-4-7 isn't ranked
+/// "older" than gpt-5.5 just because the integer 4 < 5 across families.
+/// Within a vendor, unique versions are ranked newest-first; same version =
+/// same penalty.
 fn apply_version_penalties(candidates: &mut [Candidate]) {
     let versions: Vec<Option<(u32, u32)>> = candidates
         .iter()
         .map(|c| extract_version(&c.name))
         .collect();
 
-    // Collect unique versions, sort descending (newest first)
-    let mut unique: Vec<(u32, u32)> = versions.iter().filter_map(|v| *v).collect();
-    unique.sort_unstable_by(|a, b| b.cmp(a));
-    unique.dedup();
-
-    if unique.len() <= 1 {
-        return; // nothing to penalise
+    // Build a per-vendor list of unique versions, newest-first.
+    let mut per_vendor: BTreeMap<VendorKind, Vec<(u32, u32)>> = BTreeMap::new();
+    for (candidate, version) in candidates.iter().zip(versions.iter()) {
+        if let Some(v) = version {
+            per_vendor.entry(candidate.vendor).or_default().push(*v);
+        }
+    }
+    for unique in per_vendor.values_mut() {
+        unique.sort_unstable_by(|a, b| b.cmp(a));
+        unique.dedup();
     }
 
     let cfg = &SELECTION_CONFIG;
     for (candidate, version) in candidates.iter_mut().zip(versions.iter()) {
+        let Some(unique) = per_vendor.get(&candidate.vendor) else {
+            continue;
+        };
+        if unique.len() <= 1 {
+            continue;
+        }
         let rank = version
             .and_then(|v| unique.iter().position(|u| *u == v))
             .unwrap_or(0);
@@ -713,6 +731,33 @@ mod tests {
         };
         assert!(by_name("gpt-5.5") > by_name("gpt-5.4"));
         assert!(by_name("gpt-5.4") > by_name("gpt-5.2"));
+    }
+
+    #[test]
+    fn version_penalty_does_not_cross_vendors() {
+        // claude-opus-4-7 must not be penalised relative to gpt-5.5 just
+        // because gpt's integer is bigger — different families.
+        let mut candidates = vec![
+            candidate_with_version("gpt-5.5", 70.0),
+            candidate_with_version("gpt-5.4", 70.0),
+            Candidate {
+                vendor: VendorKind::Claude,
+                ..candidate_with_version("claude-opus-4-7", 70.0)
+            },
+        ];
+        apply_version_penalties(&mut candidates);
+
+        let by_name = |n: &str| {
+            candidates
+                .iter()
+                .find(|c| c.name == n)
+                .unwrap()
+                .build_probability
+        };
+        // Only one claude version exists in the pool → no penalty applied.
+        assert_eq!(by_name("claude-opus-4-7"), 1.0);
+        // gpt-5.5 still wins within Codex.
+        assert!(by_name("gpt-5.5") > by_name("gpt-5.4"));
     }
 
     #[test]

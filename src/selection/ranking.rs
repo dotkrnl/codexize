@@ -1,8 +1,20 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use crate::dashboard;
+use super::candidates::extract_version;
 use super::config::{SelectionPhase, SELECTION_CONFIG};
 use super::types::{Candidate, VendorKind};
+
+// Newer extract_version wins. Models with no parseable version sort last,
+// so they don't displace a versioned model on ties.
+fn version_cmp_newer_first(left: &Candidate, right: &Candidate) -> Ordering {
+    match (extract_version(&left.name), extract_version(&right.name)) {
+        (Some(l), Some(r)) => r.cmp(&l),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
 
 pub fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
     let mut retained = BTreeSet::new();
@@ -22,6 +34,10 @@ pub fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
                 a.overall_score
                     .partial_cmp(&b.overall_score)
                     .unwrap_or(Ordering::Equal)
+                    // Prefer the newer version on ties — keeps a synthesized
+                    // sibling-fallback model (e.g. gemini-3.1-pro borrowing
+                    // gemini-3-pro-preview's score) winning over the source.
+                    .then_with(|| version_cmp_newer_first(b, a))
                     .then_with(|| b.display_order.cmp(&a.display_order))
             })
         {
@@ -73,6 +89,11 @@ fn compare_probability(
                 .partial_cmp(&left.overall_score)
                 .unwrap_or(Ordering::Equal)
         })
+        // Newer version wins on ties — without this, a synthesized model
+        // (e.g. gemini-3.1-pro borrowing gemini-3-pro-preview's score) loses
+        // the lex tiebreak to its own source and gets retained out before
+        // version penalties even run.
+        .then_with(|| version_cmp_newer_first(left, right))
         .then_with(|| left.display_order.cmp(&right.display_order))
         .then_with(|| left.name.cmp(&right.name))
 }
@@ -82,6 +103,7 @@ pub fn compare_candidates(left: &Candidate, right: &Candidate) -> Ordering {
         .overall_score
         .partial_cmp(&left.overall_score)
         .unwrap_or(Ordering::Equal)
+        .then_with(|| version_cmp_newer_first(left, right))
         .then_with(|| left.display_order.cmp(&right.display_order))
         .then_with(|| left.name.cmp(&right.name))
 }

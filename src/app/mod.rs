@@ -218,6 +218,7 @@ impl App {
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         loop {
             if let Some(path) = self.pending_view_path.take() {
+                let banner_inserted = prepend_review_banner(&path);
                 let _ = crate::tui::run_foreground(terminal, || {
                     let _ = std::process::Command::new(
                         std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
@@ -226,6 +227,9 @@ impl App {
                     .status();
                     Ok(())
                 });
+                if banner_inserted {
+                    let _ = strip_review_banner(&path);
+                }
             }
             self.refresh_models_if_due();
             self.poll_agent_window();
@@ -3057,6 +3061,46 @@ Hard requirements:
     )
 }
 
+/// Prepended to spec/plan files when they're auto-opened for review, then
+/// stripped (by exact match) once the editor closes. Keep the literal stable
+/// — `strip_review_banner` removes only this exact string, so any drift
+/// would leave the banner sitting in the file forever.
+const REVIEW_BANNER: &str = "\
+████████████████████████████████████████████████████████████████████████
+██                                                                    ██
+██   PLEASE REVIEW THIS DOCUMENT, THEN CLOSE THE EDITOR TO CONTINUE.  ██
+██                                                                    ██
+██   This banner is auto-inserted on open and removed on close —      ██
+██   leave it in place; it will not appear in the saved artifact.     ██
+██                                                                    ██
+████████████████████████████████████████████████████████████████████████
+
+";
+
+fn prepend_review_banner(path: &std::path::Path) -> bool {
+    let Ok(existing) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if existing.contains(REVIEW_BANNER) {
+        return false;
+    }
+    let mut combined = String::with_capacity(REVIEW_BANNER.len() + existing.len());
+    combined.push_str(REVIEW_BANNER);
+    combined.push_str(&existing);
+    std::fs::write(path, combined).is_ok()
+}
+
+fn strip_review_banner(path: &std::path::Path) -> std::io::Result<()> {
+    let existing = std::fs::read_to_string(path)?;
+    let Some(idx) = existing.find(REVIEW_BANNER) else {
+        return Ok(());
+    };
+    let mut stripped = String::with_capacity(existing.len() - REVIEW_BANNER.len());
+    stripped.push_str(&existing[..idx]);
+    stripped.push_str(&existing[idx + REVIEW_BANNER.len()..]);
+    std::fs::write(path, stripped)
+}
+
 fn git_rev_parse_head() -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -3280,6 +3324,46 @@ Rules:
 mod tests {
     use super::*;
     use crate::state::{RunRecord, RunStatus};
+
+    #[test]
+    fn review_banner_round_trip_restores_original_bytes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("spec.md");
+        let original = "# Spec\n\nbody line one\nbody line two\n";
+        std::fs::write(&path, original).unwrap();
+
+        assert!(prepend_review_banner(&path));
+        let with_banner = std::fs::read_to_string(&path).unwrap();
+        assert!(with_banner.starts_with(REVIEW_BANNER));
+        assert!(with_banner.ends_with(original));
+
+        strip_review_banner(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn review_banner_strip_is_noop_when_banner_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plan.md");
+        // User edited the banner away (or it was never there): we must not
+        // silently delete the first N lines.
+        let edited = "# Plan\n\nactual content\n";
+        std::fs::write(&path, edited).unwrap();
+        strip_review_banner(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+    }
+
+    #[test]
+    fn review_banner_prepend_is_idempotent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("spec.md");
+        std::fs::write(&path, "# Spec\nbody\n").unwrap();
+        assert!(prepend_review_banner(&path));
+        // Second prepend on the same file must not stack a second banner.
+        assert!(!prepend_review_banner(&path));
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.matches(REVIEW_BANNER).count(), 1);
+    }
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         let _guard = crate::state::test_fs_lock()

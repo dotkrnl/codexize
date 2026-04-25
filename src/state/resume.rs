@@ -58,7 +58,7 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
         match SkipToImplProposal::read_from_path(&path) {
             Ok(Some(p)) if p.proposed => {
                 state.skip_to_impl_rationale = Some(p.rationale);
-                state.skip_to_impl_kind = Some(p.kind);
+                state.skip_to_impl_kind = Some(p.status);
             }
             Ok(_) => {
                 let _ = state.log_event(
@@ -83,4 +83,3 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
 
     Ok(())
 }
-

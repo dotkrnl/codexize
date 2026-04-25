@@ -2,7 +2,7 @@
 //!
 //! Non-coder agents must leave the git working tree untouched (their writes go
 //! into the gitignored session dir). The coder may advance HEAD but must not
-//! edit session control files (task.md, base.txt, commits.txt, and prior
+//! edit session control files (task.toml, review_scope.toml, and prior
 //! rounds' artifacts). This module snapshots the relevant state at launch
 //! time and, on exit, verifies, reverts, and reports a reason string that
 //! flows through the normal run-failure machinery.
@@ -113,26 +113,26 @@ fn pop_stash_by_message(msg: &str) -> bool {
     }
     let text = String::from_utf8_lossy(&list.stdout);
     for line in text.lines() {
-        if line.contains(msg) {
-            if let Some(r#ref) = line.split(':').next() {
-                return std::process::Command::new("git")
-                    .args(["stash", "pop", r#ref])
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-            }
+        if line.contains(msg)
+            && let Some(r#ref) = line.split(':').next()
+        {
+            return std::process::Command::new("git")
+                .args(["stash", "pop", r#ref])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
         }
     }
     false
 }
 
 /// Gather the set of control files the coder must not modify for this round.
-/// Includes the current round's task.md / base.txt / commits.txt and every
+/// Includes the current round's task.toml / review_scope.toml and every
 /// file under prior rounds' directories.
 fn coder_control_paths(session_dir: &Path, round: u32) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let current = session_dir.join("rounds").join(format!("{round:03}"));
-    for name in ["task.md", "base.txt", "commits.txt"] {
+    for name in ["task.toml", "review_scope.toml"] {
         let p = current.join(name);
         if p.is_file() {
             out.push(p);
@@ -162,11 +162,7 @@ fn coder_control_paths(session_dir: &Path, round: u32) -> Vec<PathBuf> {
     out
 }
 
-pub fn capture_coder(
-    snapshot_dir: &Path,
-    session_dir: &Path,
-    round: u32,
-) -> std::io::Result<()> {
+pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std::io::Result<()> {
     let mut control_files = BTreeMap::new();
     for p in coder_control_paths(session_dir, round) {
         if let Ok(text) = std::fs::read_to_string(&p) {
@@ -196,9 +192,8 @@ pub fn verify(snapshot_dir: &Path, stage: &str) -> Option<String> {
 fn verify_non_coder(snap: &Snapshot) -> Option<String> {
     let current_head = git_head().unwrap_or_default();
     let current_status = git_status().unwrap_or_default();
-    let head_changed = !snap.head.is_empty()
-        && !current_head.is_empty()
-        && current_head != snap.head;
+    let head_changed =
+        !snap.head.is_empty() && !current_head.is_empty() && current_head != snap.head;
 
     // Stash anything the agent wrote so the working tree is clean before we
     // restore the user's baseline. The stash is retained under a labelled

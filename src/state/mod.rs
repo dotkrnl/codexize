@@ -7,13 +7,9 @@ pub use transitions::execute_transition;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    io::Write,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
-/// An event logged to the run's events.jsonl audit trail.
+/// An event logged to the run's events.toml audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub timestamp: String,
@@ -68,6 +64,18 @@ pub struct Message {
     pub kind: MessageKind,
     pub sender: MessageSender,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct EventsFile {
+    #[serde(default)]
+    events: Vec<Event>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct MessagesFile {
+    #[serde(default)]
+    messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -255,11 +263,12 @@ impl SessionState {
         Ok(())
     }
 
-    /// Append an event to the session's events.jsonl audit trail.
+    /// Append an event to the session's events.toml audit trail.
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        let path = dir.join("events.jsonl");
+        reject_old_artifact(&dir.join("events.jsonl"))?;
+        let path = dir.join("events.toml");
 
         let event = Event {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -267,13 +276,11 @@ impl SessionState {
             message: message.into(),
         };
 
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-
-        let line = serde_json::to_string(&event).context("failed to serialize event")?;
-        writeln!(file, "{}", line)?;
+        let mut file = read_events_file(&path)?;
+        file.events.push(event);
+        let text = toml::to_string_pretty(&file).context("failed to serialize events")?;
+        fs::write(&path, text)
+            .with_context(|| format!("failed to write events to {}", path.display()))?;
         Ok(())
     }
 
@@ -282,55 +289,35 @@ impl SessionState {
         execute_transition(self, next_phase)
     }
 
-    /// Append a message to the session's messages.jsonl file.
+    /// Append a message to the session's messages.toml file.
     pub fn append_message(&self, message: &Message) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
-        let path = dir.join("messages.jsonl");
+        reject_old_artifact(&dir.join("messages.jsonl"))?;
+        let path = dir.join("messages.toml");
 
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-
-        let line = serde_json::to_string(message).context("failed to serialize message")?;
-        writeln!(file, "{}", line)?;
+        let mut file = read_messages_file(&path)?;
+        file.messages.push(message.clone());
+        let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
+        fs::write(&path, text)
+            .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
 
-    /// Load all messages for a session from messages.jsonl.
+    /// Load all messages for a session from messages.toml.
     pub fn load_messages(session_id: &str) -> Result<Vec<Message>> {
-        let path = session_dir(session_id).join("messages.jsonl");
+        let dir = session_dir(session_id);
+        reject_old_artifact(&dir.join("messages.jsonl"))?;
+        let path = dir.join("messages.toml");
         if !path.exists() {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read messages from {}", path.display()))?;
-
-        let mut messages = Vec::new();
-        for (line_num, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<Message>(line) {
-                Ok(msg) => messages.push(msg),
-                Err(e) => {
-                    // Skip corrupt line, log to stderr (best effort)
-                    eprintln!(
-                        "WARNING: corrupt message line {} in {}: {}",
-                        line_num + 1,
-                        session_id,
-                        e
-                    );
-                }
-            }
-        }
-
-        Ok(messages)
+        Ok(read_messages_file(&path)?.messages)
     }
 
     /// Create a new RunRecord, push it to agent_runs, and return its id.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_run_record(
         &mut self,
         stage: String,
@@ -437,6 +424,35 @@ pub fn codexize_root() -> PathBuf {
 /// Return the directory path for a given session ID.
 pub fn session_dir(session_id: &str) -> PathBuf {
     codexize_root().join("sessions").join(session_id)
+}
+
+fn reject_old_artifact(path: &std::path::Path) -> Result<()> {
+    if path.exists() {
+        anyhow::bail!(
+            "unsupported old JSON/JSONL session artifact {}; start a fresh TOML session",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn read_events_file(path: &std::path::Path) -> Result<EventsFile> {
+    if !path.exists() {
+        return Ok(EventsFile::default());
+    }
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read events from {}", path.display()))?;
+    toml::from_str(&text).with_context(|| format!("failed to parse events from {}", path.display()))
+}
+
+fn read_messages_file(path: &std::path::Path) -> Result<MessagesFile> {
+    if !path.exists() {
+        return Ok(MessagesFile::default());
+    }
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read messages from {}", path.display()))?;
+    toml::from_str(&text)
+        .with_context(|| format!("failed to parse messages from {}", path.display()))
 }
 
 #[cfg(test)]
@@ -658,7 +674,7 @@ current_phase = "IdeaInput"
             state.append_message(&msg).unwrap();
 
             // Verify file exists and contains the message
-            let path = session_dir("test-msg-session").join("messages.jsonl");
+            let path = session_dir("test-msg-session").join("messages.toml");
             assert!(path.exists());
             let content = std::fs::read_to_string(&path).unwrap();
             assert!(content.contains("Exploring code"));
@@ -705,10 +721,18 @@ current_phase = "IdeaInput"
             let state = SessionState::new("test-sender-msg".to_string());
             state.save().unwrap();
             let dir = session_dir("test-sender-msg");
-            let path = dir.join("messages.jsonl");
+            let path = dir.join("messages.toml");
             std::fs::write(
                 &path,
-                r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","sender":{"Agent":{"model":"gpt-5","vendor":"openai"}},"text":"hello"}
+                r#"[[messages]]
+ts = "2026-04-24T00:00:00Z"
+run_id = 1
+kind = "Brief"
+text = "hello"
+
+[messages.sender.Agent]
+model = "gpt-5"
+vendor = "openai"
 "#,
             )
             .unwrap();
@@ -716,18 +740,12 @@ current_phase = "IdeaInput"
             let loaded = SessionState::load_messages("test-sender-msg").unwrap();
             assert_eq!(loaded.len(), 1);
 
-            let serialized = serde_json::to_value(&loaded[0]).unwrap();
             assert_eq!(
-                serialized
-                    .pointer("/sender/Agent/model")
-                    .and_then(serde_json::Value::as_str),
-                Some("gpt-5")
-            );
-            assert_eq!(
-                serialized
-                    .pointer("/sender/Agent/vendor")
-                    .and_then(serde_json::Value::as_str),
-                Some("openai")
+                loaded[0].sender,
+                MessageSender::Agent {
+                    model: "gpt-5".to_string(),
+                    vendor: "openai".to_string(),
+                }
             );
         });
     }
@@ -738,10 +756,15 @@ current_phase = "IdeaInput"
             let state = SessionState::new("test-started-msg".to_string());
             state.save().unwrap();
             let dir = session_dir("test-started-msg");
-            let path = dir.join("messages.jsonl");
+            let path = dir.join("messages.toml");
             std::fs::write(
                 &path,
-                r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Started","sender":"System","text":"agent started · gpt-5 (openai)"}
+                r#"[[messages]]
+ts = "2026-04-24T00:00:00Z"
+run_id = 1
+kind = "Started"
+sender = "System"
+text = "agent started · gpt-5 (openai)"
 "#,
             )
             .unwrap();
@@ -749,32 +772,22 @@ current_phase = "IdeaInput"
             let loaded = SessionState::load_messages("test-started-msg").unwrap();
             assert_eq!(loaded.len(), 1);
             assert_eq!(loaded[0].text, "agent started · gpt-5 (openai)");
-            let serialized = serde_json::to_value(&loaded[0]).unwrap();
-            assert_eq!(
-                serialized.get("kind").and_then(serde_json::Value::as_str),
-                Some("Started")
-            );
+            assert_eq!(loaded[0].kind, MessageKind::Started);
         });
     }
 
     #[test]
-    fn test_load_messages_with_corrupt_line() {
+    fn test_load_messages_rejects_old_jsonl() {
         with_temp_root(|| {
             let state = SessionState::new("test-corrupt-msg".to_string());
             state.save().unwrap();
 
-            // Manually write messages.jsonl with one corrupt line
             let dir = session_dir("test-corrupt-msg");
             let path = dir.join("messages.jsonl");
-            std::fs::write(&path, r#"{"ts":"2026-04-24T00:00:00Z","run_id":1,"kind":"Brief","sender":{"Agent":{"model":"gpt-5","vendor":"openai"}},"text":"Good"}
-{corrupt json line here}
-{"ts":"2026-04-24T00:01:00Z","run_id":1,"kind":"End","sender":"System","text":"done"}
-"#).unwrap();
+            std::fs::write(&path, r#"{"text":"old"}"#).unwrap();
 
-            let loaded = SessionState::load_messages("test-corrupt-msg").unwrap();
-            assert_eq!(loaded.len(), 2); // Corrupt line skipped
-            assert_eq!(loaded[0].text, "Good");
-            assert_eq!(loaded[1].text, "done");
+            let err = SessionState::load_messages("test-corrupt-msg").unwrap_err();
+            assert!(format!("{err:#}").contains("unsupported old JSON/JSONL"));
         });
     }
 

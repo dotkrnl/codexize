@@ -5,11 +5,12 @@ use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ReviewStatus {
-    Done,
+    Approved,
     Revise,
-    Blocked,
+    HumanBlocked,
+    AgentPivot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,18 +25,26 @@ pub struct ReviewVerdict {
 
 /// Parse and validate a review TOML file.
 pub fn validate(path: &Path) -> Result<ReviewVerdict> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     let parsed: ReviewVerdict = toml::from_str(&text)
         .with_context(|| format!("malformed review TOML in {}", path.display()))?;
 
     if parsed.summary.trim().is_empty() {
         bail!("summary is empty");
     }
-    if matches!(parsed.status, ReviewStatus::Revise | ReviewStatus::Blocked)
-        && parsed.feedback.is_empty()
+    if parsed.status == ReviewStatus::Approved && !parsed.new_tasks.is_empty() {
+        bail!("status=approved must not include new_tasks");
+    }
+    if matches!(
+        parsed.status,
+        ReviewStatus::Revise | ReviewStatus::HumanBlocked | ReviewStatus::AgentPivot
+    ) && parsed.feedback.is_empty()
     {
-        bail!("status={:?} requires at least one feedback item", parsed.status);
+        bail!(
+            "status={:?} requires at least one feedback item",
+            parsed.status
+        );
     }
     // Validate each new_task has the required fields (reuse tasks::validate-like check)
     for (i, t) in parsed.new_tasks.iter().enumerate() {

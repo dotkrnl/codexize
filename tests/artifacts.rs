@@ -1,18 +1,22 @@
 use std::fs;
 use tempfile::tempdir;
 
-use codexize::artifacts::{ArtifactKind, Implementation, SkipToImplProposal, Spec};
+use codexize::artifacts::{ArtifactKind, SkipProposalStatus, SkipToImplProposal, Spec};
 use codexize::synthetic_artifacts::generate_synthetic_artifacts;
 use codexize::tasks::TasksFile;
 
 #[test]
 fn read_skip_to_impl_proposal_success() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    let path = dir.path().join("skip_to_impl.json");
-    fs::write(&path, r#"{ "proposed": true, "rationale": "Test rationale" }"#)?;
+    let path = dir.path().join("skip_proposal.toml");
+    fs::write(
+        &path,
+        "proposed = true\nstatus = \"skip_to_impl\"\nrationale = \"Test rationale\"\n",
+    )?;
 
     let proposal = SkipToImplProposal::read_from_path(&path)?.expect("expected proposal");
     assert!(proposal.proposed);
+    assert_eq!(proposal.status, SkipProposalStatus::SkipToImpl);
     assert_eq!(proposal.rationale, "Test rationale");
     Ok(())
 }
@@ -20,11 +24,15 @@ fn read_skip_to_impl_proposal_success() -> anyhow::Result<()> {
 #[test]
 fn read_skip_to_impl_proposal_not_proposed() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    let path = dir.path().join("skip_to_impl.json");
-    fs::write(&path, r#"{ "proposed": false, "rationale": "" }"#)?;
+    let path = dir.path().join("skip_proposal.toml");
+    fs::write(
+        &path,
+        "proposed = false\nstatus = \"nothing_to_do\"\nrationale = \"\"\n",
+    )?;
 
     let proposal = SkipToImplProposal::read_from_path(&path)?.expect("expected proposal");
     assert!(!proposal.proposed);
+    assert_eq!(proposal.status, SkipProposalStatus::NothingToDo);
     assert_eq!(proposal.rationale, "");
     Ok(())
 }
@@ -32,33 +40,38 @@ fn read_skip_to_impl_proposal_not_proposed() -> anyhow::Result<()> {
 #[test]
 fn read_skip_to_impl_proposal_missing_file() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    let path = dir.path().join("skip_to_impl.json");
+    let path = dir.path().join("skip_proposal.toml");
     assert!(SkipToImplProposal::read_from_path(&path)?.is_none());
     Ok(())
 }
 
 #[test]
-fn read_skip_to_impl_proposal_malformed_json() {
+fn read_skip_to_impl_proposal_rejects_json() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("skip_to_impl.json");
-    fs::write(&path, r#"{ "proposed": true, "rationale": "#).unwrap();
+    let path = dir.path().join("skip_proposal.toml");
+    fs::write(&path, r#"{ "proposed": true, "rationale": "old" }"#).unwrap();
     assert!(SkipToImplProposal::read_from_path(&path).is_err());
 }
 
 #[test]
 fn read_skip_to_impl_proposal_empty_rationale_when_proposed() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("skip_to_impl.json");
-    fs::write(&path, r#"{ "proposed": true, "rationale": "" }"#).unwrap();
+    let path = dir.path().join("skip_proposal.toml");
+    fs::write(
+        &path,
+        "proposed = true\nstatus = \"skip_to_impl\"\nrationale = \"\"\n",
+    )
+    .unwrap();
     assert!(SkipToImplProposal::read_from_path(&path).is_err());
 }
 
 #[test]
 fn read_skip_to_impl_proposal_long_rationale() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("skip_to_impl.json");
+    let path = dir.path().join("skip_proposal.toml");
     let long_rationale = "a".repeat(501);
-    let content = format!(r#"{{ "proposed": true, "rationale": "{long_rationale}" }}"#);
+    let content =
+        format!("proposed = true\nstatus = \"skip_to_impl\"\nrationale = \"{long_rationale}\"\n");
     fs::write(&path, content).unwrap();
     assert!(SkipToImplProposal::read_from_path(&path).is_err());
 }
@@ -89,11 +102,7 @@ fn generate_synthetic_artifacts_writes_expected_files() -> anyhow::Result<()> {
     assert!(!tasks_file.tasks[0].spec_refs.is_empty());
     assert!(!tasks_file.tasks[0].plan_refs.is_empty());
 
-    let impl_content = fs::read_to_string(artifacts.join(ArtifactKind::Implementation.filename()))?;
-    let implementation: Implementation = serde_json::from_str(&impl_content)?;
-    assert_eq!(implementation.current_task_id, 1);
-    assert_eq!(implementation.current_round, 1);
-    assert_eq!(implementation.remaining_tasks, vec![1]);
+    assert!(!artifacts.join("implementation.json").exists());
 
     Ok(())
 }

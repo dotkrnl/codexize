@@ -77,14 +77,15 @@ impl VisibleNodeRow {
 }
 
 pub fn build_tree(state: &SessionState) -> Vec<Node> {
-    let mut nodes = Vec::new();
-    nodes.push(build_idea_node(state));
-    nodes.push(build_simple_stage(state, "brainstorm", "Brainstorm"));
-    nodes.push(build_review_stage(state, "spec-review", "Spec Review"));
-    nodes.push(build_simple_stage(state, "planning", "Planning"));
-    nodes.push(build_review_stage(state, "plan-review", "Plan Review"));
-    nodes.push(build_simple_stage(state, "sharding", "Sharding"));
-    nodes.push(build_builder_stage(state));
+    let mut nodes = vec![
+        build_idea_node(state),
+        build_simple_stage(state, "brainstorm", "Brainstorm"),
+        build_review_stage(state, "spec-review", "Spec Review"),
+        build_simple_stage(state, "planning", "Planning"),
+        build_review_stage(state, "plan-review", "Plan Review"),
+        build_simple_stage(state, "sharding", "Sharding"),
+        build_builder_stage(state),
+    ];
     for node in &mut nodes {
         collapse_tree(node);
     }
@@ -118,7 +119,13 @@ pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
 #[cfg(test)]
 pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
     let mut rows = Vec::new();
-    flatten_rows(nodes, &mut Vec::new(), &mut Vec::new(), &mut rows, &mut |_| true);
+    flatten_rows(
+        nodes,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut rows,
+        &mut |_| true,
+    );
     rows
 }
 
@@ -210,7 +217,10 @@ fn best_active_descendant_path(
     let mut candidates = Vec::new();
     collect_leaf_candidates(stage, stage_path, run_lookup, &mut candidates);
     candidates.sort_by(|left, right| right.cmp(left));
-    candidates.into_iter().next().map(|candidate| candidate.path)
+    candidates
+        .into_iter()
+        .next()
+        .map(|candidate| candidate.path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -690,18 +700,18 @@ fn stage_status_from_runs(
     if runs.iter().any(|r| r.status == RunStatus::Running) {
         return NodeStatus::Running;
     }
-    let phase_matches = match (stage_key, state.current_phase) {
-        ("brainstorm", Phase::BrainstormRunning) => true,
-        ("spec-review", Phase::SpecReviewRunning) => true,
-        ("spec-review", Phase::SpecReviewPaused) => true,
-        ("planning", Phase::PlanningRunning) => true,
-        ("plan-review", Phase::PlanReviewRunning) => true,
-        ("plan-review", Phase::PlanReviewPaused) => true,
-        ("sharding", Phase::ShardingRunning) => true,
-        ("coder", Phase::ImplementationRound(_)) => true,
-        ("reviewer", Phase::ReviewRound(_)) => true,
-        _ => false,
-    };
+    let phase_matches = matches!(
+        (stage_key, state.current_phase),
+        ("brainstorm", Phase::BrainstormRunning)
+            | ("spec-review", Phase::SpecReviewRunning)
+            | ("spec-review", Phase::SpecReviewPaused)
+            | ("planning", Phase::PlanningRunning)
+            | ("plan-review", Phase::PlanReviewRunning)
+            | ("plan-review", Phase::PlanReviewPaused)
+            | ("sharding", Phase::ShardingRunning)
+            | ("coder", Phase::ImplementationRound(_))
+            | ("reviewer", Phase::ReviewRound(_))
+    );
     if phase_matches && state.agent_error.is_some() {
         return NodeStatus::Failed;
     }
@@ -756,7 +766,10 @@ fn stage_status_from_runs(
         // ever running them. Surface that as Skipped (yellow) rather than Done
         // (green) so the user sees a clear "this was bypassed" signal.
         if state.skip_to_impl_kind.is_some()
-            && matches!(stage_key, "spec-review" | "planning" | "plan-review" | "sharding")
+            && matches!(
+                stage_key,
+                "spec-review" | "planning" | "plan-review" | "sharding"
+            )
         {
             return NodeStatus::Skipped;
         }
@@ -864,6 +877,7 @@ pub fn collapse_tree(node: &mut Node) {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -1414,10 +1428,6 @@ pub fn current_node_index(nodes: &[Node]) -> usize {
             )
         })
         .or_else(|| nodes.iter().position(|n| n.status == NodeStatus::Pending))
-        .or_else(|| {
-            nodes
-                .iter()
-                .rposition(|n| n.status == NodeStatus::Done)
-        })
+        .or_else(|| nodes.iter().rposition(|n| n.status == NodeStatus::Done))
         .unwrap_or(0)
 }

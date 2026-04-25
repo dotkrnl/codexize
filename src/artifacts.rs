@@ -3,23 +3,29 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum SkipToImplKind {
+pub enum SkipProposalStatus {
     #[default]
     SkipToImpl,
     NothingToDo,
 }
 
+pub type SkipToImplKind = SkipProposalStatus;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkipToImplProposal {
     pub proposed: bool,
     #[serde(default)]
-    pub kind: SkipToImplKind,
+    pub status: SkipProposalStatus,
     pub rationale: String,
 }
 
 impl SkipToImplProposal {
     pub fn new(proposed: bool, rationale: String) -> Self {
-        Self { proposed, kind: SkipToImplKind::SkipToImpl, rationale }
+        Self {
+            proposed,
+            status: SkipProposalStatus::SkipToImpl,
+            rationale,
+        }
     }
 
     /// Read the skip-to-implementation proposal artifact from `path`.
@@ -32,7 +38,9 @@ impl SkipToImplProposal {
             return Ok(None);
         }
         let content = std::fs::read_to_string(path)?;
-        let proposal: Self = serde_json::from_str(&content)?;
+        let proposal: Self = toml::from_str(&content).map_err(|err| {
+            anyhow::anyhow!("unsupported old JSON/JSONL artifact or malformed TOML: {err}")
+        })?;
         proposal.validate()?;
         Ok(Some(proposal))
     }
@@ -48,6 +56,105 @@ impl SkipToImplProposal {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionArtifact {
+    pub id: String,
+    pub created_at: String,
+    pub operator: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MessagesArtifact {
+    #[serde(default)]
+    pub messages: Vec<MessageArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageArtifact {
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct EventsArtifact {
+    #[serde(default)]
+    pub events: Vec<EventArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventArtifact {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(default)]
+    pub payload: toml::map::Map<String, toml::Value>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactRef {
+    pub path: String,
+    pub lines: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskArtifact {
+    pub id: u32,
+    pub title: String,
+    pub description: String,
+    pub test: String,
+    pub estimated_tokens: u32,
+    #[serde(default)]
+    pub spec_refs: Vec<ArtifactRef>,
+    #[serde(default)]
+    pub plan_refs: Vec<ArtifactRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TasksArtifact {
+    pub tasks: Vec<TaskArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewScopeArtifact {
+    pub base_sha: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    Approved,
+    Revise,
+    HumanBlocked,
+    AgentPivot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewArtifact {
+    pub status: ReviewStatus,
+    pub summary: String,
+    #[serde(default)]
+    pub feedback: Vec<String>,
+    #[serde(default)]
+    pub new_tasks: Vec<TaskArtifact>,
+}
+
+pub type SpecReviewArtifact = ReviewArtifact;
+pub type PlanReviewArtifact = ReviewArtifact;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryArtifact {
+    pub status: ReviewStatus,
+    pub trigger: ReviewStatus,
+    pub interactive: bool,
+    pub summary: String,
+    #[serde(default)]
+    pub feedback: Vec<String>,
+    #[serde(default)]
+    pub changed_files: Vec<String>,
+}
+
 /// Minimal Spec representation used by synthetic-artifact generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Spec {
@@ -57,14 +164,6 @@ pub struct Spec {
     pub spec_refs: Vec<String>,
 }
 
-/// Minimal implementation-pointer artifact written alongside synthetic plan/tasks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct Implementation {
-    pub current_task_id: u32,
-    pub current_round: u32,
-    pub remaining_tasks: Vec<u32>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     Spec,
@@ -72,7 +171,6 @@ pub enum ArtifactKind {
     Plan,
     PlanReview,
     CodeReview,
-    Implementation,
     Tasks,
     SkipToImpl,
 }
@@ -81,13 +179,68 @@ impl ArtifactKind {
     pub fn filename(&self) -> &'static str {
         match self {
             ArtifactKind::Spec => "spec.md",
-            ArtifactKind::SpecReview => "spec_review.md",
+            ArtifactKind::SpecReview => "spec_review.toml",
             ArtifactKind::Plan => "plan.md",
-            ArtifactKind::PlanReview => "plan_review.md",
-            ArtifactKind::CodeReview => "code_review.md",
-            ArtifactKind::Implementation => "implementation.json",
+            ArtifactKind::PlanReview => "plan_review.toml",
+            ArtifactKind::CodeReview => "review.toml",
             ArtifactKind::Tasks => "tasks.toml",
-            ArtifactKind::SkipToImpl => "skip_to_impl.json",
+            ArtifactKind::SkipToImpl => "skip_proposal.toml",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_artifact_round_trips_as_toml() {
+        let artifact = SessionArtifact {
+            id: "20260424-233547".to_string(),
+            created_at: "2026-04-24T23:35:47Z".to_string(),
+            operator: "dotkrnl".to_string(),
+            status: "running".to_string(),
+        };
+
+        let encoded = toml::to_string(&artifact).expect("encode session");
+        assert!(encoded.contains("id = \"20260424-233547\""));
+        let decoded: SessionArtifact = toml::from_str(&encoded).expect("decode session");
+        assert_eq!(decoded.id, artifact.id);
+    }
+
+    #[test]
+    fn round_artifacts_round_trip_as_toml() {
+        let review_scope = ReviewScopeArtifact {
+            base_sha: "abc123".to_string(),
+        };
+        let encoded = toml::to_string(&review_scope).expect("encode review scope");
+        let decoded: ReviewScopeArtifact = toml::from_str(&encoded).expect("decode review scope");
+        assert_eq!(decoded.base_sha, "abc123");
+
+        let review = ReviewArtifact {
+            status: ReviewStatus::Revise,
+            summary: "needs split".to_string(),
+            feedback: vec!["split the work".to_string()],
+            new_tasks: vec![TaskArtifact {
+                id: 2,
+                title: "Split work".to_string(),
+                description: "Do less at once.".to_string(),
+                test: "cargo test".to_string(),
+                estimated_tokens: 1000,
+                spec_refs: vec![],
+                plan_refs: vec![],
+            }],
+        };
+        let encoded = toml::to_string(&review).expect("encode review");
+        let decoded: ReviewArtifact = toml::from_str(&encoded).expect("decode review");
+        assert_eq!(decoded.status, ReviewStatus::Revise);
+        assert_eq!(decoded.new_tasks.len(), 1);
+    }
+
+    #[test]
+    fn json_artifacts_are_rejected_by_toml_parsers() {
+        let json = r#"{ "status": "approved", "summary": "old json" }"#;
+        let error = toml::from_str::<ReviewArtifact>(json).expect_err("json must fail");
+        assert!(error.to_string().contains("TOML"));
     }
 }

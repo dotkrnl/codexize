@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::artifacts::{ArtifactKind, Implementation, Spec};
+use crate::artifacts::{ArtifactKind, Spec};
 use crate::tasks::{Ref, Task, TasksFile};
 
-/// Write synthetic plan/tasks/implementation artifacts into `<session_dir>/artifacts/`
+/// Write synthetic plan/tasks artifacts into `<session_dir>/artifacts/`
 /// so the downstream builder flow can proceed as if sharding produced a single task.
 pub fn generate_synthetic_artifacts(session_dir: &Path, spec: &Spec) -> Result<()> {
     let artifacts_dir = session_dir.join("artifacts");
@@ -33,7 +33,10 @@ simple enough to skip the usual planning and sharding phases.\n\n\
     } else {
         spec.spec_refs
             .iter()
-            .map(|s| Ref { path: s.clone(), lines: "all".to_string() })
+            .map(|s| Ref {
+                path: s.clone(),
+                lines: "all".to_string(),
+            })
             .collect()
     };
     let task = Task {
@@ -55,15 +58,31 @@ simple enough to skip the usual planning and sharding phases.\n\n\
     fs::write(&tasks_path, tasks_content)
         .with_context(|| format!("writing {}", tasks_path.display()))?;
 
-    let impl_path = artifacts_dir.join(ArtifactKind::Implementation.filename());
-    let implementation_stub = Implementation {
-        current_task_id: 1,
-        current_round: 1,
-        remaining_tasks: vec![1],
-    };
-    let impl_content = serde_json::to_string_pretty(&implementation_stub)?;
-    fs::write(&impl_path, impl_content)
-        .with_context(|| format!("writing {}", impl_path.display()))?;
-
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_synthetic_artifacts_writes_toml_without_implementation_json() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let spec = Spec {
+            content: "spec".to_string(),
+            spec_refs: vec!["artifacts/spec.md".to_string()],
+        };
+
+        generate_synthetic_artifacts(dir.path(), &spec).expect("generate artifacts");
+
+        let artifacts = dir.path().join("artifacts");
+        assert!(artifacts.join("plan.md").exists());
+        assert!(artifacts.join("tasks.toml").exists());
+        assert!(!artifacts.join("implementation.json").exists());
+
+        let tasks = std::fs::read_to_string(artifacts.join("tasks.toml")).expect("tasks");
+        let parsed: crate::tasks::TasksFile = toml::from_str(&tasks).expect("valid TOML tasks");
+        assert_eq!(parsed.tasks.len(), 1);
+        assert_eq!(parsed.tasks[0].id, 1);
+    }
 }

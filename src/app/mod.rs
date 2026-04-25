@@ -11,6 +11,7 @@ use crate::{
         AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive,
         window_name_with_model,
     },
+    artifacts::{ArtifactKind, SkipToImplProposal, Spec},
     cache, review,
     selection::{
         self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review,
@@ -22,9 +23,8 @@ use crate::{
     tasks, tmux,
     tmux::TmuxContext,
     tui::AppTerminal,
-    artifacts::{ArtifactKind, SkipToImplProposal, Spec},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
 
 use self::{
@@ -42,6 +42,9 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+
+type RetryKey = (String, Option<u32>, u32);
+type FailedModelSet = HashSet<(VendorKind, String)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpansionOverride {
@@ -99,7 +102,7 @@ pub struct App {
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,
     current_run_id: Option<u64>,
-    failed_models: HashMap<(String, Option<u32>, u32), HashSet<(VendorKind, String)>>,
+    failed_models: HashMap<RetryKey, FailedModelSet>,
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
@@ -143,11 +146,8 @@ impl App {
                 .join("artifacts")
                 .join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
-                state.builder.task_titles = parsed
-                    .tasks
-                    .into_iter()
-                    .map(|t| (t.id, t.title))
-                    .collect();
+                state.builder.task_titles =
+                    parsed.tasks.into_iter().map(|t| (t.id, t.title)).collect();
             }
         }
         let nodes = build_tree(&state);
@@ -238,9 +238,7 @@ impl App {
         app
     }
 
-    fn rebuild_failed_models(
-        state: &SessionState,
-    ) -> HashMap<(String, Option<u32>, u32), HashSet<(VendorKind, String)>> {
+    fn rebuild_failed_models(state: &SessionState) -> HashMap<RetryKey, FailedModelSet> {
         let mut failed_models = HashMap::new();
         let cutoff = state.builder.retry_reset_run_id_cutoff;
         for run in state
@@ -357,7 +355,10 @@ impl App {
         }
 
         self.selected = previous_selected.min(self.visible_rows.len().saturating_sub(1));
-        self.selected_key = self.visible_rows.get(self.selected).map(|row| row.key.clone());
+        self.selected_key = self
+            .visible_rows
+            .get(self.selected)
+            .map(|row| row.key.clone());
     }
 
     fn rebuild_tree_view(&mut self, preferred_key: Option<NodeKey>) {
@@ -520,7 +521,9 @@ impl App {
             return Ok(());
         }
 
-        let spec_path = session_dir.join("artifacts").join(ArtifactKind::Spec.filename());
+        let spec_path = session_dir
+            .join("artifacts")
+            .join(ArtifactKind::Spec.filename());
         let spec_content = std::fs::read_to_string(&spec_path)
             .with_context(|| format!("cannot read {}", spec_path.display()))?;
         let parsed_spec = Spec {
@@ -536,7 +539,11 @@ impl App {
             .with_context(|| format!("invalid {}", tasks_path.display()))?;
 
         self.state.builder.pending = parsed_tasks.tasks.iter().map(|task| task.id).collect();
-        self.state.builder.task_titles = parsed_tasks.tasks.iter().map(|t| (t.id, t.title.clone())).collect();
+        self.state.builder.task_titles = parsed_tasks
+            .tasks
+            .iter()
+            .map(|t| (t.id, t.title.clone()))
+            .collect();
         self.state.builder.current_task = None;
         self.state.builder.done.clear();
         self.state.builder.iteration = 0;
@@ -578,8 +585,10 @@ impl App {
             Phase::ImplementationRound(r) | Phase::ReviewRound(r) => session_dir
                 .join("rounds")
                 .join(format!("{r:03}"))
-                .join("task.md"),
-            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser | Phase::SkipToImplPending => return None,
+                .join("task.toml"),
+            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser | Phase::SkipToImplPending => {
+                return None;
+            }
         };
         if path.exists() { Some(path) } else { None }
     }
@@ -630,11 +639,7 @@ impl App {
             if let Some(run) = running {
                 kill_window(&run.window_name);
                 if run.status == crate::state::RunStatus::Running {
-                    self.finalize_run_record(
-                        run_id,
-                        false,
-                        Some("aborted by user".to_string()),
-                    );
+                    self.finalize_run_record(run_id, false, Some("aborted by user".to_string()));
                 }
             }
         }
@@ -725,7 +730,7 @@ impl App {
             }
             Phase::SkipToImplPending => {
                 kill_window("[Skip Confirm]");
-                let _ = fs::remove_file(artifacts.join("skip_to_impl.json"));
+                let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
                 self.state.skip_to_impl_rationale = None;
                 self.state.skip_to_impl_kind = None;
                 self.state.agent_error = None;
@@ -914,37 +919,37 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Capture HEAD at round start so the reviewer can inspect `base..HEAD`.
+    /// Capture HEAD at round start so the reviewer can inspect `base_sha..HEAD`.
     /// Idempotent on resume: the original base is preserved.
     fn capture_round_base(&self, round_dir: &std::path::Path) {
-        let base_file = round_dir.join("base.txt");
-        if base_file.exists() {
+        let scope_file = round_dir.join("review_scope.toml");
+        if scope_file.exists() {
             return;
         }
-        if let Some(parent) = base_file.parent() {
+        if let Some(parent) = scope_file.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            let _ = std::fs::write(&base_file, "test-base");
+            let _ = std::fs::write(&scope_file, "base_sha = \"test-base\"\n");
             return;
         }
         if let Some(sha) = git_rev_parse_head() {
-            let _ = std::fs::write(&base_file, sha);
+            let _ = std::fs::write(&scope_file, format!("base_sha = \"{sha}\"\n"));
         }
     }
 
     fn coder_gate_reason(&self, round_dir: &std::path::Path) -> Option<String> {
-        let base_file = round_dir.join("base.txt");
+        let scope_file = round_dir.join("review_scope.toml");
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return (!Self::artifact_present(&base_file)).then(|| "base_missing".to_string());
+            return (!Self::artifact_present(&scope_file)).then(|| "base_missing".to_string());
         }
-        if !Self::artifact_present(&base_file) {
+        if !Self::artifact_present(&scope_file) {
             return Some("base_missing".to_string());
         }
-        let base = match std::fs::read_to_string(&base_file) {
-            Ok(s) => s.trim().to_string(),
+        let base = match read_review_scope_base_sha(&scope_file) {
+            Ok(s) => s,
             Err(_) => return Some("base_missing".to_string()),
         };
         if base.is_empty() {
@@ -1062,13 +1067,13 @@ impl App {
         // guard is still enforced, but verify_non_coder now auto-stashes
         // stray changes instead of failing the run.
         if has_artifact_check && artifact_reason.is_none() {
-            if let Some(code) = self.read_exit_status_code(run) {
-                if code != 0 {
-                    let _ = self.state.log_event(format!(
-                        "run {} ({}) exited {code} but produced a valid artifact; treating as success",
-                        run.id, run.stage
-                    ));
-                }
+            if let Some(code) = self.read_exit_status_code(run)
+                && code != 0
+            {
+                let _ = self.state.log_event(format!(
+                    "run {} ({}) exited {code} but produced a valid artifact; treating as success",
+                    run.id, run.stage
+                ));
             }
             let _ = self.enforce_run_guard(run);
             return Ok(None);
@@ -1076,13 +1081,13 @@ impl App {
 
         // No artifact (unknown stage) or artifact missing/invalid: exit code
         // takes precedence so the operator sees the real failure first.
-        if let Some(code) = self.read_exit_status_code(run) {
-            if code != 0 {
-                if code > 128 {
-                    return Ok(Some(format!("killed({})", code - 128)));
-                }
-                return Ok(Some(format!("exit({code})")));
+        if let Some(code) = self.read_exit_status_code(run)
+            && code != 0
+        {
+            if code > 128 {
+                return Ok(Some(format!("killed({})", code - 128)));
             }
+            return Ok(Some(format!("exit({code})")));
         }
 
         // Guard reason beats artifact reason (coder control-file edits are a
@@ -1190,10 +1195,10 @@ impl App {
             return;
         }
         // Keep spinning while the stall is under 30s; freeze after that.
-        if let Some(last) = self.agent_last_change {
-            if now.duration_since(last) < Duration::from_secs(30) {
-                self.spinner_tick = self.spinner_tick.wrapping_add(1);
-            }
+        if let Some(last) = self.agent_last_change
+            && now.duration_since(last) < Duration::from_secs(30)
+        {
+            self.spinner_tick = self.spinner_tick.wrapping_add(1);
         }
     }
 
@@ -1544,7 +1549,7 @@ impl App {
         if let Some(vendor) = last_failed_vendor {
             self.failed_models
                 .entry(key.clone())
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert((vendor, failed_run.model.clone()));
         }
 
@@ -1648,7 +1653,7 @@ impl App {
                     Ok(p) => p,
                     Err(err) => {
                         let _ = self.state.log_event(format!(
-                            "warning: skip_to_impl.json malformed or invalid, falling through to spec review: {err:#}"
+                            "warning: skip_proposal.toml malformed or invalid, falling through to spec review: {err:#}"
                         ));
                         None
                     }
@@ -1660,7 +1665,7 @@ impl App {
                 match proposal {
                     Some(p) if p.proposed => {
                         self.state.skip_to_impl_rationale = Some(p.rationale);
-                        self.state.skip_to_impl_kind = Some(p.kind);
+                        self.state.skip_to_impl_kind = Some(p.status);
                         self.transition_to_phase(Phase::SkipToImplPending)?;
                     }
                     _ => {
@@ -1722,10 +1727,10 @@ impl App {
                         let summary_text = verdict.summary.trim();
                         if !summary_text.is_empty() {
                             let kind = match verdict.status {
-                                review::ReviewStatus::Done => MessageKind::Summary,
-                                review::ReviewStatus::Revise | review::ReviewStatus::Blocked => {
-                                    MessageKind::SummaryWarn
-                                }
+                                review::ReviewStatus::Approved => MessageKind::Summary,
+                                review::ReviewStatus::Revise
+                                | review::ReviewStatus::HumanBlocked
+                                | review::ReviewStatus::AgentPivot => MessageKind::SummaryWarn,
                             };
                             let msg = Message {
                                 ts: chrono::Utc::now(),
@@ -1751,7 +1756,7 @@ impl App {
                         self.state.builder.last_verdict =
                             Some(format!("{:?}", verdict.status).to_lowercase());
                         match verdict.status {
-                            review::ReviewStatus::Done => {
+                            review::ReviewStatus::Approved => {
                                 if let Some(task_id) = self.state.builder.current_task.take() {
                                     self.state.builder.done.push(task_id);
                                 }
@@ -1764,12 +1769,12 @@ impl App {
                                 }
                             }
                             review::ReviewStatus::Revise => {
-                                // REVIEWER: spec does not define whether revise should reuse the
-                                // same round or advance. We advance to the next round to preserve
-                                // round-as-iteration semantics from the builder flow.
+                                // REVIEWER: full revise/new_tasks routing is handled by later queue work;
+                                // this schema migration preserves the existing retry iteration behavior.
                                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
                             }
-                            review::ReviewStatus::Blocked => {
+                            review::ReviewStatus::HumanBlocked
+                            | review::ReviewStatus::AgentPivot => {
                                 let summary = verdict.feedback.join("\n");
                                 let trigger_summary =
                                     (!summary.trim().is_empty()).then_some(summary);
@@ -1856,7 +1861,11 @@ impl App {
             .join("spec.md");
 
         let _ = std::fs::remove_file(&spec_path);
-        let _ = std::fs::remove_file(session_state::session_dir(session_id).join("artifacts").join("skip_to_impl.json"));
+        let _ = std::fs::remove_file(
+            session_state::session_dir(session_id)
+                .join("artifacts")
+                .join(ArtifactKind::SkipToImpl.filename()),
+        );
 
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -1972,8 +1981,7 @@ impl App {
                         .iter()
                         .filter(|run| {
                             (run.stage == "brainstorm"
-                                || (run.stage == "spec-review"
-                                    && run.round == round))
+                                || (run.stage == "spec-review" && run.round == round))
                                 && run.status == RunStatus::Done
                         })
                         .cloned()
@@ -2165,8 +2173,7 @@ impl App {
                         .iter()
                         .filter(|run| {
                             (run.stage == "planning"
-                                || (run.stage == "plan-review"
-                                    && run.round == round))
+                                || (run.stage == "plan-review" && run.round == round))
                                 && run.status == RunStatus::Done
                         })
                         .cloned()
@@ -2420,11 +2427,11 @@ impl App {
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
-        let task_file = round_dir.join("task.md");
+        let task_file = round_dir.join("task.toml");
 
         if !task_file.exists() {
-            let body = task_body_for(&session_dir, task_id).unwrap_or_else(|e| {
-                format!("(task body could not be loaded: {e})\n\nTask id: {task_id}\n")
+            let body = task_toml_for(&session_dir, task_id).unwrap_or_else(|e| {
+                format!("# task body could not be loaded: {e}\nid = {task_id}\n")
             });
             let _ = std::fs::write(&task_file, body);
         }
@@ -2511,30 +2518,10 @@ impl App {
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let review_path = round_dir.join("review.toml");
-        let base_file = round_dir.join("base.txt");
-        let commits_file = round_dir.join("commits.txt");
-        let task_file = round_dir.join("task.md");
+        let review_scope_file = round_dir.join("review_scope.toml");
+        let task_file = round_dir.join("task.toml");
 
         let _ = std::fs::remove_file(&review_path);
-
-        // Pre-compute the SHA list in base..HEAD so the reviewer can glance at it
-        // without shelling out. Skipped in test mode (no real git).
-        #[cfg(not(test))]
-        if let Ok(base) = std::fs::read_to_string(&base_file) {
-            let base = base.trim();
-            if !base.is_empty() {
-                write_commits_list(&round_dir, base);
-            }
-        }
-        #[cfg(test)]
-        if self.test_launch_harness.is_none() {
-            if let Ok(base) = std::fs::read_to_string(&base_file) {
-                let base = base.trim();
-                if !base.is_empty() {
-                    write_commits_list(&round_dir, base);
-                }
-            }
-        }
 
         let excluded = self
             .state
@@ -2566,8 +2553,7 @@ impl App {
             task_id,
             r,
             &task_file,
-            &base_file,
-            &commits_file,
+            &review_scope_file,
             &review_path,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
@@ -2703,10 +2689,10 @@ impl App {
             return;
         };
         let Ok(mtime) = meta.modified() else { return };
-        if let Some(cached_mtime) = self.live_summary_cached_mtime {
-            if mtime <= cached_mtime {
-                return;
-            }
+        if let Some(cached_mtime) = self.live_summary_cached_mtime
+            && mtime <= cached_mtime
+        {
+            return;
         }
         let stale = mtime
             .elapsed()
@@ -2811,7 +2797,7 @@ fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
     }
 }
 
-fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
+fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
     use anyhow::Context;
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;
@@ -2820,32 +2806,29 @@ fn task_body_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
         .iter()
         .find(|t| t.id == task_id)
         .ok_or_else(|| anyhow::anyhow!("task id {task_id} not found"))?;
-    let refs = |rs: &[crate::tasks::Ref]| -> String {
-        if rs.is_empty() {
-            "(none)".to_string()
-        } else {
-            rs.iter()
-                .map(|r| format!("  - {} lines {}", r.path, r.lines))
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-    };
-    Ok(format!(
-        "# Task {id}: {title}\n\n## Description\n{desc}\n\n## Test\n{test}\n\n## Spec refs\n{specs}\n\n## Plan refs\n{plans}\n\nEstimated effort: ~{tokens} tokens\n",
-        id = task.id,
-        title = task.title,
-        desc = task.description,
-        test = task.test,
-        specs = refs(&task.spec_refs),
-        plans = refs(&task.plan_refs),
-        tokens = task.estimated_tokens,
-    ))
+    toml::to_string_pretty(task).context("serialize task.toml")
+}
+
+fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> {
+    #[derive(serde::Deserialize)]
+    struct ReviewScope {
+        base_sha: String,
+    }
+
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let scope: ReviewScope =
+        toml::from_str(&text).with_context(|| format!("malformed TOML in {}", path.display()))?;
+    let base = scope.base_sha.trim().to_string();
+    if base.is_empty() {
+        anyhow::bail!("base_sha is empty in {}", path.display());
+    }
+    Ok(base)
 }
 
 /// Prepended to every agent prompt. Surfaces project-specific guidance
 /// (CLAUDE.md / AGENTS.md) before the agent acts.
-const PROJECT_DOC_INSTR: &str =
-    "If CLAUDE.md or AGENTS.md exist in the repo, read it first and follow those directions carefully.\n\n";
+const PROJECT_DOC_INSTR: &str = "If CLAUDE.md or AGENTS.md exist in the repo, read it first and follow those directions carefully.\n\n";
 
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
@@ -2947,8 +2930,10 @@ SKIP-TO-IMPLEMENTATION PROPOSAL (optional): after writing the spec, if the task
 is small and self-contained enough that separate planning and sharding phases
 would add no value (e.g. a single-file change, a bug fix with an obvious edit
 site, a trivial refactor), you MAY write a skip proposal to
-`artifacts/skip_to_impl.json` ALONGSIDE the spec. Format:
-    {{"proposed": true, "kind": "skip_to_impl", "rationale": "<=500 chars explaining why"}}
+`artifacts/skip_proposal.toml` ALONGSIDE the spec. Format:
+    proposed = true
+    status = "skip_to_impl"
+    rationale = "<=500 chars explaining why"
 Only emit this when the spec genuinely needs no further breakdown. When in
 doubt, omit the file — the normal spec-review → planning → sharding pipeline
 is the default. If you emit `"proposed": true`, the rationale MUST be a
@@ -3149,6 +3134,7 @@ rejection. Do NOT emit any prose around the TOML.
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recovery_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
@@ -3269,24 +3255,6 @@ fn git_rev_parse_head() -> Option<String> {
     (!sha.is_empty()).then_some(sha)
 }
 
-/// Pre-compute the list of SHAs in `base..HEAD` so the reviewer doesn't need to
-/// shell out. Writes `rounds/NNN/commits.txt` with one SHA per line. No-op in
-/// test mode (no real git) and on any git failure; the reviewer prompt only
-/// references the file when it's useful.
-fn write_commits_list(round_dir: &std::path::Path, base: &str) {
-    let commits_file = round_dir.join("commits.txt");
-    let Ok(output) = std::process::Command::new("git")
-        .args(["log", "--format=%H", &format!("{base}..HEAD")])
-        .output()
-    else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let _ = std::fs::write(&commits_file, output.stdout);
-}
-
 fn coder_prompt(
     session_dir: &std::path::Path,
     task_id: u32,
@@ -3396,8 +3364,7 @@ fn reviewer_prompt(
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
-    base_file: &std::path::Path,
-    commits_file: &std::path::Path,
+    review_scope_file: &std::path::Path,
     review_file: &std::path::Path,
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
@@ -3426,16 +3393,14 @@ fn reviewer_prompt(
 operator. Do NOT modify code. Write ONLY the review TOML.
 
 Inputs:
-  Task:        {task}
-  Spec:        {spec}
-  Plan:        {plan}
-  Base SHA:    {base}     (one SHA = HEAD at round start)
-  Commit list: {commits}  (one SHA per line in base..HEAD; may be empty if
-                           git was unavailable — fall back to `git log` yourself)
+  Task:         {task}
+  Spec:         {spec}
+  Plan:         {plan}
+  Review scope: {review_scope} (TOML with base_sha = HEAD at round start)
 {prior_reviews}
 
 Review:
-  1. BASE=$(cat {base})
+  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' {review_scope})
      `git log --oneline $BASE..HEAD` — every commit in this round.
      `git diff $BASE..HEAD`           — aggregate change.
      `git show <sha>`                 — drill into any commit.
@@ -3458,10 +3423,10 @@ Review:
 Emit the verdict to {review} in EXACTLY this TOML shape (double-quoted strings;
 triple-quoted for multi-line; arrays of inline tables for any new task refs):
 
-    status  = "done" | "revise" | "blocked"
+    status  = "approved" | "revise" | "human_blocked" | "agent_pivot"
     summary = "One-paragraph summary of what was done and your verdict."
     feedback = [
-      "Specific thing to fix, if status is revise/blocked.",
+      "Specific thing to fix, if status is revise/human_blocked/agent_pivot.",
       "One item per string.",
     ]
 
@@ -3477,14 +3442,15 @@ triple-quoted for multi-line; arrays of inline tables for any new task refs):
     plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
 
 Rules:
-  - done    → outcomes delivered AND (tests pass OR task is "not testable" and
-              the code builds cleanly).
-  - revise  → list the specific issues. For complex tasks, also suggest a
-              direction (file/approach/sketch) — do not just reject.
-  - blocked → human judgement required; explain what's unclear.
+  - approved      → outcomes delivered AND (tests pass OR task is "not testable" and
+                    the code builds cleanly). Do not include new_tasks.
+  - revise        → list the specific issues. For complex tasks, also suggest a
+                    direction (file/approach/sketch) — do not just reject.
+  - human_blocked → human judgement required; explain what's unclear.
+  - agent_pivot   → autonomous recovery is required; explain the pivot.
   - Don't repeat feedback from prior reviews unless the coder ignored it
               without good reason — in which case call that out explicitly.
-  - Don't leave feedback empty for revise/blocked, and don't emit prose
+  - Don't leave feedback empty for revise/human_blocked/agent_pivot, and don't emit prose
               outside the TOML.
 {instr}"#,
         task_id = task_id,
@@ -3492,8 +3458,7 @@ Rules:
         task = task_file.display(),
         spec = spec.display(),
         plan = plan.display(),
-        base = base_file.display(),
-        commits = commits_file.display(),
+        review_scope = review_scope_file.display(),
         review = review_file.display(),
         instr = instr,
     )
@@ -3682,7 +3647,12 @@ mod tests {
             app.latch_visible_expansions();
 
             // Mark Brainstorm Done and advance phase.
-            if let Some(run) = app.state.agent_runs.iter_mut().find(|r| r.stage == "brainstorm") {
+            if let Some(run) = app
+                .state
+                .agent_runs
+                .iter_mut()
+                .find(|r| r.stage == "brainstorm")
+            {
                 run.status = RunStatus::Done;
                 run.ended_at = Some(chrono::Utc::now());
             }
@@ -4590,14 +4560,14 @@ mod tests {
     }
 
     #[test]
-    fn review_blocked_enters_builder_recovery() {
+    fn review_human_blocked_enters_builder_recovery() {
         with_temp_root(|| {
             let session_id = "review-blocked-recovery";
             let session_dir = session_state::session_dir(session_id);
             std::fs::create_dir_all(session_dir.join("rounds").join("001")).expect("round dir");
             std::fs::write(
                 session_dir.join("rounds").join("001").join("review.toml"),
-                r#"status = "blocked"
+                r#"status = "human_blocked"
 summary = "needs recovery"
 feedback = ["task 2 is superseded"]
 "#,
@@ -4983,11 +4953,8 @@ estimated_tokens = 1
             let session_dir = session_state::session_dir(session_id);
             let artifacts = session_dir.join("artifacts");
             std::fs::create_dir_all(&artifacts).expect("mk artifacts dir");
-            std::fs::write(
-                artifacts.join("spec.md"),
-                "# Spec\n\nA trivial feature.\n",
-            )
-            .expect("write spec");
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n\nA trivial feature.\n")
+                .expect("write spec");
 
             let mut app = idle_app(state);
             app.accept_skip_to_implementation()
@@ -4996,7 +4963,7 @@ estimated_tokens = 1
             assert_eq!(app.state.current_phase, Phase::ImplementationRound(1));
             assert!(artifacts.join("plan.md").exists());
             assert!(artifacts.join("tasks.toml").exists());
-            assert!(artifacts.join("implementation.json").exists());
+            assert!(!artifacts.join("implementation.json").exists());
             assert_eq!(app.state.builder.pending, vec![1]);
             assert!(app.state.builder.current_task.is_none());
         });

@@ -7,15 +7,15 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-use chrono::Offset;
 use crate::state::{NodeStatus, Phase};
+use chrono::Offset;
 
+#[cfg(test)]
+use super::state::ModelRefreshState;
 use super::{
     App, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
 };
-#[cfg(test)]
-use super::state::ModelRefreshState;
 use crate::selection::VendorKind;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -50,7 +50,10 @@ impl Widget for PipelineWidget<'_> {
         }
 
         let area_h = inner.height as usize;
-        let viewport_top = self.app.viewport_top.min(lines.len().saturating_sub(area_h));
+        let viewport_top = self
+            .app
+            .viewport_top
+            .min(lines.len().saturating_sub(area_h));
         let end = (viewport_top + area_h).min(lines.len());
         for (offset, line) in lines[viewport_top..end].iter().enumerate() {
             buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
@@ -117,10 +120,7 @@ fn probability_span(label: &str, pct: u8, max_pct: u8) -> Span<'static> {
 /// Span used when the vendor's quota fetch failed: shows "--" in red so the
 /// user sees that the probability data is unavailable rather than zero.
 fn probability_unavailable_span(label: &str) -> Span<'static> {
-    Span::styled(
-        format!("{}--", label),
-        Style::default().fg(Color::Red),
-    )
+    Span::styled(format!("{}--", label), Style::default().fg(Color::Red))
 }
 
 fn spinner_frame(count: usize) -> &'static str {
@@ -456,7 +456,11 @@ impl App {
         };
 
         let mut spans = vec![
-            Span::raw(format!("{}{} ", " ".repeat(self.visible_rows[index].depth), marker)),
+            Span::raw(format!(
+                "{}{} ",
+                " ".repeat(self.visible_rows[index].depth),
+                marker
+            )),
             Span::raw(node.label.clone()),
             Span::raw(" | "),
             Span::styled(node.status.label(), node.status.style()),
@@ -475,7 +479,9 @@ impl App {
         if self.confirm_back && is_current {
             spans.push(Span::styled(
                 "  [b again to go back and clean up — any other key to cancel]",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
 
@@ -498,22 +504,22 @@ impl App {
             return Vec::new();
         };
         let run_id = node.run_id.or(node.leaf_run_id);
-        if let Some(id) = run_id {
-            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
-                let msgs: Vec<_> = self
-                    .messages
-                    .iter()
-                    .filter(|m| m.run_id == id)
-                    .cloned()
-                    .collect();
-                return chat_widget::message_lines(
-                    &msgs,
-                    run,
-                    local_offset,
-                    self.spinner_tick,
-                    available_width,
-                );
-            }
+        if let Some(id) = run_id
+            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id)
+        {
+            let msgs: Vec<_> = self
+                .messages
+                .iter()
+                .filter(|m| m.run_id == id)
+                .cloned()
+                .collect();
+            return chat_widget::message_lines(
+                &msgs,
+                run,
+                local_offset,
+                self.spinner_tick,
+                available_width,
+            );
         }
         self.render_compact_node(node, index)
     }
@@ -551,31 +557,32 @@ impl App {
             }
         }
         // Captured idea shown in the body (not the title)
-        if node.label == "Idea" && node.status == NodeStatus::Done {
-            if let Some(idea) = self.state.idea_text.as_deref() {
-                let width = 64usize;
-                let inner_width = width.saturating_sub(4);
-                let label = " idea ";
-                let fill = width.saturating_sub(label.len() + 2);
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    format!("  ╭{label}{}╮", "─".repeat(fill)),
-                    Style::default().fg(Color::DarkGray),
-                )));
-                for chunk in wrap_input(idea, inner_width) {
-                    let padding = inner_width.saturating_sub(chunk.chars().count());
-                    lines.push(Line::from(vec![
-                        Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(chunk, Style::default().fg(Color::White)),
-                        Span::raw(" ".repeat(padding)),
-                        Span::styled(" │", Style::default().fg(Color::DarkGray)),
-                    ]));
-                }
-                lines.push(Line::from(Span::styled(
-                    format!("  ╰{}╯", "─".repeat(width.saturating_sub(2))),
-                    Style::default().fg(Color::DarkGray),
-                )));
+        if node.label == "Idea"
+            && node.status == NodeStatus::Done
+            && let Some(idea) = self.state.idea_text.as_deref()
+        {
+            let width = 64usize;
+            let inner_width = width.saturating_sub(4);
+            let label = " idea ";
+            let fill = width.saturating_sub(label.len() + 2);
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  ╭{label}{}╮", "─".repeat(fill)),
+                Style::default().fg(Color::DarkGray),
+            )));
+            for chunk in wrap_input(idea, inner_width) {
+                let padding = inner_width.saturating_sub(chunk.chars().count());
+                lines.push(Line::from(vec![
+                    Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(chunk, Style::default().fg(Color::White)),
+                    Span::raw(" ".repeat(padding)),
+                    Span::styled(" │", Style::default().fg(Color::DarkGray)),
+                ]));
             }
+            lines.push(Line::from(Span::styled(
+                format!("  ╰{}╯", "─".repeat(width.saturating_sub(2))),
+                Style::default().fg(Color::DarkGray),
+            )));
         }
         // Input box for Idea stage
         if node.label == "Idea" && node.status == NodeStatus::WaitingUser {
@@ -680,7 +687,6 @@ impl App {
         }
         lines
     }
-
 }
 
 fn render_skip_to_impl_modal(
@@ -690,7 +696,7 @@ fn render_skip_to_impl_modal(
 ) {
     use crate::artifacts::SkipToImplKind;
     let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).min(70).max(30);
+    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
 
     let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
     let (header, accept_line, decline_line, title) = if is_nothing {
@@ -739,7 +745,11 @@ fn render_skip_to_impl_modal(
         .iter()
         .map(|line| {
             let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 { 1 } else { w.div_ceil(inner_width).max(1) as u16 }
+            if w == 0 {
+                1
+            } else {
+                w.div_ceil(inner_width).max(1) as u16
+            }
         })
         .sum();
     let desired_height = wrapped.saturating_add(2); // borders
@@ -943,15 +953,21 @@ mod tests {
         let lines = render_lines(&app, 10);
 
         assert!(lines.iter().any(|line| line.contains("▾ Root | running")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains(" ▾ Task A | running")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("  ▾ Coder | running")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("coder transcript body")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains(" ▾ Task A | running"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("  ▾ Coder | running"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("coder transcript body"))
+        );
     }
 
     #[test]
@@ -986,9 +1002,11 @@ mod tests {
         let lines = render_lines(&app, 8);
 
         assert!(lines.iter().any(|line| line.contains("Brainstorm | done")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("absorbed transcript body")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("absorbed transcript body"))
+        );
     }
 
     #[test]
@@ -1061,8 +1079,10 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("Root | running")));
         assert!(lines.iter().any(|line| line.contains("Task A | running")));
         assert!(lines.iter().any(|line| line.contains("Coder | running")));
-        assert!(!lines
-            .iter()
-            .any(|line| line.contains("hidden transcript body")));
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("hidden transcript body"))
+        );
     }
 }

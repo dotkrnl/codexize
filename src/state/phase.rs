@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::artifacts::ArtifactKind;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Phase {
@@ -24,8 +24,6 @@ pub enum Phase {
     Done,
     BlockedNeedsUser,
 }
-
-
 
 impl Phase {
     pub fn label(&self) -> String {
@@ -63,10 +61,10 @@ impl Phase {
             (SpecReviewPaused, PlanningRunning) => true,
             (SpecReviewPaused, BlockedNeedsUser) => true,
             (SkipToImplPending, ImplementationRound(_)) => true, // New transition
-            (SkipToImplPending, SpecReviewRunning) => true, // New transition
-            (SkipToImplPending, BlockedNeedsUser) => true, // New transition
-            (SkipToImplPending, Done) => true, // nothing-to-do outcome
-            (SkipToImplPending, BrainstormRunning) => true, // decline nothing-to-do → retry
+            (SkipToImplPending, SpecReviewRunning) => true,      // New transition
+            (SkipToImplPending, BlockedNeedsUser) => true,       // New transition
+            (SkipToImplPending, Done) => true,                   // nothing-to-do outcome
+            (SkipToImplPending, BrainstormRunning) => true,      // decline nothing-to-do → retry
             // New forward transitions for Plan Review
             (PlanningRunning, PlanReviewRunning) => true,
             (PlanReviewRunning, ShardingRunning) => true,
@@ -123,9 +121,7 @@ impl Phase {
             Phase::PlanReviewRunning => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::PlanReviewPaused => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::ShardingRunning => vec![ArtifactKind::Plan],
-            Phase::ImplementationRound(_) => {
-                vec![ArtifactKind::Plan, ArtifactKind::Implementation]
-            }
+            Phase::ImplementationRound(_) => vec![ArtifactKind::Plan, ArtifactKind::Tasks],
             Phase::ReviewRound(_) => vec![ArtifactKind::CodeReview],
             Phase::BuilderRecovery(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself

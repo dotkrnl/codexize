@@ -186,11 +186,7 @@ impl App {
             }
             _ => {}
         }
-        let _ = crate::input_editor::apply(
-            &mut self.input_buffer,
-            &mut self.input_cursor,
-            key,
-        );
+        let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         false
     }
 
@@ -253,7 +249,10 @@ impl App {
         } else if self.selected + 1 < self.visible_rows.len() {
             self.selected += 1;
         }
-        self.selected_key = self.visible_rows.get(self.selected).map(|row| row.key.clone());
+        self.selected_key = self
+            .visible_rows
+            .get(self.selected)
+            .map(|row| row.key.clone());
     }
 
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
@@ -277,5 +276,4 @@ impl App {
             _ => false,
         }
     }
-
 }

@@ -5,8 +5,11 @@ pub struct ClaudeAdapter;
 
 impl AgentAdapter for ClaudeAdapter {
     fn detect(&self) -> bool {
-        Command::new("claude").arg("--version").output()
-            .map(|o| o.status.success()).unwrap_or(false)
+        Command::new("claude")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     fn interactive_command(&self, model: &str, prompt_path: &str) -> String {

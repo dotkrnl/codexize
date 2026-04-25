@@ -5,8 +5,11 @@ pub struct KimiAdapter;
 
 impl AgentAdapter for KimiAdapter {
     fn detect(&self) -> bool {
-        Command::new("kimi").arg("--version").output()
-            .map(|o| o.status.success()).unwrap_or(false)
+        Command::new("kimi")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     fn interactive_command(&self, _model: &str, prompt_path: &str) -> String {

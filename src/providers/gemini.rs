@@ -2,11 +2,7 @@ use crate::warmup;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    collections::BTreeMap,
-    env, fs,
-    time::Duration,
-};
+use std::{collections::BTreeMap, env, fs, time::Duration};
 
 use super::{LiveModel, build_http_client, home_dir, parse_json_response, send_request};
 

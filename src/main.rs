@@ -1,10 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use codexize::{
-    app, runner,
+    app, picker, runner,
     state::{self},
     tmux, tui,
-    picker,
 };
 #[derive(Parser)]
 #[command(name = "codexize")]

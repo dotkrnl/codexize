@@ -7,7 +7,6 @@ use std::time::Duration;
 pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
 pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
 
-
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
     pub name: String,
@@ -91,7 +90,11 @@ fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
             .unwrap_or("")
             .trim()
             .to_ascii_lowercase();
-        entries.push(InventoryEntry { name, vendor, display_order: i });
+        entries.push(InventoryEntry {
+            name,
+            vendor,
+            display_order: i,
+        });
     }
 
     anyhow::ensure!(!entries.is_empty(), "models list returned no entries");
@@ -151,7 +154,8 @@ fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
                 .or_else(|| value_to_f64(item.get("score")))
                 .unwrap_or(0.0),
             standard_error: value_to_f64(
-                item.get("standardError").or_else(|| item.get("standard_error")),
+                item.get("standardError")
+                    .or_else(|| item.get("standard_error")),
             )
             .unwrap_or(0.0),
             axes,
@@ -166,10 +170,8 @@ fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
 // Merge inventory (full model list) with score data.
 // Inventory drives the universe; scores enrich it where available.
 fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
-    let score_map: HashMap<String, &ScoreEntry> = scores
-        .iter()
-        .map(|s| (s.name.clone(), s))
-        .collect();
+    let score_map: HashMap<String, &ScoreEntry> =
+        scores.iter().map(|s| (s.name.clone(), s)).collect();
 
     // Also build a map keyed by score display_order for final sort
     let mut models: Vec<DashboardModel> = inventory
@@ -178,7 +180,11 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
             if let Some(sc) = score_map.get(&inv.name) {
                 DashboardModel {
                     name: inv.name,
-                    vendor: if !inv.vendor.is_empty() { inv.vendor } else { sc.vendor.clone() },
+                    vendor: if !inv.vendor.is_empty() {
+                        inv.vendor
+                    } else {
+                        sc.vendor.clone()
+                    },
                     overall_score: sc.overall_score,
                     current_score: sc.current_score,
                     standard_error: sc.standard_error,
@@ -189,7 +195,11 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
             } else if let Some(sc) = sibling_score(&inv.name, &scores) {
                 DashboardModel {
                     name: inv.name,
-                    vendor: if !inv.vendor.is_empty() { inv.vendor } else { sc.vendor.clone() },
+                    vendor: if !inv.vendor.is_empty() {
+                        inv.vendor
+                    } else {
+                        sc.vendor.clone()
+                    },
                     overall_score: sc.overall_score,
                     current_score: sc.current_score,
                     standard_error: sc.standard_error,
@@ -214,10 +224,8 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
         .collect();
 
     // Also add scored models not in the inventory (edge case)
-    let inv_names: std::collections::HashSet<String> = models
-        .iter()
-        .map(|m| m.name.clone())
-        .collect();
+    let inv_names: std::collections::HashSet<String> =
+        models.iter().map(|m| m.name.clone()).collect();
     for sc in &scores {
         if !inv_names.contains(&sc.name) {
             models.push(DashboardModel {
@@ -336,7 +344,11 @@ pub fn synthesize_sibling(
 
     Some(DashboardModel {
         name: name.to_string(),
-        vendor: if !vendor.is_empty() { vendor.to_string() } else { sibling.vendor.clone() },
+        vendor: if !vendor.is_empty() {
+            vendor.to_string()
+        } else {
+            sibling.vendor.clone()
+        },
         overall_score: sibling.overall_score,
         current_score: sibling.current_score,
         standard_error: sibling.standard_error,
@@ -403,8 +415,7 @@ mod tests {
             model("gemini-3-pro-preview", 80.0),
             model("gemini-2.5-pro", 70.0),
         ];
-        let synth =
-            synthesize_sibling("gemini-3.1-pro-preview", "google", &existing).unwrap();
+        let synth = synthesize_sibling("gemini-3.1-pro-preview", "google", &existing).unwrap();
         assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
         assert_eq!(synth.overall_score, 80.0);
     }

@@ -202,7 +202,11 @@ mod tests {
     fn unicode_cursor() {
         let mut b = "日本語".to_string();
         let mut c = 3usize;
-        apply(&mut b, &mut c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        apply(
+            &mut b,
+            &mut c,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
         assert_eq!(b, "日本");
         assert_eq!(c, 2);
     }

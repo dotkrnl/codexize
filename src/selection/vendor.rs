@@ -1,5 +1,5 @@
-use crate::dashboard;
 use super::types::VendorKind;
+use crate::dashboard;
 
 pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
     match v {
@@ -13,10 +13,10 @@ pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
 pub fn str_to_vendor(s: &str) -> Option<VendorKind> {
     match s {
         "claude" => Some(VendorKind::Claude),
-        "codex"  => Some(VendorKind::Codex),
+        "codex" => Some(VendorKind::Codex),
         "gemini" => Some(VendorKind::Gemini),
-        "kimi"   => Some(VendorKind::Kimi),
-        _        => None,
+        "kimi" => Some(VendorKind::Kimi),
+        _ => None,
     }
 }
 
@@ -28,10 +28,18 @@ pub fn vendor_for_dashboard_model(model: &dashboard::DashboardModel) -> Option<V
     if name.starts_with("claude-") || name.contains("claude") {
         return Some(VendorKind::Claude);
     }
-    if name.starts_with("gpt-") || name.starts_with("o1-") || name.contains("gpt") || name.contains("codex") {
+    if name.starts_with("gpt-")
+        || name.starts_with("o1-")
+        || name.contains("gpt")
+        || name.contains("codex")
+    {
         return Some(VendorKind::Codex);
     }
-    if name.starts_with("gemini-") || name.contains("gemini") || name.contains("bison") || name.contains("gecko") {
+    if name.starts_with("gemini-")
+        || name.contains("gemini")
+        || name.contains("bison")
+        || name.contains("gecko")
+    {
         return Some(VendorKind::Gemini);
     }
     if name.starts_with("kimi-") || name.contains("kimi") || name.contains("moonshot") {

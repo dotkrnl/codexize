@@ -11,16 +11,21 @@ pub enum SelectionPhase {
 impl SelectionPhase {
     pub fn axes(self) -> &'static [&'static str] {
         match self {
-            SelectionPhase::Idea => {
-                &["complexity", "edgecases", "contextawareness", "taskcompletion"]
-            }
-            SelectionPhase::Planning => {
-                &["correctness", "complexity", "edgecases", "stability"]
-            }
+            SelectionPhase::Idea => &[
+                "complexity",
+                "edgecases",
+                "contextawareness",
+                "taskcompletion",
+            ],
+            SelectionPhase::Planning => &["correctness", "complexity", "edgecases", "stability"],
             SelectionPhase::Build => &["codequality", "correctness", "debugging", "safety"],
-            SelectionPhase::Review => {
-                &["correctness", "debugging", "edgecases", "safety", "stability"]
-            }
+            SelectionPhase::Review => &[
+                "correctness",
+                "debugging",
+                "edgecases",
+                "safety",
+                "stability",
+            ],
         }
     }
 
@@ -72,7 +77,12 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     flash_tier_penalty: 0.05,
     vendor_phase_biases: &[
         (VendorKind::Claude, Some("opus"), SelectionPhase::Idea, 1.5),
-        (VendorKind::Claude, Some("opus"), SelectionPhase::Planning, 1.5),
+        (
+            VendorKind::Claude,
+            Some("opus"),
+            SelectionPhase::Planning,
+            1.5,
+        ),
         (VendorKind::Codex, None, SelectionPhase::Review, 1.5),
     ],
 };
@@ -82,9 +92,7 @@ impl SelectionConfig {
         self.vendor_phase_biases
             .iter()
             .find(|(v, name_match, p, _)| {
-                *v == vendor
-                    && *p == phase
-                    && name_match.is_none_or(|needle| name.contains(needle))
+                *v == vendor && *p == phase && name_match.is_none_or(|needle| name.contains(needle))
             })
             .map(|(_, _, _, bias)| *bias)
             .unwrap_or(1.0)

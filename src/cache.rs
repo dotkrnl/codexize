@@ -99,7 +99,10 @@ pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
         .into_iter()
         .filter_map(|e| {
             let vendor = parse_vendor(&e.vendor)?;
-            Some(QuotaError { vendor, message: e.message })
+            Some(QuotaError {
+                vendor,
+                message: e.message,
+            })
         })
         .collect();
 

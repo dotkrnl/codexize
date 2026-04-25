@@ -34,7 +34,8 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
             if existing.contains(name) || synthesized.contains(name) {
                 continue;
             }
-            if let Some(model) = dashboard::synthesize_sibling(name, vendor_str, &dashboard_models) {
+            if let Some(model) = dashboard::synthesize_sibling(name, vendor_str, &dashboard_models)
+            {
                 synthesized.insert(name.clone());
                 dashboard_models.push(model);
             }

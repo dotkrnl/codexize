@@ -23,7 +23,9 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
     if let Some(limits) = payload.get("limits").and_then(Value::as_array) {
         for item in limits {
             let detail = item.get("detail").unwrap_or(item);
-            let Some(detail) = detail.as_object() else { continue };
+            let Some(detail) = detail.as_object() else {
+                continue;
+            };
             let name = detail
                 .get("name")
                 .and_then(Value::as_str)
@@ -40,7 +42,10 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
 
     Ok(models
         .into_iter()
-        .map(|(name, quota_percent)| LiveModel { name, quota_percent })
+        .map(|(name, quota_percent)| LiveModel {
+            name,
+            quota_percent,
+        })
         .collect())
 }
 
@@ -57,7 +62,10 @@ fn resolve_api_key() -> Result<String> {
             .with_context(|| format!("failed to parse {}", creds_file.display()))?;
 
         // Refresh the token if expired or within 60s of expiry
-        let expires_at = payload.get("expires_at").and_then(Value::as_f64).unwrap_or(0.0);
+        let expires_at = payload
+            .get("expires_at")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -126,9 +134,7 @@ fn fetch_usage_payload(api_key: &str) -> Result<Value> {
     let usage_url = format!("{}/usages", base_url.trim_end_matches('/'));
     let client = build_http_client(5)?;
 
-    let request = client
-        .get(&usage_url)
-        .bearer_auth(api_key);
+    let request = client.get(&usage_url).bearer_auth(api_key);
 
     parse_json_response(send_request(request, "Kimi")?, "Kimi")
 }

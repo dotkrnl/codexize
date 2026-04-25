@@ -59,5 +59,3 @@ pub fn window_exists(name: &str) -> bool {
         })
         .unwrap_or(false)
 }
-
-

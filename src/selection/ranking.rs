@@ -1,9 +1,9 @@
+use super::candidates::extract_version;
+use super::config::{SELECTION_CONFIG, SelectionPhase};
+use super::types::{Candidate, VendorKind};
+use crate::dashboard;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-use crate::dashboard;
-use super::candidates::extract_version;
-use super::config::{SelectionPhase, SELECTION_CONFIG};
-use super::types::{Candidate, VendorKind};
 
 // Newer extract_version wins. Models with no parseable version sort last,
 // so they don't displace a versioned model on ties.
@@ -130,12 +130,12 @@ pub fn selection_probability(
     quota_weight * role_weight * variance_factor * cfg.vendor_bias(vendor, &model.name, phase)
 }
 
-fn raw_axis_score(
-    model: &dashboard::DashboardModel,
-    axes: &[&str],
-    phase: SelectionPhase,
-) -> f64 {
-    let axis_map = model.axes.iter().cloned().collect::<std::collections::BTreeMap<_, _>>();
+fn raw_axis_score(model: &dashboard::DashboardModel, axes: &[&str], phase: SelectionPhase) -> f64 {
+    let axis_map = model
+        .axes
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut values = axes
         .iter()
         .filter_map(|axis| axis_map.get(*axis).copied())
@@ -181,4 +181,3 @@ fn variance_factor(standard_error: f64) -> f64 {
     }
     (1.0 - penalty / 100.0).clamp(0.0, 1.0)
 }
-

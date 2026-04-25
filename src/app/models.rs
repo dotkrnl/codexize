@@ -49,36 +49,31 @@ pub(super) fn vendor_prefix(vendor: VendorKind) -> &'static str {
 impl App {
     pub(super) fn refresh_models_if_due(&mut self) {
         match &self.model_refresh {
-            ModelRefreshState::Fetching { rx, started_at } => {
-                match rx.try_recv() {
-                    Ok((models, errors)) => {
-                        if !models.is_empty() {
-                            self.models = models;
-                            let _ = cache::save(&self.models, &errors);
-                        }
-                        if errors.is_empty() {
-                            self.quota_retry_delay = Duration::from_secs(60);
-                        } else {
-                            self.quota_retry_delay =
-                                (self.quota_retry_delay * 2).min(cache::TTL);
-                        }
-                        self.quota_errors = errors;
-                        self.model_refresh = ModelRefreshState::Idle(Instant::now());
+            ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
+                Ok((models, errors)) => {
+                    if !models.is_empty() {
+                        self.models = models;
+                        let _ = cache::save(&self.models, &errors);
                     }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        if started_at.elapsed() >= Duration::from_secs(60) {
-                            self.quota_retry_delay =
-                                (self.quota_retry_delay * 2).min(cache::TTL);
-                            self.model_refresh = ModelRefreshState::Idle(Instant::now());
-                        }
+                    if errors.is_empty() {
+                        self.quota_retry_delay = Duration::from_secs(60);
+                    } else {
+                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
                     }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.quota_retry_delay =
-                            (self.quota_retry_delay * 2).min(cache::TTL);
+                    self.quota_errors = errors;
+                    self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if started_at.elapsed() >= Duration::from_secs(60) {
+                        self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
                         self.model_refresh = ModelRefreshState::Idle(Instant::now());
                     }
                 }
-            }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
+                    self.model_refresh = ModelRefreshState::Idle(Instant::now());
+                }
+            },
             ModelRefreshState::Idle(refreshed_at) => {
                 let due_after = if self.quota_errors.is_empty() {
                     cache::TTL

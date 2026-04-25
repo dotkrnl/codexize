@@ -209,17 +209,12 @@ fn render_messages(
             };
             let title_wrapped = wrap_text(&title, content_width);
             for (i, chunk) in title_wrapped.iter().enumerate() {
-                let title_span = Span::styled(
-                    chunk.clone(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                );
+                let title_span =
+                    Span::styled(chunk.clone(), Style::default().add_modifier(Modifier::BOLD));
                 if i == 0 {
                     lines.push(RenderedLine {
                         spans: vec![
-                            Span::styled(
-                                format!("{} ", ts_str),
-                                Style::default().fg(sym.color),
-                            ),
+                            Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
                             Span::styled(
                                 format!("{} ", sym.symbol),
                                 Style::default().fg(sym.color),
@@ -236,14 +231,8 @@ fn render_messages(
             if title_wrapped.is_empty() {
                 lines.push(RenderedLine {
                     spans: vec![
-                        Span::styled(
-                            format!("{} ", ts_str),
-                            Style::default().fg(sym.color),
-                        ),
-                        Span::styled(
-                            format!("{} ", sym.symbol),
-                            Style::default().fg(sym.color),
-                        ),
+                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
                     ],
                 });
             }
@@ -271,14 +260,8 @@ fn render_messages(
             if i == 0 {
                 lines.push(RenderedLine {
                     spans: vec![
-                        Span::styled(
-                            format!("{} ", ts_str),
-                            Style::default().fg(sym.color),
-                        ),
-                        Span::styled(
-                            format!("{} ", sym.symbol),
-                            Style::default().fg(sym.color),
-                        ),
+                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
                         Span::styled(chunk.clone(), body_style),
                     ],
                 });
@@ -292,15 +275,11 @@ fn render_messages(
         if wrapped.is_empty() {
             lines.push(RenderedLine {
                 spans: vec![
-                    Span::styled(
-                        format!("{} ", ts_str),
-                        Style::default().fg(sym.color),
-                    ),
+                    Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
                     Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
                 ],
             });
         }
-
     }
 
     let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
@@ -362,7 +341,10 @@ impl Widget for ChatWidget<'_> {
 
         if show_above_indicator {
             let indicator = format!("  ↑ {} more above", above);
-            let line = Line::from(Span::styled(indicator, Style::default().fg(Color::DarkGray)));
+            let line = Line::from(Span::styled(
+                indicator,
+                Style::default().fg(Color::DarkGray),
+            ));
             buf.set_line(area.x, row, &line, area.width);
             row += 1;
         }
@@ -375,7 +357,10 @@ impl Widget for ChatWidget<'_> {
 
         if show_below_indicator {
             let indicator = format!("  ↓ {} more below", below);
-            let line = Line::from(Span::styled(indicator, Style::default().fg(Color::DarkGray)));
+            let line = Line::from(Span::styled(
+                indicator,
+                Style::default().fg(Color::DarkGray),
+            ));
             buf.set_line(area.x, row, &line, area.width);
         }
     }
@@ -590,8 +575,18 @@ mod tests {
         let run = make_run(RunStatus::Done);
         let offset = FixedOffset::east_opt(0).unwrap();
         let lines = chat_lines(&msgs, &run, 5, &offset, 0, 60, 10);
-        let first_text: String = lines[0].spans.iter().map(|s| s.content.to_string()).collect();
-        let last_text: String = lines.last().unwrap().spans.iter().map(|s| s.content.to_string()).collect();
+        let first_text: String = lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        let last_text: String = lines
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
         assert!(first_text.contains("↑"), "should show above indicator");
         assert!(first_text.contains("5 more above"));
         assert!(last_text.contains("↓"), "should show below indicator");
@@ -613,8 +608,15 @@ mod tests {
         let lines = render_messages(&[msg], &run, &offset, 30, 0);
         assert!(lines.len() >= 2, "should have wrapped lines");
         // Second line should be indented (starts with spaces)
-        let second_text: String = lines[1].spans.iter().map(|s| s.content.to_string()).collect();
-        assert!(second_text.starts_with("        "), "wrapped line should indent to match prefix width (8 spaces)");
+        let second_text: String = lines[1]
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert!(
+            second_text.starts_with("        "),
+            "wrapped line should indent to match prefix width (8 spaces)"
+        );
     }
 
     #[test]
@@ -628,7 +630,13 @@ mod tests {
         // Height 5 means overflow; at bottom, we should be able to reach the last message.
         // Max offset should be `total - (height - 1)` when overflow.
         let lines = chat_lines(&msgs, &run, 999, &offset, 0, 60, 5);
-        let last_text: String = lines.last().unwrap().spans.iter().map(|s| s.content.to_string()).collect();
+        let last_text: String = lines
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
         assert!(
             last_text.contains("message 10"),
             "bottom view should include the last message"

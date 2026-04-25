@@ -74,7 +74,11 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
             }
 
             if started.elapsed() < Duration::from_millis(300) {
-                bail!("{} warm-up exited immediately with {}", spec.program, status);
+                bail!(
+                    "{} warm-up exited immediately with {}",
+                    spec.program,
+                    status
+                );
             }
 
             return Ok(());

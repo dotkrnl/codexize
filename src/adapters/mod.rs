@@ -113,7 +113,9 @@ fn launch_in_window(
 }
 
 fn shell_escape(s: &str) -> String {
-    if s.chars().all(|c| c.is_alphanumeric() || "-_./@=:".contains(c)) {
+    if s.chars()
+        .all(|c| c.is_alphanumeric() || "-_./@=:".contains(c))
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))

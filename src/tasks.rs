@@ -30,10 +30,10 @@ pub struct Ref {
 /// Validate a tasks TOML file. Returns parsed structure on success,
 /// descriptive error on any structural problem.
 pub fn validate(path: &Path) -> Result<TasksFile> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
-    let parsed: TasksFile = toml::from_str(&text)
-        .with_context(|| format!("malformed TOML in {}", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let parsed: TasksFile =
+        toml::from_str(&text).with_context(|| format!("malformed TOML in {}", path.display()))?;
 
     if parsed.tasks.is_empty() {
         bail!("tasks array is empty");

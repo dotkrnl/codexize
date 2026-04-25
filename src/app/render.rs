@@ -197,7 +197,6 @@ impl App {
 
         self.body_inner_height = root[1].height.saturating_sub(2) as usize;
         self.body_inner_width = root[1].width.saturating_sub(2) as usize;
-        self.clamp_scroll();
         self.clamp_viewport();
 
         frame.render_widget(self.header(), root[0]);
@@ -726,7 +725,7 @@ fn render_skip_to_impl_modal(
 mod tests {
     use super::*;
     use crate::{
-        app::tree::{collect_all_rows, flatten_visible_rows, node_key_at_path},
+        app::tree::{flatten_visible_rows, node_key_at_path},
         state::{
             Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
             SessionState,
@@ -735,7 +734,7 @@ mod tests {
     };
     use ratatui::layout::Rect;
     use std::{
-        collections::{BTreeMap, HashMap},
+        collections::HashMap,
         time::{Duration, Instant},
     };
 
@@ -763,7 +762,6 @@ mod tests {
             selected: 0,
             selected_key,
             collapsed_overrides,
-            stage_scroll: BTreeMap::new(),
             viewport_top: 0,
             body_inner_height: 20,
             body_inner_width: 80,
@@ -1002,18 +1000,12 @@ mod tests {
     }
 
     #[test]
-    fn header_only_viewports_render_headers_without_scroll_mutation() {
-        let mut app = test_app(
+    fn header_only_viewports_render_headers_without_body() {
+        let app = test_app(
             nested_transcript_tree(),
             vec![run_record(1, RunStatus::Running)],
             vec![message(1, "hidden transcript body")],
         );
-        let coder_key = collect_all_rows(&app.nodes)
-            .into_iter()
-            .find(|row| row.has_transcript)
-            .expect("transcript row")
-            .key;
-        app.stage_scroll.insert(coder_key.clone(), 4);
 
         let lines = render_lines(&app, 5);
 
@@ -1023,6 +1015,5 @@ mod tests {
         assert!(!lines
             .iter()
             .any(|line| line.contains("hidden transcript body")));
-        assert_eq!(app.stage_scroll.get(&coder_key).copied(), Some(4));
     }
 }

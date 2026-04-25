@@ -115,6 +115,7 @@ pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     Some(NodeKey::new(parts))
 }
 
+#[cfg(test)]
 pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
     let mut rows = Vec::new();
     flatten_rows(nodes, &mut Vec::new(), &mut Vec::new(), &mut rows, &mut |_| true);

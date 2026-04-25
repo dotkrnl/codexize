@@ -275,25 +275,4 @@ impl App {
         }
     }
 
-    pub(super) fn clamp_scroll(&mut self) {
-        // Preserve the usize::MAX "stick to bottom" sentinel; clamp concrete offsets
-        // against the current per-stage max so tree rebuilds don't leave them stale.
-        // Collapsed stages are skipped: their max_offset is only meaningful when the
-        // body is rendered, and clamping them here would erase a user's stored offset
-        // across a collapse/re-expand cycle (spec § State Persistence).
-        let max_offsets: Vec<(_, usize)> = (0..self.visible_rows.len())
-            .filter(|&i| self.is_expanded(i))
-            .filter_map(|index| {
-                let key = self.visible_rows.get(index)?.key.clone();
-                Some((key, self.stage_max_offset(index)))
-            })
-            .collect();
-        for (key, max_offset) in max_offsets {
-            if let Some(scroll) = self.stage_scroll.get_mut(&key) {
-                if *scroll != usize::MAX && *scroll > max_offset {
-                    *scroll = max_offset;
-                }
-            }
-        }
-    }
 }

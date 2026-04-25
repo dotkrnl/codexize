@@ -31,8 +31,8 @@ use self::{
     models::{spawn_refresh, vendor_tag},
     state::ModelRefreshState,
     tree::{
-        NodeKey, VisibleNodeRow, active_path_keys, build_tree, collect_all_rows,
-        current_node_index, flatten_visible_rows, node_at_path, node_key_at_path,
+        NodeKey, VisibleNodeRow, active_path_keys, build_tree, current_node_index,
+        flatten_visible_rows, node_at_path, node_key_at_path,
     },
 };
 
@@ -73,7 +73,6 @@ pub struct App {
     selected: usize,
     selected_key: Option<NodeKey>,
     collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
-    stage_scroll: BTreeMap<NodeKey, usize>,
     viewport_top: usize,
     body_inner_height: usize,
     body_inner_width: usize,
@@ -163,7 +162,6 @@ impl App {
             selected: current,
             selected_key,
             collapsed_overrides: BTreeMap::new(),
-            stage_scroll: BTreeMap::new(),
             viewport_top: 0,
             body_inner_height: 0,
             body_inner_width: 0,
@@ -356,26 +354,11 @@ impl App {
     }
 
     fn rebuild_tree_view(&mut self, preferred_key: Option<NodeKey>) {
-        let previous_leaf_runs: BTreeMap<NodeKey, Option<u64>> = collect_all_rows(&self.nodes)
-            .into_iter()
-            .filter(|row| row.has_transcript)
-            .map(|row| (row.key, row.backing_leaf_run_id))
-            .collect();
         let previous_selected = self.selected;
         let preferred_key = preferred_key.or_else(|| self.selected_key.clone());
 
         self.nodes = build_tree(&self.state);
         self.rebuild_visible_rows();
-
-        for row in collect_all_rows(&self.nodes)
-            .into_iter()
-            .filter(|row| row.has_transcript)
-        {
-            if previous_leaf_runs.get(&row.key).copied() != Some(row.backing_leaf_run_id) {
-                self.stage_scroll.insert(row.key, usize::MAX);
-            }
-        }
-
         self.restore_selection(preferred_key, previous_selected);
     }
 
@@ -399,34 +382,12 @@ impl App {
         )
     }
 
-    pub(super) fn is_expanded_transcript(&self, index: usize) -> bool {
-        self.is_expanded(index)
-            && self
-                .visible_rows
-                .get(index)
-                .is_some_and(|row| row.has_transcript)
-    }
-
     pub(super) fn is_expanded_body(&self, index: usize) -> bool {
         self.is_expanded(index)
             && self
                 .visible_rows
                 .get(index)
                 .is_some_and(|row| row.has_transcript || row.has_body)
-    }
-
-    pub(super) fn stage_body_height_for(&self, index: usize) -> usize {
-        self.transcript_body_height_for(index, self.body_inner_height)
-    }
-
-    pub(super) fn transcript_body_height_for(&self, index: usize, _total_height: usize) -> usize {
-        // Each expanded transcript renders at its natural body height. Sections that
-        // overflow the pipeline area are scrolled into view by `viewport_top`, not
-        // squeezed to share space with peers.
-        if !self.is_expanded_transcript(index) {
-            return 0;
-        }
-        self.node_body(index).len()
     }
 
     /// Y-offset of each visible row's header within the unconstrained content stream,
@@ -472,43 +433,6 @@ impl App {
         let max_top = total.saturating_sub(area_h) as isize;
         let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
         self.viewport_top = next as usize;
-    }
-
-    pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(NodeKey, Option<usize>)> {
-        let row = self.visible_rows.get(index)?;
-        let stored = self.stage_scroll.get(&row.key).copied();
-        Some((row.key.clone(), stored))
-    }
-
-    /// Resolve the effective scroll offset for a stage, treating the missing/MAX
-    /// sentinel as "stick to bottom" by returning `max_offset`.
-    pub(super) fn effective_stage_scroll(&self, index: usize, max_offset: usize) -> usize {
-        match self.stage_scroll_for(index) {
-            Some((_, Some(v))) if v != usize::MAX => v.min(max_offset),
-            _ => max_offset,
-        }
-    }
-
-    pub(super) fn stage_max_offset(&self, index: usize) -> usize {
-        if !self.is_expanded_transcript(index) {
-            return 0;
-        }
-        let height = self.stage_body_height_for(index);
-        if height == 0 {
-            return 0;
-        }
-        let total = self.node_body(index).len();
-        if total > height {
-            total.saturating_sub(height.saturating_sub(1))
-        } else {
-            0
-        }
-    }
-
-    pub(super) fn set_stage_scroll(&mut self, index: usize, value: usize) {
-        if let Some(key) = self.visible_rows.get(index).map(|row| row.key.clone()) {
-            self.stage_scroll.insert(key, value);
-        }
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
@@ -3621,7 +3545,6 @@ mod tests {
             selected: 0,
             selected_key,
             collapsed_overrides: BTreeMap::new(),
-            stage_scroll: BTreeMap::new(),
             viewport_top: 0,
             body_inner_height: 30,
             body_inner_width: 80,
@@ -3804,49 +3727,10 @@ mod tests {
     }
 
     #[test]
-    fn transition_resets_scroll_for_changed_backing_leaf_only() {
-        with_temp_root(|| {
-            let mut app = mk_app(mk_state_with_runs());
-            let brainstorm_idx = row_index(&app, "Brainstorm");
-            let spec_review_idx = row_index(&app, "Spec Review");
-            let brainstorm_key = app.visible_rows[brainstorm_idx].key.clone();
-            let spec_review_key = app.visible_rows[spec_review_idx].key.clone();
-            app.stage_scroll.insert(brainstorm_key.clone(), 3);
-            app.stage_scroll.insert(spec_review_key.clone(), 5);
-
-            app.state.agent_runs.retain(|run| run.stage != "brainstorm");
-            app.state.agent_runs.push(RunRecord {
-                id: 9,
-                stage: "brainstorm".to_string(),
-                task_id: None,
-                round: 1,
-                attempt: 2,
-                model: "m2".to_string(),
-                vendor: "v".to_string(),
-                window_name: "[Brainstorm]".to_string(),
-                started_at: chrono::Utc::now(),
-                ended_at: Some(chrono::Utc::now()),
-                status: RunStatus::Done,
-                error: None,
-            });
-
-            app.rebuild_tree_view(None);
-
-            let brainstorm_idx = row_index(&app, "Brainstorm");
-            let spec_review_idx = row_index(&app, "Spec Review");
-            let brainstorm_key_after = app.visible_rows[brainstorm_idx].key.clone();
-            let spec_review_key_after = app.visible_rows[spec_review_idx].key.clone();
-            assert_eq!(app.stage_scroll.get(&brainstorm_key_after).copied(), Some(usize::MAX));
-            assert_eq!(app.stage_scroll.get(&spec_review_key_after).copied(), Some(5));
-        });
-    }
-
-    #[test]
-    fn boundary_handoff_on_up_moves_focus_to_previous_expanded_row() {
+    fn up_at_top_of_section_moves_focus_to_previous_row() {
         let mut app = mk_app(mk_state_with_runs());
         let sr_idx = row_index(&app, "Spec Review");
         app.selected = sr_idx;
-        app.set_stage_scroll(sr_idx, 0);
         app.scroll_or_move_focus(-1);
         assert!(app.selected < sr_idx);
     }
@@ -3906,25 +3790,6 @@ mod tests {
         app.scroll_or_move_focus(1);
 
         assert_eq!(row_label(&app, app.selected), "Collapsed Task");
-    }
-
-    #[test]
-    fn page_keys_do_not_mutate_scroll_when_transcript_has_zero_body_rows() {
-        let mut app = mk_app(mk_state_with_runs());
-        let brainstorm_idx = row_index(&app, "Brainstorm");
-        let brainstorm_key = app.visible_rows[brainstorm_idx].key.clone();
-        app.selected = brainstorm_idx;
-        app.collapsed_overrides
-            .insert(brainstorm_key.clone(), ExpansionOverride::Expanded);
-        app.body_inner_height = app.visible_rows.len();
-        app.stage_scroll.insert(brainstorm_key.clone(), 7);
-
-        app.handle_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::PageDown,
-            crossterm::event::KeyModifiers::NONE,
-        ));
-
-        assert_eq!(app.stage_scroll.get(&brainstorm_key).copied(), Some(7));
     }
 
     #[test]
@@ -4075,7 +3940,7 @@ mod tests {
         app.toggle_expand_focused();
 
         let round_one_idx = row_index(&app, "Round 1");
-        assert!(app.is_expanded_transcript(round_one_idx));
+        assert!(app.is_expanded_body(round_one_idx));
         assert_eq!(
             app.visible_rows[round_one_idx].backing_leaf_run_id,
             Some(31)
@@ -4206,7 +4071,6 @@ mod tests {
             selected: 0,
             selected_key,
             collapsed_overrides: BTreeMap::new(),
-            stage_scroll: BTreeMap::new(),
             viewport_top: 0,
             body_inner_height: 30,
             body_inner_width: 80,

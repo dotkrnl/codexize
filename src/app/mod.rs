@@ -74,6 +74,7 @@ pub struct App {
     selected_key: Option<NodeKey>,
     collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
     viewport_top: usize,
+    follow_tail: bool,
     body_inner_height: usize,
     body_inner_width: usize,
     input_mode: bool,
@@ -163,6 +164,7 @@ impl App {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
+            follow_tail: true,
             body_inner_height: 0,
             body_inner_width: 0,
             input_mode: false,
@@ -413,6 +415,12 @@ impl App {
         }
         let (ys, total) = self.header_y_offsets();
         let max_top = total.saturating_sub(area_h);
+        if self.follow_tail {
+            // Tail-follow: stay glued to the bottom so newly appended messages
+            // (or growing live-summary bodies) stream into view automatically.
+            self.viewport_top = max_top;
+            return;
+        }
         if let Some(&header_y) = ys.get(self.selected) {
             let section_bottom = ys.get(self.selected + 1).copied().unwrap_or(total);
             // Keep any line of the selected section visible. This lets the user
@@ -433,6 +441,7 @@ impl App {
         let max_top = total.saturating_sub(area_h) as isize;
         let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
         self.viewport_top = next as usize;
+        self.follow_tail = self.viewport_top as isize >= max_top;
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
@@ -462,6 +471,9 @@ impl App {
             self.selected = idx;
             self.selected_key = Some(target);
         }
+        // Re-engage tail-follow on phase change so the new stage's transcript
+        // streams into view.
+        self.follow_tail = true;
         Ok(())
     }
 
@@ -3546,6 +3558,7 @@ mod tests {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
+            follow_tail: true,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,
@@ -4072,6 +4085,7 @@ mod tests {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
+            follow_tail: true,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,

@@ -763,6 +763,7 @@ mod tests {
             selected_key,
             collapsed_overrides,
             viewport_top: 0,
+            follow_tail: true,
             body_inner_height: 20,
             body_inner_width: 80,
             input_mode: false,

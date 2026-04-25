@@ -160,16 +160,50 @@ pub const RECOVERY_IO: StageIO = StageIO {
     ],
 };
 
+/// Recovery-mode plan review: verifies the recovered spec/plan addresses the
+/// triggering review before sharding runs.
+pub const RECOVERY_PLAN_REVIEWER_IO: StageIO = StageIO {
+    stage: "plan-reviewer",
+    pointer_artifacts: &[
+        "artifacts/spec.md",
+        "artifacts/plan.md",
+        "rounds/{round}/review.toml",
+        "rounds/{round}/recovery.toml",
+        "artifacts/live_summary.txt",
+    ],
+    writes: &["artifacts/plan_review.toml"],
+};
+
+/// Recovery-mode sharding: regenerates the task queue from the recovered
+/// spec/plan while preserving completed task history.
+pub const RECOVERY_SHARDER_IO: StageIO = StageIO {
+    stage: "sharder",
+    pointer_artifacts: &[
+        "artifacts/spec.md",
+        "artifacts/plan.md",
+        "artifacts/live_summary.txt",
+    ],
+    writes: &["artifacts/tasks.toml"],
+};
+
 pub fn stage_io(stage: &str) -> Option<&'static StageIO> {
-    match stage {
-        "brainstorm" => Some(&BRAINSTORM_IO),
-        "spec-reviewer" => Some(&SPEC_REVIEWER_IO),
-        "planner" => Some(&PLANNER_IO),
-        "plan-reviewer" => Some(&PLAN_REVIEWER_IO),
-        "sharder" => Some(&SHARDER_IO),
-        "coder" => Some(&CODER_IO),
-        "reviewer" => Some(&REVIEWER_IO),
-        "recovery" => Some(&RECOVERY_IO),
+    stage_io_with_mode(stage, None)
+}
+
+/// Lookup StageIO by stage name and optional mode.  The `"recovery"` mode
+/// selects the recovery-specific variants for `plan-reviewer` and `sharder`.
+pub fn stage_io_with_mode(stage: &str, mode: Option<&str>) -> Option<&'static StageIO> {
+    match (stage, mode) {
+        ("plan-reviewer", Some("recovery")) => Some(&RECOVERY_PLAN_REVIEWER_IO),
+        ("sharder", Some("recovery")) => Some(&RECOVERY_SHARDER_IO),
+        ("brainstorm", _) => Some(&BRAINSTORM_IO),
+        ("spec-reviewer", _) => Some(&SPEC_REVIEWER_IO),
+        ("planner", _) => Some(&PLANNER_IO),
+        ("plan-reviewer", _) => Some(&PLAN_REVIEWER_IO),
+        ("sharder", _) => Some(&SHARDER_IO),
+        ("coder", _) => Some(&CODER_IO),
+        ("reviewer", _) => Some(&REVIEWER_IO),
+        ("recovery", _) => Some(&RECOVERY_IO),
         _ => None,
     }
 }

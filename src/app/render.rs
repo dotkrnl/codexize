@@ -13,8 +13,9 @@ use crate::state::{NodeStatus, Phase};
 use super::{
     App, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
-    state::ModelRefreshState,
 };
+#[cfg(test)]
+use super::state::ModelRefreshState;
 use crate::selection::VendorKind;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -113,6 +114,15 @@ fn probability_span(label: &str, pct: u8, max_pct: u8) -> Span<'static> {
     Span::styled(format!("{}{:>2}", label, pct), style)
 }
 
+/// Span used when the vendor's quota fetch failed: shows "--" in red so the
+/// user sees that the probability data is unavailable rather than zero.
+fn probability_unavailable_span(label: &str) -> Span<'static> {
+    Span::styled(
+        format!("{}--", label),
+        Style::default().fg(Color::Red),
+    )
+}
+
 fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
@@ -198,14 +208,7 @@ pub fn sanitize_live_summary(text: &str) -> String {
 
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
-        let fallback_lines = self
-            .models
-            .iter()
-            .filter(|m| m.fallback_from.is_some())
-            .count();
-        let model_height = (self.models.len() + fallback_lines + self.quota_errors.len()).max(1)
-            as u16
-            + 2;
+        let model_height = self.models.len().max(1) as u16 + 2;
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -348,6 +351,10 @@ impl App {
                 let planning_pct = probability_percent(model.planning_weight, total_planning);
                 let build_pct = probability_percent(model.build_weight, total_build);
                 let review_pct = probability_percent(model.review_weight, total_review);
+                let vendor_failed = self
+                    .quota_errors
+                    .iter()
+                    .any(|err| err.vendor == model.vendor);
 
                 let mut name_spans: Vec<Span> = Vec::new();
                 if model.fallback_from.is_some() {
@@ -371,53 +378,41 @@ impl App {
 
                 let mut line_spans = vec![tag_span];
                 line_spans.extend(name_spans);
+                let prob_i = if vendor_failed {
+                    probability_unavailable_span("I")
+                } else {
+                    probability_span("I", idea_pct, max_idea)
+                };
+                let prob_p = if vendor_failed {
+                    probability_unavailable_span("P")
+                } else {
+                    probability_span("P", planning_pct, max_planning)
+                };
+                let prob_b = if vendor_failed {
+                    probability_unavailable_span("B")
+                } else {
+                    probability_span("B", build_pct, max_build)
+                };
+                let prob_r = if vendor_failed {
+                    probability_unavailable_span("R")
+                } else {
+                    probability_span("R", review_pct, max_review)
+                };
                 line_spans.extend(vec![
                     Span::styled(stupid_level, Style::default().fg(Color::Yellow)),
                     Span::raw("  "),
                     Span::styled(quota, Style::default().fg(Color::Green)),
                     Span::raw("  "),
-                    probability_span("I", idea_pct, max_idea),
+                    prob_i,
                     Span::raw(" "),
-                    probability_span("P", planning_pct, max_planning),
+                    prob_p,
                     Span::raw(" "),
-                    probability_span("B", build_pct, max_build),
+                    prob_b,
                     Span::raw(" "),
-                    probability_span("R", review_pct, max_review),
+                    prob_r,
                 ]);
                 lines.push(Line::from(line_spans));
             }
-        }
-
-        for err in &self.quota_errors {
-            let tag = vendor_tag(err.vendor);
-            let msg = if err.message.len() > 60 {
-                format!("{}...", &err.message[..60])
-            } else {
-                err.message.clone()
-            };
-            let retry_in = match &self.model_refresh {
-                ModelRefreshState::Idle(at) => {
-                    let elapsed = at.elapsed();
-                    let due = self.quota_retry_delay;
-                    if elapsed < due {
-                        let secs = (due - elapsed).as_secs();
-                        format!(" — retry in {}m{}s", secs / 60, secs % 60)
-                    } else {
-                        " — retrying...".to_string()
-                    }
-                }
-                ModelRefreshState::Fetching { .. } => " — retrying now".to_string(),
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  ⚠ {:<6}  ", tag),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Span::styled(
-                    format!("{msg}{retry_in}"),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
         }
 
         Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))

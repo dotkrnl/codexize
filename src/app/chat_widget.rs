@@ -248,7 +248,7 @@ fn render_messages(
                     lines.push(RenderedLine {
                         spans: vec![
                             Span::raw(indent.clone()),
-                            Span::styled(chunk, Style::default().fg(Color::DarkGray)),
+                            Span::styled(chunk, Style::default().fg(Color::White)),
                         ],
                     });
                 }
@@ -260,7 +260,7 @@ fn render_messages(
         let body_style = if msg.kind == MessageKind::Summary {
             Style::default().fg(Color::Green)
         } else {
-            Style::default()
+            Style::default().fg(Color::White)
         };
 
         for (i, chunk) in wrapped.iter().enumerate() {

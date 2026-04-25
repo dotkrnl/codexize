@@ -30,7 +30,10 @@ use crossterm::event::{self, Event};
 use self::{
     models::{spawn_refresh, vendor_tag},
     state::ModelRefreshState,
-    tree::{build_tree, current_node_index},
+    tree::{
+        NodeKey, VisibleNodeRow, active_path_keys, build_tree, collect_all_rows,
+        current_node_index, flatten_visible_rows, node_at_path, node_key_at_path,
+    },
 };
 
 use notify::Watcher;
@@ -39,6 +42,12 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpansionOverride {
+    Expanded,
+    Collapsed,
+}
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
@@ -58,11 +67,13 @@ pub struct App {
     tmux: TmuxContext,
     state: SessionState,
     nodes: Vec<Node>,
+    visible_rows: Vec<VisibleNodeRow>,
     models: Vec<ModelStatus>,
     model_refresh: ModelRefreshState,
     selected: usize,
-    collapsed_overrides: BTreeSet<String>,
-    stage_scroll: BTreeMap<String, usize>,
+    selected_key: Option<NodeKey>,
+    collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
+    stage_scroll: BTreeMap<NodeKey, usize>,
     body_inner_height: usize,
     body_inner_width: usize,
     input_mode: bool,
@@ -106,18 +117,21 @@ impl App {
         }
         let nodes = build_tree(&state);
         let current = current_node_index(&nodes);
+        let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
         let mut app = Self {
             tmux,
             state,
             nodes,
+            visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Fetching {
                 rx: spawn_refresh(),
                 started_at: Instant::now(),
             },
             selected: current,
-            collapsed_overrides: BTreeSet::new(),
+            selected_key,
+            collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 0,
             body_inner_width: 0,
@@ -144,6 +158,8 @@ impl App {
             test_launch_harness: None,
             messages,
         };
+        app.rebuild_visible_rows();
+        app.restore_selection(app.selected_key.clone(), app.selected);
         // Load cached models if available
         if let Some((cached, errors, expired)) = cache::load() {
             app.models = cached;
@@ -178,8 +194,7 @@ impl App {
                 }
                 app.messages =
                     SessionState::load_messages(&app.state.session_id).unwrap_or_default();
-                app.nodes = build_tree(&app.state);
-                app.selected = current_node_index(&app.nodes);
+                app.rebuild_tree_view(None);
             }
         }
         let _ = app.setup_watcher();
@@ -251,26 +266,135 @@ impl App {
         current_node_index(&self.nodes)
     }
 
+    fn current_row(&self) -> usize {
+        let current = self.current_node();
+        self.visible_rows
+            .iter()
+            .position(|row| row.depth == 0 && row.path.first().copied() == Some(current))
+            .unwrap_or(0)
+    }
+
+    fn node_for_row(&self, index: usize) -> Option<&Node> {
+        let row = self.visible_rows.get(index)?;
+        node_at_path(&self.nodes, &row.path)
+    }
+
+    fn default_selected_key(&self) -> Option<NodeKey> {
+        let current = self.current_node();
+        node_key_at_path(&self.nodes, &[current])
+    }
+
+    fn active_path_keys(&self) -> BTreeSet<NodeKey> {
+        active_path_keys(&self.nodes, &self.state.agent_runs)
+    }
+
+    fn default_expanded(&self, row: &VisibleNodeRow) -> bool {
+        if !row.is_expandable() {
+            return false;
+        }
+        if row.depth == 0 {
+            return row.path.first().copied() == Some(self.current_node());
+        }
+        self.active_path_keys().contains(&row.key)
+    }
+
+    fn rebuild_visible_rows(&mut self) {
+        let active_keys = self.active_path_keys();
+        let current = self.current_node();
+        let overrides = self.collapsed_overrides.clone();
+        self.visible_rows = flatten_visible_rows(&self.nodes, |row| {
+            if !row.is_expandable() {
+                return false;
+            }
+            if active_keys.contains(&row.key) {
+                return true;
+            }
+            match overrides.get(&row.key) {
+                Some(ExpansionOverride::Expanded) => true,
+                Some(ExpansionOverride::Collapsed) => false,
+                None => {
+                    if row.depth == 0 {
+                        row.path.first().copied() == Some(current)
+                    } else {
+                        active_keys.contains(&row.key)
+                    }
+                }
+            }
+        });
+    }
+
+    fn restore_selection(&mut self, preferred_key: Option<NodeKey>, previous_selected: usize) {
+        let target = preferred_key.or_else(|| self.default_selected_key());
+        if let Some(key) = target {
+            if let Some(index) = self.visible_rows.iter().position(|row| row.key == key) {
+                self.selected = index;
+                self.selected_key = Some(key);
+                return;
+            }
+            if let Some(index) = key
+                .ancestors()
+                .find_map(|ancestor| self.visible_rows.iter().position(|row| row.key == ancestor))
+            {
+                self.selected = index;
+                self.selected_key = self.visible_rows.get(index).map(|row| row.key.clone());
+                return;
+            }
+        }
+
+        self.selected = previous_selected.min(self.visible_rows.len().saturating_sub(1));
+        self.selected_key = self.visible_rows.get(self.selected).map(|row| row.key.clone());
+    }
+
+    fn rebuild_tree_view(&mut self, preferred_key: Option<NodeKey>) {
+        let previous_leaf_runs: BTreeMap<NodeKey, Option<u64>> = collect_all_rows(&self.nodes)
+            .into_iter()
+            .filter(|row| row.has_transcript)
+            .map(|row| (row.key, row.backing_leaf_run_id))
+            .collect();
+        let previous_selected = self.selected;
+        let preferred_key = preferred_key.or_else(|| self.selected_key.clone());
+
+        self.nodes = build_tree(&self.state);
+        self.rebuild_visible_rows();
+
+        for row in collect_all_rows(&self.nodes)
+            .into_iter()
+            .filter(|row| row.has_transcript)
+        {
+            if previous_leaf_runs.get(&row.key).copied() != Some(row.backing_leaf_run_id) {
+                self.stage_scroll.insert(row.key, usize::MAX);
+            }
+        }
+
+        self.restore_selection(preferred_key, previous_selected);
+    }
+
     fn can_focus_input(&self) -> bool {
         self.is_expanded(self.selected)
             && self.state.current_phase == Phase::IdeaInput
-            && self.nodes[self.selected].label == "Idea"
+            && self
+                .node_for_row(self.selected)
+                .is_some_and(|node| node.label == "Idea")
     }
 
     pub(super) fn is_expanded(&self, index: usize) -> bool {
-        if index == self.current_node() {
+        if index == self.current_row() {
             return true;
         }
-        let Some(node) = self.nodes.get(index) else {
+        let Some(row) = self.visible_rows.get(index) else {
             return false;
         };
-        if node.status == crate::state::NodeStatus::Pending {
+        if !row.is_expandable() {
             return false;
         }
-        let Some(key) = Self::stage_scroll_key(node) else {
-            return false;
-        };
-        !self.collapsed_overrides.contains(&key)
+        if self.active_path_keys().contains(&row.key) {
+            return true;
+        }
+        match self.collapsed_overrides.get(&row.key) {
+            Some(ExpansionOverride::Expanded) => true,
+            Some(ExpansionOverride::Collapsed) => false,
+            None => self.default_expanded(row),
+        }
     }
 
     pub(super) fn page_step(&self) -> usize {
@@ -278,31 +402,21 @@ impl App {
     }
 
     pub(super) fn expanded_stage_count(&self) -> usize {
-        (0..self.nodes.len())
+        (0..self.visible_rows.len())
             .filter(|i| self.is_expanded(*i))
             .count()
             .max(1)
     }
 
     pub(super) fn stage_body_height(&self) -> usize {
-        let body = self.body_inner_height.saturating_sub(self.nodes.len());
+        let body = self.body_inner_height.saturating_sub(self.visible_rows.len());
         (body / self.expanded_stage_count()).max(3)
     }
 
-    pub(super) fn stage_scroll_key(node: &Node) -> Option<String> {
-        if node.kind != session_state::NodeKind::Stage {
-            return None;
-        }
-        // REVIEWER: stage labels are currently unique in the tree; if that changes,
-        // this key should include task_id/round identity to avoid collisions.
-        Some(node.label.clone())
-    }
-
-    pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(String, Option<usize>)> {
-        let node = self.nodes.get(index)?;
-        let key = Self::stage_scroll_key(node)?;
-        let stored = self.stage_scroll.get(&key).copied();
-        Some((key, stored))
+    pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(NodeKey, Option<usize>)> {
+        let row = self.visible_rows.get(index)?;
+        let stored = self.stage_scroll.get(&row.key).copied();
+        Some((row.key.clone(), stored))
     }
 
     /// Resolve the effective scroll offset for a stage, treating the missing/MAX
@@ -328,35 +442,17 @@ impl App {
     }
 
     pub(super) fn set_stage_scroll(&mut self, index: usize, value: usize) {
-        if let Some(key) = self.nodes.get(index).and_then(Self::stage_scroll_key) {
+        if let Some(key) = self.visible_rows.get(index).map(|row| row.key.clone()) {
             self.stage_scroll.insert(key, value);
         }
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
-        let previous_stage_leaf_runs: BTreeMap<String, Option<u64>> = self
-            .nodes
-            .iter()
-            .filter_map(|node| Self::stage_scroll_key(node).map(|key| (key, node.leaf_run_id)))
-            .collect();
-
         self.state.transition_to(next_phase)?;
         self.agent_line_count = 0;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
-
-        self.nodes = build_tree(&self.state);
-        // Reset scroll (to bottom-anchored) for any stage whose backing leaf run changed.
-        for node in &self.nodes {
-            let Some(key) = Self::stage_scroll_key(node) else {
-                continue;
-            };
-            let previous_leaf = previous_stage_leaf_runs.get(&key).copied();
-            if previous_leaf != Some(node.leaf_run_id) {
-                self.stage_scroll.insert(key, usize::MAX);
-            }
-        }
-        self.selected = current_node_index(&self.nodes);
+        self.rebuild_tree_view(None);
         Ok(())
     }
 
@@ -1013,8 +1109,7 @@ impl App {
         }
         self.read_live_summary_pipeline();
         self.messages = SessionState::load_messages(&self.state.session_id).unwrap_or_default();
-        self.nodes = build_tree(&self.state);
-        self.selected = current_node_index(&self.nodes);
+        self.rebuild_tree_view(None);
     }
 
     fn update_agent_progress(&mut self) {
@@ -1103,8 +1198,7 @@ impl App {
                 run.window_name
             ));
         }
-        self.nodes = build_tree(&self.state);
-        self.selected = current_node_index(&self.nodes);
+        self.rebuild_tree_view(None);
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
@@ -1679,7 +1773,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -1691,7 +1785,7 @@ impl App {
             self.state.agent_error =
                 Some("no model available with quota — check model strip".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -1793,7 +1887,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -1896,7 +1990,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -1925,7 +2019,7 @@ impl App {
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -1985,7 +2079,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -2086,7 +2180,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -2103,7 +2197,7 @@ impl App {
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -2163,7 +2257,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
         let Phase::BuilderRecovery(round) = self.state.current_phase else {
@@ -2185,7 +2279,7 @@ impl App {
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
@@ -2253,7 +2347,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
         let Phase::ImplementationRound(r) = self.state.current_phase else {
@@ -2344,7 +2438,7 @@ impl App {
             self.state.agent_error =
                 Some("model list not yet loaded — wait a moment and try again".to_string());
             let _ = self.state.save();
-            self.nodes = build_tree(&self.state);
+            self.rebuild_tree_view(None);
             return false;
         }
         let Phase::ReviewRound(r) = self.state.current_phase else {
@@ -3430,15 +3524,18 @@ mod tests {
 
     fn mk_app(state: SessionState) -> App {
         let nodes = build_tree(&state);
-        let selected = current_node_index(&nodes);
-        App {
+        let current = current_node_index(&nodes);
+        let selected_key = node_key_at_path(&nodes, &[current]);
+        let mut app = App {
             tmux: mk_tmux(),
             state,
             nodes,
+            visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
-            selected,
-            collapsed_overrides: BTreeSet::new(),
+            selected: 0,
+            selected_key,
+            collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 30,
             body_inner_width: 80,
@@ -3463,39 +3560,41 @@ mod tests {
             failed_models: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
-        }
+        };
+        app.rebuild_visible_rows();
+        app.restore_selection(app.selected_key.clone(), app.selected);
+        app
     }
 
     #[test]
     fn current_stage_is_always_expanded() {
         let app = mk_app(mk_state_with_runs());
-        let current = app.current_node();
+        let current = app.current_row();
         assert!(app.is_expanded(current));
     }
 
     #[test]
-    fn toggle_expand_adds_then_removes_by_stage_key() {
+    fn toggle_expand_adds_then_removes_by_node_key() {
         let mut app = mk_app(mk_state_with_runs());
-        // Focus the Brainstorm stage (Done; auto-expanded).
-        let bs_idx = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
+        let bs_idx = row_index(&app, "Brainstorm");
+        let bs_key = app.visible_rows[bs_idx].key.clone();
         app.selected = bs_idx;
+        assert!(!app.is_expanded(bs_idx));
+        app.toggle_expand_focused();
         assert!(app.is_expanded(bs_idx));
+        assert_eq!(
+            app.collapsed_overrides.get(&bs_key),
+            Some(&ExpansionOverride::Expanded)
+        );
         app.toggle_expand_focused();
         assert!(!app.is_expanded(bs_idx));
-        assert!(app.collapsed_overrides.contains("Brainstorm"));
-        app.toggle_expand_focused();
-        assert!(app.is_expanded(bs_idx));
-        assert!(!app.collapsed_overrides.contains("Brainstorm"));
+        assert!(!app.collapsed_overrides.contains_key(&bs_key));
     }
 
     #[test]
     fn toggle_noop_on_currently_running_stage() {
         let mut app = mk_app(mk_state_with_runs());
-        app.selected = app.current_node();
+        app.selected = app.current_row();
         app.toggle_expand_focused();
         assert!(app.collapsed_overrides.is_empty());
         // Still expanded via the current-running rule.
@@ -3503,139 +3602,163 @@ mod tests {
     }
 
     #[test]
-    fn expand_state_survives_tree_rebuild() {
-        let mut app = mk_app(mk_state_with_runs());
-        let bs_idx = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
-        app.selected = bs_idx;
-        // Brainstorm (Done) is auto-expanded; collapse it via toggle.
-        app.toggle_expand_focused();
-        assert!(app.collapsed_overrides.contains("Brainstorm"));
-        // Rebuild tree — indices may shift, but stage-keyed override persists.
-        app.nodes = build_tree(&app.state);
-        let bs_idx_after = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
-        assert!(!app.is_expanded(bs_idx_after));
+    fn active_path_reopens_collapsed_ancestors() {
+        let mut state = SessionState::new("active-path".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(7);
+        state.agent_runs.push(RunRecord {
+            id: 10,
+            stage: "coder".to_string(),
+            task_id: Some(7),
+            round: 1,
+            attempt: 1,
+            model: "claude".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        let mut app = mk_app(state);
+        let task_idx = row_index(&app, "Task 7");
+        let coder_idx = row_index(&app, "Coder");
+        let task_key = app.visible_rows[task_idx].key.clone();
+        let coder_key = app.visible_rows[coder_idx].key.clone();
+        app.collapsed_overrides
+            .insert(task_key.clone(), ExpansionOverride::Collapsed);
+        app.collapsed_overrides
+            .insert(coder_key.clone(), ExpansionOverride::Collapsed);
+
+        app.rebuild_tree_view(None);
+
+        assert!(row_index_opt(&app, "Task 7").is_some());
+        assert!(row_index_opt(&app, "Coder").is_some());
+        let task_idx = row_index(&app, "Task 7");
+        assert!(app.is_expanded(task_idx));
     }
 
     #[test]
-    fn scroll_offsets_keyed_by_stage_identity() {
-        let mut app = mk_app(mk_state_with_runs());
-        let bs_idx = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
-        app.collapsed_overrides.insert("Brainstorm".to_string());
-        app.set_stage_scroll(bs_idx, 7);
-        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(7));
-        // Rebuild the tree, then confirm offset still there.
-        app.nodes = build_tree(&app.state);
-        let bs_idx_after = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
-        assert_eq!(
-            app.stage_scroll
-                .get(&app.nodes[bs_idx_after].label)
-                .copied(),
-            Some(7)
-        );
+    fn selection_restores_same_key_after_reorder() {
+        let mut state = SessionState::new("restore-same-key".to_string());
+        state.current_phase = Phase::ImplementationRound(4);
+        state.builder.done = vec![3];
+        state.builder.current_task = Some(9);
+        state.builder.pending = vec![8];
+        let mut app = mk_app(state.clone());
+        let task_idx = row_index(&app, "Task 9");
+        let task_key = app.visible_rows[task_idx].key.clone();
+        app.selected = task_idx;
+        app.selected_key = Some(task_key.clone());
+
+        state.current_phase = Phase::BuilderRecovery(4);
+        state.agent_runs.push(RunRecord {
+            id: 77,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 4,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        app.state = state;
+
+        app.rebuild_tree_view(None);
+
+        assert_eq!(app.selected_key, Some(task_key));
+        assert_eq!(row_label(&app, app.selected), "Task 9");
     }
 
     #[test]
-    fn transition_resets_scroll_only_for_changed_leaf_run() {
+    fn selection_falls_back_to_nearest_visible_ancestor() {
+        let mut state = SessionState::new("fallback-ancestor".to_string());
+        state.current_phase = Phase::ReviewRound(1);
+        state.builder.current_task = Some(7);
+        for (id, stage) in [(1, "coder"), (2, "reviewer")] {
+            state.agent_runs.push(RunRecord {
+                id,
+                stage: stage.to_string(),
+                task_id: Some(7),
+                round: 1,
+                attempt: 1,
+                model: stage.to_string(),
+                vendor: "test".to_string(),
+                window_name: format!("[{stage}]"),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: if stage == "reviewer" {
+                    RunStatus::Running
+                } else {
+                    RunStatus::Done
+                },
+                error: None,
+            });
+        }
+        let mut app = mk_app(state.clone());
+        let reviewer_idx = row_index(&app, "Reviewer");
+        let reviewer_key = app.visible_rows[reviewer_idx].key.clone();
+        app.selected = reviewer_idx;
+        app.selected_key = Some(reviewer_key);
+
+        state.current_phase = Phase::ImplementationRound(1);
+        state.agent_runs.retain(|run| run.stage == "coder");
+        app.state = state;
+        app.rebuild_tree_view(None);
+
+        assert_eq!(row_label(&app, app.selected), "Task 7");
+    }
+
+    #[test]
+    fn transition_resets_scroll_for_changed_backing_leaf_only() {
         with_temp_root(|| {
             let mut app = mk_app(mk_state_with_runs());
-            // Pre-set scroll for Brainstorm (leaf_run_id=1) and Spec Review (running, id=2).
-            app.stage_scroll.insert("Brainstorm".to_string(), 3);
-            app.stage_scroll.insert("Spec Review".to_string(), 5);
+            let brainstorm_idx = row_index(&app, "Brainstorm");
+            let spec_review_idx = row_index(&app, "Spec Review");
+            let brainstorm_key = app.visible_rows[brainstorm_idx].key.clone();
+            let spec_review_key = app.visible_rows[spec_review_idx].key.clone();
+            app.stage_scroll.insert(brainstorm_key.clone(), 3);
+            app.stage_scroll.insert(spec_review_key.clone(), 5);
 
-            // Advance: brainstorm's leaf doesn't change; spec review's run pool may shift.
-            // Mimic a phase transition where brainstorm leaf stays the same.
-            let _ = app.transition_to_phase(Phase::SpecReviewPaused);
-            // Brainstorm leaf_run_id didn't change, offset preserved.
-            assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(3));
+            app.state.agent_runs.retain(|run| run.stage != "brainstorm");
+            app.state.agent_runs.push(RunRecord {
+                id: 9,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 2,
+                model: "m2".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Done,
+                error: None,
+            });
+
+            app.rebuild_tree_view(None);
+
+            let brainstorm_idx = row_index(&app, "Brainstorm");
+            let spec_review_idx = row_index(&app, "Spec Review");
+            let brainstorm_key_after = app.visible_rows[brainstorm_idx].key.clone();
+            let spec_review_key_after = app.visible_rows[spec_review_idx].key.clone();
+            assert_eq!(app.stage_scroll.get(&brainstorm_key_after).copied(), Some(usize::MAX));
+            assert_eq!(app.stage_scroll.get(&spec_review_key_after).copied(), Some(5));
         });
     }
 
     #[test]
-    fn boundary_handoff_on_up_moves_focus_to_previous_expanded_stage() {
+    fn boundary_handoff_on_up_moves_focus_to_previous_expanded_row() {
         let mut app = mk_app(mk_state_with_runs());
-        // Expand Brainstorm so it can receive focus handoff.
-        app.collapsed_overrides.insert("Brainstorm".to_string());
-        // Focus Spec Review (currently running, implicitly expanded) with scroll at top.
-        let sr_idx = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Spec Review")
-            .unwrap();
+        let sr_idx = row_index(&app, "Spec Review");
         app.selected = sr_idx;
         app.set_stage_scroll(sr_idx, 0);
-        // Pressing Up at the top boundary should move focus to the previous stage.
         app.scroll_or_move_focus(-1);
         assert!(app.selected < sr_idx);
-    }
-
-    #[test]
-    fn collapse_then_reexpand_preserves_scroll_offset() {
-        let mut app = mk_app(mk_state_with_runs());
-        let bs_idx = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
-        // Brainstorm (Done) is auto-expanded; set a scroll offset.
-        app.selected = bs_idx;
-        assert!(app.is_expanded(bs_idx));
-        app.set_stage_scroll(bs_idx, 4);
-        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
-
-        // Collapse via toggle.
-        app.toggle_expand_focused();
-        assert!(!app.is_expanded(bs_idx));
-        app.clamp_scroll();
-        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
-
-        // Re-expand via toggle — offset persists.
-        app.toggle_expand_focused();
-        assert!(app.is_expanded(bs_idx));
-        assert_eq!(app.stage_scroll.get("Brainstorm").copied(), Some(4));
-    }
-
-    fn node_index(app: &App, label: &str) -> usize {
-        app.nodes.iter().position(|n| n.label == label).unwrap()
-    }
-
-    #[test]
-    fn boundary_handoff_skips_collapsed_stages_between_expanded_neighbors() {
-        let mut app = mk_app(mk_state_with_runs());
-        // Layout: Idea, Brainstorm(Done), Spec Review(running),
-        // Planning(Pending → auto-collapsed), Plan Review(Pending), …
-        let bs_idx = node_index(&app, "Brainstorm");
-        let planning_idx = node_index(&app, "Planning");
-        let sr_idx = node_index(&app, "Spec Review");
-        assert!(bs_idx < sr_idx && sr_idx < planning_idx);
-
-        // Focus Spec Review at its top boundary.
-        app.selected = sr_idx;
-        app.set_stage_scroll(sr_idx, 0);
-
-        // Up at the top boundary should jump past any collapsed stages
-        // directly to Brainstorm (Done, auto-expanded).
-        app.scroll_or_move_focus(-1);
-        assert_eq!(
-            app.nodes[app.selected].label, "Brainstorm",
-            "expected focus to land on Brainstorm, got {:?}",
-            app.nodes[app.selected].label
-        );
     }
 
     #[test]
@@ -3646,13 +3769,25 @@ mod tests {
         // Directly test the guard: toggle_expand_focused shouldn't be reached via
         // input-mode keys. Sanity: toggle itself still works outside input mode.
         app.input_mode = false;
-        app.selected = app
-            .nodes
-            .iter()
-            .position(|n| n.label == "Brainstorm")
-            .unwrap();
+        app.selected = row_index(&app, "Brainstorm");
         app.toggle_expand_focused();
         assert_ne!(app.collapsed_overrides, before);
+    }
+
+    fn row_index(app: &App, label: &str) -> usize {
+        row_index_opt(app, label).expect("row")
+    }
+
+    fn row_index_opt(app: &App, label: &str) -> Option<usize> {
+        app.visible_rows.iter().position(|row| {
+            node_at_path(&app.nodes, &row.path).is_some_and(|node| node.label == label)
+        })
+    }
+
+    fn row_label(app: &App, index: usize) -> String {
+        app.node_for_row(index)
+            .map(|node| node.label.clone())
+            .unwrap_or_default()
     }
 
     fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::ModelStatus {
@@ -3699,15 +3834,18 @@ mod tests {
 
     fn idle_app(state: SessionState) -> App {
         let nodes = build_tree(&state);
-        let selected = current_node_index(&nodes);
-        App {
+        let current = current_node_index(&nodes);
+        let selected_key = node_key_at_path(&nodes, &[current]);
+        let mut app = App {
             tmux: mk_tmux(),
             state,
             nodes,
+            visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
-            selected,
-            collapsed_overrides: BTreeSet::new(),
+            selected: 0,
+            selected_key,
+            collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
             body_inner_height: 30,
             body_inner_width: 80,
@@ -3732,7 +3870,10 @@ mod tests {
             failed_models: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
-        }
+        };
+        app.rebuild_visible_rows();
+        app.restore_selection(app.selected_key.clone(), app.selected);
+        app
     }
 
     #[test]

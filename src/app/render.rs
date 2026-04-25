@@ -36,11 +36,14 @@ impl Widget for PipelineWidget<'_> {
         let bottom_y = inner.y.saturating_add(inner.height);
         let mut cursor_y = inner.y;
 
-        for (index, node) in self.app.nodes.iter().enumerate() {
+        for index in 0..self.app.visible_rows.len() {
             if cursor_y >= bottom_y {
                 break;
             }
 
+            let Some(node) = self.app.node_for_row(index) else {
+                continue;
+            };
             let expanded = self.app.is_expanded(index);
             let header = self.app.node_header(index, expanded, node);
             buf.set_line(inner.x, cursor_y, &header, inner.width);
@@ -54,7 +57,7 @@ impl Widget for PipelineWidget<'_> {
                 // section title remains visible even when an earlier body
                 // (especially a long chat) would otherwise eat the whole
                 // pane.
-                let headers_after = self.app.nodes.len().saturating_sub(index + 1);
+                let headers_after = self.app.visible_rows.len().saturating_sub(index + 1);
                 let remaining = (bottom_y - cursor_y) as usize;
                 let usable = remaining.saturating_sub(headers_after);
                 let natural = self
@@ -288,7 +291,9 @@ impl App {
         local_offset: &chrono::FixedOffset,
         index: usize,
     ) {
-        let node = &self.nodes[index];
+        let Some(node) = self.node_for_row(index) else {
+            return;
+        };
         let run_id = node.run_id.or(node.leaf_run_id);
         if let Some(id) = run_id {
             if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
@@ -481,7 +486,7 @@ impl App {
         } else {
             "▸"
         };
-        let is_current = index == super::tree::current_node_index(&self.nodes);
+        let is_current = index == self.current_row();
         let style = if index == self.selected {
             Style::default()
                 .bg(Color::DarkGray)
@@ -491,7 +496,7 @@ impl App {
         };
 
         let mut spans = vec![
-            Span::raw(format!("{marker} ")),
+            Span::raw(format!("{}{} ", "  ".repeat(self.visible_rows[index].depth), marker)),
             Span::raw(node.label.clone()),
             Span::raw(" | "),
             Span::styled(node.status.label(), node.status.style()),
@@ -521,7 +526,9 @@ impl App {
         available_width: usize,
         local_offset: &chrono::FixedOffset,
     ) -> Vec<Line<'static>> {
-        let node = &self.nodes[index];
+        let Some(node) = self.node_for_row(index) else {
+            return Vec::new();
+        };
         let run_id = node.run_id.or(node.leaf_run_id);
         if let Some(id) = run_id {
             if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {

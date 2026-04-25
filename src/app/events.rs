@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::state::{NodeStatus, Phase};
 
-use super::{App, tree::current_node_index};
+use super::{App, ExpansionOverride};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -48,7 +48,7 @@ impl App {
                 false
             }
             KeyCode::Enter => {
-                let on_current = self.selected == current_node_index(&self.nodes);
+                let on_current = self.selected == self.current_row();
                 if on_current {
                     if self.state.current_phase == Phase::SpecReviewPaused {
                         let _ = self.transition_to_phase(Phase::SpecReviewRunning);
@@ -193,25 +193,34 @@ impl App {
     }
 
     pub(super) fn toggle_expand_focused(&mut self) {
-        let current = current_node_index(&self.nodes);
         // The currently-running stage is always implicitly expanded; don't let the user
         // explicitly collapse it.
-        if self.selected == current {
+        if self.selected == self.current_row() {
             return;
         }
-        if self.nodes[self.selected].status == NodeStatus::Pending {
-            return;
-        }
-        let Some(key) = self
-            .nodes
-            .get(self.selected)
-            .and_then(Self::stage_scroll_key)
-        else {
+        let Some(row) = self.visible_rows.get(self.selected).cloned() else {
             return;
         };
-        if !self.collapsed_overrides.insert(key.clone()) {
-            self.collapsed_overrides.remove(&key);
+        if row.status == NodeStatus::Pending || !row.is_expandable() {
+            return;
         }
+        let default_expanded = self.default_expanded(&row);
+        let desired = !self.is_expanded(self.selected);
+        let next_override = match (desired, default_expanded) {
+            (true, true) | (false, false) => None,
+            (true, false) => Some(ExpansionOverride::Expanded),
+            (false, true) => Some(ExpansionOverride::Collapsed),
+        };
+        match next_override {
+            Some(value) => {
+                self.collapsed_overrides.insert(row.key.clone(), value);
+            }
+            None => {
+                self.collapsed_overrides.remove(&row.key);
+            }
+        }
+        self.rebuild_visible_rows();
+        self.restore_selection(Some(row.key), self.selected);
     }
 
     pub(super) fn scroll_or_move_focus(&mut self, delta: isize) {
@@ -238,9 +247,10 @@ impl App {
     fn move_focus(&mut self, delta: isize) {
         if delta < 0 {
             self.selected = self.selected.saturating_sub(1);
-        } else if self.selected + 1 < self.nodes.len() {
+        } else if self.selected + 1 < self.visible_rows.len() {
             self.selected += 1;
         }
+        self.selected_key = self.visible_rows.get(self.selected).map(|row| row.key.clone());
     }
 
     fn boundary_handoff(&mut self, delta: isize) {
@@ -262,7 +272,7 @@ impl App {
         if delta < 0 {
             (0..from).rev().find(|&i| self.is_expanded(i))
         } else {
-            ((from + 1)..self.nodes.len()).find(|&i| self.is_expanded(i))
+            ((from + 1)..self.visible_rows.len()).find(|&i| self.is_expanded(i))
         }
     }
 
@@ -305,10 +315,10 @@ impl App {
         // Collapsed stages are skipped: their max_offset is only meaningful when the
         // body is rendered, and clamping them here would erase a user's stored offset
         // across a collapse/re-expand cycle (spec § State Persistence).
-        let max_offsets: Vec<(String, usize)> = (0..self.nodes.len())
+        let max_offsets: Vec<(_, usize)> = (0..self.visible_rows.len())
             .filter(|&i| self.is_expanded(i))
             .filter_map(|index| {
-                let key = Self::stage_scroll_key(&self.nodes[index])?;
+                let key = self.visible_rows.get(index)?.key.clone();
                 Some((key, self.stage_max_offset(index)))
             })
             .collect();

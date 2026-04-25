@@ -1080,4 +1080,438 @@ text = "agent started · gpt-5 (openai)"
         let state = SessionState::new("test".to_string());
         assert_eq!(state.schema_version, 2);
     }
+
+    #[test]
+    fn test_pipeline_item_create_minimal() {
+        let item = PipelineItem {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(3),
+            round: Some(2),
+            status: PipelineItemStatus::Pending,
+            title: Some("Normalize review artifacts".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+        assert_eq!(item.id, 1);
+        assert_eq!(item.stage, "coder");
+        assert_eq!(item.task_id, Some(3));
+        assert_eq!(item.status, PipelineItemStatus::Pending);
+    }
+
+    #[test]
+    fn test_pipeline_item_recovery_with_trigger() {
+        let item = PipelineItem {
+            id: 2,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: Some("human_blocked".to_string()),
+            interactive: Some(true),
+        };
+        assert_eq!(item.trigger.as_deref(), Some("human_blocked"));
+        assert_eq!(item.interactive, Some(true));
+    }
+
+    #[test]
+    fn test_pipeline_item_plan_review_with_mode() {
+        let item = PipelineItem {
+            id: 3,
+            stage: "plan-review".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Running,
+            title: None,
+            mode: Some("recovery".to_string()),
+            trigger: None,
+            interactive: None,
+        };
+        assert_eq!(item.mode.as_deref(), Some("recovery"));
+        assert_eq!(item.stage, "plan-review");
+    }
+
+    #[test]
+    fn test_pipeline_item_status_lifecycle_vs_verdict() {
+        assert!(PipelineItemStatus::Pending.is_lifecycle());
+        assert!(PipelineItemStatus::Running.is_lifecycle());
+        assert!(PipelineItemStatus::Done.is_lifecycle());
+        assert!(PipelineItemStatus::Failed.is_lifecycle());
+
+        assert!(!PipelineItemStatus::Pending.is_verdict());
+        assert!(!PipelineItemStatus::Done.is_verdict());
+
+        assert!(PipelineItemStatus::Approved.is_verdict());
+        assert!(PipelineItemStatus::Revise.is_verdict());
+        assert!(PipelineItemStatus::HumanBlocked.is_verdict());
+        assert!(PipelineItemStatus::AgentPivot.is_verdict());
+
+        assert!(!PipelineItemStatus::Approved.is_lifecycle());
+    }
+
+    #[test]
+    fn test_pipeline_item_status_terminal() {
+        assert!(!PipelineItemStatus::Pending.is_terminal());
+        assert!(!PipelineItemStatus::Running.is_terminal());
+        assert!(PipelineItemStatus::Done.is_terminal());
+        assert!(PipelineItemStatus::Failed.is_terminal());
+        assert!(PipelineItemStatus::Approved.is_terminal());
+        assert!(PipelineItemStatus::Revise.is_terminal());
+        assert!(PipelineItemStatus::HumanBlocked.is_terminal());
+        assert!(PipelineItemStatus::AgentPivot.is_terminal());
+    }
+
+    #[test]
+    fn test_builder_push_pipeline_item_auto_id() {
+        let mut builder = BuilderState::default();
+        let item = PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Pending,
+            title: Some("First task".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+        let id = builder.push_pipeline_item(item);
+        assert_eq!(id, 1);
+        assert_eq!(builder.pipeline_items.len(), 1);
+        assert_eq!(builder.pipeline_items[0].id, 1);
+
+        let item2 = PipelineItem {
+            id: 0,
+            stage: "reviewer".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+        let id2 = builder.push_pipeline_item(item2);
+        assert_eq!(id2, 2);
+        assert_eq!(builder.pipeline_items.len(), 2);
+    }
+
+    #[test]
+    fn test_builder_push_pipeline_item_explicit_id() {
+        let mut builder = BuilderState::default();
+        let item = PipelineItem {
+            id: 42,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+        let id = builder.push_pipeline_item(item);
+        assert_eq!(id, 42);
+    }
+
+    #[test]
+    fn test_builder_get_pipeline_item() {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(5),
+            round: Some(1),
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        let item = builder.get_pipeline_item(1).unwrap();
+        assert_eq!(item.task_id, Some(5));
+        assert!(builder.get_pipeline_item(99).is_none());
+    }
+
+    #[test]
+    fn test_builder_update_pipeline_status() {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        assert!(builder.update_pipeline_status(1, PipelineItemStatus::Running));
+        assert_eq!(
+            builder.get_pipeline_item(1).unwrap().status,
+            PipelineItemStatus::Running
+        );
+        assert!(builder.update_pipeline_status(1, PipelineItemStatus::Approved));
+        assert_eq!(
+            builder.get_pipeline_item(1).unwrap().status,
+            PipelineItemStatus::Approved
+        );
+        assert!(!builder.update_pipeline_status(99, PipelineItemStatus::Failed));
+    }
+
+    #[test]
+    fn test_builder_pipeline_items_by_stage() {
+        let mut builder = BuilderState::default();
+        for (stage, tid) in &[("coder", 1), ("reviewer", 1), ("coder", 2), ("recovery", 0)] {
+            builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: stage.to_string(),
+                task_id: if *tid > 0 { Some(*tid) } else { None },
+                round: None,
+                status: PipelineItemStatus::Pending,
+                title: None,
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+        }
+        assert_eq!(builder.pipeline_items_by_stage("coder").len(), 2);
+        assert_eq!(builder.pipeline_items_by_stage("reviewer").len(), 1);
+        assert_eq!(builder.pipeline_items_by_stage("recovery").len(), 1);
+        assert_eq!(builder.pipeline_items_by_stage("brainstorm").len(), 0);
+    }
+
+    #[test]
+    fn test_builder_pending_and_running_items() {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(2),
+            round: Some(1),
+            status: PipelineItemStatus::Running,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "reviewer".to_string(),
+            task_id: Some(3),
+            round: Some(1),
+            status: PipelineItemStatus::Done,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        assert_eq!(builder.pending_pipeline_items().len(), 1);
+        assert_eq!(builder.running_pipeline_items().len(), 1);
+        assert_eq!(builder.pending_pipeline_items()[0].task_id, Some(1));
+        assert_eq!(builder.running_pipeline_items()[0].task_id, Some(2));
+    }
+
+    #[test]
+    fn test_pipeline_item_toml_roundtrip() {
+        let item = PipelineItem {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(3),
+            round: Some(2),
+            status: PipelineItemStatus::Pending,
+            title: Some("Normalize review artifacts".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Wrapper {
+            pipeline_items: Vec<PipelineItem>,
+        }
+
+        let wrapper = Wrapper {
+            pipeline_items: vec![item.clone()],
+        };
+        let toml_str = toml::to_string_pretty(&wrapper).unwrap();
+        let loaded: Wrapper = toml::from_str(&toml_str).unwrap();
+        assert_eq!(loaded.pipeline_items.len(), 1);
+        assert_eq!(loaded.pipeline_items[0], item);
+    }
+
+    #[test]
+    fn test_pipeline_item_toml_skip_none_fields() {
+        let item = PipelineItem {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+
+        let toml_str = toml::to_string_pretty(&item).unwrap();
+        assert!(!toml_str.contains("task_id"));
+        assert!(!toml_str.contains("round"));
+        assert!(!toml_str.contains("title"));
+        assert!(!toml_str.contains("mode"));
+        assert!(!toml_str.contains("trigger"));
+        assert!(!toml_str.contains("interactive"));
+    }
+
+    #[test]
+    fn test_pipeline_item_toml_recovery_with_trigger() {
+        let toml_str = r#"
+id = 5
+stage = "recovery"
+status = "pending"
+trigger = "agent_pivot"
+interactive = false
+"#;
+        let item: PipelineItem = toml::from_str(toml_str).unwrap();
+        assert_eq!(item.stage, "recovery");
+        assert_eq!(item.trigger.as_deref(), Some("agent_pivot"));
+        assert_eq!(item.interactive, Some(false));
+        assert_eq!(item.status, PipelineItemStatus::Pending);
+    }
+
+    #[test]
+    fn test_pipeline_item_status_serde_snake_case() {
+        let item = PipelineItem {
+            id: 1,
+            stage: "reviewer".to_string(),
+            task_id: Some(2),
+            round: Some(1),
+            status: PipelineItemStatus::HumanBlocked,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        };
+        let toml_str = toml::to_string_pretty(&item).unwrap();
+        assert!(toml_str.contains("human_blocked"));
+
+        let loaded: PipelineItem = toml::from_str(&toml_str).unwrap();
+        assert_eq!(loaded.status, PipelineItemStatus::HumanBlocked);
+    }
+
+    #[test]
+    fn test_pipeline_items_persist_in_session() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-pipeline".to_string());
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: Some(1),
+                status: PipelineItemStatus::Pending,
+                title: Some("First task".to_string()),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: None,
+                status: PipelineItemStatus::Running,
+                title: None,
+                mode: Some("recovery".to_string()),
+                trigger: Some("human_blocked".to_string()),
+                interactive: Some(true),
+            });
+
+            state.save().unwrap();
+            let loaded = SessionState::load("test-pipeline").unwrap();
+
+            assert_eq!(loaded.builder.pipeline_items.len(), 2);
+            assert_eq!(loaded.builder.pipeline_items[0].stage, "coder");
+            assert_eq!(loaded.builder.pipeline_items[0].task_id, Some(1));
+            assert_eq!(
+                loaded.builder.pipeline_items[0].status,
+                PipelineItemStatus::Pending
+            );
+            assert_eq!(
+                loaded.builder.pipeline_items[0].title.as_deref(),
+                Some("First task")
+            );
+
+            assert_eq!(loaded.builder.pipeline_items[1].stage, "recovery");
+            assert_eq!(
+                loaded.builder.pipeline_items[1].trigger.as_deref(),
+                Some("human_blocked")
+            );
+            assert_eq!(loaded.builder.pipeline_items[1].interactive, Some(true));
+        });
+    }
+
+    #[test]
+    fn test_pipeline_items_update_then_persist() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-update-pipe".to_string());
+            state.builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(5),
+                round: Some(1),
+                status: PipelineItemStatus::Pending,
+                title: None,
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            state
+                .builder
+                .update_pipeline_status(1, PipelineItemStatus::Approved);
+            state.save().unwrap();
+
+            let loaded = SessionState::load("test-update-pipe").unwrap();
+            assert_eq!(
+                loaded.builder.pipeline_items[0].status,
+                PipelineItemStatus::Approved
+            );
+        });
+    }
+
+    #[test]
+    fn test_pipeline_item_default_status_is_pending() {
+        assert_eq!(PipelineItemStatus::default(), PipelineItemStatus::Pending);
+    }
+
+    #[test]
+    fn test_pipeline_all_verdict_values_roundtrip() {
+        for (input, expected) in [
+            ("\"approved\"", PipelineItemStatus::Approved),
+            ("\"revise\"", PipelineItemStatus::Revise),
+            ("\"human_blocked\"", PipelineItemStatus::HumanBlocked),
+            ("\"agent_pivot\"", PipelineItemStatus::AgentPivot),
+        ] {
+            let status: PipelineItemStatus = toml::from_str(&format!("status = {input}\n"))
+                .map(|w: std::collections::HashMap<String, PipelineItemStatus>| {
+                    w["status"]
+                })
+                .unwrap();
+            assert_eq!(status, expected);
+        }
+    }
 }

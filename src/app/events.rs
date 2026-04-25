@@ -193,11 +193,6 @@ impl App {
     }
 
     pub(super) fn toggle_expand_focused(&mut self) {
-        // The currently-running stage is always implicitly expanded; don't let the user
-        // explicitly collapse it.
-        if self.selected == self.current_row() {
-            return;
-        }
         let Some(row) = self.visible_rows.get(self.selected).cloned() else {
             return;
         };
@@ -225,7 +220,7 @@ impl App {
 
     pub(super) fn scroll_or_move_focus(&mut self, delta: isize) {
         let idx = self.selected;
-        if !self.is_expanded(idx) {
+        if !self.is_expanded_transcript(idx) || self.stage_body_height_for(idx) == 0 {
             self.move_focus(delta);
             return;
         }
@@ -254,31 +249,12 @@ impl App {
     }
 
     fn boundary_handoff(&mut self, delta: isize) {
-        // Prefer jumping to the next expanded stage in the direction, skipping any
-        // collapsed stages between (spec § Navigation System → Boundary Handling).
-        if let Some(target) = self.find_expanded_neighbor(self.selected, delta) {
-            self.selected = target;
-            let max_offset = self.stage_max_offset(self.selected);
-            let landing = if delta < 0 { max_offset } else { 0 };
-            self.set_stage_scroll(self.selected, landing);
-            return;
-        }
-        // No expanded neighbor in that direction — fall back to a single-step focus
-        // move, which may land on a collapsed stage (focus-only move per spec).
         self.move_focus(delta);
-    }
-
-    fn find_expanded_neighbor(&self, from: usize, delta: isize) -> Option<usize> {
-        if delta < 0 {
-            (0..from).rev().find(|&i| self.is_expanded(i))
-        } else {
-            ((from + 1)..self.visible_rows.len()).find(|&i| self.is_expanded(i))
-        }
     }
 
     fn scroll_selected(&mut self, delta: isize) {
         let idx = self.selected;
-        if !self.is_expanded(idx) {
+        if !self.is_expanded_transcript(idx) || self.stage_body_height_for(idx) == 0 {
             return;
         }
         let max_offset = self.stage_max_offset(idx) as isize;

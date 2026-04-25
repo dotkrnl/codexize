@@ -3626,13 +3626,17 @@ mod tests {
     }
 
     #[test]
-    fn toggle_noop_on_currently_running_stage() {
+    fn active_current_stage_collapse_override_does_not_hide_row() {
         let mut app = mk_app(mk_state_with_runs());
-        app.selected = app.current_row();
+        let current = app.current_row();
+        let current_key = app.visible_rows[current].key.clone();
+        app.selected = current;
         app.toggle_expand_focused();
-        assert!(app.collapsed_overrides.is_empty());
-        // Still expanded via the current-running rule.
-        assert!(app.is_expanded(app.selected));
+        assert_eq!(
+            app.collapsed_overrides.get(&current_key),
+            Some(&ExpansionOverride::Collapsed)
+        );
+        assert!(app.is_expanded(current));
     }
 
     #[test]
@@ -3806,6 +3810,276 @@ mod tests {
         app.selected = row_index(&app, "Brainstorm");
         app.toggle_expand_focused();
         assert_ne!(app.collapsed_overrides, before);
+    }
+
+    #[test]
+    fn down_boundary_handoff_moves_to_next_visible_row_even_when_collapsed() {
+        let mut app = mk_app(SessionState::new("boundary-visible-row".to_string()));
+        app.nodes = vec![Node {
+            label: "Root".to_string(),
+            kind: crate::state::NodeKind::Stage,
+            status: crate::state::NodeStatus::Running,
+            summary: String::new(),
+            children: vec![
+                Node {
+                    label: "Collapsed Task".to_string(),
+                    kind: crate::state::NodeKind::Task,
+                    status: crate::state::NodeStatus::Done,
+                    summary: String::new(),
+                    children: Vec::new(),
+                    run_id: None,
+                    leaf_run_id: Some(11),
+                },
+                Node {
+                    label: "Expanded Task".to_string(),
+                    kind: crate::state::NodeKind::Task,
+                    status: crate::state::NodeStatus::Done,
+                    summary: String::new(),
+                    children: Vec::new(),
+                    run_id: None,
+                    leaf_run_id: Some(12),
+                },
+            ],
+            run_id: None,
+            leaf_run_id: None,
+        }];
+        app.rebuild_visible_rows();
+        let expanded_idx = row_index(&app, "Expanded Task");
+        let expanded_key = app.visible_rows[expanded_idx].key.clone();
+        app.collapsed_overrides
+            .insert(expanded_key, ExpansionOverride::Expanded);
+        app.rebuild_visible_rows();
+
+        app.selected = row_index(&app, "Root");
+        app.scroll_or_move_focus(1);
+
+        assert_eq!(row_label(&app, app.selected), "Collapsed Task");
+    }
+
+    #[test]
+    fn page_keys_do_not_mutate_scroll_when_transcript_has_zero_body_rows() {
+        let mut app = mk_app(mk_state_with_runs());
+        let brainstorm_idx = row_index(&app, "Brainstorm");
+        let brainstorm_key = app.visible_rows[brainstorm_idx].key.clone();
+        app.selected = brainstorm_idx;
+        app.collapsed_overrides
+            .insert(brainstorm_key.clone(), ExpansionOverride::Expanded);
+        app.body_inner_height = app.visible_rows.len();
+        app.stage_scroll.insert(brainstorm_key.clone(), 7);
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::PageDown,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(app.stage_scroll.get(&brainstorm_key).copied(), Some(7));
+    }
+
+    #[test]
+    fn space_does_not_toggle_pending_rows() {
+        let mut state = SessionState::new("pending-toggle".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.pending = vec![4];
+        let mut app = mk_app(state);
+        let pending_idx = row_index(&app, "Task 4");
+        app.selected = pending_idx;
+
+        app.toggle_expand_focused();
+
+        assert!(app.collapsed_overrides.is_empty());
+        assert!(!app.is_expanded(pending_idx));
+    }
+
+    #[test]
+    fn space_collapse_override_cannot_hide_active_path_row() {
+        let mut state = SessionState::new("active-space".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(7);
+        state.agent_runs.push(RunRecord {
+            id: 88,
+            stage: "coder".to_string(),
+            task_id: Some(7),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        let mut app = mk_app(state);
+        let coder_idx = row_index(&app, "Coder");
+        let coder_key = app.visible_rows[coder_idx].key.clone();
+        app.selected = coder_idx;
+
+        app.toggle_expand_focused();
+
+        let coder_idx = row_index(&app, "Coder");
+        assert!(app.is_expanded(coder_idx));
+        assert_eq!(
+            app.collapsed_overrides.get(&coder_key),
+            Some(&ExpansionOverride::Collapsed)
+        );
+    }
+
+    #[test]
+    fn enter_does_not_toggle_expansion_for_focused_row() {
+        let mut app = mk_app(mk_state_with_runs());
+        let brainstorm_idx = row_index(&app, "Brainstorm");
+        let before = app.collapsed_overrides.clone();
+        app.selected = brainstorm_idx;
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(app.collapsed_overrides, before);
+        assert!(!app.is_expanded(brainstorm_idx));
+    }
+
+    #[test]
+    fn builder_task_row_can_be_focused_and_expanded_to_transcript_descendant() {
+        let mut state = SessionState::new("builder-drilldown".to_string());
+        state.current_phase = Phase::ImplementationRound(2);
+        state.builder.done = vec![7];
+        state.builder.current_task = Some(8);
+        state.agent_runs.push(RunRecord {
+            id: 71,
+            stage: "coder".to_string(),
+            task_id: Some(7),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Coder 7]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 81,
+            stage: "coder".to_string(),
+            task_id: Some(8),
+            round: 2,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Coder 8]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        let mut app = mk_app(state);
+        let task_idx = row_index(&app, "Task 7");
+        app.selected = task_idx;
+
+        app.toggle_expand_focused();
+
+        assert_eq!(row_label(&app, app.selected), "Task 7");
+        assert!(row_index_opt(&app, "Coder").is_some());
+    }
+
+    #[test]
+    fn review_round_row_can_be_expanded_for_multiround_transcript_access() {
+        let mut state = SessionState::new("review-drilldown".to_string());
+        state.current_phase = Phase::SpecReviewRunning;
+        state.agent_runs.push(RunRecord {
+            id: 31,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review 1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 32,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 2,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review 2]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        let mut app = mk_app(state);
+        let round_one_idx = row_index(&app, "Round 1");
+        app.selected = round_one_idx;
+
+        app.toggle_expand_focused();
+
+        let round_one_idx = row_index(&app, "Round 1");
+        assert!(app.is_expanded_transcript(round_one_idx));
+        assert_eq!(
+            app.visible_rows[round_one_idx].backing_leaf_run_id,
+            Some(31)
+        );
+    }
+
+    #[test]
+    fn repeated_attempt_labels_keep_independent_expansion_state() {
+        let mut state = SessionState::new("attempt-identity".to_string());
+        state.current_phase = Phase::ReviewRound(1);
+        state.builder.current_task = Some(5);
+        for (id, stage, attempt, status) in [
+            (41, "coder", 1, RunStatus::Failed),
+            (42, "coder", 2, RunStatus::Done),
+            (43, "reviewer", 1, RunStatus::Failed),
+            (44, "reviewer", 2, RunStatus::Running),
+        ] {
+            state.agent_runs.push(RunRecord {
+                id,
+                stage: stage.to_string(),
+                task_id: Some(5),
+                round: 1,
+                attempt,
+                model: "gpt-5".to_string(),
+                vendor: "openai".to_string(),
+                window_name: format!("[{stage}]"),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status,
+                error: None,
+            });
+        }
+        let mut app = mk_app(state);
+        let coder_idx = row_index(&app, "Coder");
+        app.selected = coder_idx;
+        app.toggle_expand_focused();
+        let attempt_rows = app
+            .visible_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                node_at_path(&app.nodes, &row.path).is_some_and(|node| node.label == "Attempt 1")
+            })
+            .map(|(index, row)| (index, row.key.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(attempt_rows.len(), 2);
+        assert_ne!(attempt_rows[0].1, attempt_rows[1].1);
+
+        app.selected = attempt_rows[0].0;
+        app.toggle_expand_focused();
+
+        assert_eq!(
+            app.collapsed_overrides.get(&attempt_rows[0].1),
+            Some(&ExpansionOverride::Expanded)
+        );
+        assert!(!app.collapsed_overrides.contains_key(&attempt_rows[1].1));
     }
 
     fn row_index(app: &App, label: &str) -> usize {

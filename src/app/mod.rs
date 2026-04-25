@@ -512,11 +512,32 @@ impl App {
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
+        // Pin currently-expanded sections as explicit overrides before the phase
+        // changes, so the previous stage doesn't auto-collapse when it's no
+        // longer on the active path. The user's expand state should persist.
+        let pre_transition_expanded: Vec<NodeKey> = (0..self.visible_rows.len())
+            .filter(|&i| self.is_expanded(i))
+            .filter_map(|i| self.visible_rows.get(i).map(|row| row.key.clone()))
+            .collect();
+        for key in pre_transition_expanded {
+            self.collapsed_overrides
+                .entry(key)
+                .or_insert(ExpansionOverride::Expanded);
+        }
+
         self.state.transition_to(next_phase)?;
         self.agent_line_count = 0;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         self.rebuild_tree_view(None);
+
+        // Move cursor to the row of the new current stage.
+        if let Some(target) = node_key_at_path(&self.nodes, &[self.current_node()])
+            && let Some(idx) = self.visible_rows.iter().position(|row| row.key == target)
+        {
+            self.selected = idx;
+            self.selected_key = Some(target);
+        }
         Ok(())
     }
 

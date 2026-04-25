@@ -1,6 +1,9 @@
 use super::AgentAdapter;
 use std::process::Command;
 
+const KIMI_READY_MAX_POLLS: u32 = 50;
+const KIMI_READY_POLL_INTERVAL: f32 = 0.2;
+
 pub struct KimiAdapter;
 
 impl AgentAdapter for KimiAdapter {
@@ -13,13 +16,21 @@ impl AgentAdapter for KimiAdapter {
     }
 
     fn interactive_command(&self, _model: &str, prompt_path: &str) -> String {
-        // kimi's `-p/--prompt` always exits after the query (one-shot — see
-        // https://moonshotai.github.io/kimi-cli/en/reference/kimi-command.md),
-        // and there's no flag to preload a prompt and stay in the TUI. So we
-        // background a tmux paste into this pane that fires once the TUI has
-        // initialized, then exec kimi in shell (interactive) mode.
+        // kimi's `-p/--prompt` always exits after the query (one-shot), so we
+        // background a tmux paste that polls for TUI readiness before firing,
+        // then exec kimi in interactive mode.
         format!(
-            r#"(sleep 1 && tmux load-buffer -b codexize_kimi {prompt_path} && tmux paste-buffer -d -b codexize_kimi -t "$TMUX_PANE" && tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
+            concat!(
+                r#"(for i in $(seq 1 {max_polls}); do "#,
+                r#"tmux capture-pane -p -t "$TMUX_PANE" 2>/dev/null | grep -qE '[❯>]' && break; "#,
+                r#"sleep {poll_interval}; "#,
+                r#"done && "#,
+                r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
+                r#"tmux paste-buffer -d -b codexize_kimi -t "$TMUX_PANE" && "#,
+                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
+            ),
+            max_polls = KIMI_READY_MAX_POLLS,
+            poll_interval = KIMI_READY_POLL_INTERVAL,
             prompt_path = super::shell_escape(prompt_path),
         )
     }

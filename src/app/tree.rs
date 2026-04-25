@@ -1,4 +1,78 @@
 use crate::state::{Node, NodeKind, NodeStatus, Phase, RunRecord, RunStatus, SessionState};
+use std::collections::{BTreeMap, BTreeSet};
+
+pub type NodePath = Vec<usize>;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StageKey {
+    Idea,
+    Brainstorm,
+    SpecReview,
+    Planning,
+    PlanReview,
+    Sharding,
+    BuilderLoop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TaskKey {
+    Task(u32),
+    BuilderRecovery,
+    Fallback(NodeKind, NodePath),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ModeKey {
+    Coder,
+    Reviewer,
+    Recovery,
+    Named(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NodeKeyPart {
+    Stage(StageKey),
+    Task(TaskKey),
+    Round(u32),
+    Mode(ModeKey),
+    Run(u64),
+    Fallback(NodeKind, NodePath),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeKey {
+    parts: Vec<NodeKeyPart>,
+}
+
+impl NodeKey {
+    pub fn new(parts: Vec<NodeKeyPart>) -> Self {
+        Self { parts }
+    }
+
+    pub fn ancestors(&self) -> impl Iterator<Item = NodeKey> + '_ {
+        (1..self.parts.len()).rev().map(|len| NodeKey {
+            parts: self.parts[..len].to_vec(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleNodeRow {
+    pub depth: usize,
+    pub path: NodePath,
+    pub key: NodeKey,
+    pub kind: NodeKind,
+    pub status: NodeStatus,
+    pub has_children: bool,
+    pub has_transcript: bool,
+    pub backing_leaf_run_id: Option<u64>,
+}
+
+impl VisibleNodeRow {
+    pub fn is_expandable(&self) -> bool {
+        self.status != NodeStatus::Pending && (self.has_children || self.has_transcript)
+    }
+}
 
 pub fn build_tree(state: &SessionState) -> Vec<Node> {
     let mut nodes = Vec::new();
@@ -13,6 +87,237 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
         collapse_tree(node);
     }
     nodes
+}
+
+pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
+    let (&first, rest) = path.split_first()?;
+    let mut node = nodes.get(first)?;
+    for &index in rest {
+        node = node.children.get(index)?;
+    }
+    Some(node)
+}
+
+pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
+    let mut parts = Vec::new();
+    let mut absolute_path = Vec::new();
+    let mut current = nodes;
+
+    for (depth, &index) in path.iter().enumerate() {
+        absolute_path.push(index);
+        let node = current.get(index)?;
+        parts.push(node_key_part(node, &absolute_path, depth));
+        current = &node.children;
+    }
+
+    Some(NodeKey::new(parts))
+}
+
+pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
+    let mut rows = Vec::new();
+    flatten_rows(nodes, &mut Vec::new(), &mut Vec::new(), &mut rows, &mut |_| true);
+    rows
+}
+
+pub fn flatten_visible_rows(
+    nodes: &[Node],
+    mut is_expanded: impl FnMut(&VisibleNodeRow) -> bool,
+) -> Vec<VisibleNodeRow> {
+    let mut rows = Vec::new();
+    flatten_rows(
+        nodes,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut rows,
+        &mut is_expanded,
+    );
+    rows
+}
+
+pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
+    let run_lookup: BTreeMap<u64, &RunRecord> = runs.iter().map(|run| (run.id, run)).collect();
+    let mut active = BTreeMap::new();
+
+    for (index, node) in nodes.iter().enumerate() {
+        if node.kind != NodeKind::Stage || node.status != NodeStatus::Running {
+            continue;
+        }
+        let path = vec![index];
+        let Some(stage_key) = node_key_at_path(nodes, &path) else {
+            continue;
+        };
+        if let Some(best_path) = best_active_descendant_path(nodes, &path, &run_lookup) {
+            active.insert(stage_key, best_path);
+        }
+    }
+
+    active
+}
+
+pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey> {
+    let mut keys = BTreeSet::new();
+    for path in active_stage_paths(nodes, runs).into_values() {
+        for depth in 1..=path.len() {
+            if let Some(key) = node_key_at_path(nodes, &path[..depth]) {
+                keys.insert(key);
+            }
+        }
+    }
+    keys
+}
+
+fn flatten_rows(
+    nodes: &[Node],
+    parent_path: &mut NodePath,
+    parent_parts: &mut Vec<NodeKeyPart>,
+    rows: &mut Vec<VisibleNodeRow>,
+    is_expanded: &mut impl FnMut(&VisibleNodeRow) -> bool,
+) {
+    for (index, node) in nodes.iter().enumerate() {
+        parent_path.push(index);
+        let part = node_key_part(node, parent_path, parent_path.len() - 1);
+        parent_parts.push(part);
+        let row = VisibleNodeRow {
+            depth: parent_path.len() - 1,
+            path: parent_path.clone(),
+            key: NodeKey::new(parent_parts.clone()),
+            kind: node.kind,
+            status: node.status,
+            has_children: !node.children.is_empty(),
+            has_transcript: node.run_id.or(node.leaf_run_id).is_some(),
+            backing_leaf_run_id: node.run_id.or(node.leaf_run_id),
+        };
+        let expanded = is_expanded(&row);
+        rows.push(row);
+        if expanded {
+            flatten_rows(&node.children, parent_path, parent_parts, rows, is_expanded);
+        }
+        parent_parts.pop();
+        parent_path.pop();
+    }
+}
+
+fn best_active_descendant_path(
+    nodes: &[Node],
+    stage_path: &[usize],
+    run_lookup: &BTreeMap<u64, &RunRecord>,
+) -> Option<NodePath> {
+    let stage = node_at_path(nodes, stage_path)?;
+    let mut candidates = Vec::new();
+    collect_leaf_candidates(stage, stage_path, run_lookup, &mut candidates);
+    candidates.sort_by(|left, right| right.cmp(left));
+    candidates.into_iter().next().map(|candidate| candidate.path)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ActiveLeafCandidate {
+    priority: ActiveLeafPriority,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    path: NodePath,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ActiveLeafPriority {
+    Running = 2,
+    RecentNonPending = 1,
+}
+
+fn collect_leaf_candidates(
+    node: &Node,
+    path: &[usize],
+    run_lookup: &BTreeMap<u64, &RunRecord>,
+    out: &mut Vec<ActiveLeafCandidate>,
+) {
+    let leaf_run_id = node.run_id.or(node.leaf_run_id);
+    if node.children.is_empty()
+        && node.status != NodeStatus::Pending
+        && let Some(run_id) = leaf_run_id
+        && let Some(run) = run_lookup.get(&run_id)
+    {
+        let priority = if run.status == RunStatus::Running {
+            ActiveLeafPriority::Running
+        } else {
+            ActiveLeafPriority::RecentNonPending
+        };
+        out.push(ActiveLeafCandidate {
+            priority,
+            updated_at: run.ended_at.unwrap_or(run.started_at),
+            path: path.to_vec(),
+        });
+    }
+
+    for (index, child) in node.children.iter().enumerate() {
+        let mut child_path = path.to_vec();
+        child_path.push(index);
+        collect_leaf_candidates(child, &child_path, run_lookup, out);
+    }
+}
+
+fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
+    if let Some(run_id) = node.run_id {
+        return NodeKeyPart::Run(run_id);
+    }
+
+    match node.kind {
+        NodeKind::Stage => stage_key_for(path.first().copied(), path)
+            .map(NodeKeyPart::Stage)
+            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path.to_vec())),
+        NodeKind::Task => NodeKeyPart::Task(task_key_for(node, path)),
+        NodeKind::Round => parse_round(node)
+            .map(NodeKeyPart::Round)
+            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path.to_vec())),
+        NodeKind::Mode => NodeKeyPart::Mode(mode_key_for(node)),
+        NodeKind::AgentRun => node
+            .leaf_run_id
+            .map(NodeKeyPart::Run)
+            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path[..=depth].to_vec())),
+    }
+}
+
+fn stage_key_for(index: Option<usize>, path: &[usize]) -> Option<StageKey> {
+    if path.len() != 1 {
+        return None;
+    }
+    match index? {
+        0 => Some(StageKey::Idea),
+        1 => Some(StageKey::Brainstorm),
+        2 => Some(StageKey::SpecReview),
+        3 => Some(StageKey::Planning),
+        4 => Some(StageKey::PlanReview),
+        5 => Some(StageKey::Sharding),
+        6 => Some(StageKey::BuilderLoop),
+        _ => None,
+    }
+}
+
+fn task_key_for(node: &Node, path: &[usize]) -> TaskKey {
+    if node.label == "Builder Recovery" {
+        return TaskKey::BuilderRecovery;
+    }
+    // REVIEWER: pending builder tasks do not carry an intrinsic id in `Node`, so the
+    // canonical key currently parses the stable `Task <id>` prefix emitted by build_tree().
+    parse_task_id(node)
+        .map(TaskKey::Task)
+        .unwrap_or_else(|| TaskKey::Fallback(node.kind, path.to_vec()))
+}
+
+fn parse_task_id(node: &Node) -> Option<u32> {
+    let rest = node.label.strip_prefix("Task ")?;
+    let digits = rest.split(':').next()?.trim();
+    digits.parse().ok()
+}
+
+fn parse_round(node: &Node) -> Option<u32> {
+    node.label.strip_prefix("Round ")?.trim().parse().ok()
+}
+
+fn mode_key_for(node: &Node) -> ModeKey {
+    match node.label.as_str() {
+        "Coder" => ModeKey::Coder,
+        "Reviewer" => ModeKey::Reviewer,
+        "Recovery" => ModeKey::Recovery,
+        other => ModeKey::Named(other.to_string()),
+    }
 }
 
 fn build_idea_node(state: &SessionState) -> Node {
@@ -951,6 +1256,139 @@ mod tests {
         // Mode keeps both attempt children (multi-child not collapsed)
         assert_eq!(mode.children.len(), 2);
         assert_eq!(mode.leaf_run_id, None);
+    }
+
+    #[test]
+    fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ImplementationRound(2);
+        state.builder.done = vec![7];
+        state.builder.current_task = Some(8);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(7),
+            round: 2,
+            attempt: 1,
+            model: "claude".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "coder".to_string(),
+            task_id: Some(8),
+            round: 2,
+            attempt: 1,
+            model: "gpt".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Coder 2]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let nodes = build_tree(&state);
+        let rows = collect_all_rows(&nodes);
+        let coder_rows = rows
+            .into_iter()
+            .filter(|row| node_at_path(&nodes, &row.path).is_some_and(|node| node.label == "Coder"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(coder_rows.len(), 2);
+        assert_ne!(coder_rows[0].key, coder_rows[1].key);
+    }
+
+    #[test]
+    fn flatten_visible_rows_hides_collapsed_descendants() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ReviewRound(1);
+        state.builder.current_task = Some(3);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(3),
+            round: 1,
+            attempt: 1,
+            model: "claude".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let nodes = build_tree(&state);
+        let all_rows = collect_all_rows(&nodes);
+        let task_row = all_rows
+            .iter()
+            .find(|row| node_at_path(&nodes, &row.path).is_some_and(|node| node.label == "Task 3"))
+            .cloned()
+            .expect("task row");
+        let stage_row = all_rows
+            .iter()
+            .find(|row| row.path == vec![6])
+            .cloned()
+            .expect("builder stage row");
+
+        let visible = flatten_visible_rows(&nodes, |row| row.key == stage_row.key);
+
+        assert!(visible.iter().any(|row| row.key == task_row.key));
+        assert!(
+            visible
+                .iter()
+                .all(|row| node_at_path(&nodes, &row.path).is_none_or(|node| node.label != "Coder"))
+        );
+    }
+
+    #[test]
+    fn active_stage_paths_prefer_latest_running_leaf() {
+        let earlier = chrono::Utc::now() - chrono::Duration::minutes(5);
+        let later = chrono::Utc::now();
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::SpecReviewRunning;
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review 1]".to_string(),
+            started_at: earlier,
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "spec-review".to_string(),
+            task_id: None,
+            round: 2,
+            attempt: 1,
+            model: "o3".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Spec Review 2]".to_string(),
+            started_at: later,
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        });
+
+        let nodes = build_tree(&state);
+        let stage_key = node_key_at_path(&nodes, &[2]).expect("spec review key");
+        let active = active_stage_paths(&nodes, &state.agent_runs);
+        let chosen = active.get(&stage_key).expect("active descendant");
+        let chosen_node = node_at_path(&nodes, chosen).expect("chosen node");
+
+        assert_eq!(chosen_node.run_id.or(chosen_node.leaf_run_id), Some(2));
     }
 }
 

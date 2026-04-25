@@ -29,7 +29,7 @@ impl AgentAdapter for KimiAdapter {
                 r#"sleep {poll_interval}; "#,
                 r#"done && "#,
                 r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
-                r#"tmux paste-buffer -d -b codexize_kimi -t "$TMUX_PANE" && "#,
+                r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE" && "#,
                 r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
             ),
             max_polls = KIMI_READY_MAX_POLLS,
@@ -68,6 +68,10 @@ mod tests {
         );
         assert!(cmd.contains("grep"), "should grep for the prompt indicator");
         assert!(cmd.contains("seq 1"), "should loop with bounded retries");
+        assert!(
+            cmd.contains("tmux paste-buffer -p -r"),
+            "should use bracketed paste with raw LF to prevent multi-line input chunking"
+        );
         assert!(
             cmd.contains("exec kimi --yolo"),
             "should still exec kimi in interactive mode"

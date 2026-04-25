@@ -137,12 +137,12 @@ impl App {
             KeyCode::Char('t') => false,
             KeyCode::PageUp => {
                 let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                self.scroll_viewport(-step);
+                self.scroll_viewport(-step, true);
                 false
             }
             KeyCode::PageDown => {
                 let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                self.scroll_viewport(step);
+                self.scroll_viewport(step, true);
                 false
             }
             _ => false,
@@ -229,18 +229,19 @@ impl App {
 
         if delta < 0 {
             if self.viewport_top > header_y {
-                self.scroll_viewport(-1);
+                self.scroll_viewport(-1, false);
             } else {
                 self.move_focus(delta);
             }
         } else if area_h > 0 && self.viewport_top + area_h < section_bottom {
-            self.scroll_viewport(1);
+            self.scroll_viewport(1, false);
         } else {
             self.move_focus(delta);
         }
     }
 
     fn move_focus(&mut self, delta: isize) {
+        self.explicit_viewport_scroll = false;
         if delta < 0 {
             // Any upward focus action also breaks tail-follow so the user can
             // read history without the viewport yanking back to the latest.

@@ -75,6 +75,10 @@ pub struct App {
     collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
     viewport_top: usize,
     follow_tail: bool,
+    /// Snapshot of `messages.len()` taken when tail-follow was last
+    /// disengaged. None while following. Used to count missed messages
+    /// for the "↓ N new" badge.
+    tail_detach_baseline: Option<usize>,
     body_inner_height: usize,
     body_inner_width: usize,
     input_mode: bool,
@@ -165,6 +169,7 @@ impl App {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            tail_detach_baseline: None,
             body_inner_height: 0,
             body_inner_width: 0,
             input_mode: false,
@@ -441,7 +446,28 @@ impl App {
         let max_top = total.saturating_sub(area_h) as isize;
         let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
         self.viewport_top = next as usize;
-        self.follow_tail = self.viewport_top as isize >= max_top;
+        self.set_follow_tail(self.viewport_top as isize >= max_top);
+    }
+
+    /// Single writer for `follow_tail`. Tracks the message-count baseline so
+    /// the unread-counter badge can compute "messages since detach".
+    pub(super) fn set_follow_tail(&mut self, follow: bool) {
+        if follow == self.follow_tail {
+            return;
+        }
+        self.follow_tail = follow;
+        self.tail_detach_baseline = if follow {
+            None
+        } else {
+            Some(self.messages.len())
+        };
+    }
+
+    pub(super) fn unread_below_count(&self) -> usize {
+        match self.tail_detach_baseline {
+            Some(baseline) => self.messages.len().saturating_sub(baseline),
+            None => 0,
+        }
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
@@ -473,7 +499,7 @@ impl App {
         }
         // Re-engage tail-follow on phase change so the new stage's transcript
         // streams into view.
-        self.follow_tail = true;
+        self.set_follow_tail(true);
         Ok(())
     }
 
@@ -3559,6 +3585,7 @@ mod tests {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,
@@ -4086,6 +4113,7 @@ mod tests {
             collapsed_overrides: BTreeMap::new(),
             viewport_top: 0,
             follow_tail: true,
+            tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,

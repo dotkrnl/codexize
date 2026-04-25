@@ -232,8 +232,6 @@ impl App {
         let section_bottom = next_y; // exclusive end of selected row's content block
 
         if delta < 0 {
-            // Any upward action breaks tail-follow so the user can read history.
-            self.follow_tail = false;
             if self.viewport_top > header_y {
                 self.scroll_viewport(-1);
             } else {
@@ -248,6 +246,9 @@ impl App {
 
     fn move_focus(&mut self, delta: isize) {
         if delta < 0 {
+            // Any upward focus action also breaks tail-follow so the user can
+            // read history without the viewport yanking back to the latest.
+            self.set_follow_tail(false);
             self.selected = self.selected.saturating_sub(1);
         } else if self.selected + 1 < self.visible_rows.len() {
             self.selected += 1;

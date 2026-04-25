@@ -54,6 +54,26 @@ impl Widget for PipelineWidget<'_> {
         for (offset, line) in lines[viewport_top..end].iter().enumerate() {
             buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
         }
+
+        // "↓ N new" badge centered along the bottom of the pipeline frame
+        // when tail-follow is detached and messages have arrived since.
+        let unread = self.app.unread_below_count();
+        if unread > 0 && area.height >= 1 {
+            let label = format!(" ↓ {unread} new ");
+            let label_w = label.chars().count() as u16;
+            if label_w + 2 <= area.width {
+                let x = area.x + (area.width.saturating_sub(label_w)) / 2;
+                let y = area.y + area.height - 1;
+                let span = Span::styled(
+                    label,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
+                buf.set_line(x, y, &Line::from(span), label_w);
+            }
+        }
     }
 }
 
@@ -764,6 +784,7 @@ mod tests {
             collapsed_overrides,
             viewport_top: 0,
             follow_tail: true,
+            tail_detach_baseline: None,
             body_inner_height: 20,
             body_inner_width: 80,
             input_mode: false,

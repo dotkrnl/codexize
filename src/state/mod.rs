@@ -373,6 +373,9 @@ impl BuilderState {
 
     pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
         if self.pipeline_items.is_empty() {
+            // REVIEWER: legacy queue fallback is kept so older tests that seed only
+            // pending/current_task continue to run; runtime sharding/skip/recovery
+            // initialization now always populates pipeline_items first.
             if self.current_task.is_none() {
                 if let Some(id) = self.pending.first().copied() {
                     self.pending.remove(0);

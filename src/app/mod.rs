@@ -74,6 +74,7 @@ pub struct App {
     selected_key: Option<NodeKey>,
     collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
     stage_scroll: BTreeMap<NodeKey, usize>,
+    viewport_top: usize,
     body_inner_height: usize,
     body_inner_width: usize,
     input_mode: bool,
@@ -133,6 +134,7 @@ impl App {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
+            viewport_top: 0,
             body_inner_height: 0,
             body_inner_width: 0,
             input_mode: false,
@@ -397,12 +399,6 @@ impl App {
         }
     }
 
-    pub(super) fn page_step(&self) -> usize {
-        self.stage_body_height_for(self.selected)
-            .saturating_sub(2)
-            .max(1)
-    }
-
     pub(super) fn is_expanded_transcript(&self, index: usize) -> bool {
         self.is_expanded(index)
             && self
@@ -415,33 +411,55 @@ impl App {
         self.transcript_body_height_for(index, self.body_inner_height)
     }
 
-    pub(super) fn transcript_body_height_for(&self, index: usize, total_height: usize) -> usize {
+    pub(super) fn transcript_body_height_for(&self, index: usize, _total_height: usize) -> usize {
+        // Each expanded transcript renders at its natural body height. Sections that
+        // overflow the pipeline area are scrolled into view by `viewport_top`, not
+        // squeezed to share space with peers.
         if !self.is_expanded_transcript(index) {
             return 0;
         }
+        self.node_body(index).len()
+    }
 
-        let body_rows = total_height.saturating_sub(self.visible_rows.len());
-        if body_rows == 0 {
-            return 0;
+    /// Y-offset of each visible row's header within the unconstrained content stream,
+    /// plus the total number of content rows.
+    pub(super) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
+        let mut ys = Vec::with_capacity(self.visible_rows.len());
+        let mut y = 0usize;
+        for i in 0..self.visible_rows.len() {
+            ys.push(y);
+            y += 1;
+            if self.is_expanded_transcript(i) {
+                y += self.node_body(i).len();
+            }
         }
+        (ys, y)
+    }
 
-        let transcript_position = (0..self.visible_rows.len())
-            .filter(|i| self.is_expanded_transcript(*i))
-            .position(|i| i == index);
-        let Some(position) = transcript_position else {
-            return 0;
-        };
-
-        let transcript_count = (0..self.visible_rows.len())
-            .filter(|i| self.is_expanded_transcript(*i))
-            .count();
-        if transcript_count == 0 {
-            return 0;
+    pub(super) fn clamp_viewport(&mut self) {
+        let area_h = self.body_inner_height;
+        if area_h == 0 {
+            self.viewport_top = 0;
+            return;
         }
+        let (ys, total) = self.header_y_offsets();
+        let max_top = total.saturating_sub(area_h);
+        if let Some(&header_y) = ys.get(self.selected) {
+            if header_y < self.viewport_top {
+                self.viewport_top = header_y;
+            } else if header_y >= self.viewport_top + area_h {
+                self.viewport_top = header_y + 1 - area_h;
+            }
+        }
+        self.viewport_top = self.viewport_top.min(max_top);
+    }
 
-        let base = body_rows / transcript_count;
-        let remainder = body_rows % transcript_count;
-        base + usize::from(position < remainder)
+    pub(super) fn scroll_viewport(&mut self, delta: isize) {
+        let area_h = self.body_inner_height;
+        let (_, total) = self.header_y_offsets();
+        let max_top = total.saturating_sub(area_h) as isize;
+        let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
+        self.viewport_top = next as usize;
     }
 
     pub(super) fn stage_scroll_for(&self, index: usize) -> Option<(NodeKey, Option<usize>)> {
@@ -3571,6 +3589,7 @@ mod tests {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
+            viewport_top: 0,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,
@@ -4155,6 +4174,7 @@ mod tests {
             selected_key,
             collapsed_overrides: BTreeMap::new(),
             stage_scroll: BTreeMap::new(),
+            viewport_top: 0,
             body_inner_height: 30,
             body_inner_width: 80,
             input_mode: false,

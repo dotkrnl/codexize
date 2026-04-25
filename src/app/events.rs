@@ -136,11 +136,13 @@ impl App {
             }
             KeyCode::Char('t') => false,
             KeyCode::PageUp => {
-                self.scroll_selected(-(self.page_step() as isize));
+                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                self.scroll_viewport(-step);
                 false
             }
             KeyCode::PageDown => {
-                self.scroll_selected(self.page_step() as isize);
+                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                self.scroll_viewport(step);
                 false
             }
             _ => false,
@@ -250,17 +252,6 @@ impl App {
 
     fn boundary_handoff(&mut self, delta: isize) {
         self.move_focus(delta);
-    }
-
-    fn scroll_selected(&mut self, delta: isize) {
-        let idx = self.selected;
-        if !self.is_expanded_transcript(idx) || self.stage_body_height_for(idx) == 0 {
-            return;
-        }
-        let max_offset = self.stage_max_offset(idx) as isize;
-        let current = self.effective_stage_scroll(idx, max_offset as usize) as isize;
-        let next = (current + delta).clamp(0, max_offset);
-        self.set_stage_scroll(idx, next as usize);
     }
 
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {

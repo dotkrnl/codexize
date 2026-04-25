@@ -32,48 +32,27 @@ impl Widget for PipelineWidget<'_> {
             return;
         }
 
-        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        let bottom_y = inner.y.saturating_add(inner.height);
-        let mut cursor_y = inner.y;
-
+        // Build the full linear content stream: each visible row contributes one
+        // header line and, if expanded with a transcript, its full natural body.
+        // Sections never share or compete for height; overflow is handled by the
+        // pipeline-level `viewport_top` scroll instead.
+        let mut lines: Vec<Line<'static>> = Vec::new();
         for index in 0..self.app.visible_rows.len() {
-            if cursor_y >= bottom_y {
-                break;
-            }
-
             let Some(node) = self.app.node_for_row(index) else {
                 continue;
             };
             let expanded = self.app.is_expanded(index);
-            let header = self.app.node_header(index, expanded, node);
-            buf.set_line(inner.x, cursor_y, &header, inner.width);
-            cursor_y += 1;
-            if cursor_y >= bottom_y {
-                break;
-            }
-
+            lines.push(self.app.node_header(index, expanded, node));
             if expanded && self.app.is_expanded_transcript(index) {
-                let headers_after = self.app.visible_rows.len().saturating_sub(index + 1);
-                let usable = (bottom_y - cursor_y).saturating_sub(headers_after as u16) as usize;
-                let body_height = self
-                    .app
-                    .transcript_body_height_for(index, inner.height as usize)
-                    .min(usable) as u16;
-                if body_height == 0 {
-                    continue;
-                }
-
-                let body_area = ratatui::layout::Rect {
-                    x: inner.x,
-                    y: cursor_y,
-                    width: inner.width,
-                    height: body_height,
-                };
-
-                self.app
-                    .render_stage_body(body_area, buf, &local_offset, index);
-                cursor_y += body_height;
+                lines.extend(self.app.node_body(index));
             }
+        }
+
+        let area_h = inner.height as usize;
+        let viewport_top = self.app.viewport_top.min(lines.len().saturating_sub(area_h));
+        let end = (viewport_top + area_h).min(lines.len());
+        for (offset, line) in lines[viewport_top..end].iter().enumerate() {
+            buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
         }
     }
 }
@@ -219,6 +198,7 @@ impl App {
         self.body_inner_height = root[1].height.saturating_sub(2) as usize;
         self.body_inner_width = root[1].width.saturating_sub(2) as usize;
         self.clamp_scroll();
+        self.clamp_viewport();
 
         frame.render_widget(self.header(), root[0]);
         frame.render_widget(PipelineWidget { app: self }, root[1]);
@@ -267,41 +247,6 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ),
         ]))
-    }
-
-    fn render_stage_body(
-        &self,
-        area: ratatui::layout::Rect,
-        buf: &mut Buffer,
-        local_offset: &chrono::FixedOffset,
-        index: usize,
-    ) {
-        let Some(node) = self.node_for_row(index) else {
-            return;
-        };
-        let run_id = node.run_id.or(node.leaf_run_id);
-        if let Some(id) = run_id {
-            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) {
-                let msgs: Vec<_> = self
-                    .messages
-                    .iter()
-                    .filter(|m| m.run_id == id)
-                    .cloned()
-                    .collect();
-                let scroll_offset = self
-                    .stage_scroll_for(index)
-                    .and_then(|(_, stored)| stored)
-                    .unwrap_or(usize::MAX);
-                let widget = chat_widget::ChatWidget::new(
-                    &msgs,
-                    run,
-                    scroll_offset,
-                    *local_offset,
-                    self.spinner_tick,
-                );
-                widget.render(area, buf);
-            }
-        }
     }
 
     fn model_strip(&self) -> Paragraph<'static> {
@@ -819,6 +764,7 @@ mod tests {
             selected_key,
             collapsed_overrides,
             stage_scroll: BTreeMap::new(),
+            viewport_top: 0,
             body_inner_height: 20,
             body_inner_width: 80,
             input_mode: false,

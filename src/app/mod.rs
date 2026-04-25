@@ -1166,8 +1166,9 @@ impl App {
         // regardless of the wrapped pipeline's exit code. Agent commands like
         // `codex exec --json | jq ...` can return non-zero (e.g., a stray
         // non-JSON line from the agent makes jq exit 4/5) even after the
-        // agent has already written a well-formed artifact. The immutability
-        // guard is still enforced; warnings are emitted but the run succeeds.
+        // agent has already written a well-formed artifact. Warnings are
+        // emitted for dirty-tree changes; a hard guard error (HEAD advance)
+        // still fails the run.
         if has_artifact_check && artifact_reason.is_none() {
             if let Some(code) = self.read_exit_status_code(run)
                 && code != 0
@@ -1177,9 +1178,12 @@ impl App {
                     run.id, run.stage
                 ));
             }
-            let (_, guard_warnings) = self.enforce_run_guard(run);
+            let (guard_reason, guard_warnings) = self.enforce_run_guard(run);
             for w in guard_warnings {
                 self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+            }
+            if guard_reason.is_some() {
+                return Ok(guard_reason);
             }
             return Ok(None);
         }
@@ -5383,6 +5387,53 @@ mod tests {
                     .expect("error text")
                     .starts_with("artifact_invalid: ")
             );
+        });
+    }
+
+    #[test]
+    fn normalize_failure_reason_artifact_present_still_fails_on_head_advance() {
+        with_temp_root(|| {
+            let session_id = "normalize-failure-reason-guard";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let state = SessionState::new(session_id.to_string());
+            let mut app = mk_app(state);
+            let run = RunRecord {
+                id: 1,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Planning]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            };
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
+                .expect("create status dir");
+            // Valid plan artifact so artifact_reason is None.
+            std::fs::write(session_dir.join("artifacts").join("plan.md"), "# Plan\n")
+                .expect("write plan");
+            std::fs::write(app.run_status_path(&run), "0").expect("write exit code");
+
+            // Write a guard snapshot whose HEAD differs from real HEAD so
+            // verify_non_coder will return forbidden_head_advance.
+            let guard_dir = session_dir.join(".guards").join("planning-stage-r1-a1");
+            std::fs::create_dir_all(&guard_dir).expect("guard dir");
+            std::fs::write(
+                guard_dir.join("snapshot.toml"),
+                "head = \"0000000000000000000000000000000000000000\"\ngit_status = \"\"\n\n[control_files]\n",
+            )
+            .expect("write snapshot");
+
+            let reason = app
+                .normalized_failure_reason(&run)
+                .expect("normalized")
+                .expect("hard error expected");
+            assert_eq!(reason, "forbidden_head_advance");
         });
     }
 

@@ -133,7 +133,6 @@ pub struct Node {
     pub leaf_run_id: Option<u64>,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineItemStatus {
@@ -229,12 +228,23 @@ impl PipelineItemStatus {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Done | Self::Failed | Self::Approved | Self::Revise | Self::HumanBlocked | Self::AgentPivot
+            Self::Done
+                | Self::Failed
+                | Self::Approved
+                | Self::Revise
+                | Self::HumanBlocked
+                | Self::AgentPivot
         )
     }
 }
 
 impl BuilderState {
+    fn pipeline_task_items(&self) -> impl Iterator<Item = &PipelineItem> {
+        self.pipeline_items
+            .iter()
+            .filter(|item| item.stage == "coder" && item.task_id.is_some())
+    }
+
     pub fn next_pipeline_id(&self) -> u32 {
         self.pipeline_items.iter().map(|i| i.id).max().unwrap_or(0) + 1
     }
@@ -284,6 +294,190 @@ impl BuilderState {
             .iter()
             .filter(|i| i.status == PipelineItemStatus::Running)
             .collect()
+    }
+
+    pub fn reset_task_pipeline(&mut self, tasks: impl IntoIterator<Item = (u32, Option<String>)>) {
+        self.pipeline_items.clear();
+        for (task_id, title) in tasks {
+            self.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(task_id),
+                round: None,
+                status: PipelineItemStatus::Pending,
+                title,
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+        }
+        self.iteration = 0;
+        self.last_verdict = None;
+        self.sync_legacy_queue_views();
+    }
+
+    pub fn current_task_id(&self) -> Option<u32> {
+        if self.pipeline_items.is_empty() {
+            return self.current_task;
+        }
+        self.pipeline_task_items()
+            .find(|item| item.status == PipelineItemStatus::Running)
+            .and_then(|item| item.task_id)
+    }
+
+    pub fn done_task_ids(&self) -> Vec<u32> {
+        if self.pipeline_items.is_empty() {
+            return self.done.clone();
+        }
+        self.pipeline_task_items()
+            .filter(|item| {
+                matches!(
+                    item.status,
+                    PipelineItemStatus::Approved | PipelineItemStatus::Done
+                )
+            })
+            .filter_map(|item| item.task_id)
+            .collect()
+    }
+
+    pub fn pending_task_ids(&self) -> Vec<u32> {
+        if self.pipeline_items.is_empty() {
+            return self.pending.clone();
+        }
+        self.pipeline_task_items()
+            .filter(|item| {
+                matches!(
+                    item.status,
+                    PipelineItemStatus::Pending | PipelineItemStatus::Revise
+                )
+            })
+            .filter_map(|item| item.task_id)
+            .collect()
+    }
+
+    pub fn has_unfinished_tasks(&self) -> bool {
+        if self.pipeline_items.is_empty() {
+            return self.current_task.is_some() || !self.pending.is_empty();
+        }
+        self.pipeline_task_items().any(|item| {
+            matches!(
+                item.status,
+                PipelineItemStatus::Pending
+                    | PipelineItemStatus::Running
+                    | PipelineItemStatus::Revise
+                    | PipelineItemStatus::HumanBlocked
+                    | PipelineItemStatus::AgentPivot
+            )
+        })
+    }
+
+    pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
+        if self.pipeline_items.is_empty() {
+            if self.current_task.is_none() {
+                if let Some(id) = self.pending.first().copied() {
+                    self.pending.remove(0);
+                    self.current_task = Some(id);
+                } else {
+                    return None;
+                }
+            }
+            self.iteration = round;
+            return self.current_task;
+        }
+
+        if let Some(index) = self.pipeline_items.iter().position(|item| {
+            item.stage == "coder"
+                && item.task_id.is_some()
+                && item.status == PipelineItemStatus::Running
+        }) {
+            self.pipeline_items[index].round = Some(round);
+            self.iteration = round;
+            self.sync_legacy_queue_views();
+            return self.pipeline_items[index].task_id;
+        }
+
+        if let Some(index) = self.pipeline_items.iter().position(|item| {
+            item.stage == "coder"
+                && item.task_id.is_some()
+                && matches!(
+                    item.status,
+                    PipelineItemStatus::Pending | PipelineItemStatus::Revise
+                )
+        }) {
+            self.pipeline_items[index].status = PipelineItemStatus::Running;
+            self.pipeline_items[index].round = Some(round);
+            self.iteration = round;
+            let task_id = self.pipeline_items[index].task_id;
+            self.sync_legacy_queue_views();
+            return task_id;
+        }
+
+        None
+    }
+
+    pub fn set_task_status(
+        &mut self,
+        task_id: u32,
+        status: PipelineItemStatus,
+        round: Option<u32>,
+    ) -> bool {
+        if self.pipeline_items.is_empty() {
+            match status {
+                PipelineItemStatus::Pending => {
+                    if self.current_task == Some(task_id) {
+                        self.current_task = None;
+                    }
+                    true
+                }
+                PipelineItemStatus::Approved => {
+                    if self.current_task == Some(task_id) {
+                        self.current_task = None;
+                    }
+                    if !self.done.contains(&task_id) {
+                        self.done.push(task_id);
+                    }
+                    self.pending.retain(|id| *id != task_id);
+                    self.last_verdict = Some("approved".to_string());
+                    true
+                }
+                PipelineItemStatus::Revise => {
+                    self.current_task = Some(task_id);
+                    self.last_verdict = Some("revise".to_string());
+                    true
+                }
+                PipelineItemStatus::HumanBlocked => {
+                    self.last_verdict = Some("human_blocked".to_string());
+                    true
+                }
+                PipelineItemStatus::AgentPivot => {
+                    self.last_verdict = Some("agent_pivot".to_string());
+                    true
+                }
+                _ => false,
+            }
+        } else if let Some(index) = self
+            .pipeline_items
+            .iter()
+            .position(|item| item.stage == "coder" && item.task_id == Some(task_id))
+        {
+            self.pipeline_items[index].status = status;
+            if round.is_some() {
+                self.pipeline_items[index].round = round;
+            }
+            self.sync_legacy_queue_views();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn sync_legacy_queue_views(&mut self) {
+        if self.pipeline_items.is_empty() {
+            return;
+        }
+        self.done = self.done_task_ids();
+        self.current_task = self.current_task_id();
+        self.pending = self.pending_task_ids();
     }
 }
 
@@ -1507,9 +1701,7 @@ interactive = false
             ("\"agent_pivot\"", PipelineItemStatus::AgentPivot),
         ] {
             let status: PipelineItemStatus = toml::from_str(&format!("status = {input}\n"))
-                .map(|w: std::collections::HashMap<String, PipelineItemStatus>| {
-                    w["status"]
-                })
+                .map(|w: std::collections::HashMap<String, PipelineItemStatus>| w["status"])
                 .unwrap();
             assert_eq!(status, expected);
         }

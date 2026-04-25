@@ -179,6 +179,17 @@ fn verify_non_coder(snap: &Snapshot) -> (Option<String>, Vec<String>) {
     (None, warnings)
 }
 
+/// Construct a `Snapshot` for testing without running real git commands.
+#[cfg(test)]
+fn test_snapshot(head: &str, git_status: &str) -> Snapshot {
+    Snapshot {
+        head: head.to_string(),
+        git_status: git_status.to_string(),
+        control_files: BTreeMap::new(),
+        baseline_stash: None,
+    }
+}
+
 fn verify_coder(snap: &Snapshot) -> Option<String> {
     let mut violated = Vec::new();
     for (path, expected) in &snap.control_files {
@@ -192,5 +203,66 @@ fn verify_coder(snap: &Snapshot) -> Option<String> {
         None
     } else {
         Some(format!("forbidden_control_edit: {}", violated.join(", ")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_non_coder_warns_on_pre_dirty_status() {
+        let head = git_head().unwrap_or_default();
+        let current_status = git_status().unwrap_or_default();
+        let snap = test_snapshot(
+            &head,
+            &format!("{current_status} M dirty.txt\n"),
+        );
+        let (error, warnings) = verify_non_coder(&snap);
+        assert!(error.is_none());
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("dirty before agent launch")),
+            "expected dirty-tree warning, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn verify_non_coder_warns_on_changed_status() {
+        let head = git_head().unwrap_or_default();
+        let current_status = git_status().unwrap_or_default();
+        let snap = test_snapshot(
+            &head,
+            &format!("{current_status}?? phantom-file.xyz\n"),
+        );
+        let (error, warnings) = verify_non_coder(&snap);
+        assert!(error.is_none());
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("modified working tree")),
+            "expected modified-tree warning, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn verify_non_coder_hard_error_on_head_advance() {
+        let snap = test_snapshot("0000000000000000000000000000000000000000", "");
+        let (error, _warnings) = verify_non_coder(&snap);
+        assert_eq!(error, Some("forbidden_head_advance".to_string()));
+    }
+
+    #[test]
+    fn verify_non_coder_matching_status_has_no_modified_warning() {
+        let head = git_head().unwrap_or_default();
+        let status = git_status().unwrap_or_default();
+        let snap = test_snapshot(&head, &status);
+        let (error, warnings) = verify_non_coder(&snap);
+        assert!(error.is_none());
+        assert!(
+            !warnings.iter().any(|w| w.contains("modified working tree")),
+            "expected no modified-tree warning when status unchanged, got: {warnings:?}"
+        );
     }
 }

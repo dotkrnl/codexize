@@ -44,6 +44,12 @@ fn git_head() -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+pub fn git_status_dirty() -> bool {
+    git_status()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
 fn git_status() -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["status", "--porcelain"])
@@ -67,63 +73,16 @@ fn read_snapshot(snapshot_dir: &Path) -> Option<Snapshot> {
     toml::from_str(&text).ok()
 }
 
-/// Capture a snapshot for a non-coder agent. They must leave the git tree
-/// unchanged; any pre-existing dirt is stashed so the agent starts clean,
-/// and the stash is popped during verify.
-pub fn capture_non_coder(snapshot_dir: &Path, stage_tag: &str) -> std::io::Result<()> {
-    let baseline_stash = stash_working_tree(&format!("codexize-baseline-{stage_tag}"));
+/// Capture a snapshot for a non-coder agent. Records HEAD and working-tree
+/// status so `verify_non_coder` can detect changes and emit warnings.
+pub fn capture_non_coder(snapshot_dir: &Path, _stage_tag: &str) -> std::io::Result<()> {
     let snap = Snapshot {
         head: git_head().unwrap_or_default(),
         git_status: git_status().unwrap_or_default(),
         control_files: BTreeMap::new(),
-        baseline_stash,
+        baseline_stash: None,
     };
     write_snapshot(snapshot_dir, &snap)
-}
-
-/// `git stash push -u -m <msg>`. Returns Some(msg) if a stash entry was
-/// actually created (i.e., there was something to stash).
-fn stash_working_tree(msg: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["stash", "push", "-u", "-m", msg])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    // Git prints "No local changes to save" when there's nothing to stash.
-    if text.contains("No local changes to save") {
-        None
-    } else {
-        Some(msg.to_string())
-    }
-}
-
-/// Find a stash entry by its message and pop it.
-fn pop_stash_by_message(msg: &str) -> bool {
-    let Ok(list) = std::process::Command::new("git")
-        .args(["stash", "list"])
-        .output()
-    else {
-        return false;
-    };
-    if !list.status.success() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&list.stdout);
-    for line in text.lines() {
-        if line.contains(msg)
-            && let Some(r#ref) = line.split(':').next()
-        {
-            return std::process::Command::new("git")
-                .args(["stash", "pop", r#ref])
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-        }
-    }
-    false
 }
 
 /// Gather the set of control files the coder must not modify for this round.
@@ -178,44 +137,46 @@ pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std
     write_snapshot(snapshot_dir, &snap)
 }
 
-/// Verify the snapshot. Returns `Some(reason)` if the agent violated
-/// immutability; reverts as much as possible before returning.
-pub fn verify(snapshot_dir: &Path, stage: &str) -> Option<String> {
-    let snap = read_snapshot(snapshot_dir)?;
+/// Verify the snapshot. Returns `(hard_error, warnings)` where the first
+/// element is a protocol-violation reason (only HEAD-advance for non-coder)
+/// and the second is advisory warnings for the operator.
+pub fn verify(snapshot_dir: &Path, stage: &str) -> (Option<String>, Vec<String>) {
+    let Some(snap) = read_snapshot(snapshot_dir) else {
+        return (None, vec![]);
+    };
     if stage == "coder" {
-        verify_coder(&snap)
+        (verify_coder(&snap), vec![])
     } else {
         verify_non_coder(&snap)
     }
 }
 
-fn verify_non_coder(snap: &Snapshot) -> Option<String> {
-    let current_head = git_head().unwrap_or_default();
+fn verify_non_coder(snap: &Snapshot) -> (Option<String>, Vec<String>) {
+    let mut warnings = Vec::new();
+
+    if !snap.git_status.trim().is_empty() {
+        warnings.push("working tree was dirty before agent launch".to_string());
+    }
+
     let current_status = git_status().unwrap_or_default();
+    let current_head = git_head().unwrap_or_default();
     let head_changed =
         !snap.head.is_empty() && !current_head.is_empty() && current_head != snap.head;
 
-    // Stash anything the agent wrote so the working tree is clean before we
-    // restore the user's baseline. The stash is retained under a labelled
-    // entry so the operator can recover it with `git stash list` if needed.
     if current_status.trim() != snap.git_status.trim() {
-        let _ = stash_working_tree("codexize-guard-agent-writes");
+        warnings.push("non-coder agent modified working tree".to_string());
     }
 
-    // Agent committed something on top of our HEAD — reset to the snapshot
-    // HEAD. The commits remain in the reflog.
     if head_changed {
         let _ = std::process::Command::new("git")
             .args(["reset", "--hard", &snap.head])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .output();
+        return (Some("forbidden_head_advance".to_string()), warnings);
     }
 
-    // Restore the user's pre-run changes, if any.
-    if let Some(msg) = &snap.baseline_stash {
-        let _ = pop_stash_by_message(msg);
-    }
-
-    None
+    (None, warnings)
 }
 
 fn verify_coder(snap: &Snapshot) -> Option<String> {

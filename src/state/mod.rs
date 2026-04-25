@@ -133,24 +133,56 @@ pub struct Node {
     pub leaf_run_id: Option<u64>,
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineItemStatus {
+    #[default]
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Approved,
+    Revise,
+    HumanBlocked,
+    AgentPivot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PipelineItem {
+    pub id: u32,
+    pub stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub round: Option<u32>,
+    pub status: PipelineItemStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<bool>,
+}
+
 /// Tracks the builder loop — which tasks are pending, done, what iteration
 /// we're on, and enough state to resume a killed session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuilderState {
-    /// Task IDs still to do, in order.
+    #[serde(default)]
+    pub pipeline_items: Vec<PipelineItem>,
+    // Legacy fields — callers migrate to pipeline_items in Phase 3.
     #[serde(default)]
     pub pending: Vec<u32>,
-    /// Task IDs already accepted (reviewer said "done").
     #[serde(default)]
     pub done: Vec<u32>,
-    /// The task being worked on right now (None between rounds or at end).
     #[serde(default)]
     pub current_task: Option<u32>,
     /// Global iteration counter — one coder+reviewer cycle is one iteration.
     #[serde(default)]
     pub iteration: u32,
-    /// Last reviewer verdict status ("done", "revise", "blocked") — used to
-    /// decide where to resume on restart.
     #[serde(default)]
     pub last_verdict: Option<String>,
     /// Recovery context captured when entering builder recovery.
@@ -177,6 +209,82 @@ pub struct BuilderState {
     /// Used to label task nodes in the pipeline tree.
     #[serde(default)]
     pub task_titles: std::collections::BTreeMap<u32, String>,
+}
+
+impl PipelineItemStatus {
+    pub fn is_lifecycle(self) -> bool {
+        matches!(
+            self,
+            Self::Pending | Self::Running | Self::Done | Self::Failed
+        )
+    }
+
+    pub fn is_verdict(self) -> bool {
+        matches!(
+            self,
+            Self::Approved | Self::Revise | Self::HumanBlocked | Self::AgentPivot
+        )
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Done | Self::Failed | Self::Approved | Self::Revise | Self::HumanBlocked | Self::AgentPivot
+        )
+    }
+}
+
+impl BuilderState {
+    pub fn next_pipeline_id(&self) -> u32 {
+        self.pipeline_items.iter().map(|i| i.id).max().unwrap_or(0) + 1
+    }
+
+    pub fn push_pipeline_item(&mut self, mut item: PipelineItem) -> u32 {
+        if item.id == 0 {
+            item.id = self.next_pipeline_id();
+        }
+        let id = item.id;
+        self.pipeline_items.push(item);
+        id
+    }
+
+    pub fn get_pipeline_item(&self, id: u32) -> Option<&PipelineItem> {
+        self.pipeline_items.iter().find(|i| i.id == id)
+    }
+
+    pub fn get_pipeline_item_mut(&mut self, id: u32) -> Option<&mut PipelineItem> {
+        self.pipeline_items.iter_mut().find(|i| i.id == id)
+    }
+
+    pub fn update_pipeline_status(&mut self, id: u32, status: PipelineItemStatus) -> bool {
+        if let Some(item) = self.get_pipeline_item_mut(id) {
+            item.status = status;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn pipeline_items_by_stage(&self, stage: &str) -> Vec<&PipelineItem> {
+        self.pipeline_items
+            .iter()
+            .filter(|i| i.stage == stage)
+            .collect()
+    }
+
+    pub fn pending_pipeline_items(&self) -> Vec<&PipelineItem> {
+        self.pipeline_items
+            .iter()
+            .filter(|i| i.status == PipelineItemStatus::Pending)
+            .collect()
+    }
+
+    pub fn running_pipeline_items(&self) -> Vec<&PipelineItem> {
+        self.pipeline_items
+            .iter()
+            .filter(|i| i.status == PipelineItemStatus::Running)
+            .collect()
+    }
 }
 
 /// The persisted state of a single codexize session.

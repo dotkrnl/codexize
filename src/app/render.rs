@@ -63,7 +63,13 @@ impl Widget for PipelineWidget<'_> {
         // when tail-follow is detached and messages have arrived since.
         let unread = self.app.unread_below_count();
         let at_bottom = self.app.viewport_top >= self.app.max_viewport_top();
-        if unread > 0 && !at_bottom && area.height >= 1 {
+        let viewport_bottom = viewport_top + area_h;
+        let unread_below_viewport = self
+            .app
+            .first_unread_rendered_line()
+            .map(|line| line >= viewport_bottom)
+            .unwrap_or(!at_bottom);
+        if unread > 0 && unread_below_viewport && area.height >= 1 {
             let label = format!(" ↓ {unread} new ");
             let label_w = label.chars().count() as u16;
             if label_w + 2 <= area.width {
@@ -1101,6 +1107,34 @@ mod tests {
         app
     }
 
+    fn transcript_then_stage_tree() -> Vec<Node> {
+        vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![
+                node(
+                    "Coder",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(1),
+                    None,
+                ),
+                node(
+                    "Review",
+                    NodeKind::Stage,
+                    NodeStatus::Pending,
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+            ],
+            None,
+            None,
+        )]
+    }
+
     #[test]
     fn explicit_page_scroll_moves_viewport_without_focus_clamping() {
         let mut app = tall_app();
@@ -1141,6 +1175,29 @@ mod tests {
     }
 
     #[test]
+    fn unread_badge_hides_once_first_unread_line_is_visible() {
+        let mut app = test_app(
+            transcript_then_stage_tree(),
+            vec![run_record(1, RunStatus::Running)],
+            vec![
+                message(1, "old message 1"),
+                message(1, "old message 2"),
+                message(1, "old message 3"),
+            ],
+        );
+        app.body_inner_height = 5;
+        app.body_inner_width = 80;
+        app.set_follow_tail(false);
+        app.messages.push(message(1, "new unread"));
+        app.scroll_viewport(2, true);
+
+        let lines = render_lines(&app, app.body_inner_height as u16 + 2);
+
+        assert!(lines.iter().any(|line| line.contains("new unread")));
+        assert!(!lines.iter().any(|line| line.contains("↓")));
+    }
+
+    #[test]
     fn page_up_scrolls_viewport_without_moving_focus() {
         let mut app = tall_app();
         app.set_follow_tail(false);
@@ -1153,6 +1210,47 @@ mod tests {
         assert!(app.viewport_top < app.max_viewport_top());
         app.clamp_viewport();
         assert_eq!(app.selected, initial_selected);
+    }
+
+    #[test]
+    fn page_down_key_pages_without_moving_focus() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        let initial_key = app.selected_key.clone();
+        let step = app.body_inner_height.saturating_sub(1).max(1);
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::PageDown,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(app.selected, 0);
+        assert_eq!(app.selected_key, initial_key);
+        assert_eq!(app.viewport_top, step);
+        assert!(app.explicit_viewport_scroll);
+    }
+
+    #[test]
+    fn page_up_key_pages_without_moving_focus() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.viewport_top = app.max_viewport_top();
+        app.explicit_viewport_scroll = true;
+        app.selected = 2;
+        app.selected_key = Some(app.visible_rows[2].key.clone());
+        let initial_key = app.selected_key.clone();
+        let initial_top = app.viewport_top;
+        let step = app.body_inner_height.saturating_sub(1).max(1);
+
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::PageUp,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+
+        assert_eq!(app.selected, 2);
+        assert_eq!(app.selected_key, initial_key);
+        assert_eq!(app.viewport_top, initial_top.saturating_sub(step));
+        assert!(app.explicit_viewport_scroll);
     }
 
     #[test]
@@ -1176,5 +1274,20 @@ mod tests {
         let (ys, _) = app.header_y_offsets();
         let section_bottom = ys.get(1).copied().unwrap_or(ys.len());
         assert!(app.viewport_top < section_bottom);
+    }
+
+    #[test]
+    fn clamp_viewport_reattaches_tail_when_bottom_shrinks_under_viewport() {
+        let mut app = tall_app();
+        app.set_follow_tail(false);
+        app.messages.push(message(1, "new unread"));
+        app.viewport_top = 10;
+        app.body_inner_height = 200;
+
+        app.clamp_viewport();
+
+        assert!(app.follow_tail);
+        assert_eq!(app.tail_detach_baseline, None);
+        assert_eq!(app.viewport_top, app.max_viewport_top());
     }
 }

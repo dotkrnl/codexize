@@ -431,17 +431,17 @@ impl App {
             self.explicit_viewport_scroll = false;
             return;
         }
-        if !self.explicit_viewport_scroll {
-            if let Some(&header_y) = ys.get(self.selected) {
-                let section_bottom = ys.get(self.selected + 1).copied().unwrap_or(total);
-                // Keep any line of the selected section visible. This lets the user
-                // scroll viewport_top through a tall body without the viewport snapping
-                // back to the header on every render.
-                if section_bottom <= self.viewport_top {
-                    self.viewport_top = section_bottom.saturating_sub(1);
-                } else if header_y >= self.viewport_top + area_h {
-                    self.viewport_top = header_y + 1 - area_h;
-                }
+        if !self.explicit_viewport_scroll
+            && let Some(&header_y) = ys.get(self.selected)
+        {
+            let section_bottom = ys.get(self.selected + 1).copied().unwrap_or(total);
+            // Keep any line of the selected section visible. This lets the user
+            // scroll viewport_top through a tall body without the viewport snapping
+            // back to the header on every render.
+            if section_bottom <= self.viewport_top {
+                self.viewport_top = section_bottom.saturating_sub(1);
+            } else if header_y >= self.viewport_top + area_h {
+                self.viewport_top = header_y + 1 - area_h;
             }
         }
         self.viewport_top = self.viewport_top.min(max_top);
@@ -503,6 +503,62 @@ impl App {
             Some(baseline) => self.messages.len().saturating_sub(baseline),
             None => 0,
         }
+    }
+
+    pub(super) fn first_unread_rendered_line(&self) -> Option<usize> {
+        let baseline = self.tail_detach_baseline?;
+        if baseline >= self.messages.len() {
+            return None;
+        }
+
+        let local_offset = chrono::Local::now().fixed_offset().offset().to_owned();
+        let available_width = self.body_inner_width.max(1);
+        let (ys, _) = self.header_y_offsets();
+
+        (0..self.visible_rows.len())
+            .filter(|&index| self.is_expanded_body(index))
+            .filter_map(|index| {
+                let node = self.node_for_row(index)?;
+                let run_id = node.run_id.or(node.leaf_run_id)?;
+                let run = self.state.agent_runs.iter().find(|run| run.id == run_id)?;
+                let old_messages: Vec<_> = self
+                    .messages
+                    .iter()
+                    .take(baseline)
+                    .filter(|message| message.run_id == run_id)
+                    .cloned()
+                    .collect();
+                let all_messages: Vec<_> = self
+                    .messages
+                    .iter()
+                    .filter(|message| message.run_id == run_id)
+                    .cloned()
+                    .collect();
+
+                if old_messages.len() == all_messages.len() {
+                    return None;
+                }
+
+                let old_line_count = crate::app::chat_widget::message_lines(
+                    &old_messages,
+                    run,
+                    &local_offset,
+                    self.spinner_tick,
+                    available_width,
+                )
+                .len();
+                let all_line_count = crate::app::chat_widget::message_lines(
+                    &all_messages,
+                    run,
+                    &local_offset,
+                    self.spinner_tick,
+                    available_width,
+                )
+                .len();
+
+                (all_line_count > old_line_count).then_some(ys[index] + 1 + old_line_count)
+            })
+            .min()
     }
 
     fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
@@ -6288,8 +6344,10 @@ estimated_tokens = 1
     fn circuit_breaker_resets_after_approved_plan_review() {
         // Verify that recovery_cycle_count is reset to 0 when the recovery
         // plan review is approved (see handle_recovery_plan_review_completed).
-        let mut builder = crate::state::BuilderState::default();
-        builder.recovery_cycle_count = 3;
+        let mut builder = crate::state::BuilderState {
+            recovery_cycle_count: 3,
+            ..crate::state::BuilderState::default()
+        };
         // Simulate the reset that happens in handle_recovery_plan_review_completed
         builder.recovery_cycle_count = 0;
         assert_eq!(builder.recovery_cycle_count, 0);

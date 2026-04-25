@@ -239,6 +239,12 @@ impl PipelineItemStatus {
 }
 
 impl BuilderState {
+    fn is_selectable_task_item(item: &PipelineItem) -> bool {
+        matches!(item.status, PipelineItemStatus::Pending)
+            || (item.status == PipelineItemStatus::Revise
+                && item.mode.as_deref() != Some("superseded"))
+    }
+
     fn pipeline_task_items(&self) -> impl Iterator<Item = &PipelineItem> {
         self.pipeline_items
             .iter()
@@ -345,12 +351,7 @@ impl BuilderState {
             return self.pending.clone();
         }
         self.pipeline_task_items()
-            .filter(|item| {
-                matches!(
-                    item.status,
-                    PipelineItemStatus::Pending | PipelineItemStatus::Revise
-                )
-            })
+            .filter(|item| Self::is_selectable_task_item(item))
             .filter_map(|item| item.task_id)
             .collect()
     }
@@ -360,14 +361,10 @@ impl BuilderState {
             return self.current_task.is_some() || !self.pending.is_empty();
         }
         self.pipeline_task_items().any(|item| {
-            matches!(
-                item.status,
-                PipelineItemStatus::Pending
-                    | PipelineItemStatus::Running
-                    | PipelineItemStatus::Revise
-                    | PipelineItemStatus::HumanBlocked
-                    | PipelineItemStatus::AgentPivot
-            )
+            item.status == PipelineItemStatus::Running
+                || item.status == PipelineItemStatus::HumanBlocked
+                || item.status == PipelineItemStatus::AgentPivot
+                || Self::is_selectable_task_item(item)
         })
     }
 
@@ -400,12 +397,7 @@ impl BuilderState {
         }
 
         if let Some(index) = self.pipeline_items.iter().position(|item| {
-            item.stage == "coder"
-                && item.task_id.is_some()
-                && matches!(
-                    item.status,
-                    PipelineItemStatus::Pending | PipelineItemStatus::Revise
-                )
+            item.stage == "coder" && item.task_id.is_some() && Self::is_selectable_task_item(item)
         }) {
             self.pipeline_items[index].status = PipelineItemStatus::Running;
             self.pipeline_items[index].round = Some(round);
@@ -509,7 +501,10 @@ impl BuilderState {
             .max()
             .unwrap_or(0)
             .max(self.recovery_prev_max_task_id.unwrap_or(0));
-        from_pipeline.max(from_legacy).max(from_titles).max(from_recovery)
+        from_pipeline
+            .max(from_legacy)
+            .max(from_titles)
+            .max(from_recovery)
     }
 
     /// Handle a `revise` verdict that carries `new_tasks`: mark the current
@@ -536,6 +531,7 @@ impl BuilderState {
         let insert_pos = match current_idx {
             Some(idx) => {
                 self.pipeline_items[idx].status = PipelineItemStatus::Revise;
+                self.pipeline_items[idx].mode = Some("superseded".to_string());
                 idx + 1
             }
             None => self.pipeline_items.len(),

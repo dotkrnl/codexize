@@ -120,14 +120,27 @@ pub const SHARDER_IO: StageIO = StageIO {
 
 pub const CODER_IO: StageIO = StageIO {
     stage: "coder",
-    pointer_artifacts: &["artifacts/live_summary.txt"],
+    pointer_artifacts: &[
+        "rounds/{round}/task.toml",
+        "artifacts/spec.md",
+        "artifacts/plan.md",
+        "rounds/{round}/review.toml",
+        "artifacts/live_summary.txt",
+    ],
     writes: &[],
 };
 
 pub const REVIEWER_IO: StageIO = StageIO {
     stage: "reviewer",
-    pointer_artifacts: &["artifacts/live_summary.txt"],
-    writes: &[],
+    pointer_artifacts: &[
+        "rounds/{round}/task.toml",
+        "rounds/{round}/review_scope.toml",
+        "artifacts/spec.md",
+        "artifacts/plan.md",
+        "rounds/*/review.toml",
+        "artifacts/live_summary.txt",
+    ],
+    writes: &["rounds/{round}/review.toml"],
 };
 
 pub const RECOVERY_IO: StageIO = StageIO {
@@ -136,9 +149,15 @@ pub const RECOVERY_IO: StageIO = StageIO {
         "artifacts/spec.md",
         "artifacts/plan.md",
         "artifacts/tasks.toml",
+        "rounds/{round}/review.toml",
         "artifacts/live_summary.txt",
     ],
-    writes: &[],
+    writes: &[
+        "artifacts/spec.md",
+        "artifacts/plan.md",
+        "artifacts/tasks.toml",
+        "rounds/{round}/recovery.toml",
+    ],
 };
 
 pub fn stage_io(stage: &str) -> Option<&'static StageIO> {
@@ -161,8 +180,7 @@ pub fn stage_io(stage: &str) -> Option<&'static StageIO> {
 pub fn try_parse_toml_artifact<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("artifact missing or unreadable: {}", path.display()))?;
-    toml::from_str(&text)
-        .with_context(|| format!("unparseable TOML artifact: {}", path.display()))
+    toml::from_str(&text).with_context(|| format!("unparseable TOML artifact: {}", path.display()))
 }
 
 #[cfg(test)]
@@ -190,6 +208,35 @@ mod tests {
         let io = stage_io("sharder").unwrap();
         assert!(io.pointer_artifacts.contains(&"artifacts/spec.md"));
         assert!(io.pointer_artifacts.contains(&"artifacts/plan.md"));
+    }
+
+    #[test]
+    fn test_coder_io_uses_round_task_artifacts() {
+        let io = stage_io("coder").unwrap();
+        assert!(io.pointer_artifacts.contains(&"rounds/{round}/task.toml"));
+        assert!(io.pointer_artifacts.contains(&"rounds/{round}/review.toml"));
+        assert!(io.writes.is_empty());
+    }
+
+    #[test]
+    fn test_reviewer_io_writes_round_review() {
+        let io = stage_io("reviewer").unwrap();
+        assert!(io.pointer_artifacts.contains(&"rounds/{round}/task.toml"));
+        assert!(
+            io.pointer_artifacts
+                .contains(&"rounds/{round}/review_scope.toml")
+        );
+        assert!(io.writes.contains(&"rounds/{round}/review.toml"));
+    }
+
+    #[test]
+    fn test_recovery_io_uses_trigger_review_and_writes_recovery() {
+        let io = stage_io("recovery").unwrap();
+        assert!(io.pointer_artifacts.contains(&"rounds/{round}/review.toml"));
+        assert!(io.writes.contains(&"artifacts/spec.md"));
+        assert!(io.writes.contains(&"artifacts/plan.md"));
+        assert!(io.writes.contains(&"artifacts/tasks.toml"));
+        assert!(io.writes.contains(&"rounds/{round}/recovery.toml"));
     }
 
     #[test]
@@ -245,9 +292,11 @@ mod tests {
 
     #[test]
     fn test_max_task_id_from_recovery_snapshot() {
-        let mut builder = BuilderState::default();
-        builder.recovery_prev_max_task_id = Some(10);
-        builder.recovery_prev_task_ids = vec![1, 2, 10];
+        let builder = BuilderState {
+            recovery_prev_max_task_id: Some(10),
+            recovery_prev_task_ids: vec![1, 2, 10],
+            ..Default::default()
+        };
         assert_eq!(builder.max_task_id(), 10);
     }
 
@@ -330,10 +379,8 @@ mod tests {
         builder.pipeline_items[0].status = PipelineItemStatus::Approved;
         builder.pipeline_items[1].status = PipelineItemStatus::Running;
 
-        let _ids = builder.apply_revise_with_new_tasks(
-            2,
-            vec![("New".into(), "d".into(), "t".into(), 1000)],
-        );
+        let _ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
 
         // Task 1 (approved) stays as 1
         assert_eq!(builder.pipeline_items[0].task_id, Some(1));
@@ -353,10 +400,8 @@ mod tests {
         builder.pipeline_items[0].status = PipelineItemStatus::Approved;
         builder.pipeline_items[1].status = PipelineItemStatus::Running;
 
-        let ids = builder.apply_revise_with_new_tasks(
-            2,
-            vec![("New".into(), "d".into(), "t".into(), 1000)],
-        );
+        let ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
 
         assert_eq!(ids[0], 11);
     }
@@ -378,7 +423,10 @@ mod tests {
         // Old task 3 was renumbered to 4; its title should follow
         let new_id_for_old_3 = ids[0] + 1;
         assert_eq!(
-            builder.task_titles.get(&new_id_for_old_3).map(|s| s.as_str()),
+            builder
+                .task_titles
+                .get(&new_id_for_old_3)
+                .map(|s| s.as_str()),
             Some("Task 3")
         );
         assert!(!builder.task_titles.contains_key(&3));
@@ -398,10 +446,7 @@ mod tests {
         builder.pipeline_items[0].status = PipelineItemStatus::Approved;
         builder.pipeline_items[1].status = PipelineItemStatus::Running;
 
-        builder.apply_revise_with_new_tasks(
-            2,
-            vec![("New".into(), "d".into(), "t".into(), 1000)],
-        );
+        builder.apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
 
         assert!(builder.done.contains(&1));
         assert!(builder.pending.len() >= 2);

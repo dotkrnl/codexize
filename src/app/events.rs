@@ -222,22 +222,25 @@ impl App {
 
     pub(super) fn scroll_or_move_focus(&mut self, delta: isize) {
         let idx = self.selected;
-        if !self.is_expanded_transcript(idx) || self.stage_body_height_for(idx) == 0 {
+        let area_h = self.body_inner_height;
+        let (ys, total) = self.header_y_offsets();
+        let Some(&header_y) = ys.get(idx) else {
             self.move_focus(delta);
             return;
-        }
-        let max_offset = self.stage_max_offset(idx);
-        let current = self.effective_stage_scroll(idx, max_offset);
+        };
+        let next_y = ys.get(idx + 1).copied().unwrap_or(total);
+        let section_bottom = next_y; // exclusive end of selected row's content block
+
         if delta < 0 {
-            if current > 0 {
-                self.set_stage_scroll(idx, current.saturating_sub(1));
+            if self.viewport_top > header_y {
+                self.scroll_viewport(-1);
             } else {
-                self.boundary_handoff(delta);
+                self.move_focus(delta);
             }
-        } else if current < max_offset {
-            self.set_stage_scroll(idx, current + 1);
+        } else if area_h > 0 && self.viewport_top + area_h < section_bottom {
+            self.scroll_viewport(1);
         } else {
-            self.boundary_handoff(delta);
+            self.move_focus(delta);
         }
     }
 
@@ -248,10 +251,6 @@ impl App {
             self.selected += 1;
         }
         self.selected_key = self.visible_rows.get(self.selected).map(|row| row.key.clone());
-    }
-
-    fn boundary_handoff(&mut self, delta: isize) {
-        self.move_focus(delta);
     }
 
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {

@@ -453,8 +453,12 @@ impl App {
         let (ys, total) = self.header_y_offsets();
         let max_top = total.saturating_sub(area_h);
         if let Some(&header_y) = ys.get(self.selected) {
-            if header_y < self.viewport_top {
-                self.viewport_top = header_y;
+            let section_bottom = ys.get(self.selected + 1).copied().unwrap_or(total);
+            // Keep any line of the selected section visible. This lets the user
+            // scroll viewport_top through a tall body without the viewport snapping
+            // back to the header on every render.
+            if section_bottom <= self.viewport_top {
+                self.viewport_top = section_bottom.saturating_sub(1);
             } else if header_y >= self.viewport_top + area_h {
                 self.viewport_top = header_y + 1 - area_h;
             }

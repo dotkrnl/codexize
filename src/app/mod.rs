@@ -3585,6 +3585,7 @@ mod tests {
             planning_weight: 0.0,
             build_weight: 0.0,
             review_weight: 0.0,
+            fallback_from: None,
         }
     }
 
@@ -3608,6 +3609,7 @@ mod tests {
             planning_weight: 0.0,
             build_weight: 0.0,
             review_weight: 0.0,
+            fallback_from: None,
         }
     }
 

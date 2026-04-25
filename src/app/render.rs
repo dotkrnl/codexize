@@ -195,7 +195,14 @@ pub fn sanitize_live_summary(text: &str) -> String {
 
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
-        let model_height = (self.models.len() + self.quota_errors.len()).max(1) as u16 + 2;
+        let fallback_lines = self
+            .models
+            .iter()
+            .filter(|m| m.fallback_from.is_some())
+            .count();
+        let model_height = (self.models.len() + fallback_lines + self.quota_errors.len()).max(1)
+            as u16
+            + 2;
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -407,6 +414,16 @@ impl App {
                     Span::raw(" "),
                     probability_span("R", review_pct, max_review),
                 ]));
+
+                if let Some(source) = model.fallback_from.as_deref() {
+                    lines.push(Line::from(vec![
+                        Span::raw("          ↳ "),
+                        Span::styled(
+                            format!("borrowing {source}'s score (no ranking data yet)"),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                }
             }
         }
 

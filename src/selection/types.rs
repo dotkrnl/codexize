@@ -26,6 +26,9 @@ pub struct ModelStatus {
     pub planning_weight: f64,
     pub build_weight: f64,
     pub review_weight: f64,
+    /// Sibling whose ranking-API score was borrowed because this model
+    /// has no entry yet. `None` for normal models.
+    pub fallback_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +51,7 @@ pub struct Candidate {
     pub planning_probability: f64,
     pub build_probability: f64,
     pub review_probability: f64,
+    pub fallback_from: Option<String>,
 }
 
 impl ModelStatus {
@@ -79,6 +83,7 @@ mod tests {
             planning_weight: 0.3,
             build_weight: 0.2,
             review_weight: 0.1,
+            fallback_from: None,
         }
     }
 

@@ -39,6 +39,8 @@ struct CachedModel {
     build_weight: f64,
     #[serde(default)]
     review_weight: f64,
+    #[serde(default)]
+    fallback_from: Option<String>,
 }
 
 fn cache_path() -> PathBuf {
@@ -83,6 +85,7 @@ pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
                 planning_weight: m.planning_weight,
                 build_weight: m.build_weight,
                 review_weight: m.review_weight,
+                fallback_from: m.fallback_from,
             })
         })
         .collect::<Vec<_>>();
@@ -126,6 +129,7 @@ pub fn save(models: &[ModelStatus], errors: &[QuotaError]) -> Result<()> {
                 planning_weight: m.planning_weight,
                 build_weight: m.build_weight,
                 review_weight: m.review_weight,
+                fallback_from: m.fallback_from.clone(),
             })
             .collect(),
         quota_errors: errors

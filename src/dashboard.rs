@@ -17,6 +17,10 @@ pub struct DashboardModel {
     pub standard_error: f64,
     pub axes: Vec<(String, f64)>,
     pub display_order: usize,
+    /// Set when this model's score was borrowed from a same-stem sibling
+    /// because the ranking API has no entry for it yet. Holds the sibling's
+    /// name; UI surfaces this so the fallback is visible.
+    pub fallback_from: Option<String>,
 }
 
 pub fn load_models() -> Result<Vec<DashboardModel>> {
@@ -180,12 +184,9 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     standard_error: sc.standard_error,
                     axes: sc.axes.clone(),
                     display_order: sc.display_order,
+                    fallback_from: None,
                 }
             } else if let Some(sc) = sibling_score(&inv.name, &scores) {
-                eprintln!(
-                    "warning: no ranking-API score for {} yet; falling back to {}'s score",
-                    inv.name, sc.name
-                );
                 DashboardModel {
                     name: inv.name,
                     vendor: if !inv.vendor.is_empty() { inv.vendor } else { sc.vendor.clone() },
@@ -194,6 +195,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     standard_error: sc.standard_error,
                     axes: sc.axes.clone(),
                     display_order: sc.display_order,
+                    fallback_from: Some(sc.name.clone()),
                 }
             } else {
                 // Model is in the inventory but not yet scored — include with zeroed scores
@@ -205,6 +207,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     standard_error: 0.0,
                     axes: Vec::new(),
                     display_order: inv.display_order + 10_000,
+                    fallback_from: None,
                 }
             }
         })
@@ -225,6 +228,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                 standard_error: sc.standard_error,
                 axes: sc.axes.clone(),
                 display_order: sc.display_order,
+                fallback_from: None,
             });
         }
     }
@@ -245,6 +249,7 @@ fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             standard_error: sc.standard_error,
             axes: sc.axes,
             display_order: sc.display_order,
+            fallback_from: None,
         })
         .collect()
 }
@@ -261,6 +266,7 @@ fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
             standard_error: 0.0,
             axes: Vec::new(),
             display_order: inv.display_order,
+            fallback_from: None,
         })
         .collect()
 }
@@ -296,9 +302,11 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
 // Synthesize a DashboardModel for a name absent from the ranking API by
 // borrowing the best-scoring sibling's numbers (same version stem). Used by
 // the selection layer to keep live-quota-only models (e.g. "gpt-5.5" before
-// aistupidlevel catches up) in the candidate pool. Emits a warning so the
-// fallback is visible; once the real score lands in `existing`, the caller
-// finds an exact match and never calls this.
+// aistupidlevel catches up) in the candidate pool. The synthesized model
+// carries `fallback_from = Some(sibling.name)` so the UI can surface the
+// fallback only for models that actually survive selection; once the real
+// score lands in `existing`, the caller finds an exact match and never
+// calls this.
 pub fn synthesize_sibling(
     name: &str,
     vendor: &str,
@@ -314,11 +322,6 @@ pub fn synthesize_sibling(
                 .unwrap_or(std::cmp::Ordering::Equal)
         })?;
 
-    eprintln!(
-        "warning: no ranking-API score for {} yet; falling back to {}'s score",
-        name, sibling.name
-    );
-
     Some(DashboardModel {
         name: name.to_string(),
         vendor: if !vendor.is_empty() { vendor.to_string() } else { sibling.vendor.clone() },
@@ -327,6 +330,7 @@ pub fn synthesize_sibling(
         standard_error: sibling.standard_error,
         axes: sibling.axes.clone(),
         display_order: sibling.display_order,
+        fallback_from: Some(sibling.name.clone()),
     })
 }
 

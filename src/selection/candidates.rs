@@ -97,6 +97,7 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
             planning_weight: candidate.planning_probability,
             build_weight: candidate.build_probability,
             review_weight: candidate.review_probability,
+            fallback_from: candidate.fallback_from.clone(),
         })
         .collect();
 
@@ -369,6 +370,7 @@ fn build_candidate(
         planning_probability,
         build_probability,
         review_probability,
+        fallback_from: model.fallback_from,
     };
 
     if is_flash_tier(&candidate) {
@@ -402,6 +404,7 @@ mod tests {
             planning_weight: 0.5,
             build_weight: 0.4,
             review_weight: 0.3,
+            fallback_from: None,
         }
     }
 
@@ -510,6 +513,7 @@ mod tests {
             standard_error: 0.0,
             axes: Vec::new(),
             display_order: 0,
+            fallback_from: None,
         }
     }
 
@@ -537,6 +541,7 @@ mod tests {
             planning_weight: candidate.planning_probability,
             build_weight: candidate.build_probability,
             review_weight: candidate.review_probability,
+            fallback_from: candidate.fallback_from.clone(),
         }
     }
 

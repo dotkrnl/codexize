@@ -35,8 +35,9 @@ pub fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
                     .partial_cmp(&b.overall_score)
                     .unwrap_or(Ordering::Equal)
                     // Prefer the newer version on ties — keeps a synthesized
-                    // sibling-fallback model (e.g. gemini-3.1-pro borrowing
-                    // gemini-3-pro-preview's score) winning over the source.
+                    // sibling-fallback model (e.g. gemini-3-flash-preview
+                    // borrowing gemini-2.5-flash's score) winning over the
+                    // source.
                     .then_with(|| version_cmp_newer_first(b, a))
                     .then_with(|| b.display_order.cmp(&a.display_order))
             })
@@ -90,7 +91,7 @@ fn compare_probability(
                 .unwrap_or(Ordering::Equal)
         })
         // Newer version wins on ties — without this, a synthesized model
-        // (e.g. gemini-3.1-pro borrowing gemini-3-pro-preview's score) loses
+        // (e.g. gemini-3-flash-preview borrowing gemini-2.5-flash's score) loses
         // the lex tiebreak to its own source and gets retained out before
         // version penalties even run.
         .then_with(|| version_cmp_newer_first(left, right))

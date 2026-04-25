@@ -70,7 +70,7 @@ pub fn load_all_models() -> (Vec<ModelStatus>, Vec<QuotaError>) {
     }
 
     // Apply version penalties first so synthesized newer-version models
-    // (e.g. gemini-3.1-pro borrowing 3-pro-preview's score) outrank their
+    // (e.g. gemini-3-flash-preview borrowing 2.5-flash's score) outrank their
     // sources by probability before top_model_union's "top-N" selector
     // runs — otherwise tied probabilities lose a lex/display-order
     // tiebreak to the source and the new model gets retained out.
@@ -684,10 +684,9 @@ mod tests {
         assert_eq!(extract_version("gpt-5.5"), Some((5, 5)));
         assert_eq!(extract_version("gpt-5.4"), Some((5, 4)));
         assert_eq!(extract_version("gpt-5.2"), Some((5, 2)));
-        assert_eq!(extract_version("gemini-3.1-pro"), Some((3, 1)));
         assert_eq!(extract_version("gemini-2.5-flash"), Some((2, 5)));
         assert_eq!(extract_version("gemini-3-pro-preview"), Some((3, 0)));
-        assert_eq!(extract_version("gemini-3-flash"), Some((3, 0)));
+        assert_eq!(extract_version("gemini-3-flash-preview"), Some((3, 0)));
         // Existing dash-separated minor still works.
         assert_eq!(extract_version("claude-sonnet-4-6"), Some((4, 6)));
         // Date-shaped digit runs are skipped.
@@ -761,28 +760,31 @@ mod tests {
     }
 
     #[test]
-    fn synthesized_gemini_3_1_pro_makes_3_pro_preview_carry_penalty() {
+    fn synthesized_gemini_3_flash_preview_makes_2_5_flash_carry_penalty() {
+        // gemini-3-flash-preview is synthesized off gemini-2.5-flash via the
+        // explicit fallback. Within the gemini bucket it must end up newer
+        // (rank 0) and the 2.5 source carries the per-step penalty.
         let mut candidates = vec![
             Candidate {
                 vendor: VendorKind::Gemini,
-                ..candidate_with_version("gemini-3.1-pro", 80.0)
+                ..candidate_with_version("gemini-3-flash-preview", 60.0)
             },
             Candidate {
                 vendor: VendorKind::Gemini,
-                ..candidate_with_version("gemini-3-pro-preview", 80.0)
+                ..candidate_with_version("gemini-2.5-flash", 60.0)
             },
         ];
         apply_version_penalties(&mut candidates);
 
-        let pro_31 = candidates
+        let new_flash = candidates
             .iter()
-            .find(|c| c.name == "gemini-3.1-pro")
+            .find(|c| c.name == "gemini-3-flash-preview")
             .unwrap();
-        let preview = candidates
+        let old_flash = candidates
             .iter()
-            .find(|c| c.name == "gemini-3-pro-preview")
+            .find(|c| c.name == "gemini-2.5-flash")
             .unwrap();
-        assert!(pro_31.idea_probability > preview.idea_probability);
-        assert!(pro_31.build_probability > preview.build_probability);
+        assert!(new_flash.idea_probability > old_flash.idea_probability);
+        assert!(new_flash.build_probability > old_flash.build_probability);
     }
 }

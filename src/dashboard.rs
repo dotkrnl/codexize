@@ -304,13 +304,12 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
 // preference order; first match wins. Used when the ranking API hasn't
 // scored the new model yet but quota probes already see it.
 const EXPLICIT_FALLBACKS: &[(&str, &str)] = &[
-    ("gemini-3.1-pro", "gemini-3-pro-preview"),
-    ("gemini-3-flash", "gemini-2.5-flash"),
+    ("gemini-3-flash-preview", "gemini-2.5-flash"),
 ];
 
 // Synthesize a DashboardModel for a name absent from the ranking API by
 // borrowing a sibling's numbers — preferring an explicit hardcoded mapping
-// (e.g. gemini-3.1-pro → gemini-3-pro-preview), then falling back to the
+// (e.g. gemini-3-flash-preview → gemini-2.5-flash), then falling back to the
 // best-scoring same-stem sibling. Used by the selection layer to keep
 // live-quota-only models in the candidate pool. The synthesized model
 // carries `fallback_from = Some(sibling.name)` so the UI surfaces the
@@ -398,23 +397,12 @@ mod tests {
     }
 
     #[test]
-    fn synthesize_gemini_3_1_pro_uses_explicit_preview_fallback() {
-        let existing = vec![
-            model("gemini-3-pro-preview", 80.0),
-            model("gemini-3-pro", 70.0),
-        ];
-        let synth = synthesize_sibling("gemini-3.1-pro", "google", &existing).unwrap();
-        assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
-        assert_eq!(synth.overall_score, 80.0);
-    }
-
-    #[test]
-    fn synthesize_gemini_3_flash_falls_back_to_2_5_flash() {
+    fn synthesize_gemini_3_flash_preview_falls_back_to_2_5_flash() {
         let existing = vec![
             model("gemini-2.5-flash", 60.0),
             model("gemini-2.5-pro", 75.0),
         ];
-        let synth = synthesize_sibling("gemini-3-flash", "google", &existing).unwrap();
+        let synth = synthesize_sibling("gemini-3-flash-preview", "google", &existing).unwrap();
         assert_eq!(synth.fallback_from.as_deref(), Some("gemini-2.5-flash"));
         assert_eq!(synth.overall_score, 60.0);
     }

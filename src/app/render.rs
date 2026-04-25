@@ -247,7 +247,10 @@ impl App {
             Span::raw(format!(" #{} ", self.state.session_id)),
             Span::styled(
                 format!("[{}]", self.state.current_phase.label()),
-                Style::default().fg(Color::Yellow),
+                self.nodes
+                    .get(self.current_node())
+                    .map(|n| n.status.style())
+                    .unwrap_or_default(),
             ),
             Span::raw(" | "),
             Span::raw(format!(
@@ -398,10 +401,22 @@ impl App {
                 } else {
                     probability_span("R", review_pct, max_review)
                 };
+                // Both metrics share the probability gradient (red→yellow→green
+                // on 0..100), where higher is better — for stupid_level a higher
+                // score literally means "more clever", and for quota_percent a
+                // higher value means "more headroom remaining".
+                let stupid_color = match model.stupid_level {
+                    Some(v) => probability_color(v, 100),
+                    None => Color::DarkGray,
+                };
+                let quota_color = match model.quota_percent {
+                    Some(v) => probability_color(v, 100),
+                    None => Color::DarkGray,
+                };
                 line_spans.extend(vec![
-                    Span::styled(stupid_level, Style::default().fg(Color::Yellow)),
+                    Span::styled(stupid_level, Style::default().fg(stupid_color)),
                     Span::raw("  "),
-                    Span::styled(quota, Style::default().fg(Color::Green)),
+                    Span::styled(quota, Style::default().fg(quota_color)),
                     Span::raw("  "),
                     prob_i,
                     Span::raw(" "),
@@ -460,7 +475,7 @@ impl App {
         if self.confirm_back && is_current {
             spans.push(Span::styled(
                 "  [b again to go back and clean up — any other key to cancel]",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
         }
 

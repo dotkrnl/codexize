@@ -218,7 +218,7 @@ fn render_messages(
                         spans: vec![
                             Span::styled(
                                 format!("{} ", ts_str),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(sym.color),
                             ),
                             Span::styled(
                                 format!("{} ", sym.symbol),
@@ -309,7 +309,7 @@ fn render_messages(
         lines.push(RenderedLine {
             spans: vec![Span::styled(
                 format!("{} working...", spin),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Cyan),
             )],
         });
     }

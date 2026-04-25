@@ -3404,6 +3404,23 @@ fn reviewer_prompt(
     let plan = session_dir.join("artifacts/plan.md");
     let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
     let instr = live_summary_instruction(&live_summary_path);
+    let prior_reviews = if round > 1 {
+        let lines: Vec<String> = (1..round)
+            .map(|r| {
+                let p = session_dir
+                    .join("rounds")
+                    .join(format!("{r:03}"))
+                    .join("review.toml");
+                format!("    {}", p.display())
+            })
+            .collect();
+        format!(
+            "  Prior reviews for this task (read first; do not repeat their feedback):\n{}\n",
+            lines.join("\n")
+        )
+    } else {
+        String::new()
+    };
     format!(
         r#"{PROJECT_DOC_INSTR}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
 operator. Do NOT modify code. Write ONLY the review TOML.
@@ -3415,6 +3432,7 @@ Inputs:
   Base SHA:    {base}     (one SHA = HEAD at round start)
   Commit list: {commits}  (one SHA per line in base..HEAD; may be empty if
                            git was unavailable — fall back to `git log` yourself)
+{prior_reviews}
 
 Review:
   1. BASE=$(cat {base})
@@ -3459,12 +3477,15 @@ triple-quoted for multi-line; arrays of inline tables for any new task refs):
     plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
 
 Rules:
-  - done    → task outcomes are delivered AND (tests pass, OR task is marked
-              "not testable" and the code builds cleanly).
-  - revise  → coder must iterate; feedback MUST list the specific issues.
-  - blocked → human judgement required; feedback MUST explain what's unclear.
-  - Do NOT leave feedback empty for revise/blocked.
-  - Do NOT emit prose outside the TOML.
+  - done    → outcomes delivered AND (tests pass OR task is "not testable" and
+              the code builds cleanly).
+  - revise  → list the specific issues. For complex tasks, also suggest a
+              direction (file/approach/sketch) — do not just reject.
+  - blocked → human judgement required; explain what's unclear.
+  - Don't repeat feedback from prior reviews unless the coder ignored it
+              without good reason — in which case call that out explicitly.
+  - Don't leave feedback empty for revise/blocked, and don't emit prose
+              outside the TOML.
 {instr}"#,
         task_id = task_id,
         round = round,

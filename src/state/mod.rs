@@ -204,6 +204,11 @@ pub struct BuilderState {
     /// run id are ignored when rebuilding retry exclusions after restart.
     #[serde(default)]
     pub retry_reset_run_id_cutoff: Option<u64>,
+    /// How many recovery cycles have been entered since the last successful
+    /// recovery. The circuit-breaker escalates to `human_blocked` when this
+    /// reaches 3, preventing infinite recovery loops.
+    #[serde(default)]
+    pub recovery_cycle_count: u32,
     /// Short one-line titles keyed by task id, sourced from tasks.toml.
     /// Used to label task nodes in the pipeline tree.
     #[serde(default)]

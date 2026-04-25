@@ -19,8 +19,14 @@ pub enum Phase {
     /// Builder-only recovery stage that repairs artifacts and reconciles queue state.
     ///
     /// The stored round is the builder round that triggered recovery; successful recovery
-    /// resumes into the next implementation round (round + 1).
+    /// resumes into `BuilderRecoveryPlanReview` of the same round.
     BuilderRecovery(u32),
+    /// Non-interactive plan review inserted after a builder recovery stage completes.
+    /// Verifies the recovered spec/plan is coherent before sharding.
+    BuilderRecoveryPlanReview(u32),
+    /// Recovery-mode re-sharding inserted after a successful recovery plan review.
+    /// Regenerates the task queue from the recovered spec/plan.
+    BuilderRecoverySharding(u32),
     Done,
     BlockedNeedsUser,
 }
@@ -39,6 +45,8 @@ impl Phase {
             Phase::ImplementationRound(r) => format!("Builder: coder r{r}"),
             Phase::ReviewRound(r) => format!("Builder: reviewer r{r}"),
             Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
+            Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
+            Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
             Phase::Done => "Done".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
@@ -84,7 +92,13 @@ impl Phase {
             (ReviewRound(_), BlockedNeedsUser) => true,
             (ReviewRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
             (BuilderRecovery(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
+            (BuilderRecovery(r), BuilderRecoveryPlanReview(r2)) if *r == *r2 => true,
             (BuilderRecovery(_), BlockedNeedsUser) => true,
+            (BuilderRecoveryPlanReview(r), BuilderRecoverySharding(r2)) if *r == *r2 => true,
+            (BuilderRecoveryPlanReview(r), BuilderRecovery(r2)) if *r == *r2 => true,
+            (BuilderRecoveryPlanReview(_), BlockedNeedsUser) => true,
+            (BuilderRecoverySharding(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
+            (BuilderRecoverySharding(_), BlockedNeedsUser) => true,
             (BlockedNeedsUser, BrainstormRunning) => true,
             (BlockedNeedsUser, SpecReviewRunning) => true,
             (BlockedNeedsUser, PlanningRunning) => true,
@@ -124,6 +138,8 @@ impl Phase {
             Phase::ImplementationRound(_) => vec![ArtifactKind::Plan, ArtifactKind::Tasks],
             Phase::ReviewRound(_) => vec![ArtifactKind::CodeReview],
             Phase::BuilderRecovery(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
+            Phase::BuilderRecoveryPlanReview(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
+            Phase::BuilderRecoverySharding(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself
             _ => vec![],
         }
@@ -144,6 +160,8 @@ impl Phase {
             Phase::ImplementationRound(_) => "AI agent implementing code",
             Phase::ReviewRound(_) => "AI agent reviewing implementation",
             Phase::BuilderRecovery(_) => "AI agent repairing builder artifacts",
+            Phase::BuilderRecoveryPlanReview(_) => "Validating recovered spec and plan",
+            Phase::BuilderRecoverySharding(_) => "Regenerating tasks from recovered plan",
             Phase::Done => "Run completed successfully",
             Phase::BlockedNeedsUser => "Blocked - requires user intervention",
             Phase::SkipToImplPending => "Awaiting user confirmation to skip to implementation",
@@ -156,6 +174,8 @@ impl Phase {
             Phase::ImplementationRound(n) => format!("Implementation Round {n}"),
             Phase::ReviewRound(n) => format!("Review Round {n}"),
             Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
+            Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
+            Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
             _ => self.label(),
         }
     }

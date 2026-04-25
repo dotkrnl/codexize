@@ -65,12 +65,14 @@ pub struct VisibleNodeRow {
     pub status: NodeStatus,
     pub has_children: bool,
     pub has_transcript: bool,
+    pub has_body: bool,
     pub backing_leaf_run_id: Option<u64>,
 }
 
 impl VisibleNodeRow {
     pub fn is_expandable(&self) -> bool {
-        self.status != NodeStatus::Pending && (self.has_children || self.has_transcript)
+        self.status != NodeStatus::Pending
+            && (self.has_children || self.has_transcript || self.has_body)
     }
 }
 
@@ -185,6 +187,7 @@ fn flatten_rows(
             status: node.status,
             has_children: !node.children.is_empty(),
             has_transcript: node.run_id.or(node.leaf_run_id).is_some(),
+            has_body: node.label == "Idea",
             backing_leaf_run_id: node.run_id.or(node.leaf_run_id),
         };
         let expanded = is_expanded(&row);

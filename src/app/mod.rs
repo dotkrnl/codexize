@@ -407,6 +407,14 @@ impl App {
                 .is_some_and(|row| row.has_transcript)
     }
 
+    pub(super) fn is_expanded_body(&self, index: usize) -> bool {
+        self.is_expanded(index)
+            && self
+                .visible_rows
+                .get(index)
+                .is_some_and(|row| row.has_transcript || row.has_body)
+    }
+
     pub(super) fn stage_body_height_for(&self, index: usize) -> usize {
         self.transcript_body_height_for(index, self.body_inner_height)
     }
@@ -429,7 +437,7 @@ impl App {
         for i in 0..self.visible_rows.len() {
             ys.push(y);
             y += 1;
-            if self.is_expanded_transcript(i) {
+            if self.is_expanded_body(i) {
                 y += self.node_body(i).len();
             }
         }

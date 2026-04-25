@@ -43,7 +43,7 @@ impl Widget for PipelineWidget<'_> {
             };
             let expanded = self.app.is_expanded(index);
             lines.push(self.app.node_header(index, expanded, node));
-            if expanded && self.app.is_expanded_transcript(index) {
+            if expanded && self.app.is_expanded_body(index) {
                 lines.extend(self.app.node_body(index));
             }
         }

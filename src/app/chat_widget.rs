@@ -238,7 +238,7 @@ fn render_messages(
                     spans: vec![
                         Span::styled(
                             format!("{} ", ts_str),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(sym.color),
                         ),
                         Span::styled(
                             format!("{} ", sym.symbol),
@@ -273,7 +273,7 @@ fn render_messages(
                     spans: vec![
                         Span::styled(
                             format!("{} ", ts_str),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(sym.color),
                         ),
                         Span::styled(
                             format!("{} ", sym.symbol),
@@ -294,16 +294,13 @@ fn render_messages(
                 spans: vec![
                     Span::styled(
                         format!("{} ", ts_str),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(sym.color),
                     ),
                     Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
                 ],
             });
         }
 
-        if msg.kind == MessageKind::End {
-            lines.push(RenderedLine { spans: vec![Span::raw(String::new())] });
-        }
     }
 
     let has_end = messages.iter().any(|m| m.kind == MessageKind::End);

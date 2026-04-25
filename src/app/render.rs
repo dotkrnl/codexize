@@ -441,13 +441,21 @@ impl App {
         };
 
         let mut spans = vec![
-            Span::raw(format!("{}{} ", "  ".repeat(self.visible_rows[index].depth), marker)),
+            Span::raw(format!("{}{} ", " ".repeat(self.visible_rows[index].depth), marker)),
             Span::raw(node.label.clone()),
             Span::raw(" | "),
             Span::styled(node.status.label(), node.status.style()),
-            Span::raw(" | "),
-            Span::styled(node.summary.clone(), Style::default().fg(Color::Gray)),
         ];
+        // Only the Builder Loop carries useful per-stage progress in its
+        // summary ("N of M tasks done"); the other stages emit narration like
+        // "idea captured" that just clutters the title.
+        if node.label == "Builder Loop" && !node.summary.is_empty() {
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                node.summary.clone(),
+                Style::default().fg(Color::Gray),
+            ));
+        }
 
         if self.confirm_back && is_current {
             spans.push(Span::styled(
@@ -922,10 +930,10 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("▾ Root | running")));
         assert!(lines
             .iter()
-            .any(|line| line.contains("  ▾ Task A | running")));
+            .any(|line| line.contains(" ▾ Task A | running")));
         assert!(lines
             .iter()
-            .any(|line| line.contains("    ▾ Coder | running")));
+            .any(|line| line.contains("  ▾ Coder | running")));
         assert!(lines
             .iter()
             .any(|line| line.contains("coder transcript body")));

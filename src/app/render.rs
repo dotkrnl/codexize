@@ -349,12 +349,29 @@ impl App {
                 let build_pct = probability_percent(model.build_weight, total_build);
                 let review_pct = probability_percent(model.review_weight, total_review);
 
-                lines.push(Line::from(vec![
-                    tag_span,
-                    Span::styled(
+                let mut name_spans: Vec<Span> = Vec::new();
+                if model.fallback_from.is_some() {
+                    let suffix = " (new)";
+                    let used = short_name.chars().count() + suffix.chars().count();
+                    let pad = 28usize.saturating_sub(used);
+                    name_spans.push(Span::styled(
+                        short_name.clone(),
+                        Style::default().fg(Color::Cyan),
+                    ));
+                    name_spans.push(Span::styled(suffix, Style::default().fg(Color::DarkGray)));
+                    if pad > 0 {
+                        name_spans.push(Span::raw(" ".repeat(pad)));
+                    }
+                } else {
+                    name_spans.push(Span::styled(
                         format!("{:<28}", short_name),
                         Style::default().fg(Color::Cyan),
-                    ),
+                    ));
+                }
+
+                let mut line_spans = vec![tag_span];
+                line_spans.extend(name_spans);
+                line_spans.extend(vec![
                     Span::styled(stupid_level, Style::default().fg(Color::Yellow)),
                     Span::raw("  "),
                     Span::styled(quota, Style::default().fg(Color::Green)),
@@ -366,17 +383,8 @@ impl App {
                     probability_span("B", build_pct, max_build),
                     Span::raw(" "),
                     probability_span("R", review_pct, max_review),
-                ]));
-
-                if let Some(source) = model.fallback_from.as_deref() {
-                    lines.push(Line::from(vec![
-                        Span::raw("          ↳ "),
-                        Span::styled(
-                            format!("borrowing {source}'s score (no ranking data yet)"),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]));
-                }
+                ]);
+                lines.push(Line::from(line_spans));
             }
         }
 

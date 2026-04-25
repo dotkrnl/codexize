@@ -188,10 +188,27 @@ fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
 }
 
 fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
-    models
+    let mut mapped: BTreeMap<String, Option<u8>> = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
-        .collect()
+        .collect();
+
+    // Google's retrieveUserQuota only returns buckets it knows about, which
+    // can lag new model names (e.g. gemini-3.1-pro). Inject known names so
+    // dashboard::synthesize_sibling has something to extend a sibling
+    // fallback onto. Use the best observed quota as the shared default.
+    let shared = mapped.values().find_map(|q| *q);
+    for known in &[
+        "gemini-3.1-pro",
+        "gemini-3-pro-preview",
+        "gemini-3-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+    ] {
+        mapped.entry((*known).to_string()).or_insert(shared);
+    }
+
+    mapped
 }
 
 fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {

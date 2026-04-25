@@ -1023,11 +1023,20 @@ impl App {
                 let spec_path = session_dir.join("artifacts").join("spec.md");
                 let plan_path = session_dir.join("artifacts").join("plan.md");
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+                let recovery_path = session_dir
+                    .join("rounds")
+                    .join(format!("{:03}", run.round))
+                    .join("recovery.toml");
                 let reason = if !Self::artifact_present(&spec_path)
                     || !Self::artifact_present(&plan_path)
                     || !Self::artifact_present(&tasks_path)
+                    || !Self::artifact_present(&recovery_path)
                 {
                     Some("artifact_missing".to_string())
+                } else if let Err(err) =
+                    validate_stage_toml_writes(&session_dir, "recovery", run.round)
+                {
+                    Some(format!("artifact_invalid: {err}"))
                 } else {
                     tasks::validate(&tasks_path)
                         .err()
@@ -1841,14 +1850,44 @@ impl App {
                             }
                             review::ReviewStatus::Revise => {
                                 if let Some(task_id) = self.state.builder.current_task_id() {
-                                    let _ = self.state.builder.set_task_status(
-                                        task_id,
-                                        PipelineItemStatus::Revise,
-                                        Some(round),
-                                    );
+                                    if verdict.new_tasks.is_empty() {
+                                        let _ = self.state.builder.set_task_status(
+                                            task_id,
+                                            PipelineItemStatus::Revise,
+                                            Some(round),
+                                        );
+                                    } else {
+                                        let new_tasks = verdict
+                                            .new_tasks
+                                            .iter()
+                                            .map(|task| {
+                                                (
+                                                    task.title.clone(),
+                                                    task.description.clone(),
+                                                    task.test.clone(),
+                                                    task.estimated_tokens,
+                                                )
+                                            })
+                                            .collect::<Vec<_>>();
+                                        let assigned_ids = assigned_revise_task_ids(
+                                            &self.state.builder,
+                                            new_tasks.len(),
+                                        );
+                                        rewrite_tasks_for_revise(
+                                            &session_dir,
+                                            task_id,
+                                            &verdict.new_tasks,
+                                            &assigned_ids,
+                                        )?;
+                                        self.state
+                                            .builder
+                                            .apply_revise_with_new_tasks(task_id, new_tasks);
+                                        if let Some(first_inserted) = assigned_ids.first().copied()
+                                        {
+                                            self.state.builder.current_task = Some(first_inserted);
+                                        }
+                                    }
                                 }
-                                // REVIEWER: full revise/new_tasks routing is handled by later queue work;
-                                // this schema migration preserves the existing retry iteration behavior.
                                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
                             }
                             review::ReviewStatus::HumanBlocked
@@ -2429,6 +2468,11 @@ impl App {
         let spec_path = artifacts.join("spec.md");
         let plan_path = artifacts.join("plan.md");
         let tasks_path = artifacts.join("tasks.toml");
+        let recovery_path = session_dir
+            .join("rounds")
+            .join(format!("{round:03}"))
+            .join("recovery.toml");
+        let _ = std::fs::remove_file(&recovery_path);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("recovery-r{round}.md"));
@@ -2460,6 +2504,7 @@ impl App {
             &completed,
             &started,
             &session_dir.join("artifacts").join("live_summary.txt"),
+            &recovery_path,
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -2906,6 +2951,84 @@ fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
     toml::to_string_pretty(task).context("serialize task.toml")
 }
 
+fn assigned_revise_task_ids(builder: &session_state::BuilderState, count: usize) -> Vec<u32> {
+    let mut next_id = builder.max_task_id() + 1;
+    let mut ids = Vec::with_capacity(count);
+    for _ in 0..count {
+        ids.push(next_id);
+        next_id += 1;
+    }
+    ids
+}
+
+fn rewrite_tasks_for_revise(
+    session_dir: &std::path::Path,
+    current_task_id: u32,
+    new_tasks: &[tasks::Task],
+    assigned_ids: &[u32],
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        new_tasks.len() == assigned_ids.len(),
+        "new task count does not match assigned id count"
+    );
+    let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+    let parsed = tasks::validate(&tasks_path).context("load tasks.toml before revise")?;
+    let Some(current_idx) = parsed
+        .tasks
+        .iter()
+        .position(|task| task.id == current_task_id)
+    else {
+        anyhow::bail!("task id {current_task_id} not found in tasks.toml");
+    };
+
+    let mut rewritten = Vec::with_capacity(parsed.tasks.len() + new_tasks.len());
+    rewritten.extend(parsed.tasks[..current_idx].iter().cloned());
+
+    for (task, id) in new_tasks.iter().zip(assigned_ids.iter().copied()) {
+        let mut inserted = task.clone();
+        inserted.id = id;
+        rewritten.push(inserted);
+    }
+
+    let mut next_pending_id = assigned_ids
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or_else(|| parsed.tasks.iter().map(|task| task.id).max().unwrap_or(0))
+        + 1;
+    for task in parsed.tasks[current_idx + 1..].iter().cloned() {
+        let mut renumbered = task;
+        renumbered.id = next_pending_id;
+        next_pending_id += 1;
+        rewritten.push(renumbered);
+    }
+
+    let file = tasks::TasksFile { tasks: rewritten };
+    let text = toml::to_string_pretty(&file).context("serialize revised tasks.toml")?;
+    std::fs::write(&tasks_path, text)
+        .with_context(|| format!("write revised {}", tasks_path.display()))?;
+    Ok(())
+}
+
+fn validate_stage_toml_writes(
+    session_dir: &std::path::Path,
+    stage: &str,
+    round: u32,
+) -> anyhow::Result<()> {
+    let Some(io) = session_state::transitions::stage_io(stage) else {
+        return Ok(());
+    };
+    let round_token = format!("{round:03}");
+    let paths = io
+        .writes
+        .iter()
+        .filter(|template| template.ends_with(".toml"))
+        .map(|template| session_dir.join(template.replace("{round}", &round_token)))
+        .collect::<Vec<_>>();
+    let refs = paths.iter().map(|path| path.as_path()).collect::<Vec<_>>();
+    crate::runner::validate_toml_artifacts(&refs)
+}
+
 fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> {
     #[derive(serde::Deserialize)]
     struct ReviewScope {
@@ -3241,6 +3364,7 @@ fn recovery_prompt(
     completed_task_ids: &[u32],
     started_task_ids: &[u32],
     live_summary_path: &std::path::Path,
+    recovery_path: &std::path::Path,
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     let trigger_task = trigger_task_id
@@ -3273,6 +3397,7 @@ You may edit ONLY:
   - {spec}
   - {plan}
   - {tasks}
+  - {recovery}
 
 Context from orchestrator:
   - Triggering task id: {trigger_task}
@@ -3287,11 +3412,14 @@ Hard requirements:
   - If you supersede/remove started-but-unfinished task ids, add a `Recovery Notes`
     section in BOTH spec and plan, naming each superseded id and reason.
   - Keep changes minimal and deterministic.
+  - Write `{recovery}` with `status`, `summary`, and `feedback` TOML fields
+    describing the recovery decision.
   - Do NOT modify source code or version control.
 {instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),
         tasks = tasks_path.display(),
+        recovery = recovery_path.display(),
         trigger_task = trigger_task,
         trigger_summary = trigger_summary,
         completed = completed,
@@ -4697,12 +4825,174 @@ feedback = ["task 2 is superseded"]
     }
 
     #[test]
+    fn review_revise_with_new_tasks_rewrites_queue_and_advances_to_inserted_task() {
+        with_temp_root(|| {
+            let session_id = "review-revise-new-tasks";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::create_dir_all(&round_dir).expect("round dir");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 1
+title = "Finished"
+description = "done"
+test = "cargo test"
+estimated_tokens = 10
+
+[[tasks]]
+id = 2
+title = "Too broad"
+description = "split me"
+test = "cargo test"
+estimated_tokens = 20
+
+[[tasks]]
+id = 3
+title = "Later"
+description = "preserve this"
+test = "cargo test runner::"
+estimated_tokens = 30
+
+[[tasks.spec_refs]]
+path = "spec.md"
+lines = "1-2"
+"#,
+            )
+            .expect("tasks file");
+            std::fs::write(
+                round_dir.join("review.toml"),
+                r#"status = "revise"
+summary = "split required"
+feedback = ["split into smaller work"]
+
+[[new_tasks]]
+id = 0
+title = "Split A"
+description = "first half"
+test = "cargo test transitions::"
+estimated_tokens = 11
+
+[[new_tasks]]
+id = 0
+title = "Split B"
+description = "second half"
+test = "cargo test runner::"
+estimated_tokens = 12
+"#,
+            )
+            .expect("review file");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            state.builder.reset_task_pipeline(vec![
+                (1, Some("Finished".to_string())),
+                (2, Some("Too broad".to_string())),
+                (3, Some("Later".to_string())),
+            ]);
+            let _ = state
+                .builder
+                .set_task_status(1, PipelineItemStatus::Approved, Some(1));
+            let _ = state
+                .builder
+                .set_task_status(2, PipelineItemStatus::Running, Some(1));
+            state.builder.current_task = Some(2);
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "reviewer".to_string(),
+                task_id: Some(2),
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Review]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+
+            let mut app = idle_app(state);
+            let run = app.state.agent_runs[0].clone();
+            app.finalize_current_run(&run).expect("finalize review");
+
+            assert_eq!(app.state.current_phase, Phase::ImplementationRound(2));
+            assert_eq!(
+                app.state.builder.pending_task_ids().first().copied(),
+                Some(4)
+            );
+            let parsed = tasks::validate(&artifacts.join("tasks.toml")).expect("tasks valid");
+            let ids = parsed.tasks.iter().map(|task| task.id).collect::<Vec<_>>();
+            assert_eq!(ids, vec![1, 4, 5, 6]);
+            assert_eq!(parsed.tasks[1].title, "Split A");
+            assert_eq!(parsed.tasks[2].title, "Split B");
+            assert_eq!(parsed.tasks[3].title, "Later");
+            assert_eq!(parsed.tasks[3].spec_refs[0].lines, "1-2");
+        });
+    }
+
+    #[test]
+    fn recovery_requires_parseable_recovery_artifact() {
+        with_temp_root(|| {
+            let session_id = "recovery-invalid-artifact";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::create_dir_all(&round_dir).expect("round dir");
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 2
+title = "Recovered"
+description = "valid"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+            )
+            .expect("tasks");
+            std::fs::write(round_dir.join("recovery.toml"), "[[[broken").expect("recovery");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(1);
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Recovery]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+            });
+            let app = idle_app(state);
+            let run = app.state.agent_runs[0].clone();
+            let reason = app
+                .normalized_failure_reason(&run)
+                .expect("normalized")
+                .expect("failure reason");
+
+            assert!(reason.starts_with("artifact_invalid:"), "{reason}");
+        });
+    }
+
+    #[test]
     fn recovery_reconcile_replaces_pending_and_sets_retry_reset_cutoff() {
         with_temp_root(|| {
             let session_id = "recovery-reconcile-success";
             let session_dir = session_state::session_dir(session_id);
             let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("002");
             std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::create_dir_all(&round_dir).expect("round dir");
             std::fs::write(
                 artifacts.join("spec.md"),
                 "Spec\n\n## Recovery Notes\n- superseded task 2: split into 5\n",
@@ -4731,6 +5021,14 @@ estimated_tokens = 10
 "#,
             )
             .expect("tasks");
+            std::fs::write(
+                round_dir.join("recovery.toml"),
+                r#"status = "agent_pivot"
+summary = "recovered queue"
+feedback = ["split task 2"]
+"#,
+            )
+            .expect("recovery");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::BuilderRecovery(2);

@@ -9273,6 +9273,47 @@ dirty_after = false
         });
     }
 
+    #[test]
+    fn planning_prompt_flags_ai_written_reviews_for_triage() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("planning-prompt-ai-reviews");
+            let spec_path = session_dir.join("artifacts/spec.md");
+            let plan_path = session_dir.join("artifacts/plan.md");
+            let review_path = session_dir.join("artifacts/spec-review-1.md");
+            let live_summary = session_dir.join("artifacts/live_summary.txt");
+            std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
+            std::fs::write(&review_path, "review").unwrap();
+
+            let prompt =
+                planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary);
+
+            assert!(prompt.contains("Reviews are written by AI agents."));
+            assert!(prompt.contains("Be skeptical — accept feedback only when it"));
+            assert!(prompt.contains("genuinely improves the spec or plan."));
+            assert!(prompt.contains("Reject the rest with a brief reason."));
+        });
+    }
+
+    #[test]
+    fn coder_prompt_tells_resume_rounds_to_rebut_unhelpful_ai_feedback() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("coder-prompt-ai-feedback");
+            let round_dir = session_dir.join("rounds/001");
+            let task_file = round_dir.join("task.toml");
+            let live_summary = session_dir.join("artifacts/live_summary.txt");
+            std::fs::create_dir_all(&round_dir).unwrap();
+            std::fs::write(round_dir.join("review.toml"), "feedback").unwrap();
+
+            let prompt = coder_prompt(&session_dir, 1, 2, &task_file, &live_summary, true);
+
+            assert!(prompt.contains("Previous reviewer feedback (round 1):"));
+            assert!(prompt.contains("Reviewer feedback comes from an AI agent."));
+            assert!(prompt.contains(
+                "Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml."
+            ));
+        });
+    }
+
     // Modal tests
 
     #[test]

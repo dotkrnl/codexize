@@ -1,3 +1,5 @@
+use crate::adapters::adapter_for_vendor;
+use crate::selection::VendorKind;
 use crate::state::codexize_root;
 use crate::tmux::TmuxContext;
 use crate::tui::AppTerminal;
@@ -90,12 +92,13 @@ fn run_git_init() -> Result<()> {
     Ok(())
 }
 
-fn detect_available_agent() -> Option<&'static str> {
-    ["claude", "codex", "gemini", "kimi"].iter().find(|&cmd| Command::new(cmd)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)).map(|v| v as _)
+fn default_model_for_vendor(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Claude => "claude-sonnet-4",
+        VendorKind::Codex => "gpt-4o",
+        VendorKind::Gemini => "gemini-2.5-pro",
+        VendorKind::Kimi => "",
+    }
 }
 
 fn detect_project_type() -> Vec<&'static str> {
@@ -195,22 +198,20 @@ fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
 }
 
 fn spawn_gitignore_agent(tmux: &TmuxContext, codexize_entry: &str) -> Result<std::path::PathBuf> {
-    let agent = detect_available_agent();
     let finish_marker = std::env::temp_dir().join(format!(
         "codexize-gitignore-{}.done",
         std::process::id()
     ));
 
-    if agent.is_none() {
-        let content = generate_heuristic_gitignore(codexize_entry);
-        fs::write(".gitignore", content).context("failed to write .gitignore")?;
-        fs::write(&finish_marker, "").context("failed to write finish marker")?;
-        return Ok(finish_marker);
-    }
+    for vendor in [VendorKind::Claude, VendorKind::Codex, VendorKind::Gemini, VendorKind::Kimi] {
+        let adapter = adapter_for_vendor(vendor);
+        if !adapter.detect() {
+            continue;
+        }
 
-    let agent = agent.unwrap();
-    let prompt = format!(
-        r#"Analyze the current directory and generate a comprehensive .gitignore file.
+        let model = default_model_for_vendor(vendor);
+        let prompt = format!(
+            r#"Analyze the current directory and generate a comprehensive .gitignore file.
 
 Instructions:
 1. Look at the files and directories present to identify the project type(s)
@@ -221,34 +222,40 @@ Instructions:
 After writing .gitignore, create an empty file at: {}
 
 Do not ask for confirmation - just analyze and write the files."#,
-        finish_marker.display()
-    );
+            finish_marker.display()
+        );
 
-    let prompt_path = std::env::temp_dir().join(format!(
-        "codexize-gitignore-prompt-{}.md",
-        std::process::id()
-    ));
-    fs::write(&prompt_path, &prompt).context("failed to write agent prompt")?;
+        let prompt_path = std::env::temp_dir().join(format!(
+            "codexize-gitignore-prompt-{}.md",
+            std::process::id()
+        ));
+        fs::write(&prompt_path, &prompt).context("failed to write agent prompt")?;
 
-    let shell_cmd = format!(
-        r#"{agent} --dangerously-skip-permissions "$(cat {prompt_path})" && touch {finish_marker}"#,
-        agent = agent,
-        prompt_path = prompt_path.display(),
-        finish_marker = finish_marker.display(),
-    );
+        let agent_cmd = adapter.noninteractive_command(model, &prompt_path.to_string_lossy());
+        let shell_cmd = format!(
+            r#"{agent_cmd} && touch {finish_marker}"#,
+            agent_cmd = agent_cmd,
+            finish_marker = finish_marker.display(),
+        );
 
-    let window_name = "[Gitignore]";
-    let status = Command::new("tmux")
-        .args(["new-window", "-d", "-n", window_name, &shell_cmd])
-        .status()
-        .context("failed to create tmux window for gitignore agent")?;
+        let window_name = "[Gitignore]";
+        let status = Command::new("tmux")
+            .args(["new-window", "-d", "-n", window_name, &shell_cmd])
+            .status()
+            .context("failed to create tmux window for gitignore agent")?;
 
-    if !status.success() {
-        anyhow::bail!("tmux new-window for gitignore agent failed");
+        if !status.success() {
+            anyhow::bail!("tmux new-window for gitignore agent failed");
+        }
+
+        let _ = tmux;
+        return Ok(finish_marker);
     }
 
-    let _ = tmux;
-
+    // No adapter found — fall back to heuristic
+    let content = generate_heuristic_gitignore(codexize_entry);
+    fs::write(".gitignore", content).context("failed to write .gitignore")?;
+    fs::write(&finish_marker, "").context("failed to write finish marker")?;
     Ok(finish_marker)
 }
 

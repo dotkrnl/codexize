@@ -575,8 +575,12 @@ mod tests {
         assert!(entries.is_empty(), "expected no partial files, got {:?}", entries);
 
         // Restore permissions so the temp dir can be cleaned up.
-        perms.set_readonly(false);
-        let _ = fs::set_permissions(&ro_dir, perms);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o700);
+            let _ = fs::set_permissions(&ro_dir, perms);
+        }
     }
 
     #[test]
@@ -813,5 +817,92 @@ exit 1
         assert_eq!(stamp.exit_code, 0);
         assert_eq!(stamp.head_state, "unstable");
         assert!(!stamp.head_after.is_empty());
+    }
+
+    #[test]
+    fn shell_cmd_writes_stamp_when_path_contains_spaces() {
+        let dir = tempfile::Builder::new()
+            .prefix("runner with spaces ")
+            .tempdir()
+            .unwrap();
+        let status_dir = dir.path().join("status dir");
+        let status_path = status_dir.join("run status.txt");
+        let finish_dir = dir.path().join("run finish");
+        let stamp_path = finish_dir.join("test key.toml");
+
+        let cmd = build_shell_cmd(
+            "true",
+            "[Test]",
+            &status_dir.to_string_lossy(),
+            &status_path.to_string_lossy(),
+            &finish_dir.to_string_lossy(),
+            &stamp_path.to_string_lossy(),
+        );
+
+        let output = std::process::Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(dir.path())
+            .output()
+            .expect("bash");
+        assert!(
+            output.status.success(),
+            "bash failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        assert!(stamp_path.exists(), "stamp should exist at escaped path");
+        assert!(read_finish_stamp(&stamp_path).is_ok());
+    }
+
+    #[test]
+    fn shell_cmd_writes_stamp_when_interrupted() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let status_dir = dir.path().join("status");
+        let status_path = status_dir.join("run.txt");
+        let finish_dir = dir.path().join("run-finish");
+        let stamp_path = finish_dir.join("interrupted.toml");
+
+        let cmd = build_shell_cmd(
+            "sleep 30",
+            "[Test]",
+            &status_dir.to_string_lossy(),
+            &status_path.to_string_lossy(),
+            &finish_dir.to_string_lossy(),
+            &stamp_path.to_string_lossy(),
+        );
+
+        let mut child = std::process::Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(dir.path())
+            .spawn()
+            .expect("spawn bash");
+
+        std::thread::sleep(Duration::from_millis(200));
+        let pid = child.id().to_string();
+        let kill_status = std::process::Command::new("kill")
+            .args(["-TERM", &pid])
+            .status()
+            .expect("kill");
+        assert!(kill_status.success(), "failed to signal wrapper process");
+
+        let mut attempts = 0;
+        loop {
+            if let Some(_status) = child.try_wait().expect("try_wait") {
+                break;
+            }
+            attempts += 1;
+            if attempts > 50 {
+                let _ = child.kill();
+                panic!("wrapper did not exit promptly after TERM");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        assert!(
+            stamp_path.exists(),
+            "interrupted run should still produce a finish stamp"
+        );
+        let stamp = read_finish_stamp(&stamp_path).expect("parse interrupted stamp");
+        assert_ne!(stamp.exit_code, 0, "interrupted run should not report success");
     }
 }

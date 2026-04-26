@@ -4,6 +4,7 @@ use std::process::Command;
 const KIMI_READY_MAX_POLLS: u32 = 50;
 const KIMI_READY_POLL_INTERVAL: f32 = 0.2;
 const KIMI_READY_INITIAL_DELAY: f32 = 1.5;
+const KIMI_READY_SETTLE_DELAY: f32 = 0.3;
 
 pub struct KimiAdapter;
 
@@ -25,9 +26,9 @@ impl AgentAdapter for KimiAdapter {
         format!(
             concat!(
                 r#"(sleep {initial_delay}; for i in $(seq 1 {max_polls}); do "#,
-                r#"tmux capture-pane -p -t "$TMUX_PANE" 2>/dev/null | grep -qE '[❯>]' && break; "#,
+                r#"tmux capture-pane -p -t "$TMUX_PANE" 2>/dev/null | grep -q ' input ' && break; "#,
                 r#"sleep {poll_interval}; "#,
-                r#"done && "#,
+                r#"done && sleep {settle_delay} && "#,
                 r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
                 r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE" && "#,
                 r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
@@ -35,6 +36,7 @@ impl AgentAdapter for KimiAdapter {
             max_polls = KIMI_READY_MAX_POLLS,
             poll_interval = KIMI_READY_POLL_INTERVAL,
             initial_delay = KIMI_READY_INITIAL_DELAY,
+            settle_delay = KIMI_READY_SETTLE_DELAY,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
@@ -66,7 +68,14 @@ mod tests {
             cmd.contains("capture-pane"),
             "should poll tmux pane content for readiness"
         );
-        assert!(cmd.contains("grep"), "should grep for the prompt indicator");
+        assert!(
+            cmd.contains("grep -q ' input '"),
+            "should grep for the input box label"
+        );
+        assert!(
+            cmd.contains("sleep 0.3"),
+            "should settle after readiness detection"
+        );
         assert!(cmd.contains("seq 1"), "should loop with bounded retries");
         assert!(
             cmd.contains("tmux paste-buffer -p -r"),

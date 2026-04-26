@@ -6,4 +6,5 @@ pub mod types;
 pub mod vendor;
 
 pub use candidates::*;
+pub use config::*;
 pub use types::*;

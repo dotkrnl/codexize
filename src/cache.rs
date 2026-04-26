@@ -1,55 +1,71 @@
+use crate::cache_lock;
 use crate::selection::{ModelStatus, QuotaError, VendorKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const TTL: Duration = Duration::from_secs(30 * 60);
 
-#[derive(Serialize, Deserialize, Default)]
-struct CachedModels {
-    saved_at: u64,
-    models: Vec<CachedModel>,
-    #[serde(default)]
-    quota_errors: Vec<CachedQuotaError>,
+pub const CACHE_VERSION: u32 = 2;
+pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
+pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
+
+// ---------------------------------------------------------------------------
+// Schema v2 types
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CacheFile {
+    pub version: u32,
+    pub dashboard: Option<Section<Vec<DashboardEntry>>>,
+    pub quotas: Option<Section<QuotaPayload>>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct CachedQuotaError {
-    vendor: String,
-    message: String,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Section<T> {
+    pub fetched_at: u64,
+    pub data: T,
 }
 
-#[derive(Serialize, Deserialize)]
-struct CachedModel {
-    vendor: String,
-    name: String,
-    stupid_level: Option<u8>,
-    quota_percent: Option<u8>,
-    idea_rank: u8,
-    planning_rank: u8,
-    build_rank: u8,
-    review_rank: u8,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DashboardEntry {
+    pub vendor: String,
+    pub name: String,
+    pub overall_score: f64,
+    pub current_score: f64,
+    pub standard_error: f64,
+    pub axes: Vec<(String, f64)>,
+    pub display_order: usize,
     #[serde(default)]
-    idea_weight: f64,
-    #[serde(default)]
-    planning_weight: f64,
-    #[serde(default)]
-    build_weight: f64,
-    #[serde(default)]
-    review_weight: f64,
-    #[serde(default)]
-    fallback_from: Option<String>,
+    pub fallback_from: Option<String>,
 }
 
-fn cache_path() -> PathBuf {
-    let base = dirs_home().unwrap_or_else(|| PathBuf::from("."));
-    base.join(".codexize").join("cache").join("models.json")
+/// Per-vendor map of model name → optional quota percentage.
+pub type QuotaPayload = BTreeMap<String, BTreeMap<String, Option<u8>>>;
+
+pub struct LoadedCache {
+    pub dashboard: Option<LoadedSection<Vec<DashboardEntry>>>,
+    pub quotas: Option<LoadedSection<QuotaPayload>>,
 }
 
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+pub struct LoadedSection<T> {
+    pub data: T,
+    pub expired: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
+fn default_cache_dir() -> PathBuf {
+    let base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join(".codexize").join("cache")
 }
 
 fn now_secs() -> u64 {
@@ -59,93 +75,173 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
-    let path = cache_path();
-    let text = fs::read_to_string(&path).ok()?;
-    let cached: CachedModels = serde_json::from_str(&text).ok()?;
+// ---------------------------------------------------------------------------
+// Public API — schema v2
+// ---------------------------------------------------------------------------
 
-    let age = now_secs().saturating_sub(cached.saved_at);
-    let expired = age >= TTL.as_secs();
+pub fn load_cache() -> LoadedCache {
+    load_cache_at(&default_cache_dir())
+}
 
-    let models = cached
-        .models
-        .into_iter()
-        .filter_map(|m| {
-            let vendor = parse_vendor(&m.vendor)?;
-            Some(ModelStatus {
-                vendor,
-                name: m.name,
-                stupid_level: m.stupid_level,
-                quota_percent: m.quota_percent,
-                idea_rank: m.idea_rank,
-                planning_rank: m.planning_rank,
-                build_rank: m.build_rank,
-                review_rank: m.review_rank,
-                idea_weight: m.idea_weight,
-                planning_weight: m.planning_weight,
-                build_weight: m.build_weight,
-                review_weight: m.review_weight,
-                fallback_from: m.fallback_from,
-            })
-        })
-        .collect::<Vec<_>>();
+pub fn save_dashboard(entries: &[DashboardEntry]) -> Result<()> {
+    save_dashboard_at(&default_cache_dir(), entries)
+}
 
-    if models.is_empty() {
-        return None;
+pub fn save_quotas(payload: &QuotaPayload) -> Result<()> {
+    save_quotas_at(&default_cache_dir(), payload)
+}
+
+// ---------------------------------------------------------------------------
+// Path-parameterized implementations
+// ---------------------------------------------------------------------------
+
+fn load_cache_at(dir: &Path) -> LoadedCache {
+    let empty = LoadedCache {
+        dashboard: None,
+        quotas: None,
+    };
+    let text = match fs::read_to_string(dir.join("models.json")) {
+        Ok(t) => t,
+        Err(_) => return empty,
+    };
+    let file: CacheFile = match serde_json::from_str(&text) {
+        Ok(f) => f,
+        Err(_) => return empty,
+    };
+    if file.version != CACHE_VERSION {
+        return empty;
     }
+    let now = now_secs();
+    LoadedCache {
+        dashboard: file.dashboard.map(|s| LoadedSection {
+            expired: now.saturating_sub(s.fetched_at) >= DASHBOARD_TTL.as_secs(),
+            data: s.data,
+        }),
+        quotas: file.quotas.map(|s| LoadedSection {
+            expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
+            data: s.data,
+        }),
+    }
+}
 
-    let errors = cached
-        .quota_errors
+fn save_dashboard_at(dir: &Path, entries: &[DashboardEntry]) -> Result<()> {
+    let lock = dir.join("models.json.lock");
+    cache_lock::with_lock(&lock, || {
+        let mut file = load_raw_or_default(dir);
+        file.dashboard = Some(Section {
+            fetched_at: now_secs(),
+            data: entries.to_vec(),
+        });
+        atomic_write(dir, &file)
+    })
+}
+
+fn save_quotas_at(dir: &Path, payload: &QuotaPayload) -> Result<()> {
+    let lock = dir.join("models.json.lock");
+    cache_lock::with_lock(&lock, || {
+        let mut file = load_raw_or_default(dir);
+        file.quotas = Some(Section {
+            fetched_at: now_secs(),
+            data: payload.clone(),
+        });
+        atomic_write(dir, &file)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Backward-compat wrappers (temporary — removed once app migrates)
+// ---------------------------------------------------------------------------
+
+pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
+    let loaded = load_cache();
+    let dashboard = loaded.dashboard?;
+    let expired = dashboard.expired;
+
+    let models: Vec<ModelStatus> = dashboard
+        .data
         .into_iter()
         .filter_map(|e| {
             let vendor = parse_vendor(&e.vendor)?;
-            Some(QuotaError {
+            Some(ModelStatus {
                 vendor,
-                message: e.message,
+                name: e.name,
+                stupid_level: Some(e.current_score.round().clamp(0.0, 99.0) as u8),
+                quota_percent: None,
+                idea_rank: 99,
+                planning_rank: 99,
+                build_rank: 99,
+                review_rank: 99,
+                idea_weight: 0.0,
+                planning_weight: 0.0,
+                build_weight: 0.0,
+                review_weight: 0.0,
+                fallback_from: e.fallback_from,
             })
         })
         .collect();
 
-    Some((models, errors, expired))
+    if models.is_empty() {
+        return None;
+    }
+    Some((models, Vec::new(), expired))
 }
 
-pub fn save(models: &[ModelStatus], errors: &[QuotaError]) -> Result<()> {
-    let path = cache_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create cache directory")?;
-    }
+pub fn save(models: &[ModelStatus], _errors: &[QuotaError]) -> Result<()> {
+    let entries: Vec<DashboardEntry> = models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| DashboardEntry {
+            vendor: vendor_str(m.vendor).to_string(),
+            name: m.name.clone(),
+            overall_score: 0.0,
+            current_score: m.stupid_level.unwrap_or(0) as f64,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            display_order: i,
+            fallback_from: m.fallback_from.clone(),
+        })
+        .collect();
+    save_dashboard(&entries)
+}
 
-    let cached = CachedModels {
-        saved_at: now_secs(),
-        models: models
-            .iter()
-            .map(|m| CachedModel {
-                vendor: vendor_str(m.vendor).to_string(),
-                name: m.name.clone(),
-                stupid_level: m.stupid_level,
-                quota_percent: m.quota_percent,
-                idea_rank: m.idea_rank,
-                planning_rank: m.planning_rank,
-                build_rank: m.build_rank,
-                review_rank: m.review_rank,
-                idea_weight: m.idea_weight,
-                planning_weight: m.planning_weight,
-                build_weight: m.build_weight,
-                review_weight: m.review_weight,
-                fallback_from: m.fallback_from.clone(),
-            })
-            .collect(),
-        quota_errors: errors
-            .iter()
-            .map(|e| CachedQuotaError {
-                vendor: vendor_str(e.vendor).to_string(),
-                message: e.message.clone(),
-            })
-            .collect(),
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn load_raw_or_default(dir: &Path) -> CacheFile {
+    let text = match fs::read_to_string(dir.join("models.json")) {
+        Ok(t) => t,
+        Err(_) => {
+            return CacheFile {
+                version: CACHE_VERSION,
+                dashboard: None,
+                quotas: None,
+            }
+        }
     };
+    match serde_json::from_str::<CacheFile>(&text) {
+        Ok(f) if f.version == CACHE_VERSION => f,
+        _ => CacheFile {
+            version: CACHE_VERSION,
+            dashboard: None,
+            quotas: None,
+        },
+    }
+}
 
-    let text = serde_json::to_string_pretty(&cached).context("failed to serialise cache")?;
-    fs::write(&path, text).context("failed to write cache file")?;
+fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
+    fs::create_dir_all(dir).context("failed to create cache directory")?;
+
+    let tmp_path = dir.join(".models.json.tmp");
+    let final_path = dir.join("models.json");
+    let text = serde_json::to_string_pretty(file).context("failed to serialise cache")?;
+    {
+        let mut tmp = fs::File::create(&tmp_path).context("failed to create temp cache file")?;
+        tmp.write_all(text.as_bytes())
+            .context("failed to write temp cache file")?;
+        tmp.sync_all().context("failed to sync temp cache file")?;
+    }
+    fs::rename(&tmp_path, &final_path).context("failed to rename temp cache file")?;
     Ok(())
 }
 
@@ -165,5 +261,166 @@ fn parse_vendor(s: &str) -> Option<VendorKind> {
         "gemini" => Some(VendorKind::Gemini),
         "kimi" => Some(VendorKind::Kimi),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn sample_entries() -> Vec<DashboardEntry> {
+        vec![DashboardEntry {
+            vendor: "claude".to_string(),
+            name: "claude-sonnet".to_string(),
+            overall_score: 85.0,
+            current_score: 82.0,
+            standard_error: 1.5,
+            axes: vec![("coding".to_string(), 90.0)],
+            display_order: 0,
+            fallback_from: None,
+        }]
+    }
+
+    fn sample_quotas() -> QuotaPayload {
+        let mut inner = BTreeMap::new();
+        inner.insert("claude-sonnet".to_string(), Some(75u8));
+        let mut payload = BTreeMap::new();
+        payload.insert("claude".to_string(), inner);
+        payload
+    }
+
+    #[test]
+    fn save_and_load_dashboard() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        let loaded = load_cache_at(dir.path());
+        let dash = loaded.dashboard.unwrap();
+        assert!(!dash.expired);
+        assert_eq!(dash.data.len(), 1);
+        assert_eq!(dash.data[0].name, "claude-sonnet");
+        assert_eq!(dash.data[0].overall_score, 85.0);
+    }
+
+    #[test]
+    fn save_and_load_quotas() {
+        let dir = TempDir::new().unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+        let loaded = load_cache_at(dir.path());
+        let q = loaded.quotas.unwrap();
+        assert!(!q.expired);
+        assert_eq!(
+            q.data.get("claude").unwrap().get("claude-sonnet").unwrap(),
+            &Some(75)
+        );
+    }
+
+    #[test]
+    fn sections_are_independent() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_some());
+        assert!(loaded.quotas.is_none());
+
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_some());
+        assert!(loaded.quotas.is_some());
+    }
+
+    #[test]
+    fn version_mismatch_returns_none() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        let path = dir.path().join("models.json");
+        let mut file: CacheFile =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        file.version = 999;
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_none());
+        assert!(loaded.quotas.is_none());
+    }
+
+    #[test]
+    fn ttl_expiry_dashboard() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        let path = dir.path().join("models.json");
+        let mut file: CacheFile =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        if let Some(ref mut s) = file.dashboard {
+            s.fetched_at = now_secs() - DASHBOARD_TTL.as_secs() - 1;
+        }
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.unwrap().expired);
+    }
+
+    #[test]
+    fn ttl_expiry_quotas() {
+        let dir = TempDir::new().unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+        let path = dir.path().join("models.json");
+        let mut file: CacheFile =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        if let Some(ref mut s) = file.quotas {
+            s.fetched_at = now_secs() - QUOTA_TTL.as_secs() - 1;
+        }
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.quotas.unwrap().expired);
+    }
+
+    #[test]
+    fn atomic_write_produces_valid_json() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
+        let file: CacheFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(file.version, CACHE_VERSION);
+    }
+
+    #[test]
+    fn missing_cache_file_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_none());
+        assert!(loaded.quotas.is_none());
+    }
+
+    #[test]
+    fn corrupt_cache_file_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("models.json"), "not json at all").unwrap();
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_none());
+        assert!(loaded.quotas.is_none());
+    }
+
+    #[test]
+    fn save_dashboard_preserves_existing_quotas() {
+        let dir = TempDir::new().unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_some());
+        assert!(loaded.quotas.is_some());
+    }
+
+    #[test]
+    fn save_quotas_preserves_existing_dashboard() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+
+        let loaded = load_cache_at(dir.path());
+        assert!(loaded.dashboard.is_some());
+        assert!(loaded.quotas.is_some());
     }
 }

@@ -5,8 +5,53 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
+    time::{Duration, Instant},
 };
+
+#[derive(Debug, Clone, Default)]
+pub struct ChildLaunch {
+    program: String,
+    args: Vec<String>,
+    envs: Vec<(String, String)>,
+    stdin_null: bool,
+    stdout_null: bool,
+    stderr_null: bool,
+}
+
+impl ChildLaunch {
+    pub fn new(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.envs.push((key.into(), value.into()));
+        self
+    }
+
+    pub fn stdin_null(mut self) -> Self {
+        self.stdin_null = true;
+        self
+    }
+
+    pub fn stdout_null(mut self) -> Self {
+        self.stdout_null = true;
+        self
+    }
+
+    pub fn stderr_null(mut self) -> Self {
+        self.stderr_null = true;
+        self
+    }
+}
 
 pub fn run(
     session_id: String,
@@ -149,6 +194,42 @@ pub fn launch_noninteractive(
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
     launch_in_window(window_name, &cmd, adapter, false, status_path)
+}
+
+pub fn run_child_with_timeout(
+    launch: &ChildLaunch,
+    timeout: Duration,
+) -> Result<Option<ExitStatus>> {
+    let mut command = Command::new(&launch.program);
+    command.args(&launch.args);
+    for (key, value) in &launch.envs {
+        command.env(key, value);
+    }
+    if launch.stdin_null {
+        command.stdin(Stdio::null());
+    }
+    if launch.stdout_null {
+        command.stdout(Stdio::null());
+    }
+    if launch.stderr_null {
+        command.stderr(Stdio::null());
+    }
+
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to spawn: {:?}", launch))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn launch_in_window(

@@ -1,9 +1,9 @@
+use crate::runner::{ChildLaunch, run_child_with_timeout};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
     env, fs,
-    process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -75,26 +75,8 @@ fn resolve_api_key() -> Result<String> {
             // Token is expired or nearly expired — run kimi briefly to trigger
             // a credential refresh. Close stdin so kimi sees EOF and exits;
             // kill after 10s if it somehow keeps running.
-            if let Ok(mut child) = Command::new("kimi")
-                .args(["--yolo", "--print"])
-                .env("KIMI_CLI_NO_AUTO_UPDATE", "1")
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                let deadline = std::time::Instant::now() + Duration::from_secs(10);
-                loop {
-                    if matches!(child.try_wait(), Ok(Some(_))) {
-                        break;
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        let _ = child.kill();
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            }
+            let _ =
+                run_child_with_timeout(&kimi_credential_refresh_launch(), Duration::from_secs(10));
 
             // Re-read after potential refresh
             if let Ok(refreshed) = fs::read_to_string(&creds_file)
@@ -126,6 +108,15 @@ fn resolve_api_key() -> Result<String> {
     }
 
     bail!("no Kimi API key found")
+}
+
+fn kimi_credential_refresh_launch() -> ChildLaunch {
+    ChildLaunch::new("kimi")
+        .args(["--yolo", "--print"])
+        .env("KIMI_CLI_NO_AUTO_UPDATE", "1")
+        .stdin_null()
+        .stdout_null()
+        .stderr_null()
 }
 
 fn fetch_usage_payload(api_key: &str) -> Result<Value> {

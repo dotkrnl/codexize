@@ -22,6 +22,7 @@ pub enum RunStatus {
     Running,
     Done,
     Failed,
+    FailedUnverified,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +96,7 @@ pub enum NodeStatus {
     Done,
     Skipped,
     Failed,
+    FailedUnverified,
 }
 
 impl NodeStatus {
@@ -106,6 +108,7 @@ impl NodeStatus {
             Self::Done => "done",
             Self::Skipped => "skipped",
             Self::Failed => "failed",
+            Self::FailedUnverified => "failed-unverified",
         }
     }
 
@@ -118,6 +121,7 @@ impl NodeStatus {
             Self::Done => Style::default().fg(Color::Green),
             Self::Skipped => Style::default().fg(Color::Yellow),
             Self::Failed => Style::default().fg(Color::Red),
+            Self::FailedUnverified => Style::default().fg(Color::LightYellow),
         }
     }
 }

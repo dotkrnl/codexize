@@ -8,9 +8,9 @@ mod tree;
 
 use crate::{
     adapters::{AgentRun, adapter_for_vendor, window_name_with_model},
-    runner::{launch_interactive, launch_noninteractive},
     artifacts::{ArtifactKind, SkipToImplProposal, Spec},
     cache, review,
+    runner::{launch_interactive, launch_noninteractive},
     selection::{
         self, CachedModel, QuotaError, VendorKind,
         config::SelectionPhase,
@@ -235,8 +235,7 @@ impl App {
                 app.window_launched = run_id.is_some();
                 if let Some(rid) = run_id {
                     if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid) {
-                        app.live_summary_path =
-                            Some(app.live_summary_path_for(run));
+                        app.live_summary_path = Some(app.live_summary_path_for(run));
                     }
                     app.read_live_summary_pipeline();
                 }
@@ -249,15 +248,15 @@ impl App {
         // restore the modal or fail closed.
         if app.state.current_phase == Phase::GitGuardPending {
             if app.state.pending_guard_decision.is_none() {
-                app.state.agent_error =
-                    Some("guard pending state missing on resume".to_string());
+                app.state.agent_error = Some("guard pending state missing on resume".to_string());
                 let _ = app.transition_to_phase(Phase::BlockedNeedsUser);
                 let _ = app.state.save();
             }
         } else if app.state.pending_guard_decision.is_some() {
             // Stale: pending decision with no matching phase — clear it.
             let _ = app.state.log_event(
-                "warning: clearing stale pending_guard_decision (phase mismatch on resume)".to_string(),
+                "warning: clearing stale pending_guard_decision (phase mismatch on resume)"
+                    .to_string(),
             );
             app.state.pending_guard_decision = None;
             let _ = app.state.save();
@@ -265,8 +264,7 @@ impl App {
         // Orphan sweep: remove stale live_summary.*.txt files that do not
         // correspond to a Running run record.
         {
-            let artifacts_dir = session_state::session_dir(&app.state.session_id)
-                .join("artifacts");
+            let artifacts_dir = session_state::session_dir(&app.state.session_id).join("artifacts");
             let running_keys: std::collections::HashSet<String> = app
                 .state
                 .agent_runs
@@ -304,7 +302,7 @@ impl App {
         for run in state
             .agent_runs
             .iter()
-            .filter(|run| run.status == RunStatus::Failed)
+            .filter(|run| matches!(run.status, RunStatus::Failed | RunStatus::FailedUnverified))
         {
             if run.error.as_deref() == Some("user_forced_retry") {
                 continue;
@@ -718,7 +716,9 @@ impl App {
             .iter()
             .find(|r| r.id == decision.run_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("accept_guard_reset: run {} not found", decision.run_id))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("accept_guard_reset: run {} not found", decision.run_id)
+            })?;
 
         let _ = self.state.save();
         self.complete_run_finalization(&run, Some("forbidden_head_advance".to_string()))
@@ -746,7 +746,9 @@ impl App {
             .iter()
             .find(|r| r.id == decision.run_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("accept_guard_keep: run {} not found", decision.run_id))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("accept_guard_keep: run {} not found", decision.run_id)
+            })?;
 
         let _ = self.state.save();
         // Artifact was valid (PendingDecision only fires on valid-artifact path).
@@ -1025,7 +1027,9 @@ impl App {
                 }
                 // Write a synthetic finish stamp so test-path behavior mirrors
                 // the real runner-owned wrapper.
-                let stamp_path = artifacts_dir.join("run-finish").join(format!("{run_key}.toml"));
+                let stamp_path = artifacts_dir
+                    .join("run-finish")
+                    .join(format!("{run_key}.toml"));
                 let stamp = crate::runner::FinishStamp {
                     finished_at: chrono::Utc::now().to_rfc3339(),
                     exit_code: outcome.exit_code,
@@ -1108,12 +1112,7 @@ impl App {
         self.run_status_path_for(&run.stage, run.task_id, run.round, run.attempt)
     }
 
-    fn run_key_for(
-        stage: &str,
-        task_id: Option<u32>,
-        round: u32,
-        attempt: u32,
-    ) -> String {
+    fn run_key_for(stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> String {
         let task = task_id
             .map(|id| format!("task-{id}"))
             .unwrap_or_else(|| "stage".to_string());
@@ -1231,7 +1230,19 @@ impl App {
         }
     }
 
-    fn coder_gate_reason(&self, round_dir: &std::path::Path) -> Option<String> {
+    fn failed_unverified_reason(stamp_path: &std::path::Path, detail: impl AsRef<str>) -> String {
+        format!(
+            "failed_unverified: {} at {}",
+            detail.as_ref(),
+            stamp_path.display()
+        )
+    }
+
+    fn coder_gate_reason(
+        &self,
+        run: &crate::state::RunRecord,
+        round_dir: &std::path::Path,
+    ) -> Option<String> {
         let scope_file = round_dir.join("review_scope.toml");
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
@@ -1247,26 +1258,49 @@ impl App {
         if base.is_empty() {
             return Some("base_missing".to_string());
         }
-        let Some(head) = git_rev_parse_head() else {
-            return Some("git_unavailable".to_string());
-        };
-        if head == base {
-            return Some("no_commits_since_round_start".to_string());
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let run_key = Self::run_key_for(&run.stage, run.task_id, run.round, run.attempt);
+        let stamp_path = session_dir
+            .join("artifacts")
+            .join("run-finish")
+            .join(format!("{run_key}.toml"));
+        if !Self::artifact_present(&stamp_path) {
+            return Some(Self::failed_unverified_reason(
+                &stamp_path,
+                "missing finish stamp",
+            ));
         }
-        let reachable = std::process::Command::new("git")
-            .args(["merge-base", "--is-ancestor", &base, &head])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !reachable {
-            return Some("base_not_reachable_history_rewritten".to_string());
+        let stamp = match crate::runner::read_finish_stamp(&stamp_path) {
+            Ok(stamp) => stamp,
+            Err(_) => {
+                return Some(Self::failed_unverified_reason(
+                    &stamp_path,
+                    "malformed finish stamp",
+                ));
+            }
+        };
+        if stamp.head_state != "stable" {
+            return Some(Self::failed_unverified_reason(
+                &stamp_path,
+                format!("head_state={}", stamp.head_state),
+            ));
+        }
+        if stamp.exit_code == 0 && stamp.head_after.trim().is_empty() {
+            return Some(Self::failed_unverified_reason(
+                &stamp_path,
+                "empty stable head_after",
+            ));
+        }
+        if stamp.head_after == base {
+            return Some("no_commits_since_round_start".to_string());
         }
         None
     }
 
-    fn normalized_failure_reason(&mut self, run: &crate::state::RunRecord) -> Result<Option<String>> {
+    fn normalized_failure_reason(
+        &mut self,
+        run: &crate::state::RunRecord,
+    ) -> Result<Option<String>> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
             "brainstorm" => {
@@ -1339,11 +1373,8 @@ impl App {
             }
             "coder" => {
                 // Coder's real deliverable is a git commit, not a file. We
-                // can't robustly verify "did the agent actually commit
-                // anything meaningful" from the file system alone, so the
-                // wrapped process's exit code stays authoritative here.
                 let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
-                (false, self.coder_gate_reason(&round_dir))
+                (false, self.coder_gate_reason(run, &round_dir))
             }
             "reviewer" => {
                 let review_path = session_dir
@@ -2238,21 +2269,40 @@ impl App {
             prompt_path,
         };
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
+        let dirty = self.capture_run_guard(
+            "plan-review",
+            None,
+            round,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let window_name = window_name_with_model("[Recovery Plan Review]", &model);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&plan_review_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) = self.try_test_launch(
+            &status_path,
+            Some(&plan_review_path),
+            &run_key,
+            &artifacts_dir,
+        ) {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(err) => {
@@ -2268,10 +2318,7 @@ impl App {
         let _ = self.launch_recovery_sharding_with_model(None);
     }
 
-    fn launch_recovery_sharding_with_model(
-        &mut self,
-        override_model: Option<CachedModel>,
-    ) -> bool {
+    fn launch_recovery_sharding_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         use anyhow::Context;
 
         self.state.agent_error = None;
@@ -2299,7 +2346,9 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
+            .or_else(|| {
+                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -2344,26 +2393,41 @@ impl App {
             prompt_path,
         };
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
-        let dirty = self.capture_run_guard("sharding", None, round, attempt, guard::GuardMode::AutoReset);
+        let dirty = self.capture_run_guard(
+            "sharding",
+            None,
+            round,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let window_name = window_name_with_model("[Recovery Sharding]", &model);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("sharding", None, round, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(err) => {
-                self.state.agent_error =
-                    Some(format!("failed to launch recovery sharding: {err}"));
+                self.state.agent_error = Some(format!("failed to launch recovery sharding: {err}"));
                 false
             }
         }
@@ -2380,8 +2444,13 @@ impl App {
         };
         let ended_at = chrono::Utc::now();
         run.ended_at = Some(ended_at);
+        let unverified = error
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("failed_unverified:"));
         run.status = if success {
             RunStatus::Done
+        } else if unverified {
+            RunStatus::FailedUnverified
         } else {
             RunStatus::Failed
         };
@@ -2395,6 +2464,12 @@ impl App {
             format!(
                 "done in {minutes}m{seconds:02}s · {} ({})",
                 run.model, run.vendor
+            )
+        } else if unverified {
+            format!(
+                "attempt {} unverified: {}",
+                run.attempt,
+                error.unwrap_or_else(|| "unknown error".to_string())
             )
         } else {
             format!(
@@ -2433,7 +2508,7 @@ impl App {
                 run.stage == failed_run.stage
                     && run.task_id == failed_run.task_id
                     && run.round == failed_run.round
-                    && run.status == RunStatus::Failed
+                    && matches!(run.status, RunStatus::Failed | RunStatus::FailedUnverified)
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2453,6 +2528,8 @@ impl App {
     }
 
     fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
+        // Reviewer note: retry suppression for failed_unverified is intentionally
+        // deferred; this round only changes verdict attribution and UI surfacing.
         if failed_run.error.as_deref() == Some("user_forced_retry") {
             return false;
         }
@@ -2551,7 +2628,11 @@ impl App {
 
         let failure_reason = self.normalized_failure_reason(run)?;
         if failure_reason.is_none()
-            && self.state.pending_guard_decision.as_ref().is_some_and(|d| d.run_id == run.id)
+            && self
+                .state
+                .pending_guard_decision
+                .as_ref()
+                .is_some_and(|d| d.run_id == run.id)
         {
             self.transition_to_phase(Phase::GitGuardPending)?;
             let _ = self.state.save();
@@ -2723,9 +2804,7 @@ impl App {
                                         },
                                         text: advisory,
                                     };
-                                    if let Err(err) =
-                                        self.state.append_message(&advisory_msg)
-                                    {
+                                    if let Err(err) = self.state.append_message(&advisory_msg) {
                                         let _ = self.state.log_event(format!(
                                             "failed to append advisory feedback message: {err}"
                                         ));
@@ -2792,19 +2871,18 @@ impl App {
                             }
                             review::ReviewStatus::HumanBlocked
                             | review::ReviewStatus::AgentPivot => {
-                                let (verdict_status, trigger_str) =
-                                    match verdict.status {
-                                        review::ReviewStatus::HumanBlocked => {
-                                            (PipelineItemStatus::HumanBlocked, "human_blocked")
-                                        }
-                                        review::ReviewStatus::AgentPivot => {
-                                            (PipelineItemStatus::AgentPivot, "agent_pivot")
-                                        }
-                                        review::ReviewStatus::Approved
-                                        | review::ReviewStatus::Revise => {
-                                            unreachable!("already handled")
-                                        }
-                                    };
+                                let (verdict_status, trigger_str) = match verdict.status {
+                                    review::ReviewStatus::HumanBlocked => {
+                                        (PipelineItemStatus::HumanBlocked, "human_blocked")
+                                    }
+                                    review::ReviewStatus::AgentPivot => {
+                                        (PipelineItemStatus::AgentPivot, "agent_pivot")
+                                    }
+                                    review::ReviewStatus::Approved
+                                    | review::ReviewStatus::Revise => {
+                                        unreachable!("already handled")
+                                    }
+                                };
                                 if let Some(task_id) = self.state.builder.current_task_id() {
                                     let _ = self.state.builder.set_task_status(
                                         task_id,
@@ -2946,24 +3024,41 @@ impl App {
         };
 
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
-        let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard::GuardMode::AskOperator);
+        let dirty = self.capture_run_guard(
+            "brainstorm",
+            None,
+            1,
+            attempt,
+            guard::GuardMode::AskOperator,
+        );
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&spec_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&spec_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            launch_interactive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                true,
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
                 self.start_run_tracking("brainstorm", None, 1, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(e) => {
@@ -3076,20 +3171,36 @@ impl App {
         };
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
-        let dirty = self.capture_run_guard("spec-review", None, round, attempt, guard::GuardMode::AutoReset);
+        let dirty = self.capture_run_guard(
+            "spec-review",
+            None,
+            round,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let run_key = Self::run_key_for("spec-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(err) => {
@@ -3138,7 +3249,9 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
+            .or_else(|| {
+                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3169,23 +3282,45 @@ impl App {
 
         let adapter = adapter_for_vendor(vendor_kind);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
-        let guard_mode = if interactive { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
+        let guard_mode = if interactive {
+            guard::GuardMode::AskOperator
+        } else {
+            guard::GuardMode::AutoReset
+        };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
         let window_name = window_name_with_model("[Planning]", &model);
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path), &run_key, &artifacts_dir) {
-                result
-            } else if interactive {
-                launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path, &run_key, &artifacts_dir)
-            } else {
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&plan_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else if interactive {
+            launch_interactive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                true,
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        } else {
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("planning", None, 1, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(e) => {
@@ -3272,20 +3407,36 @@ impl App {
         };
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
+        let dirty = self.capture_run_guard(
+            "plan-review",
+            None,
+            round,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(err) => {
@@ -3318,7 +3469,9 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
+            .or_else(|| {
+                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3348,21 +3501,32 @@ impl App {
         };
 
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
-        let dirty = self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
+        let dirty =
+            self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Sharding]", &model);
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("sharding", None, 1, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(e) => {
@@ -3408,7 +3572,9 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
+            .or_else(|| {
+                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3462,26 +3628,48 @@ impl App {
             prompt_path,
         };
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
-        let recovery_guard_mode = if is_human_blocked { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
+        let recovery_guard_mode = if is_human_blocked {
+            guard::GuardMode::AskOperator
+        } else {
+            guard::GuardMode::AutoReset
+        };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
         let window_name = window_name_with_model("[Recovery]", &model);
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir) {
-                result
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            if is_human_blocked {
+                launch_interactive(
+                    &window_name,
+                    &run,
+                    adapter.as_ref(),
+                    true,
+                    &status_path,
+                    &run_key,
+                    &artifacts_dir,
+                )
             } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                if is_human_blocked {
-                    launch_interactive(&window_name, &run, adapter.as_ref(), true, &status_path, &run_key, &artifacts_dir)
-                } else {
-                    launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-                }
-            };
+                launch_noninteractive(
+                    &window_name,
+                    &run,
+                    adapter.as_ref(),
+                    &status_path,
+                    &run_key,
+                    &artifacts_dir,
+                )
+            }
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("recovery", None, round, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(err) => {
@@ -3551,7 +3739,14 @@ impl App {
             .agent_runs
             .iter()
             .any(|run| run.stage == "coder" && run.task_id == Some(task_id) && run.round == r);
-        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &live_summary_path, resume);
+        let prompt = coder_prompt(
+            &session_dir,
+            task_id,
+            r,
+            &task_file,
+            &live_summary_path,
+            resume,
+        );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return false;
@@ -3564,14 +3759,29 @@ impl App {
 
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
-        self.capture_run_guard("coder", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
+        self.capture_run_guard(
+            "coder",
+            Some(task_id),
+            r,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let run_key = Self::run_key_for("coder", Some(task_id), r, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result = if let Some(result) = self.try_test_launch(&status_path, None, &run_key, &artifacts_dir) {
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, None, &run_key, &artifacts_dir)
+        {
             result
         } else {
             let adapter = adapter_for_vendor(vendor_kind);
-            launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
         };
         match launch_result {
             Ok(()) => {
@@ -3642,7 +3852,8 @@ impl App {
         let (model, vendor_kind, vendor) = chosen;
 
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
-        let live_summary_path = self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
+        let live_summary_path =
+            self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("reviewer-r{r}.md"));
@@ -3667,20 +3878,36 @@ impl App {
 
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
-        let dirty = self.capture_run_guard("reviewer", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
+        let dirty = self.capture_run_guard(
+            "reviewer",
+            Some(task_id),
+            r,
+            attempt,
+            guard::GuardMode::AutoReset,
+        );
         let run_key = Self::run_key_for("reviewer", Some(task_id), r, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result =
-            if let Some(result) = self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir) {
-                result
-            } else {
-                let adapter = adapter_for_vendor(vendor_kind);
-                launch_noninteractive(&window_name, &run, adapter.as_ref(), &status_path, &run_key, &artifacts_dir)
-            };
+        let launch_result = if let Some(result) =
+            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+        {
+            result
+        } else {
+            let adapter = adapter_for_vendor(vendor_kind);
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
+        };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking("reviewer", Some(task_id), r, model, vendor, window_name);
-                if dirty { self.emit_dirty_tree_warning(); }
+                if dirty {
+                    self.emit_dirty_tree_warning();
+                }
                 true
             }
             Err(e) => {
@@ -4948,6 +5175,52 @@ mod tests {
         app
     }
 
+    fn make_coder_run(id: u64, round: u32, attempt: u32) -> RunRecord {
+        RunRecord {
+            id,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round,
+            attempt,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: format!("[Coder t1 r{round}]"),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        }
+    }
+
+    fn write_review_scope(round_dir: &std::path::Path, base_sha: &str) {
+        std::fs::create_dir_all(round_dir).expect("round dir");
+        std::fs::write(
+            round_dir.join("review_scope.toml"),
+            format!("base_sha = \"{base_sha}\"\n"),
+        )
+        .expect("write review scope");
+    }
+
+    fn write_finish_stamp(
+        session_dir: &std::path::Path,
+        run_key: &str,
+        head_after: &str,
+        head_state: &str,
+    ) {
+        let stamp = crate::runner::FinishStamp {
+            finished_at: chrono::Utc::now().to_rfc3339(),
+            exit_code: 0,
+            head_before: "base123".to_string(),
+            head_after: head_after.to_string(),
+            head_state: head_state.to_string(),
+        };
+        let stamp_path = session_dir
+            .join("artifacts")
+            .join("run-finish")
+            .join(format!("{run_key}.toml"));
+        crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
+    }
+
     #[test]
     fn previous_stage_stays_expanded_after_phase_advance() {
         with_temp_root(|| {
@@ -5853,6 +6126,180 @@ mod tests {
     }
 
     #[test]
+    fn coder_finalize_succeeds_from_stable_advancing_finish_stamp() {
+        with_temp_root(|| {
+            let session_id = "coder-stable-advance";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "head456",
+                "stable",
+            );
+
+            app.finalize_current_run(&run).expect("finalize coder");
+
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
+            assert_eq!(finalized.status, RunStatus::Done);
+            assert_eq!(finalized.error, None);
+            assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
+        });
+    }
+
+    #[test]
+    fn coder_gate_reports_authoritative_failure_when_stamp_head_matches_base() {
+        with_temp_root(|| {
+            let session_id = "coder-stable-unchanged";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "base123",
+                "stable",
+            );
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            let reason = app
+                .normalized_failure_reason(&run)
+                .expect("normalized failure reason");
+            assert_eq!(reason.as_deref(), Some("no_commits_since_round_start"));
+        });
+    }
+
+    #[test]
+    fn coder_gate_fails_unverified_when_finish_stamp_missing_or_unstable() {
+        with_temp_root(|| {
+            let session_id = "coder-missing-stamp";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            let missing_reason = app
+                .normalized_failure_reason(&run)
+                .expect("missing normalized failure reason");
+            let missing = missing_reason.expect("missing stamp should fail");
+            assert!(missing.starts_with("failed_unverified"));
+            assert!(missing.contains("missing finish stamp"));
+
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "head456",
+                "unstable",
+            );
+            let unstable_reason = app
+                .normalized_failure_reason(&run)
+                .expect("unstable normalized failure reason");
+            let unstable = unstable_reason.expect("unstable stamp should fail");
+            assert!(unstable.starts_with("failed_unverified"));
+            assert!(unstable.contains("head_state=unstable"));
+        });
+    }
+
+    #[test]
+    fn coder_gate_fails_unverified_when_finish_stamp_is_malformed() {
+        with_temp_root(|| {
+            let session_id = "coder-malformed-stamp";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let run_key = App::run_key_for("coder", Some(1), 1, 1);
+            let stamp_path = session_dir
+                .join("artifacts")
+                .join("run-finish")
+                .join(format!("{run_key}.toml"));
+            std::fs::create_dir_all(stamp_path.parent().expect("stamp dir")).expect("stamp dir");
+            std::fs::write(&stamp_path, "not = [valid").expect("write malformed stamp");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            let reason = app
+                .normalized_failure_reason(&run)
+                .expect("normalized failure reason");
+            let reason = reason.expect("malformed stamp should fail");
+            assert!(reason.starts_with("failed_unverified"));
+            assert!(reason.contains("malformed finish stamp"));
+        });
+    }
+
+    #[test]
+    fn coder_finalize_marks_missing_stamp_as_failed_unverified_with_hint() {
+        with_temp_root(|| {
+            let session_id = "coder-finalize-missing-stamp";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            app.finalize_current_run(&run).expect("finalize coder");
+
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
+            assert_eq!(finalized.status, RunStatus::FailedUnverified);
+            assert!(
+                finalized
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("run-finish")
+            );
+            let end = app
+                .messages
+                .iter()
+                .find(|message| message.run_id == 1 && message.kind == MessageKind::End)
+                .expect("end message");
+            assert!(end.text.contains("attempt 1 unverified"));
+            assert!(end.text.contains("missing finish stamp"));
+        });
+    }
+
+    #[test]
     fn coder_retry_exhaustion_enters_builder_recovery() {
         with_temp_root(|| {
             let session_id = "coder-retry-exhaustion";
@@ -6588,7 +7035,12 @@ estimated_tokens = 1
             .unwrap();
 
             let mut app = idle_app(state);
-            app.enter_builder_recovery(1, Some(1), Some("needs human".to_string()), "human_blocked");
+            app.enter_builder_recovery(
+                1,
+                Some(1),
+                Some("needs human".to_string()),
+                "human_blocked",
+            );
 
             // The recovery pipeline item should be interactive=true for human_blocked
             let recovery_items: Vec<_> = app
@@ -6600,10 +7052,7 @@ estimated_tokens = 1
                 .collect();
             assert_eq!(recovery_items.len(), 1);
             assert_eq!(recovery_items[0].interactive, Some(true));
-            assert_eq!(
-                recovery_items[0].trigger.as_deref(),
-                Some("human_blocked")
-            );
+            assert_eq!(recovery_items[0].trigger.as_deref(), Some("human_blocked"));
             assert_eq!(app.state.current_phase, Phase::BuilderRecovery(1));
         });
     }
@@ -6757,10 +7206,7 @@ estimated_tokens = 1
                 .filter(|i| i.stage == "recovery")
                 .collect();
             // Stays human_blocked
-            assert_eq!(
-                recovery_items[0].trigger.as_deref(),
-                Some("human_blocked")
-            );
+            assert_eq!(recovery_items[0].trigger.as_deref(), Some("human_blocked"));
         });
     }
 
@@ -7081,8 +7527,7 @@ estimated_tokens = 1
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::BuilderRecovery(1);
             state.builder.recovery_trigger_task_id = Some(1);
-            state.builder.recovery_trigger_summary =
-                Some("needs human judgment".to_string());
+            state.builder.recovery_trigger_summary = Some("needs human judgment".to_string());
             state.builder.push_pipeline_item(PipelineItem {
                 id: 0,
                 stage: "recovery".to_string(),
@@ -7115,9 +7560,7 @@ estimated_tokens = 1
             let ok = app.launch_recovery_with_model(None);
             assert!(ok, "launch_recovery_with_model must succeed");
 
-            let prompt_path = session_dir
-                .join("prompts")
-                .join("recovery-r1.md");
+            let prompt_path = session_dir.join("prompts").join("recovery-r1.md");
             let prompt = std::fs::read_to_string(&prompt_path).unwrap();
             assert!(
                 prompt.contains("INTERACTIVE"),
@@ -7149,8 +7592,7 @@ estimated_tokens = 1
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::BuilderRecovery(2);
             state.builder.recovery_trigger_task_id = Some(1);
-            state.builder.recovery_trigger_summary =
-                Some("plan is wrong".to_string());
+            state.builder.recovery_trigger_summary = Some("plan is wrong".to_string());
             state.builder.push_pipeline_item(PipelineItem {
                 id: 0,
                 stage: "recovery".to_string(),
@@ -7183,9 +7625,7 @@ estimated_tokens = 1
             let ok = app.launch_recovery_with_model(None);
             assert!(ok, "launch_recovery_with_model must succeed");
 
-            let prompt_path = session_dir
-                .join("prompts")
-                .join("recovery-r2.md");
+            let prompt_path = session_dir.join("prompts").join("recovery-r2.md");
             let prompt = std::fs::read_to_string(&prompt_path).unwrap();
             assert!(
                 prompt.contains("NON-INTERACTIVE"),
@@ -7254,7 +7694,10 @@ estimated_tokens = 1
                 .expect("pending_guard_decision must be Some after PendingDecision");
             assert_eq!(decision.run_id, run.id);
             assert_eq!(decision.stage, "brainstorm");
-            assert_eq!(decision.captured_head, "0000000000000000000000000000000000000000");
+            assert_eq!(
+                decision.captured_head,
+                "0000000000000000000000000000000000000000"
+            );
         });
     }
 
@@ -7318,7 +7761,12 @@ estimated_tokens = 1
                 app.state.pending_guard_decision.is_none(),
                 "pending_guard_decision must be cleared after reset"
             );
-            let finalized = app.state.agent_runs.iter().find(|r| r.id == 10).expect("run");
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 10)
+                .expect("run");
             assert_eq!(finalized.status, RunStatus::Failed);
             assert_eq!(
                 finalized.error.as_deref(),
@@ -7362,8 +7810,17 @@ estimated_tokens = 1
                 app.state.pending_guard_decision.is_none(),
                 "pending_guard_decision must be cleared after keep"
             );
-            let finalized = app.state.agent_runs.iter().find(|r| r.id == 20).expect("run");
-            assert_eq!(finalized.status, RunStatus::Done, "run must succeed on keep");
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 20)
+                .expect("run");
+            assert_eq!(
+                finalized.status,
+                RunStatus::Done,
+                "run must succeed on keep"
+            );
             let kept_warn = app.messages.iter().any(|m| {
                 m.kind == MessageKind::SummaryWarn
                     && m.text.contains("operator kept unauthorized commit")
@@ -7407,7 +7864,12 @@ estimated_tokens = 1
 
             assert!(!should_quit);
             assert!(app.state.pending_guard_decision.is_none());
-            let finalized = app.state.agent_runs.iter().find(|r| r.id == 30).expect("run");
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 30)
+                .expect("run");
             assert_eq!(finalized.status, RunStatus::Failed);
             assert_eq!(finalized.error.as_deref(), Some("forbidden_head_advance"));
         });
@@ -7427,7 +7889,12 @@ estimated_tokens = 1
 
             assert!(!should_quit);
             assert!(app.state.pending_guard_decision.is_none());
-            let finalized = app.state.agent_runs.iter().find(|r| r.id == 31).expect("run");
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 31)
+                .expect("run");
             assert_eq!(finalized.status, RunStatus::Done);
             assert_ne!(app.state.current_phase, Phase::GitGuardPending);
         });

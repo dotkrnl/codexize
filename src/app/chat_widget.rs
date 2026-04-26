@@ -65,6 +65,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
                 symbol: "●",
                 color: Color::Green,
             },
+            RunStatus::FailedUnverified => SymbolStyle {
+                symbol: "!",
+                color: Color::Yellow,
+            },
             _ => SymbolStyle {
                 symbol: "✗",
                 color: Color::Red,
@@ -507,6 +511,13 @@ mod tests {
         let s = message_symbol(MessageKind::End, RunStatus::Failed);
         assert_eq!(s.symbol, "✗");
         assert_eq!(s.color, Color::Red);
+    }
+
+    #[test]
+    fn symbol_end_failed_unverified() {
+        let s = message_symbol(MessageKind::End, RunStatus::FailedUnverified);
+        assert_eq!(s.symbol, "!");
+        assert_eq!(s.color, Color::Yellow);
     }
 
     #[test]

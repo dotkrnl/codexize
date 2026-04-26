@@ -145,7 +145,6 @@ fn model_strip_height(models: &[CachedModel], versions: &VersionIndex) -> u16 {
     }
 }
 
-
 fn strip_ansi_codes(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -173,7 +172,11 @@ pub fn sanitize_live_summary(text: &str) -> String {
     collapsed.chars().take(500).collect()
 }
 
-fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) -> Vec<Span<'static>> {
+fn format_model_name_spans(
+    short_name: &str,
+    is_new: bool,
+    target_width: usize,
+) -> Vec<Span<'static>> {
     const SUFFIX: &str = " (new)";
     const ELLIPSIS: &str = "...";
 
@@ -307,9 +310,7 @@ impl App {
 
     fn model_strip(&self, strip_width: u16) -> Paragraph<'static> {
         use crate::selection::{
-            config::SelectionPhase,
-            display::phase_rank,
-            ranking::selection_probability,
+            config::SelectionPhase, display::phase_rank, ranking::selection_probability,
         };
 
         // Fixed-width parts: vendor tag (8) + stupid (2) + "  " (2) + quota (4) +
@@ -330,9 +331,8 @@ impl App {
         let prob_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
             selection_probability(model, phase, &self.versions)
         };
-        let total_for = |phase: SelectionPhase| -> f64 {
-            self.models.iter().map(|m| prob_for(phase, m)).sum()
-        };
+        let total_for =
+            |phase: SelectionPhase| -> f64 { self.models.iter().map(|m| prob_for(phase, m)).sum() };
 
         let total_idea = total_for(SelectionPhase::Idea);
         let total_planning = total_for(SelectionPhase::Planning);
@@ -412,10 +412,8 @@ impl App {
 
                 let idea_pct =
                     probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct = probability_percent(
-                    prob_for(SelectionPhase::Planning, model),
-                    total_planning,
-                );
+                let planning_pct =
+                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
                 let build_pct =
                     probability_percent(prob_for(SelectionPhase::Build, model), total_build);
                 let review_pct =
@@ -425,11 +423,8 @@ impl App {
                     .iter()
                     .any(|err| err.vendor == model.vendor);
 
-                let name_spans = format_model_name_spans(
-                    &short_name,
-                    model.fallback_from.is_some(),
-                    name_width,
-                );
+                let name_spans =
+                    format_model_name_spans(&short_name, model.fallback_from.is_some(), name_width);
 
                 let mut line_spans = vec![tag_span];
                 line_spans.extend(name_spans);
@@ -895,7 +890,11 @@ fn render_guard_decision_modal(
         .iter()
         .map(|line| {
             let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 { 1 } else { w.div_ceil(inner_width).max(1) as u16 }
+            if w == 0 {
+                1
+            } else {
+                w.div_ceil(inner_width).max(1) as u16
+            }
         })
         .sum();
     let desired_height = wrapped.saturating_add(2);
@@ -903,7 +902,12 @@ fn render_guard_decision_modal(
 
     let x = area.x + area.width.saturating_sub(modal_width) / 2;
     let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect { x, y, width: modal_width, height: modal_height };
+    let rect = ratatui::layout::Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
 
     frame.render_widget(ratatui::widgets::Clear, rect);
 
@@ -1145,7 +1149,10 @@ mod tests {
         let model_line = full_buffer_line_text(&buf, model_y);
 
         assert!(
-            model_line.contains("I") && model_line.contains("P") && model_line.contains("B") && model_line.contains("R"),
+            model_line.contains("I")
+                && model_line.contains("P")
+                && model_line.contains("B")
+                && model_line.contains("R"),
             "metrics IPBR should still appear on narrow width: {model_line}"
         );
     }
@@ -1491,6 +1498,37 @@ mod tests {
 
         assert!(first_body < second_header);
         assert!(second_header < second_body);
+    }
+
+    #[test]
+    fn failed_unverified_render_shows_distinct_status_and_stamp_hint() {
+        let app = test_app(
+            vec![node(
+                "Coder",
+                NodeKind::Mode,
+                NodeStatus::FailedUnverified,
+                Vec::new(),
+                Some(1),
+                None,
+            )],
+            vec![run_record(1, RunStatus::FailedUnverified)],
+            vec![Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::End,
+                sender: MessageSender::System,
+                text: "attempt 1 unverified: missing finish stamp at artifacts/run-finish/coder-t1-r1-a1.toml".to_string(),
+            }],
+        );
+
+        let lines = render_lines(&app, 8);
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Coder | failed-unverified"))
+        );
+        assert!(lines.iter().any(|line| line.contains("run-finish")));
     }
 
     #[test]

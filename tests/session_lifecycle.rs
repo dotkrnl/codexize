@@ -86,6 +86,36 @@ fn session_round_trips_schema_v2_runs_and_messages() {
 }
 
 #[test]
+fn session_round_trips_failed_unverified_runs() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("integration-unverified".to_string());
+        state
+            .agent_runs
+            .push(sample_run(9, RunStatus::FailedUnverified));
+        state.agent_runs[0].error = Some(
+            "failed_unverified: missing finish stamp at /tmp/run-finish/coder-t1-r1-a1.toml"
+                .to_string(),
+        );
+        state.save().expect("save session");
+
+        let loaded_state = SessionState::load("integration-unverified").expect("load session");
+
+        assert_eq!(loaded_state.agent_runs.len(), 1);
+        assert_eq!(
+            loaded_state.agent_runs[0].status,
+            RunStatus::FailedUnverified
+        );
+        assert!(
+            loaded_state.agent_runs[0]
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("run-finish")
+        );
+    });
+}
+
+#[test]
 fn resuming_missing_window_writes_end_message_and_persists_failure() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-missing-window".to_string());

@@ -559,7 +559,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
                     NodeStatus::Running
                 } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
                     NodeStatus::Done
-                } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+                } else if round_nodes.iter().any(|c| is_failed_status(c.status)) {
                     NodeStatus::Failed
                 } else {
                     NodeStatus::Pending
@@ -625,7 +625,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
             }
         } else if round_nodes.iter().all(|c| c.status == NodeStatus::Done) {
             NodeStatus::Done
-        } else if round_nodes.iter().any(|c| c.status == NodeStatus::Failed) {
+        } else if round_nodes.iter().any(|c| is_failed_status(c.status)) {
             NodeStatus::Failed
         } else {
             NodeStatus::Pending
@@ -707,6 +707,10 @@ fn latest_attempts<'a>(runs: &[&'a RunRecord]) -> Vec<&'a RunRecord> {
     best.into_values().collect()
 }
 
+fn is_failed_status(status: NodeStatus) -> bool {
+    matches!(status, NodeStatus::Failed | NodeStatus::FailedUnverified)
+}
+
 fn rollup_status(runs: &[&RunRecord]) -> NodeStatus {
     let latest = latest_attempts(runs);
     if latest.iter().any(|r| r.status == RunStatus::Running) {
@@ -715,6 +719,11 @@ fn rollup_status(runs: &[&RunRecord]) -> NodeStatus {
         NodeStatus::Pending
     } else if latest.iter().all(|r| r.status == RunStatus::Done) {
         NodeStatus::Done
+    } else if latest
+        .iter()
+        .all(|r| r.status == RunStatus::FailedUnverified)
+    {
+        NodeStatus::FailedUnverified
     } else {
         NodeStatus::Failed
     }
@@ -725,6 +734,7 @@ fn run_status_to_node(status: RunStatus) -> NodeStatus {
         RunStatus::Running => NodeStatus::Running,
         RunStatus::Done => NodeStatus::Done,
         RunStatus::Failed => NodeStatus::Failed,
+        RunStatus::FailedUnverified => NodeStatus::FailedUnverified,
     }
 }
 
@@ -813,7 +823,10 @@ fn stage_status_from_runs(
     }
     if runs.iter().all(|r| r.status == RunStatus::Done) {
         NodeStatus::Done
-    } else if runs.iter().any(|r| r.status == RunStatus::Failed) {
+    } else if runs
+        .iter()
+        .any(|r| matches!(r.status, RunStatus::Failed | RunStatus::FailedUnverified))
+    {
         NodeStatus::Failed
     } else {
         NodeStatus::Pending
@@ -1164,6 +1177,42 @@ mod tests {
     }
 
     #[test]
+    fn failed_unverified_run_maps_to_distinct_node_status() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "openai".to_string(),
+            window_name: "[Coder t1 r1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::FailedUnverified,
+            error: Some(
+                "failed_unverified: missing finish stamp at artifacts/run-finish/coder-t1-r1-a1.toml"
+                    .to_string(),
+            ),
+        });
+
+        let nodes = build_tree(&state);
+        fn find_run_node(node: &Node) -> Option<&Node> {
+            if node.run_id == Some(1) || node.leaf_run_id == Some(1) {
+                return Some(node);
+            }
+            node.children.iter().find_map(find_run_node)
+        }
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let attempt = find_run_node(builder).expect("run node");
+
+        assert_eq!(attempt.status, NodeStatus::FailedUnverified);
+    }
+
+    #[test]
     fn test_collapsed_stage_leaf_run_id() {
         let mut state = SessionState::new("test".to_string());
         state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
@@ -1460,7 +1509,10 @@ pub fn current_node_index(nodes: &[Node]) -> usize {
         .position(|n| {
             matches!(
                 n.status,
-                NodeStatus::Running | NodeStatus::WaitingUser | NodeStatus::Failed
+                NodeStatus::Running
+                    | NodeStatus::WaitingUser
+                    | NodeStatus::Failed
+                    | NodeStatus::FailedUnverified
             )
         })
         .or_else(|| nodes.iter().position(|n| n.status == NodeStatus::Pending))

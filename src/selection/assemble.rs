@@ -15,6 +15,27 @@ pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
     assemble_from_cache(loaded)
 }
 
+/// Build the canonical model universe purely from cached data, performing no
+/// network fetches. Returns an empty vector if the dashboard cache is missing.
+/// Useful at startup to render the model strip immediately while a background
+/// refresh runs.
+pub fn assemble_from_cached_only() -> Vec<CachedModel> {
+    let loaded = cache::load();
+    if loaded.dashboard.is_none() {
+        return Vec::new();
+    }
+    let quotas = loaded.quotas.map(|s| crate::cache::LoadedSection {
+        data: s.data,
+        expired: false,
+    });
+    let dashboard = loaded.dashboard.map(|s| crate::cache::LoadedSection {
+        data: s.data,
+        expired: false,
+    });
+    let (models, _) = assemble_from_cache(LoadedCache { dashboard, quotas });
+    models
+}
+
 fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let (cached_dashboard, dashboard_expired) = match loaded.dashboard {
         Some(section) => (section.data, section.expired),

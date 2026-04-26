@@ -39,6 +39,10 @@ pub struct RunRecord {
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
     pub status: RunStatus,
     pub error: Option<String>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+    #[serde(default)]
+    pub mount_device_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -773,6 +777,8 @@ impl SessionState {
         window_name: String,
     ) -> u64 {
         let id = self.next_agent_run_id();
+        let hostname = Self::capture_hostname();
+        let mount_device_id = Self::capture_mount_device_id(&self.session_id);
         let run = RunRecord {
             id,
             stage,
@@ -786,9 +792,41 @@ impl SessionState {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname,
+            mount_device_id,
         };
         self.agent_runs.push(run);
         id
+    }
+
+    /// Capture current hostname for same-host resume validation.
+    fn capture_hostname() -> Option<String> {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    String::from_utf8(out.stdout).ok()
+                } else {
+                    None
+                }
+            })
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Capture device ID of the mount containing the session directory.
+    fn capture_mount_device_id(session_id: &str) -> Option<u64> {
+        let session_dir = session_dir(session_id);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(&session_dir).ok().map(|m| m.dev())
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
     }
 
     /// Return the next available agent_run_id (monotonic within session).
@@ -798,6 +836,72 @@ impl SessionState {
 
     /// Resume running runs on session load. Returns the current run ID if exactly one Running run exists and its window is live.
     pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
+        // Check for hostname/device identity mismatch first
+        let current_hostname = Self::capture_hostname();
+        let current_device_id = Self::capture_mount_device_id(&self.session_id);
+
+        // Collect messages to append after the loop
+        let mut messages_to_append = Vec::new();
+        let mut events_to_log = Vec::new();
+
+        // Finalize any Running records with hostname or device mismatch
+        for run in &mut self.agent_runs {
+            if run.status != RunStatus::Running {
+                continue;
+            }
+            let mut mismatch_reason = None;
+            if let Some(ref run_hostname) = run.hostname {
+                if let Some(ref current) = current_hostname {
+                    if run_hostname != current {
+                        mismatch_reason = Some(format!(
+                            "hostname mismatch: run={run_hostname}, current={current}"
+                        ));
+                    }
+                }
+            }
+            if mismatch_reason.is_none() {
+                if let Some(run_dev) = run.mount_device_id {
+                    if let Some(current_dev) = current_device_id {
+                        if run_dev != current_dev {
+                            mismatch_reason = Some(format!(
+                                "mount device mismatch: run={run_dev}, current={current_dev}"
+                            ));
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = mismatch_reason {
+                run.status = RunStatus::FailedUnverified;
+                run.ended_at = Some(chrono::Utc::now());
+                run.error = Some(reason.clone());
+                let duration = run
+                    .ended_at
+                    .unwrap()
+                    .signed_duration_since(run.started_at);
+                let msg = Message {
+                    ts: chrono::Utc::now(),
+                    run_id: run.id,
+                    kind: MessageKind::End,
+                    sender: MessageSender::System,
+                    text: format!(
+                        "failed-unverified in {}s: {}",
+                        duration.num_seconds(),
+                        reason
+                    ),
+                };
+                messages_to_append.push(msg);
+                events_to_log.push(format!("run {} failed-unverified on resume: {}", run.id, reason));
+            }
+        }
+
+        // Append collected messages and events
+        for msg in messages_to_append {
+            let _ = self.append_message(&msg);
+        }
+        for event in events_to_log {
+            let _ = self.log_event(event);
+        }
+
         let running_ids: Vec<u64> = self
             .agent_runs
             .iter()
@@ -806,6 +910,7 @@ impl SessionState {
             .collect();
 
         if running_ids.is_empty() {
+            self.save()?;
             return Ok(None);
         }
 
@@ -827,7 +932,7 @@ impl SessionState {
         let window_live = live_windows.contains(&window_name);
 
         if !window_live {
-            // Finalize as Failed
+            // Finalize as Failed - the run will re-enter drain barrier via poll_agent_window
             let run_idx = self.agent_runs.iter().position(|r| r.id == run_id).unwrap();
             self.agent_runs[run_idx].status = RunStatus::Failed;
             self.agent_runs[run_idx].ended_at = Some(chrono::Utc::now());
@@ -852,6 +957,7 @@ impl SessionState {
             return Ok(None);
         }
 
+        self.save()?;
         Ok(Some(run_id))
     }
 }
@@ -977,6 +1083,8 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         };
         runs.push(run);
 
@@ -999,6 +1107,8 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         };
 
         run.status = RunStatus::Done;
@@ -1024,6 +1134,8 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         };
 
         run.status = RunStatus::Failed;
@@ -1094,6 +1206,8 @@ current_phase = "IdeaInput"
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                hostname: None,
+                mount_device_id: None,
             });
 
             state.save().unwrap();
@@ -1283,6 +1397,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         assert_eq!(state.next_agent_run_id(), 2);
@@ -1304,6 +1420,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let live_windows = vec!["[Brainstorm]".to_string()];
@@ -1330,6 +1448,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let live_windows = vec![]; // No live windows
@@ -1360,6 +1480,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1374,6 +1496,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let live_windows = vec!["[Brainstorm]".to_string(), "[Spec]".to_string()];
@@ -1418,6 +1542,8 @@ text = "agent started · gpt-5 (openai)"
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let toml = toml::to_string(&state).unwrap();
         let loaded: SessionState = toml::from_str(&toml).unwrap();
@@ -1877,5 +2003,127 @@ interactive = false
                 .unwrap();
             assert_eq!(status, expected);
         }
+    }
+
+    #[test]
+    fn test_resume_hostname_mismatch_marks_failed_unverified() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-hostname-mismatch".to_string());
+            let current_hostname = SessionState::capture_hostname();
+            let different_hostname = Some("different-host".to_string());
+
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: if current_hostname.is_some() {
+                    different_hostname
+                } else {
+                    Some("some-host".to_string())
+                },
+                mount_device_id: None,
+            });
+
+            let live_windows = vec!["[Coder]".to_string()];
+            let result = state.resume_running_runs(&live_windows);
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), None);
+            assert_eq!(state.agent_runs[0].status, RunStatus::FailedUnverified);
+            assert!(state.agent_runs[0].error.is_some());
+            assert!(state.agent_runs[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("hostname mismatch"));
+        });
+    }
+
+    #[test]
+    fn test_resume_mount_device_mismatch_marks_failed_unverified() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-mount-mismatch".to_string());
+            let current_device = SessionState::capture_mount_device_id(&state.session_id);
+
+            // Only run this test if we can capture a device ID (Unix systems)
+            if current_device.is_none() {
+                return;
+            }
+
+            let different_device = current_device.map(|d| if d == 0 { 1 } else { d - 1 });
+
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: different_device,
+            });
+
+            let live_windows = vec!["[Coder]".to_string()];
+            let result = state.resume_running_runs(&live_windows);
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), None);
+            assert_eq!(state.agent_runs[0].status, RunStatus::FailedUnverified);
+            assert!(state.agent_runs[0].error.is_some());
+            assert!(state.agent_runs[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("mount device mismatch"));
+        });
+    }
+
+    #[test]
+    fn test_resume_same_host_identity_preserves_running() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-same-host".to_string());
+            let current_hostname = SessionState::capture_hostname();
+            let current_device = SessionState::capture_mount_device_id(&state.session_id);
+
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: current_hostname,
+                mount_device_id: current_device,
+            });
+
+            let live_windows = vec!["[Coder]".to_string()];
+            let result = state.resume_running_runs(&live_windows);
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), Some(1));
+            assert_eq!(state.agent_runs[0].status, RunStatus::Running);
+            assert!(state.agent_runs[0].error.is_none());
+        });
     }
 }

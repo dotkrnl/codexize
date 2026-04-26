@@ -990,7 +990,6 @@ mod tests {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,
-            pending_drain_notice_emitted: false,
             current_run_id: None,
             failed_models: HashMap::new(),
             test_launch_harness: None,

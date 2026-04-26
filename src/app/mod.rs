@@ -109,7 +109,6 @@ pub struct App {
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,
     pending_drain_deadline: Option<Instant>,
-    pending_drain_notice_emitted: bool,
     current_run_id: Option<u64>,
     failed_models: HashMap<RetryKey, FailedModelSet>,
     #[cfg(test)]
@@ -207,7 +206,6 @@ impl App {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,
-            pending_drain_notice_emitted: false,
             current_run_id: None,
             failed_models,
             #[cfg(test)]
@@ -1685,7 +1683,6 @@ impl App {
     fn poll_agent_window(&mut self) {
         let Some(run_id) = self.current_run_id else {
             self.pending_drain_deadline = None;
-            self.pending_drain_notice_emitted = false;
             return;
         };
         let Some(run) = self
@@ -1696,32 +1693,21 @@ impl App {
             .cloned()
         else {
             self.pending_drain_deadline = None;
-            self.pending_drain_notice_emitted = false;
             return;
         };
         if self.window_exists(&run.window_name) {
             self.pending_drain_deadline = None;
-            self.pending_drain_notice_emitted = false;
             return;
         }
 
         let deadline = *self
             .pending_drain_deadline
             .get_or_insert_with(|| Instant::now() + Self::stamp_timeout_duration());
-        if !self.pending_drain_notice_emitted {
-            self.append_system_message(
-                run.id,
-                MessageKind::Summary,
-                "window closed; draining live summary and finish stamp before finalize".to_string(),
-            );
-            self.pending_drain_notice_emitted = true;
-        }
         let now = Instant::now();
-        let live_summary_missing = !self.live_summary_path_for(&run).exists();
         let stamp_path = self.finish_stamp_path_for(&run);
         let stamp_present = Self::artifact_present(&stamp_path);
         let deadline_elapsed = now >= deadline;
-        if !live_summary_missing || (!stamp_present && !deadline_elapsed) {
+        if !stamp_present && !deadline_elapsed {
             return;
         }
         if !stamp_present && deadline_elapsed && run.stage != "coder" {
@@ -1739,7 +1725,6 @@ impl App {
         }
 
         self.pending_drain_deadline = None;
-        self.pending_drain_notice_emitted = false;
         self.window_launched = false;
         self.current_run_id = None;
         let outcome = self.finalize_current_run(&run);
@@ -5285,7 +5270,6 @@ mod tests {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,
-            pending_drain_notice_emitted: false,
             current_run_id: Some(2),
             failed_models: HashMap::new(),
             test_launch_harness: None,
@@ -5990,7 +5974,6 @@ mod tests {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,
-            pending_drain_notice_emitted: false,
             current_run_id: None,
             failed_models: HashMap::new(),
             test_launch_harness: None,
@@ -6501,11 +6484,7 @@ mod tests {
             std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
             std::fs::write(&status_path, "0").expect("status");
 
-            let run_key = App::run_key_for("planning", None, 1, 1);
-            write_finish_stamp(&session_dir, &run_key, "head123", "stable");
-
-            let live_summary_path = app.live_summary_path_for(&run);
-            std::fs::write(&live_summary_path, "still draining\n").expect("live summary");
+            let _ = std::fs::remove_file(app.finish_stamp_path_for(&run));
 
             app.poll_agent_window();
 
@@ -6518,9 +6497,6 @@ mod tests {
             assert_eq!(persisted.status, RunStatus::Running);
             assert_eq!(app.current_run_id, Some(run.id));
             assert!(app.pending_drain_deadline.is_some());
-            assert!(app.messages.iter().any(|m| m.run_id == run.id
-                && m.kind == MessageKind::Summary
-                && m.text.contains("draining")));
         });
     }
 
@@ -6717,8 +6693,7 @@ mod tests {
             std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
             std::fs::write(&status_path, "0").expect("status");
 
-            let run_key = App::run_key_for("planning", None, 1, 1);
-            write_finish_stamp(&session_dir, &run_key, "head123", "stable");
+            let _ = std::fs::remove_file(app.finish_stamp_path_for(&run));
 
             let guard_dir = session_dir.join(".guards").join("planning-stage-r1-a1");
             std::fs::create_dir_all(&guard_dir).expect("guard dir");
@@ -6728,8 +6703,6 @@ mod tests {
             )
             .expect("guard snapshot");
 
-            let live_summary_path = app.live_summary_path_for(&run);
-            std::fs::write(&live_summary_path, "awaiting drain\n").expect("live summary");
             app.poll_agent_window();
 
             assert!(
@@ -6743,7 +6716,8 @@ mod tests {
                 "guard diagnostics should not emit before drain barrier releases finalize"
             );
 
-            std::fs::remove_file(&live_summary_path).expect("remove live summary");
+            let run_key = App::run_key_for("planning", None, 1, 1);
+            write_finish_stamp(&session_dir, &run_key, "head123", "stable");
             app.poll_agent_window();
 
             assert!(

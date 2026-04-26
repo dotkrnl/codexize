@@ -55,6 +55,60 @@ enum ExpansionOverride {
     Collapsed,
 }
 
+/// Identifies a running stage for Family B error modals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StageId {
+    Brainstorm,
+    SpecReview,
+    Planning,
+    PlanReview,
+    Sharding,
+    Implementation,
+    Review,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ModalKind {
+    SkipToImpl,
+    GitGuard,
+    SpecReviewPaused,
+    PlanReviewPaused,
+    StageError(StageId),
+}
+
+impl App {
+    pub(super) fn active_modal(&self) -> Option<ModalKind> {
+        match self.state.current_phase {
+            Phase::SkipToImplPending => Some(ModalKind::SkipToImpl),
+            Phase::GitGuardPending => Some(ModalKind::GitGuard),
+            Phase::SpecReviewPaused => Some(ModalKind::SpecReviewPaused),
+            Phase::PlanReviewPaused => Some(ModalKind::PlanReviewPaused),
+            Phase::BrainstormRunning if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Brainstorm))
+            }
+            Phase::SpecReviewRunning if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::SpecReview))
+            }
+            Phase::PlanningRunning if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Planning))
+            }
+            Phase::PlanReviewRunning if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::PlanReview))
+            }
+            Phase::ShardingRunning if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Sharding))
+            }
+            Phase::ImplementationRound(_) if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Implementation))
+            }
+            Phase::ReviewRound(_) if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Review))
+            }
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone)]
 struct TestLaunchOutcome {

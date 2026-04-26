@@ -145,6 +145,12 @@ fn effective_expansion(
     }
 }
 
+fn startup_cache_has_expired_section(loaded: &cache::LoadedCache) -> bool {
+    let dashboard_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true);
+    let quotas_expired = loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true);
+    dashboard_expired || quotas_expired
+}
+
 impl App {
     pub fn new(tmux: TmuxContext, mut state: SessionState) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
@@ -211,12 +217,9 @@ impl App {
         // is expired.
         let cached = selection::assemble::assemble_from_cached_only();
         if !cached.is_empty() {
-            let dashboard_expired = cache::load()
-                .dashboard
-                .map(|s| s.expired)
-                .unwrap_or(true);
+            let cache_has_expired_section = startup_cache_has_expired_section(&cache::load());
             app.set_models(cached);
-            if !dashboard_expired {
+            if !cache_has_expired_section {
                 app.model_refresh = ModelRefreshState::Idle(Instant::now());
             }
         }
@@ -4647,6 +4650,22 @@ mod tests {
             error: None,
         });
         state
+    }
+
+    #[test]
+    fn startup_refresh_remains_fetching_when_quotas_expired() {
+        let loaded = cache::LoadedCache {
+            dashboard: Some(cache::LoadedSection {
+                data: Vec::new(),
+                expired: false,
+            }),
+            quotas: Some(cache::LoadedSection {
+                data: std::collections::BTreeMap::new(),
+                expired: true,
+            }),
+        };
+
+        assert!(startup_cache_has_expired_section(&loaded));
     }
 
     fn mk_app(state: SessionState) -> App {

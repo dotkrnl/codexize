@@ -1,6 +1,7 @@
 use crate::adapters::{AgentAdapter, AgentRun, shell_escape};
 use crate::state;
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::{BufRead, BufReader, Write},
@@ -51,6 +52,135 @@ impl ChildLaunch {
         self.stderr_null = true;
         self
     }
+}
+
+/// Finish stamp written by the runner-owned wrapper after every agent attempt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FinishStamp {
+    pub finished_at: String,
+    pub exit_code: i32,
+    pub head_before: String,
+    pub head_after: String,
+    pub head_state: String,
+}
+
+/// Atomic write of a finish stamp: write to a temp file in the same directory,
+/// then rename into place.
+pub fn write_finish_stamp(path: &Path, stamp: &FinishStamp) -> Result<()> {
+    let dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    fs::create_dir_all(&dir)?;
+
+    let tmp_path = dir.join(format!(
+        ".tmp.{}.toml",
+        std::process::id()
+    ));
+    let text = toml::to_string_pretty(stamp).context("failed to serialize finish stamp")?;
+    fs::write(&tmp_path, text)
+        .with_context(|| format!("failed to write temp stamp {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, path)
+        .with_context(|| format!("failed to rename stamp to {}", path.display()))?;
+    Ok(())
+}
+
+/// Read and parse a finish stamp from disk.
+pub fn read_finish_stamp(path: &Path) -> Result<FinishStamp> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read finish stamp {}", path.display()))?;
+    let stamp: FinishStamp = toml::from_str(&text)
+        .with_context(|| format!("failed to parse finish stamp {}", path.display()))?;
+    Ok(stamp)
+}
+
+/// Default stabilization budget in milliseconds.
+const DEFAULT_STAMP_STABILIZE_BUDGET_MS: u64 = 1500;
+/// Default interval between HEAD reads in milliseconds.
+const DEFAULT_STAMP_STABILIZE_INTERVAL_MS: u64 = 100;
+
+/// Environment variable overrides for stabilization timing.
+const ENV_STAMP_STABILIZE_MS: &str = "CODEXIZE_STAMP_STABILIZE_MS";
+const ENV_STAMP_STABILIZE_INTERVAL_MS: &str = "CODEXIZE_STAMP_STABILIZE_INTERVAL_MS";
+
+/// Build the shell command that runs the agent and then writes a finish stamp.
+fn build_shell_cmd(
+    agent_cmd: &str,
+    window_name: &str,
+    status_dir: &str,
+    status_path: &str,
+    finish_dir: &str,
+    stamp_path: &str,
+) -> String {
+    // Compute interval as a decimal string for `sleep` (e.g. "0.1").
+    let interval_ms = DEFAULT_STAMP_STABILIZE_INTERVAL_MS;
+    let interval_sec = format!("{:.3}", interval_ms as f64 / 1000.0)
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string();
+
+    format!(
+        r#"mkdir -p {status_dir} {finish_dir}
+head_before=$(git rev-parse HEAD 2>/dev/null || echo "")
+trap 'status=$?; printf "%s" "$status" > {status_path}' EXIT HUP INT TERM
+printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}
+{agent_cmd}
+exit_code=$?
+trap 'printf "%s" "$exit_code" > {status_path}' EXIT HUP INT TERM
+
+budget_ms=${{{env_budget}:-{budget}}}
+interval_ms=${{{env_interval}:-{interval}}}
+iterations=$((budget_ms / interval_ms))
+last_head=""
+head_state="unstable"
+i=0
+while [ "$i" -lt "$iterations" ]; do
+    while [ -f .git/index.lock ]; do
+        sleep 0.05
+        i=$((i + 1))
+        if [ "$i" -ge "$iterations" ]; then break 2; fi
+    done
+    h1=$(git rev-parse HEAD 2>/dev/null || echo "")
+    sleep {interval_sec}
+    i=$((i + 1))
+    h2=$(git rev-parse HEAD 2>/dev/null || echo "")
+    if [ "$h1" = "$h2" ]; then
+        last_head="$h1"
+        head_state="stable"
+        break
+    fi
+    last_head="$h2"
+done
+
+finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+tmp_stamp="{tmp_stamp}"
+cat > "$tmp_stamp" << STAMPEOF
+finished_at = "{finished_at_placeholder}"
+exit_code = {exit_code_placeholder}
+head_before = "{head_before_placeholder}"
+head_after = "{head_after_placeholder}"
+head_state = "{head_state_placeholder}"
+STAMPEOF
+mv "$tmp_stamp" "{stamp_path}"
+exit $exit_code"#,
+        status_dir = shell_escape(status_dir),
+        finish_dir = shell_escape(finish_dir),
+        status_path = shell_escape(status_path),
+        name = shell_escape(window_name),
+        agent_cmd = agent_cmd,
+        budget = DEFAULT_STAMP_STABILIZE_BUDGET_MS,
+        interval = interval_ms,
+        env_budget = ENV_STAMP_STABILIZE_MS,
+        env_interval = ENV_STAMP_STABILIZE_INTERVAL_MS,
+        interval_sec = interval_sec,
+        tmp_stamp = shell_escape(&format!("{}.tmp", stamp_path)),
+        finished_at_placeholder = "$finished_at",
+        exit_code_placeholder = "$exit_code",
+        head_before_placeholder = "$head_before",
+        head_after_placeholder = "$last_head",
+        head_state_placeholder = "$head_state",
+        stamp_path = shell_escape(stamp_path),
+    )
 }
 
 pub fn run(
@@ -169,31 +299,35 @@ pub fn validate_toml_artifacts(paths: &[&Path]) -> Result<()> {
 
 /// Launch an agent interactively inside a new tmux window.
 /// All agent child-process launches must route through the runner so that
-/// finish-stamp logic (added in a later phase) is guaranteed to run.
+/// finish-stamp logic is guaranteed to run.
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
     adapter: &dyn AgentAdapter,
     switch: bool,
     status_path: &Path,
+    run_key: &str,
+    artifacts_dir: &Path,
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.interactive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, switch, status_path)
+    launch_in_window(window_name, &cmd, adapter, switch, status_path, run_key, artifacts_dir)
 }
 
 /// Launch an agent non-interactively inside a new tmux window.
 /// All agent child-process launches must route through the runner so that
-/// finish-stamp logic (added in a later phase) is guaranteed to run.
+/// finish-stamp logic is guaranteed to run.
 pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
     adapter: &dyn AgentAdapter,
     status_path: &Path,
+    run_key: &str,
+    artifacts_dir: &Path,
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, false, status_path)
+    launch_in_window(window_name, &cmd, adapter, false, status_path, run_key, artifacts_dir)
 }
 
 pub fn run_child_with_timeout(
@@ -238,6 +372,8 @@ fn launch_in_window(
     adapter: &dyn AgentAdapter,
     switch: bool,
     status_path: &Path,
+    run_key: &str,
+    artifacts_dir: &Path,
 ) -> Result<()> {
     if !adapter.detect() {
         bail!("agent CLI not found — install it first");
@@ -248,12 +384,25 @@ fn launch_in_window(
         .unwrap_or_else(|| Path::new("."))
         .to_string_lossy()
         .into_owned();
-    let status_path = status_path.to_string_lossy().into_owned();
-    let shell_cmd = format!(
-        r#"mkdir -p {status_dir}; trap 'status=$?; printf "%s" "$status" > {status_path}' EXIT HUP INT TERM; printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}; {agent_cmd}"#,
-        status_dir = shell_escape(&status_dir),
-        status_path = shell_escape(&status_path),
-        name = shell_escape(window_name),
+    let status_path_str = status_path.to_string_lossy().into_owned();
+
+    let finish_dir = artifacts_dir
+        .join("run-finish")
+        .to_string_lossy()
+        .into_owned();
+    let stamp_path = artifacts_dir
+        .join("run-finish")
+        .join(format!("{run_key}.toml"))
+        .to_string_lossy()
+        .into_owned();
+
+    let shell_cmd = build_shell_cmd(
+        agent_cmd,
+        window_name,
+        &status_dir,
+        &status_path_str,
+        &finish_dir,
+        &stamp_path,
     );
 
     let args: Vec<&str> = if switch {
@@ -344,7 +493,7 @@ mod tests {
     fn test_validate_toml_artifacts_non_toml_ignored() {
         let dir = tempfile::TempDir::new().unwrap();
         let md = dir.path().join("spec.md");
-        fs::write(&md, "# Not TOML at all {{{}}}").unwrap();
+        fs::write(&md, "# Not TOML at all {{{{}}}}}").unwrap();
         assert!(validate_toml_artifacts(&[md.as_path()]).is_ok());
     }
 
@@ -381,5 +530,288 @@ mod tests {
     fn test_extract_model_fallback_to_binary() {
         let cmd = vec!["/usr/bin/claude".to_string(), "--fast".to_string()];
         assert_eq!(extract_model(&cmd), "claude");
+    }
+
+    #[test]
+    fn finish_stamp_round_trip() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        let stamp = FinishStamp {
+            finished_at: "2026-04-26T10:00:00Z".to_string(),
+            exit_code: 0,
+            head_before: "abc123".to_string(),
+            head_after: "def456".to_string(),
+            head_state: "stable".to_string(),
+        };
+        write_finish_stamp(&path, &stamp).unwrap();
+        assert!(path.exists());
+        let read = read_finish_stamp(&path).unwrap();
+        assert_eq!(read, stamp);
+    }
+
+    #[test]
+    fn finish_stamp_atomic_write_no_partial_file_on_failure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Use a read-only directory to force the write to fail.
+        let ro_dir = dir.path().join("readonly");
+        fs::create_dir(&ro_dir).unwrap();
+        let mut perms = fs::metadata(&ro_dir).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&ro_dir, perms.clone()).unwrap();
+
+        let path = ro_dir.join("stamp.toml");
+        let stamp = FinishStamp {
+            finished_at: "2026-04-26T10:00:00Z".to_string(),
+            exit_code: 0,
+            head_before: "abc123".to_string(),
+            head_after: "def456".to_string(),
+            head_state: "stable".to_string(),
+        };
+        let result = write_finish_stamp(&path, &stamp);
+        assert!(result.is_err());
+
+        // No partial file should remain.
+        let entries: Vec<_> = fs::read_dir(&ro_dir).unwrap().flatten().collect();
+        assert!(entries.is_empty(), "expected no partial files, got {:?}", entries);
+
+        // Restore permissions so the temp dir can be cleaned up.
+        perms.set_readonly(false);
+        let _ = fs::set_permissions(&ro_dir, perms);
+    }
+
+    #[test]
+    fn finish_stamp_parses_required_fields() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        fs::write(
+            &path,
+            r#"finished_at = "2026-04-26T10:00:00Z"
+exit_code = 1
+head_before = "000000"
+head_after = "111111"
+head_state = "unstable"
+"#,
+        )
+        .unwrap();
+        let stamp = read_finish_stamp(&path).unwrap();
+        assert_eq!(stamp.finished_at, "2026-04-26T10:00:00Z");
+        assert_eq!(stamp.exit_code, 1);
+        assert_eq!(stamp.head_before, "000000");
+        assert_eq!(stamp.head_after, "111111");
+        assert_eq!(stamp.head_state, "unstable");
+    }
+
+    #[test]
+    fn finish_stamp_missing_field_is_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        fs::write(
+            &path,
+            r#"finished_at = "2026-04-26T10:00:00Z"
+exit_code = 0
+head_before = "abc"
+head_after = "def"
+"#,
+        )
+        .unwrap();
+        assert!(read_finish_stamp(&path).is_err());
+    }
+
+    #[test]
+    fn finish_stamp_malformed_toml_is_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        fs::write(&path, "not { valid toml").unwrap();
+        assert!(read_finish_stamp(&path).is_err());
+    }
+
+    #[test]
+    fn finish_stamp_ignores_unknown_fields() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        fs::write(
+            &path,
+            r#"finished_at = "2026-04-26T10:00:00Z"
+exit_code = 0
+head_before = "abc"
+head_after = "def"
+head_state = "stable"
+extra_field = "ignored"
+"#,
+        )
+        .unwrap();
+        let stamp = read_finish_stamp(&path).unwrap();
+        assert_eq!(stamp.head_state, "stable");
+    }
+
+    #[test]
+    fn shell_cmd_contains_stabilization_loop() {
+        let cmd = build_shell_cmd(
+            "claude -p prompt.md",
+            "[Test]",
+            "/tmp/status",
+            "/tmp/status/run.txt",
+            "/tmp/artifacts/run-finish",
+            "/tmp/artifacts/run-finish/test-key.toml",
+        );
+        assert!(cmd.contains("git rev-parse HEAD"), "should capture HEAD");
+        assert!(cmd.contains("head_state"), "should write head_state");
+        assert!(cmd.contains(".git/index.lock"), "should wait for index.lock");
+        assert!(cmd.contains("stable"), "should mention stable state");
+        assert!(cmd.contains("unstable"), "should mention unstable state");
+        assert!(cmd.contains("mv "), "should atomically rename stamp");
+        assert!(cmd.contains("CODEXIZE_STAMP_STABILIZE_MS"), "should read env budget");
+    }
+
+    #[test]
+    fn shell_cmd_escapes_paths() {
+        let cmd = build_shell_cmd(
+            "echo hello",
+            "[Test]",
+            "/tmp/weird'path",
+            "/tmp/weird'path/status.txt",
+            "/tmp/weird'path/finish",
+            "/tmp/weird'path/finish/key.toml",
+        );
+        // Escaped paths should contain the single-quote handling.
+        assert!(cmd.contains("weird'\\''path"), "path should be shell-escaped");
+    }
+
+    #[test]
+    fn shell_cmd_produces_stable_stamp_in_git_repo() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let status_dir = dir.path().join("status");
+        let status_path = status_dir.join("run.txt");
+        let finish_dir = dir.path().join("run-finish");
+        let stamp_path = finish_dir.join("test.toml");
+
+        // Initialize a git repo with one commit.
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git init");
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "file.txt"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git add");
+        std::process::Command::new("git")
+            .args(["commit", "-m", "test", "--no-gpg-sign"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git commit");
+
+        let cmd = build_shell_cmd(
+            "true",
+            "[Test]",
+            &status_dir.to_string_lossy(),
+            &status_path.to_string_lossy(),
+            &finish_dir.to_string_lossy(),
+            &stamp_path.to_string_lossy(),
+        );
+
+        let output = std::process::Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(dir.path())
+            .output()
+            .expect("bash");
+        assert!(
+            output.status.success(),
+            "bash failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        assert!(stamp_path.exists(), "stamp should exist");
+        let stamp = read_finish_stamp(&stamp_path).unwrap();
+        assert_eq!(stamp.exit_code, 0);
+        assert_eq!(stamp.head_state, "stable");
+        assert!(!stamp.head_before.is_empty());
+        assert_eq!(stamp.head_before, stamp.head_after);
+
+        // Status file should also contain the exit code.
+        let status_text = fs::read_to_string(&status_path).unwrap();
+        assert_eq!(status_text.trim(), "0");
+    }
+
+    #[test]
+    fn shell_cmd_produces_unstable_stamp_when_head_keeps_changing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let status_dir = dir.path().join("status");
+        let status_path = status_dir.join("run.txt");
+        let finish_dir = dir.path().join("run-finish");
+        let stamp_path = finish_dir.join("test.toml");
+
+        // Create a fake git that returns a different SHA each call.
+        let bin_dir = dir.path().join("bin");
+        fs::create_dir(&bin_dir).unwrap();
+        let counter_file = dir.path().join("git_counter");
+        let git_script = format!(
+            r#"#!/bin/bash
+if [ "$1" = "rev-parse" ] && [ "$2" = "HEAD" ]; then
+    if [ -f "{counter}" ]; then
+        c=$(cat "{counter}")
+    else
+        c=0
+    fi
+    c=$((c + 1))
+    echo "$c" > "{counter}"
+    printf '%040d\n' "$c"
+    exit 0
+fi
+exit 1
+"#,
+            counter = counter_file.to_string_lossy()
+        );
+        fs::write(bin_dir.join("git"), git_script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(bin_dir.join("git")).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(bin_dir.join("git"), perms).unwrap();
+        }
+
+        // Create a fake .git directory so index.lock check works.
+        fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let path_env = std::env::var_os("PATH").unwrap_or_default();
+        let mut new_path = std::ffi::OsString::from(&bin_dir);
+        new_path.push(":");
+        new_path.push(&path_env);
+
+        let cmd = build_shell_cmd(
+            "true",
+            "[Test]",
+            &status_dir.to_string_lossy(),
+            &status_path.to_string_lossy(),
+            &finish_dir.to_string_lossy(),
+            &stamp_path.to_string_lossy(),
+        );
+
+        let output = std::process::Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(dir.path())
+            .env("PATH", &new_path)
+            .output()
+            .expect("bash");
+        assert!(
+            output.status.success(),
+            "bash failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        assert!(stamp_path.exists(), "stamp should exist");
+        let stamp = read_finish_stamp(&stamp_path).unwrap();
+        assert_eq!(stamp.exit_code, 0);
+        assert_eq!(stamp.head_state, "unstable");
+        assert!(!stamp.head_after.is_empty());
     }
 }

@@ -118,27 +118,25 @@ fn session_round_trips_failed_unverified_runs() {
 }
 
 #[test]
-fn resuming_missing_window_writes_end_message_and_persists_failure() {
+fn resuming_missing_window_keeps_run_running_for_drain_barrier() {
     with_temp_root(|| {
         let mut state = SessionState::new("resume-missing-window".to_string());
         state.agent_runs.push(sample_run(7, RunStatus::Running));
         state.save().expect("save session");
 
         let resumed = state.resume_running_runs(&[]).expect("resume");
-        assert_eq!(resumed, None);
+        assert_eq!(resumed, Some(7));
 
         let reloaded = SessionState::load("resume-missing-window").expect("reload session");
         let messages =
             SessionState::load_messages("resume-missing-window").expect("reload messages");
 
-        assert_eq!(reloaded.agent_runs[0].status, RunStatus::Failed);
-        assert_eq!(
-            reloaded.agent_runs[0].error.as_deref(),
-            Some("window missing on resume")
+        assert_eq!(reloaded.agent_runs[0].status, RunStatus::Running);
+        assert!(reloaded.agent_runs[0].error.is_none());
+        assert!(
+            messages.is_empty(),
+            "resume should not finalize missing-window runs at the state layer"
         );
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].kind, MessageKind::End);
-        assert!(messages[0].text.contains("window missing on resume"));
 
         let session_path = session_dir("resume-missing-window").join("session.toml");
         assert!(session_path.exists());

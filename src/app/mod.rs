@@ -9331,4 +9331,35 @@ dirty_after = false
             assert_eq!(app.state.current_phase, Phase::IdeaInput);
         });
     }
+
+    #[test]
+    fn stage_error_enter_relaunches_from_non_current_row() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test".into());
+            state.current_phase = Phase::SpecReviewRunning;
+            state.agent_error = Some("something went wrong".to_string());
+            let mut app = idle_app(state);
+            app.selected = 999;
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                1,
+                10,
+                10,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            app.handle_key(key(crossterm::event::KeyCode::Enter));
+            assert!(app.state.agent_error.is_none());
+            assert!(app.current_run_id.is_some());
+            assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
+        });
+    }
 }

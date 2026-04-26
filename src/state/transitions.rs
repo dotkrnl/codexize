@@ -127,7 +127,7 @@ pub const CODER_IO: StageIO = StageIO {
         "rounds/{round}/review.toml",
         "artifacts/live_summary.txt",
     ],
-    writes: &[],
+    writes: &["rounds/{round}/coder_summary.toml"],
 };
 
 pub const REVIEWER_IO: StageIO = StageIO {
@@ -135,6 +135,7 @@ pub const REVIEWER_IO: StageIO = StageIO {
     pointer_artifacts: &[
         "rounds/{round}/task.toml",
         "rounds/{round}/review_scope.toml",
+        "rounds/{round}/coder_summary.toml",
         "artifacts/spec.md",
         "artifacts/plan.md",
         "rounds/*/review.toml",
@@ -249,7 +250,7 @@ mod tests {
         let io = stage_io("coder").unwrap();
         assert!(io.pointer_artifacts.contains(&"rounds/{round}/task.toml"));
         assert!(io.pointer_artifacts.contains(&"rounds/{round}/review.toml"));
-        assert!(io.writes.is_empty());
+        assert!(io.writes.contains(&"rounds/{round}/coder_summary.toml"));
     }
 
     #[test]
@@ -259,6 +260,10 @@ mod tests {
         assert!(
             io.pointer_artifacts
                 .contains(&"rounds/{round}/review_scope.toml")
+        );
+        assert!(
+            io.pointer_artifacts
+                .contains(&"rounds/{round}/coder_summary.toml")
         );
         assert!(io.writes.contains(&"rounds/{round}/review.toml"));
     }

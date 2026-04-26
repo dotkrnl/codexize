@@ -3,6 +3,7 @@ pub mod app;
 pub mod artifacts;
 pub mod cache;
 pub mod cache_lock;
+pub mod coder_summary;
 pub mod dashboard;
 pub mod input_editor;
 pub mod model_names;

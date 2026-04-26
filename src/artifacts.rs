@@ -119,6 +119,8 @@ pub struct TasksArtifact {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewScopeArtifact {
     pub base_sha: String,
+    #[serde(default)]
+    pub dirty_after: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,10 +214,12 @@ mod tests {
     fn round_artifacts_round_trip_as_toml() {
         let review_scope = ReviewScopeArtifact {
             base_sha: "abc123".to_string(),
+            dirty_after: true,
         };
         let encoded = toml::to_string(&review_scope).expect("encode review scope");
         let decoded: ReviewScopeArtifact = toml::from_str(&encoded).expect("decode review scope");
         assert_eq!(decoded.base_sha, "abc123");
+        assert!(decoded.dirty_after);
 
         let review = ReviewArtifact {
             status: ReviewStatus::Revise,
@@ -242,5 +246,13 @@ mod tests {
         let json = r#"{ "status": "approved", "summary": "old json" }"#;
         let error = toml::from_str::<ReviewArtifact>(json).expect_err("json must fail");
         assert!(error.to_string().contains("TOML"));
+    }
+
+    #[test]
+    fn review_scope_defaults_dirty_after_for_legacy_files() {
+        let decoded: ReviewScopeArtifact =
+            toml::from_str("base_sha = \"abc123\"\n").expect("decode legacy review scope");
+        assert_eq!(decoded.base_sha, "abc123");
+        assert!(!decoded.dirty_after);
     }
 }

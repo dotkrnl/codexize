@@ -20,8 +20,8 @@ use crate::{
         selection::{pick_for_phase, select_excluding, select_for_review},
     },
     state::{
-        self as session_state, Message, MessageKind, MessageSender, Node, Phase, PipelineItem,
-        PipelineItemStatus, RunStatus, SessionState,
+        self as session_state, Message, MessageKind, MessageSender, Node, PendingGuardDecision,
+        Phase, PipelineItem, PipelineItemStatus, RunStatus, SessionState,
     },
     tasks, tmux,
     tmux::TmuxContext,
@@ -247,6 +247,23 @@ impl App {
                     SessionState::load_messages(&app.state.session_id).unwrap_or_default();
                 app.rebuild_tree_view(None);
             }
+        }
+        // Resume validation: if the session was interrupted mid-guard-decision,
+        // restore the modal or fail closed.
+        if app.state.current_phase == Phase::GitGuardPending {
+            if app.state.pending_guard_decision.is_none() {
+                app.state.agent_error =
+                    Some("guard pending state missing on resume".to_string());
+                let _ = app.transition_to_phase(Phase::BlockedNeedsUser);
+                let _ = app.state.save();
+            }
+        } else if app.state.pending_guard_decision.is_some() {
+            // Stale: pending decision with no matching phase — clear it.
+            let _ = app.state.log_event(
+                "warning: clearing stale pending_guard_decision (phase mismatch on resume)".to_string(),
+            );
+            app.state.pending_guard_decision = None;
+            let _ = app.state.save();
         }
         let _ = app.setup_watcher();
         app
@@ -654,6 +671,60 @@ impl App {
         Ok(())
     }
 
+    pub fn accept_guard_reset(&mut self) -> Result<()> {
+        let decision = self
+            .state
+            .pending_guard_decision
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("accept_guard_reset: no pending guard decision"))?;
+
+        for w in &decision.warnings {
+            self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
+        }
+        guard::reset_hard_to(&decision.captured_head);
+
+        let run = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|r| r.id == decision.run_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("accept_guard_reset: run {} not found", decision.run_id))?;
+
+        let _ = self.state.save();
+        self.complete_run_finalization(&run, Some("forbidden_head_advance".to_string()))
+    }
+
+    pub fn accept_guard_keep(&mut self) -> Result<()> {
+        let decision = self
+            .state
+            .pending_guard_decision
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("accept_guard_keep: no pending guard decision"))?;
+
+        for w in &decision.warnings {
+            self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
+        }
+        self.append_system_message(
+            decision.run_id,
+            MessageKind::SummaryWarn,
+            "operator kept unauthorized commit from interactive run".to_string(),
+        );
+
+        let run = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|r| r.id == decision.run_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("accept_guard_keep: run {} not found", decision.run_id))?;
+
+        let _ = self.state.save();
+        // Artifact was valid (PendingDecision only fires on valid-artifact path);
+        // finalize as success so artifact/exit-code logic in the phase dispatch fires.
+        self.complete_run_finalization(&run, None)
+    }
+
     fn editable_artifact(&self) -> Option<std::path::PathBuf> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
@@ -1040,19 +1111,13 @@ impl App {
         }
     }
 
-    fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> (Option<String>, Vec<String>) {
+    fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> guard::VerifyResult {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return (None, vec![]);
+            return guard::VerifyResult::Ok { warnings: vec![] };
         }
         let dir = self.guard_dir_for(&run.stage, run.task_id, run.round, run.attempt);
-        match guard::verify(&dir, &run.stage) {
-            guard::VerifyResult::Ok { warnings } => (None, warnings),
-            guard::VerifyResult::HardError { reason, warnings } => (Some(reason), warnings),
-            // No AskOperator capture sites exist yet; treat as no-error so
-            // the run outcome is not affected until the modal is wired up.
-            guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
-        }
+        guard::verify(&dir, &run.stage)
     }
 
     fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
@@ -1234,14 +1299,41 @@ impl App {
                     run.id, run.stage
                 ));
             }
-            let (guard_reason, guard_warnings) = self.enforce_run_guard(run);
-            for w in guard_warnings {
-                self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+            match self.enforce_run_guard(run) {
+                guard::VerifyResult::Ok { warnings } => {
+                    for w in warnings {
+                        self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+                    }
+                    return Ok(None);
+                }
+                guard::VerifyResult::HardError { reason, warnings } => {
+                    for w in warnings {
+                        self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+                    }
+                    return Ok(Some(reason));
+                }
+                guard::VerifyResult::PendingDecision {
+                    captured_head,
+                    current_head,
+                    warnings,
+                } => {
+                    // Park the run: populate pending decision and return Ok(None).
+                    // Warnings are NOT appended yet — they replay at resolution time.
+                    // The finalization caller detects the populated field and
+                    // transitions to GitGuardPending instead of completing normally.
+                    self.state.pending_guard_decision = Some(PendingGuardDecision {
+                        stage: run.stage.clone(),
+                        task_id: run.task_id,
+                        round: run.round,
+                        attempt: run.attempt,
+                        run_id: run.id,
+                        captured_head,
+                        current_head,
+                        warnings,
+                    });
+                    return Ok(None);
+                }
             }
-            if guard_reason.is_some() {
-                return Ok(guard_reason);
-            }
-            return Ok(None);
         }
 
         // No artifact (unknown stage) or artifact missing/invalid: exit code
@@ -1257,7 +1349,13 @@ impl App {
 
         // Guard reason beats artifact reason (coder control-file edits are a
         // real protocol violation; non-coder HEAD advances are hard errors).
-        let (guard_reason, guard_warnings) = self.enforce_run_guard(run);
+        // PendingDecision here means artifact was missing/invalid — the run is
+        // already a failure from the artifact check, so treat it as no guard error.
+        let (guard_reason, guard_warnings) = match self.enforce_run_guard(run) {
+            guard::VerifyResult::Ok { warnings } => (None, warnings),
+            guard::VerifyResult::HardError { reason, warnings } => (Some(reason), warnings),
+            guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
+        };
         for w in guard_warnings {
             self.append_system_message(run.id, MessageKind::SummaryWarn, w);
         }
@@ -2368,12 +2466,28 @@ impl App {
     }
 
     fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
-        use anyhow::Context;
-
         self.drain_live_summary(run);
 
+        let failure_reason = self.normalized_failure_reason(run)?;
+        if failure_reason.is_none()
+            && self.state.pending_guard_decision.as_ref().is_some_and(|d| d.run_id == run.id)
+        {
+            self.transition_to_phase(Phase::GitGuardPending)?;
+            let _ = self.state.save();
+            return Ok(());
+        }
+        self.complete_run_finalization(run, failure_reason)
+    }
+
+    fn complete_run_finalization(
+        &mut self,
+        run: &crate::state::RunRecord,
+        failure_reason: Option<String>,
+    ) -> Result<()> {
+        use anyhow::Context;
+
         let session_dir = session_state::session_dir(&self.state.session_id);
-        if let Some(error) = self.normalized_failure_reason(run)? {
+        if let Some(error) = failure_reason {
             self.finalize_run_record(run.id, false, Some(error.clone()));
             let failed_run = self
                 .state

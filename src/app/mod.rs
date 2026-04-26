@@ -720,8 +720,16 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("accept_guard_keep: run {} not found", decision.run_id))?;
 
         let _ = self.state.save();
-        // Artifact was valid (PendingDecision only fires on valid-artifact path);
-        // finalize as success so artifact/exit-code logic in the phase dispatch fires.
+        // Artifact was valid (PendingDecision only fires on valid-artifact path).
+        // complete_run_finalization dispatches on current_phase; restore the
+        // originating running phase so the correct success successor fires.
+        let originating = match decision.stage.as_str() {
+            "brainstorm" => Phase::BrainstormRunning,
+            "planning" => Phase::PlanningRunning,
+            "recovery" => Phase::BuilderRecovery(decision.round),
+            other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
+        };
+        self.state.current_phase = originating;
         self.complete_run_finalization(&run, None)
     }
 
@@ -7100,6 +7108,270 @@ estimated_tokens = 1
                 prompt.contains("NON-INTERACTIVE"),
                 "agent_pivot recovery prompt file must be NON-INTERACTIVE"
             );
+        });
+    }
+
+    // ---------- pending guard decision tests ----------
+
+    fn make_brainstorm_run(id: u64) -> RunRecord {
+        RunRecord {
+            id,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            vendor: "test".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        }
+    }
+
+    fn write_ask_operator_snapshot(session_dir: &std::path::Path) {
+        let guard_dir = session_dir.join(".guards").join("brainstorm-stage-r1-a1");
+        std::fs::create_dir_all(&guard_dir).expect("guard dir");
+        std::fs::write(
+            guard_dir.join("snapshot.toml"),
+            "head = \"0000000000000000000000000000000000000000\"\ngit_status = \"\"\nmode = \"ask_operator\"\n\n[control_files]\n",
+        )
+        .expect("write snapshot");
+    }
+
+    #[test]
+    fn normalize_failure_reason_pending_decision_parks_run() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-park";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            let run = make_brainstorm_run(42);
+            state.agent_runs.push(run.clone());
+            let mut app = mk_app(state);
+
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
+                .expect("write spec");
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status parent"))
+                .expect("status dir");
+            std::fs::write(app.run_status_path(&run), "0").expect("write exit code");
+            write_ask_operator_snapshot(&session_dir);
+
+            let result = app.normalized_failure_reason(&run).expect("call ok");
+            assert!(
+                result.is_none(),
+                "PendingDecision must not become a hard failure reason, got: {result:?}"
+            );
+            let decision = app
+                .state
+                .pending_guard_decision
+                .as_ref()
+                .expect("pending_guard_decision must be Some after PendingDecision");
+            assert_eq!(decision.run_id, run.id);
+            assert_eq!(decision.stage, "brainstorm");
+            assert_eq!(decision.captured_head, "0000000000000000000000000000000000000000");
+        });
+    }
+
+    #[test]
+    fn finalize_current_run_transitions_to_git_guard_pending() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-finalize";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            let run = make_brainstorm_run(1);
+            state.agent_runs.push(run.clone());
+            let mut app = mk_app(state);
+
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
+                .expect("write spec");
+            std::fs::create_dir_all(app.run_status_path(&run).parent().expect("parent"))
+                .expect("dir");
+            std::fs::write(app.run_status_path(&run), "0").expect("exit code");
+            write_ask_operator_snapshot(&session_dir);
+
+            app.finalize_current_run(&run).expect("finalize ok");
+            assert_eq!(
+                app.state.current_phase,
+                Phase::GitGuardPending,
+                "phase must be GitGuardPending after parked run"
+            );
+            assert!(
+                app.state.pending_guard_decision.is_some(),
+                "pending_guard_decision must be set"
+            );
+        });
+    }
+
+    #[test]
+    fn pending_guard_reset_finalizes_as_forbidden_head_advance() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-reset";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::GitGuardPending;
+            let run = make_brainstorm_run(10);
+            state.agent_runs.push(run.clone());
+            state.pending_guard_decision = Some(PendingGuardDecision {
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                run_id: 10,
+                captured_head: "abc123".to_string(),
+                current_head: "def456".to_string(),
+                warnings: vec!["some guard warning".to_string()],
+            });
+            let mut app = mk_app(state);
+
+            app.accept_guard_reset().expect("accept_guard_reset ok");
+
+            assert!(
+                app.state.pending_guard_decision.is_none(),
+                "pending_guard_decision must be cleared after reset"
+            );
+            let finalized = app.state.agent_runs.iter().find(|r| r.id == 10).expect("run");
+            assert_eq!(finalized.status, RunStatus::Failed);
+            assert_eq!(
+                finalized.error.as_deref(),
+                Some("forbidden_head_advance"),
+                "run error must be forbidden_head_advance"
+            );
+            let warned = app.messages.iter().any(|m| {
+                m.kind == MessageKind::SummaryWarn && m.text.contains("some guard warning")
+            });
+            assert!(warned, "guard warning must be replayed as SummaryWarn");
+        });
+    }
+
+    #[test]
+    fn pending_guard_keep_preserves_normal_semantics() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-keep";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::GitGuardPending;
+            let run = make_brainstorm_run(20);
+            state.agent_runs.push(run.clone());
+            state.pending_guard_decision = Some(PendingGuardDecision {
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                run_id: 20,
+                captured_head: "abc123".to_string(),
+                current_head: "def456".to_string(),
+                warnings: vec!["kept-warning".to_string()],
+            });
+            let mut app = mk_app(state);
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
+                .expect("write spec");
+
+            app.accept_guard_keep().expect("accept_guard_keep ok");
+
+            assert!(
+                app.state.pending_guard_decision.is_none(),
+                "pending_guard_decision must be cleared after keep"
+            );
+            let finalized = app.state.agent_runs.iter().find(|r| r.id == 20).expect("run");
+            assert_eq!(finalized.status, RunStatus::Done, "run must succeed on keep");
+            let kept_warn = app.messages.iter().any(|m| {
+                m.kind == MessageKind::SummaryWarn
+                    && m.text.contains("operator kept unauthorized commit")
+            });
+            assert!(kept_warn, "operator-kept warning must be emitted");
+            assert_ne!(
+                app.state.current_phase,
+                Phase::GitGuardPending,
+                "phase must advance after keep"
+            );
+        });
+    }
+
+    #[test]
+    fn pending_guard_resume_fail_closed_when_decision_missing() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-resume-fail";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::GitGuardPending;
+            state.save().expect("save");
+
+            let app = App::new(
+                mk_tmux(),
+                SessionState::load(session_id).expect("load session"),
+            );
+            assert_eq!(
+                app.state.current_phase,
+                Phase::BlockedNeedsUser,
+                "must fail closed to BlockedNeedsUser"
+            );
+            assert!(
+                app.state.agent_error.is_some(),
+                "agent_error must be set on fail-closed"
+            );
+        });
+    }
+
+    #[test]
+    fn pending_guard_resume_restores_modal_when_decision_present() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-resume-ok";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::GitGuardPending;
+            state.pending_guard_decision = Some(PendingGuardDecision {
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                run_id: 99,
+                captured_head: "abc".to_string(),
+                current_head: "def".to_string(),
+                warnings: vec![],
+            });
+            state.save().expect("save");
+
+            let app = App::new(
+                mk_tmux(),
+                SessionState::load(session_id).expect("load session"),
+            );
+            assert_eq!(app.state.current_phase, Phase::GitGuardPending);
+            assert!(app.state.pending_guard_decision.is_some());
+        });
+    }
+
+    #[test]
+    fn pending_guard_stale_decision_cleared_on_resume() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-stale";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            state.pending_guard_decision = Some(PendingGuardDecision {
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                run_id: 77,
+                captured_head: "aaa".to_string(),
+                current_head: "bbb".to_string(),
+                warnings: vec![],
+            });
+            state.save().expect("save");
+
+            let app = App::new(
+                mk_tmux(),
+                SessionState::load(session_id).expect("load session"),
+            );
+            assert!(
+                app.state.pending_guard_decision.is_none(),
+                "stale pending_guard_decision must be cleared on resume"
+            );
+            assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
         });
     }
 }

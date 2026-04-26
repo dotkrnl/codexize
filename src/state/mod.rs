@@ -859,25 +859,21 @@ impl SessionState {
                 continue;
             }
             let mut mismatch_reason = None;
-            if let Some(ref run_hostname) = run.hostname {
-                if let Some(ref current) = current_hostname {
-                    if run_hostname != current {
-                        mismatch_reason = Some(format!(
-                            "hostname mismatch: run={run_hostname}, current={current}"
-                        ));
-                    }
-                }
+            if let (Some(run_hostname), Some(current)) =
+                (run.hostname.as_deref(), current_hostname.as_deref())
+                && run_hostname != current
+            {
+                mismatch_reason = Some(format!(
+                    "hostname mismatch: run={run_hostname}, current={current}"
+                ));
             }
-            if mismatch_reason.is_none() {
-                if let Some(run_dev) = run.mount_device_id {
-                    if let Some(current_dev) = current_device_id {
-                        if run_dev != current_dev {
-                            mismatch_reason = Some(format!(
-                                "mount device mismatch: run={run_dev}, current={current_dev}"
-                            ));
-                        }
-                    }
-                }
+            if mismatch_reason.is_none()
+                && let (Some(run_dev), Some(current_dev)) = (run.mount_device_id, current_device_id)
+                && run_dev != current_dev
+            {
+                mismatch_reason = Some(format!(
+                    "mount device mismatch: run={run_dev}, current={current_dev}"
+                ));
             }
             if let Some(reason) = mismatch_reason {
                 run.status = RunStatus::FailedUnverified;

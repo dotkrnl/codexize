@@ -312,28 +312,27 @@ impl App {
                 .filter(|run| run.status == crate::state::RunStatus::Running)
                 .map(|run| run.started_at)
                 .min();
-            if let Some(cutoff) = oldest_running_timestamp {
-                if let Ok(entries) = std::fs::read_dir(&finish_dir) {
-                    for entry in entries.flatten() {
-                        if !entry.path().is_file() {
-                            continue;
-                        }
-                        let name = entry.file_name();
-                        let name_str = name.to_string_lossy();
-                        if !name_str.ends_with(".toml") {
-                            continue;
-                        }
-                        if let Ok(stamp) = crate::runner::read_finish_stamp(&entry.path()) {
-                            if let Ok(finished) =
-                                chrono::DateTime::parse_from_rfc3339(&stamp.finished_at)
-                            {
-                                let finished_utc = finished.with_timezone(&chrono::Utc);
-                                if finished_utc < cutoff {
-                                    let _ = std::fs::create_dir_all(&archive_dir);
-                                    let dest = archive_dir.join(&name);
-                                    let _ = std::fs::rename(entry.path(), dest);
-                                }
-                            }
+            if let Some(cutoff) = oldest_running_timestamp
+                && let Ok(entries) = std::fs::read_dir(&finish_dir)
+            {
+                for entry in entries.flatten() {
+                    if !entry.path().is_file() {
+                        continue;
+                    }
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if !name_str.ends_with(".toml") {
+                        continue;
+                    }
+                    if let Ok(stamp) = crate::runner::read_finish_stamp(&entry.path())
+                        && let Ok(finished) =
+                            chrono::DateTime::parse_from_rfc3339(&stamp.finished_at)
+                    {
+                        let finished_utc = finished.with_timezone(&chrono::Utc);
+                        if finished_utc < cutoff {
+                            let _ = std::fs::create_dir_all(&archive_dir);
+                            let dest = archive_dir.join(&name);
+                            let _ = std::fs::rename(entry.path(), dest);
                         }
                     }
                 }

@@ -236,45 +236,65 @@ impl App {
     }
 
     fn model_strip(&self) -> Paragraph<'static> {
+        use crate::selection::{
+            CachedModel,
+            config::SelectionPhase,
+            display::visible_models,
+            ranking::selection_probability,
+        };
+
+        // Probabilities are computed on demand per phase and normalised against
+        // the global total over every assembled model (not just the visible
+        // subset) so that filtering doesn't artificially inflate percentages.
+        let prob_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
+            selection_probability(model, phase, &self.versions)
+        };
+        let total_for = |phase: SelectionPhase| -> f64 {
+            self.models.iter().map(|m| prob_for(phase, m)).sum()
+        };
+
+        let total_idea = total_for(SelectionPhase::Idea);
+        let total_planning = total_for(SelectionPhase::Planning);
+        let total_build = total_for(SelectionPhase::Build);
+        let total_review = total_for(SelectionPhase::Review);
+
+        let visible = visible_models(&self.models, &self.versions);
+
         let mut vendor_order: Vec<VendorKind> = Vec::new();
-        let mut by_vendor: std::collections::BTreeMap<
-            VendorKind,
-            Vec<&crate::selection::ModelStatus>,
-        > = std::collections::BTreeMap::new();
-        for model in &self.models {
+        let mut by_vendor: std::collections::BTreeMap<VendorKind, Vec<&CachedModel>> =
+            std::collections::BTreeMap::new();
+        for model in self.models.iter().filter(|m| visible.contains(&m.name)) {
             if !vendor_order.contains(&model.vendor) {
                 vendor_order.push(model.vendor);
             }
             by_vendor.entry(model.vendor).or_default().push(model);
         }
-
-        let total_idea: f64 = self.models.iter().map(|m| m.idea_weight).sum();
-        let total_planning: f64 = self.models.iter().map(|m| m.planning_weight).sum();
-        let total_build: f64 = self.models.iter().map(|m| m.build_weight).sum();
-        let total_review: f64 = self.models.iter().map(|m| m.review_weight).sum();
+        for models in by_vendor.values_mut() {
+            models.sort_by_key(|m| m.display_order);
+        }
 
         let max_idea = self
             .models
             .iter()
-            .map(|m| probability_percent(m.idea_weight, total_idea))
+            .map(|m| probability_percent(prob_for(SelectionPhase::Idea, m), total_idea))
             .max()
             .unwrap_or(0);
         let max_planning = self
             .models
             .iter()
-            .map(|m| probability_percent(m.planning_weight, total_planning))
+            .map(|m| probability_percent(prob_for(SelectionPhase::Planning, m), total_planning))
             .max()
             .unwrap_or(0);
         let max_build = self
             .models
             .iter()
-            .map(|m| probability_percent(m.build_weight, total_build))
+            .map(|m| probability_percent(prob_for(SelectionPhase::Build, m), total_build))
             .max()
             .unwrap_or(0);
         let max_review = self
             .models
             .iter()
-            .map(|m| probability_percent(m.review_weight, total_review))
+            .map(|m| probability_percent(prob_for(SelectionPhase::Review, m), total_review))
             .max()
             .unwrap_or(0);
 
@@ -292,10 +312,8 @@ impl App {
                     .unwrap_or(&model.name)
                     .to_string();
 
-                let stupid_level = model
-                    .stupid_level
-                    .map(|v| format!("{v:>2}"))
-                    .unwrap_or_else(|| " -".to_string());
+                let stupid_value: u8 = model.current_score.round().clamp(0.0, 99.0) as u8;
+                let stupid_level = format!("{stupid_value:>2}");
                 let quota = model
                     .quota_percent
                     .map(|v| format!("{v:>3}%"))
@@ -310,10 +328,16 @@ impl App {
                     Span::raw("        ")
                 };
 
-                let idea_pct = probability_percent(model.idea_weight, total_idea);
-                let planning_pct = probability_percent(model.planning_weight, total_planning);
-                let build_pct = probability_percent(model.build_weight, total_build);
-                let review_pct = probability_percent(model.review_weight, total_review);
+                let idea_pct =
+                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
+                let planning_pct = probability_percent(
+                    prob_for(SelectionPhase::Planning, model),
+                    total_planning,
+                );
+                let build_pct =
+                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                let review_pct =
+                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
                 let vendor_failed = self
                     .quota_errors
                     .iter()
@@ -365,10 +389,7 @@ impl App {
                 // on 0..100), where higher is better — for stupid_level a higher
                 // score literally means "more clever", and for quota_percent a
                 // higher value means "more headroom remaining".
-                let stupid_color = match model.stupid_level {
-                    Some(v) => probability_color(v, 100),
-                    None => Color::DarkGray,
-                };
+                let stupid_color = probability_color(stupid_value, 100);
                 let quota_color = match model.quota_percent {
                     Some(v) => probability_color(v, 100),
                     None => Color::DarkGray,
@@ -775,6 +796,7 @@ mod tests {
             nodes,
             visible_rows,
             models: Vec::new(),
+            versions: crate::selection::ranking::build_version_index(&[]),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
             selected: 0,
             selected_key,

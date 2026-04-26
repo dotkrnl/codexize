@@ -1,6 +1,6 @@
 use crate::{
     cache,
-    selection::{ModelStatus, QuotaError, VendorKind},
+    selection::{self, CachedModel, QuotaError, VendorKind, ranking::build_version_index},
 };
 use ratatui::style::Color;
 use std::{
@@ -11,10 +11,10 @@ use std::{
 
 use super::{App, state::ModelRefreshState};
 
-pub(super) fn spawn_refresh() -> mpsc::Receiver<(Vec<ModelStatus>, Vec<QuotaError>)> {
+pub(super) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(crate::selection::load_all_models());
+        let _ = tx.send(selection::assemble::assemble_models());
     });
     rx
 }
@@ -47,13 +47,17 @@ pub(super) fn vendor_prefix(vendor: VendorKind) -> &'static str {
 }
 
 impl App {
+    pub(super) fn set_models(&mut self, models: Vec<CachedModel>) {
+        self.versions = build_version_index(&models);
+        self.models = models;
+    }
+
     pub(super) fn refresh_models_if_due(&mut self) {
         match &self.model_refresh {
             ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
                 Ok((models, errors)) => {
                     if !models.is_empty() {
-                        self.models = models;
-                        let _ = cache::save_legacy_model_statuses(&self.models, &errors);
+                        self.set_models(models);
                     }
                     if errors.is_empty() {
                         self.quota_retry_delay = Duration::from_secs(60);

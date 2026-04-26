@@ -14,7 +14,10 @@ use crate::{
     artifacts::{ArtifactKind, SkipToImplProposal, Spec},
     cache, review,
     selection::{
-        self, ModelStatus, QuotaError, TaskKind, VendorKind, select_excluding, select_for_review,
+        self, CachedModel, QuotaError, VendorKind,
+        config::SelectionPhase,
+        ranking::{VersionIndex, build_version_index},
+        selection::{pick_for_phase, select_excluding, select_for_review},
     },
     state::{
         self as session_state, Message, MessageKind, MessageSender, Node, Phase, PipelineItem,
@@ -71,7 +74,8 @@ pub struct App {
     state: SessionState,
     nodes: Vec<Node>,
     visible_rows: Vec<VisibleNodeRow>,
-    models: Vec<ModelStatus>,
+    models: Vec<CachedModel>,
+    versions: VersionIndex,
     model_refresh: ModelRefreshState,
     selected: usize,
     selected_key: Option<NodeKey>,
@@ -163,6 +167,7 @@ impl App {
             nodes,
             visible_rows: Vec::new(),
             models: Vec::new(),
+            versions: build_version_index(&[]),
             model_refresh: ModelRefreshState::Fetching {
                 rx: spawn_refresh(),
                 started_at: Instant::now(),
@@ -201,18 +206,19 @@ impl App {
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
-        // Load cached models if available
-        if let Some((cached, errors, expired)) = cache::load_legacy_model_statuses() {
-            app.models = cached;
-            app.quota_errors = errors;
-            app.model_refresh = if expired {
-                ModelRefreshState::Fetching {
-                    rx: spawn_refresh(),
-                    started_at: Instant::now(),
-                }
-            } else {
-                ModelRefreshState::Idle(Instant::now())
-            };
+        // Populate the model strip immediately from whatever the cache holds.
+        // The background refresh spawned above will replace this if any section
+        // is expired.
+        let cached = selection::assemble::assemble_from_cached_only();
+        if !cached.is_empty() {
+            let dashboard_expired = cache::load()
+                .dashboard
+                .map(|s| s.expired)
+                .unwrap_or(true);
+            app.set_models(cached);
+            if !dashboard_expired {
+                app.model_refresh = ModelRefreshState::Idle(Instant::now());
+            }
         }
         if let Ok(output) = std::process::Command::new("tmux")
             .args(["list-windows", "-F", "#{window_name}"])
@@ -911,17 +917,40 @@ impl App {
         (run.stage.clone(), run.task_id, run.round)
     }
 
-    fn task_kind_for_stage(stage: &str) -> TaskKind {
+    /// Project a list of completed runs into the (vendors, (vendor,model)) shape
+    /// expected by `select_for_review` and `select_excluding`. Runs with an
+    /// unrecognised vendor string are dropped.
+    fn used_review_pairs(
+        runs: &[crate::state::RunRecord],
+    ) -> (Vec<VendorKind>, Vec<(VendorKind, String)>) {
+        let mut vendors = Vec::new();
+        let mut models = Vec::new();
+        for run in runs {
+            let Some(vendor) = selection::vendor::str_to_vendor(&run.vendor) else {
+                continue;
+            };
+            if !vendors.contains(&vendor) {
+                vendors.push(vendor);
+            }
+            let pair = (vendor, run.model.clone());
+            if !models.contains(&pair) {
+                models.push(pair);
+            }
+        }
+        (vendors, models)
+    }
+
+    fn phase_for_stage(stage: &str) -> SelectionPhase {
         match stage {
-            "brainstorm" => TaskKind::Idea,
-            "spec-review" => TaskKind::Review,
-            "planning" => TaskKind::Planning,
-            "plan-review" => TaskKind::Review,
-            "sharding" => TaskKind::Planning,
-            "recovery" => TaskKind::Planning,
-            "coder" => TaskKind::Build,
-            "reviewer" => TaskKind::Review,
-            _ => TaskKind::Build,
+            "brainstorm" => SelectionPhase::Idea,
+            "spec-review" => SelectionPhase::Review,
+            "planning" => SelectionPhase::Planning,
+            "plan-review" => SelectionPhase::Review,
+            "sharding" => SelectionPhase::Planning,
+            "recovery" => SelectionPhase::Planning,
+            "coder" => SelectionPhase::Build,
+            "reviewer" => SelectionPhase::Review,
+            _ => SelectionPhase::Build,
         }
     }
 
@@ -1924,7 +1953,7 @@ impl App {
 
     fn launch_recovery_plan_review_with_model(
         &mut self,
-        override_model: Option<ModelStatus>,
+        override_model: Option<CachedModel>,
     ) -> bool {
         use anyhow::Context;
 
@@ -1961,7 +1990,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Review))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Review, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -2037,7 +2066,7 @@ impl App {
 
     fn launch_recovery_sharding_with_model(
         &mut self,
-        override_model: Option<ModelStatus>,
+        override_model: Option<CachedModel>,
     ) -> bool {
         use anyhow::Context;
 
@@ -2065,7 +2094,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -2260,12 +2289,19 @@ impl App {
             return true;
         }
 
-        let excluded = self.failed_models.get(&key).cloned().unwrap_or_default();
+        let excluded: Vec<(VendorKind, String)> = self
+            .failed_models
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         let next_model = select_excluding(
             &self.models,
-            Self::task_kind_for_stage(&failed_run.stage),
+            Self::phase_for_stage(&failed_run.stage),
             &excluded,
             last_failed_vendor,
+            &self.versions,
         );
 
         if let Some(next_model) = next_model.cloned() {
@@ -2626,7 +2662,7 @@ impl App {
     fn launch_brainstorm_with_model(
         &mut self,
         idea: String,
-        override_model: Option<ModelStatus>,
+        override_model: Option<CachedModel>,
     ) -> bool {
         self.state.agent_error = None;
 
@@ -2640,7 +2676,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| Self::select_brainstorm_model(&self.models))
+            .or_else(|| Self::select_brainstorm_model(&self.models, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error =
@@ -2714,16 +2750,17 @@ impl App {
         }
     }
 
-    fn select_brainstorm_model(
-        models: &[selection::ModelStatus],
-    ) -> Option<&selection::ModelStatus> {
-        selection::select(models, selection::TaskKind::Idea)
+    fn select_brainstorm_model<'a>(
+        models: &'a [CachedModel],
+        versions: &VersionIndex,
+    ) -> Option<&'a CachedModel> {
+        pick_for_phase(models, SelectionPhase::Idea, None, versions)
     }
 
     fn launch_retry_for_stage(
         &mut self,
         failed_run: &crate::state::RunRecord,
-        chosen: ModelStatus,
+        chosen: CachedModel,
     ) -> bool {
         match failed_run.stage.as_str() {
             "brainstorm" => {
@@ -2747,7 +2784,7 @@ impl App {
         let _ = self.launch_spec_review_with_model(None);
     }
 
-    fn launch_spec_review_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_spec_review_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
@@ -2773,20 +2810,19 @@ impl App {
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
-                select_for_review(
-                    &self.models,
-                    &self
-                        .state
-                        .agent_runs
-                        .iter()
-                        .filter(|run| {
-                            (run.stage == "brainstorm"
-                                || (run.stage == "spec-review" && run.round == round))
-                                && run.status == RunStatus::Done
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
+                let runs: Vec<_> = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .filter(|run| {
+                        (run.stage == "brainstorm"
+                            || (run.stage == "spec-review" && run.round == round))
+                            && run.status == RunStatus::Done
+                    })
+                    .cloned()
+                    .collect();
+                let (used_vendors, used_models) = Self::used_review_pairs(&runs);
+                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
             })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
@@ -2847,7 +2883,7 @@ impl App {
 
     fn launch_planning_with_model(
         &mut self,
-        override_model: Option<ModelStatus>,
+        override_model: Option<CachedModel>,
         interactive: bool,
     ) -> bool {
         self.state.agent_error = None;
@@ -2880,7 +2916,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -2940,7 +2976,7 @@ impl App {
         let _ = self.launch_plan_review_with_model(None);
     }
 
-    fn launch_plan_review_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_plan_review_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
@@ -2967,20 +3003,19 @@ impl App {
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
-                select_for_review(
-                    &self.models,
-                    &self
-                        .state
-                        .agent_runs
-                        .iter()
-                        .filter(|run| {
-                            (run.stage == "planning"
-                                || (run.stage == "plan-review" && run.round == round))
-                                && run.status == RunStatus::Done
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
+                let runs: Vec<_> = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .filter(|run| {
+                        (run.stage == "planning"
+                            || (run.stage == "plan-review" && run.round == round))
+                            && run.status == RunStatus::Done
+                    })
+                    .cloned()
+                    .collect();
+                let (used_vendors, used_models) = Self::used_review_pairs(&runs);
+                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
             })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
@@ -3040,7 +3075,7 @@ impl App {
         let _ = self.launch_sharding_with_model(None);
     }
 
-    fn launch_sharding_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_sharding_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.state.agent_error = None;
 
         if self.models.is_empty() {
@@ -3059,7 +3094,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3117,7 +3152,7 @@ impl App {
         let _ = self.launch_recovery_with_model(None);
     }
 
-    fn launch_recovery_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_recovery_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         use anyhow::Context;
 
         self.state.agent_error = None;
@@ -3147,7 +3182,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Planning))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3230,7 +3265,7 @@ impl App {
         let _ = self.launch_coder_with_model(None);
     }
 
-    fn launch_coder_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_coder_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
@@ -3266,7 +3301,7 @@ impl App {
 
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| selection::select(&self.models, selection::TaskKind::Build))
+            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Build, None, &self.versions))
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -3321,7 +3356,7 @@ impl App {
         let _ = self.launch_reviewer_with_model(None);
     }
 
-    fn launch_reviewer_with_model(&mut self, override_model: Option<ModelStatus>) -> bool {
+    fn launch_reviewer_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.state.agent_error = None;
         if self.models.is_empty() {
             self.state.agent_error =
@@ -3361,7 +3396,10 @@ impl App {
             .collect::<Vec<_>>();
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| select_for_review(&self.models, &excluded))
+            .or_else(|| {
+                let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
+                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available for review".to_string());
@@ -4621,6 +4659,7 @@ mod tests {
             nodes,
             visible_rows: Vec::new(),
             models: Vec::new(),
+            versions: build_version_index(&[]),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
             selected: 0,
             selected_key,
@@ -5146,20 +5185,44 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::ModelStatus {
-        selection::ModelStatus {
+    /// Map a 1-based rank to an axis score that produces a probability gap
+    /// large enough for `pick_for_phase`'s relative cutoff (1/3) to deterministically
+    /// keep the rank-1 model and discard the rest. With role_score_exponent = 3:
+    ///   1.0³ = 1.0     → kept
+    ///   0.6³ = 0.216   → 0.216 < 1/3, excluded
+    ///   0.4³ = 0.064   → excluded
+    fn rank_to_axis_score_inner(rank: u8) -> f64 {
+        match rank {
+            1 => 1.0,
+            2 => 0.6,
+            3 => 0.4,
+            _ => 0.3,
+        }
+    }
+
+    fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::CachedModel {
+        let idea = rank_to_axis_score_inner(idea_rank);
+        let build = rank_to_axis_score_inner(build_rank);
+        selection::CachedModel {
             vendor: selection::VendorKind::Claude,
             name: name.to_string(),
-            stupid_level: Some(7),
+            overall_score: 7.0,
+            current_score: 7.0,
+            standard_error: 2.0,
+            axes: vec![
+                // Build axes — disjoint from Idea axes.
+                ("codequality".to_string(), build),
+                ("correctness".to_string(), build),
+                ("debugging".to_string(), build),
+                ("safety".to_string(), build),
+                // Idea axes.
+                ("complexity".to_string(), idea),
+                ("edgecases".to_string(), idea),
+                ("contextawareness".to_string(), idea),
+                ("taskcompletion".to_string(), idea),
+            ],
             quota_percent: Some(80),
-            idea_rank,
-            planning_rank: 10,
-            build_rank,
-            review_rank: 10,
-            idea_weight: 0.0,
-            planning_weight: 0.0,
-            build_weight: 0.0,
-            review_weight: 0.0,
+            display_order: 0,
             fallback_from: None,
         }
     }
@@ -5170,20 +5233,34 @@ mod tests {
         planning_rank: u8,
         build_rank: u8,
         review_rank: u8,
-    ) -> selection::ModelStatus {
-        selection::ModelStatus {
+    ) -> selection::CachedModel {
+        let build = rank_to_axis_score_inner(build_rank);
+        let planning = rank_to_axis_score_inner(planning_rank);
+        let review = rank_to_axis_score_inner(review_rank);
+        // REVIEWER: "correctness" / "debugging" / "safety" / "edgecases" / "stability"
+        // are shared across multiple phases. Existing `ranked_model` callers only
+        // exercise the Build phase (planning_rank/review_rank are typically 10),
+        // so we bias the shared axes toward the Build score and use Planning /
+        // Review scores only for axes unique to those phases.
+        selection::CachedModel {
             vendor,
             name: name.to_string(),
-            stupid_level: Some(7),
+            overall_score: 7.0,
+            current_score: 7.0,
+            standard_error: 2.0,
+            axes: vec![
+                ("codequality".to_string(), build),
+                ("correctness".to_string(), build),
+                ("debugging".to_string(), build),
+                ("safety".to_string(), build),
+                ("complexity".to_string(), planning),
+                ("edgecases".to_string(), planning),
+                ("stability".to_string(), review),
+                ("contextawareness".to_string(), 0.3),
+                ("taskcompletion".to_string(), 0.3),
+            ],
             quota_percent: Some(80),
-            idea_rank: 10,
-            planning_rank,
-            build_rank,
-            review_rank,
-            idea_weight: 0.0,
-            planning_weight: 0.0,
-            build_weight: 0.0,
-            review_weight: 0.0,
+            display_order: 0,
             fallback_from: None,
         }
     }
@@ -5198,6 +5275,7 @@ mod tests {
             nodes,
             visible_rows: Vec::new(),
             models: Vec::new(),
+            versions: build_version_index(&[]),
             model_refresh: ModelRefreshState::Idle(Instant::now()),
             selected: 0,
             selected_key,
@@ -5242,7 +5320,9 @@ mod tests {
             sample_model("build-first", 2, 1),
         ];
 
-        let chosen = App::select_brainstorm_model(&models).expect("expected brainstorm model");
+        let versions = build_version_index(&models);
+        let chosen =
+            App::select_brainstorm_model(&models, &versions).expect("expected brainstorm model");
 
         assert_eq!(chosen.name, "idea-first");
     }

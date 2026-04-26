@@ -94,6 +94,18 @@ pub fn apply(buffer: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
     }
 }
 
+pub fn insert_str(buffer: &mut String, cursor: &mut usize, s: &str) {
+    let len = buffer.chars().count();
+    if *cursor > len {
+        *cursor = len;
+    }
+    let byte_cursor = char_to_byte(buffer, *cursor);
+    let normalized: String = s.replace("\r\n", "\n").replace('\r', "\n");
+    let inserted_chars = normalized.chars().count();
+    buffer.insert_str(byte_cursor, &normalized);
+    *cursor += inserted_chars;
+}
+
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
@@ -196,6 +208,15 @@ mod tests {
         apply(&mut b, &mut c, ctrl('d'));
         assert_eq!(b, "ac");
         assert_eq!(c, 1);
+    }
+
+    #[test]
+    fn insert_str_multiline_normalizes_newlines() {
+        let mut b = "ab".to_string();
+        let mut c = 1usize;
+        insert_str(&mut b, &mut c, "X\r\nY\rZ");
+        assert_eq!(b, "aX\nY\nZb");
+        assert_eq!(c, 6);
     }
 
     #[test]

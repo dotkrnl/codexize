@@ -79,16 +79,28 @@ impl SessionPicker {
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
-            if event::poll(Duration::from_millis(250))?
-                && let Event::Key(key) = event::read()?
-            {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                match self.handle_key(key)? {
-                    KeyAction::Continue => continue,
-                    KeyAction::SelectSession(id) => return Ok(Some(id)),
-                    KeyAction::Quit => return Ok(None),
+            if event::poll(Duration::from_millis(250))? {
+                match event::read()? {
+                    Event::Key(key) => {
+                        if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
+                        match self.handle_key(key)? {
+                            KeyAction::Continue => continue,
+                            KeyAction::SelectSession(id) => return Ok(Some(id)),
+                            KeyAction::Quit => return Ok(None),
+                        }
+                    }
+                    Event::Paste(text) => {
+                        if self.input_mode {
+                            crate::input_editor::insert_str(
+                                &mut self.input_buffer,
+                                &mut self.input_cursor,
+                                &text,
+                            );
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

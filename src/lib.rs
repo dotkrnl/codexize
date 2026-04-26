@@ -5,6 +5,7 @@ pub mod cache;
 pub mod cache_lock;
 pub mod dashboard;
 pub mod input_editor;
+pub mod model_names;
 pub mod picker;
 pub mod providers;
 pub mod review;

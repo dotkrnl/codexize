@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::model_names;
+
 pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
 pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
 
@@ -307,15 +309,6 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
         })
 }
 
-// Hardcoded fallbacks for cases the same-stem heuristic can't express
-// (cross-major-version or non-numeric suffix differences). Listed in
-// preference order; first match wins. Used when the ranking API hasn't
-// scored the new model yet but quota probes already see it.
-const EXPLICIT_FALLBACKS: &[(&str, &str)] = &[
-    ("gemini-3.1-pro-preview", "gemini-3-pro-preview"),
-    ("gemini-3-flash-preview", "gemini-2.5-flash"),
-];
-
 // Synthesize a DashboardModel for a name absent from the ranking API by
 // borrowing a sibling's numbers — preferring an explicit hardcoded mapping
 // (e.g. gemini-3-flash-preview → gemini-2.5-flash), then falling back to the
@@ -359,7 +352,7 @@ pub fn synthesize_sibling(
 }
 
 fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
-    let target = EXPLICIT_FALLBACKS
+    let target = model_names::EXPLICIT_SCORE_FALLBACKS
         .iter()
         .find(|(from, _)| *from == name)
         .map(|(_, to)| *to)?;

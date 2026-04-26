@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::model_names;
 use crate::selection::VendorKind;
 
 pub mod claude;
@@ -34,11 +35,9 @@ pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {
     }
 }
 
-/// Short display form of a model name for tmux window titles. Strips the
-/// `claude-` prefix since it's long and the vendor is obvious in context;
-/// other vendor prefixes stay because they're already compact.
+/// Short display form of a model name for tmux window titles.
 pub fn short_model(model: &str) -> String {
-    model.strip_prefix("claude-").unwrap_or(model).to_string()
+    model_names::tmux_name(model)
 }
 
 /// Build a tmux window name that embeds the model, e.g. `[Coder r1] sonnet-4.6`.
@@ -119,5 +118,21 @@ fn shell_escape(s: &str) -> String {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_model_preserves_claude_prefix_behavior() {
+        assert_eq!(short_model("claude-sonnet-4.6"), "sonnet-4.6");
+        assert_eq!(short_model("gpt-5.2"), "gpt-5.2");
+    }
+
+    #[test]
+    fn short_model_uses_gemini_preview_display_label() {
+        assert_eq!(short_model("gemini-3.1-pro-preview"), "3.1-pro");
     }
 }

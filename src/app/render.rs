@@ -16,11 +16,8 @@ use super::{
     App, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
 };
-use crate::selection::{
-    CachedModel, VendorKind,
-    display::visible_models,
-    ranking::VersionIndex,
-};
+use crate::model_names;
+use crate::selection::{CachedModel, VendorKind, display::visible_models, ranking::VersionIndex};
 use crate::tui::wrap_input;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -395,11 +392,7 @@ impl App {
             let models = &by_vendor[vendor];
 
             for (i, model) in models.iter().enumerate() {
-                let short_name = model
-                    .name
-                    .strip_prefix(prefix)
-                    .unwrap_or(&model.name)
-                    .to_string();
+                let short_name = model_names::display_name_for_vendor(&model.name, prefix);
 
                 let stupid_value: u8 = model.current_score.round().clamp(0.0, 99.0) as u8;
                 let stupid_level = format!("{stupid_value:>2}");
@@ -1057,6 +1050,17 @@ mod tests {
         }
     }
 
+    fn vendor_model_with_axis_score(
+        vendor: VendorKind,
+        name: &str,
+        axis_score: f64,
+        display_order: usize,
+    ) -> CachedModel {
+        let mut model = model_with_axis_score(name, axis_score, display_order);
+        model.vendor = vendor;
+        model
+    }
+
     fn full_buffer_line_text(buf: &ratatui::buffer::Buffer, y: u16) -> String {
         (0..buf.area.width)
             .map(|x| buf.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "))
@@ -1195,6 +1199,36 @@ mod tests {
         assert!(
             !model_line.contains("..."),
             "should not truncate on wide width: {model_line}"
+        );
+    }
+
+    #[test]
+    fn model_strip_uses_gemini_preview_display_label() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![vendor_model_with_axis_score(
+            VendorKind::Gemini,
+            "gemini-3.1-pro-preview",
+            1.0,
+            0,
+        )]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 90, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("gemini"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("3.1-pro"),
+            "short display label should appear: {model_line}"
+        );
+        assert!(
+            !model_line.contains("3.1-pro-preview"),
+            "preview suffix should not appear in display label: {model_line}"
         );
     }
 

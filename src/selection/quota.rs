@@ -1,5 +1,8 @@
 use super::types::{QuotaError, VendorKind};
-use crate::providers::{self, LiveModel};
+use crate::{
+    model_names,
+    providers::{self, LiveModel},
+};
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
@@ -221,14 +224,8 @@ fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     // sibling fallback onto. Use the best observed quota as the shared
     // default.
     let shared = mapped.values().find_map(|q| *q);
-    for known in &[
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-    ] {
-        mapped.entry((*known).to_string()).or_insert(shared);
+    for known in model_names::GEMINI_KNOWN_QUOTA_MODELS {
+        mapped.entry(known.to_string()).or_insert(shared);
     }
 
     mapped
@@ -239,4 +236,27 @@ fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     // canonical name regardless of what the API returns.
     let quota = models.into_iter().find_map(|m| m.quota_percent);
     BTreeMap::from([("kimi-latest".to_string(), quota)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_map_direct_injects_known_gemini_quota_names() {
+        let mapped = live_map_direct(vec![LiveModel {
+            name: "gemini-3-pro-preview".to_string(),
+            quota_percent: Some(42),
+        }]);
+
+        for name in [
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        ] {
+            assert_eq!(mapped.get(name), Some(&Some(42)), "{name} missing");
+        }
+    }
 }

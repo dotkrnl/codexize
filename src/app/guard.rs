@@ -18,17 +18,12 @@ const SNAPSHOT_FILE: &str = "snapshot.toml";
 /// behavior (fail closed; `git reset --hard` on HEAD-advance). `AskOperator`
 /// is reserved for interactive non-coder runs: verify reports a pending
 /// decision instead of resetting, and the operator chooses reset vs keep.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GuardMode {
+    #[default]
     AutoReset,
     AskOperator,
-}
-
-impl Default for GuardMode {
-    fn default() -> Self {
-        GuardMode::AutoReset
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

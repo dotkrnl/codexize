@@ -869,32 +869,33 @@ fn render_guard_decision_modal(
         })
         .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
-        Style::default().fg(Color::White),
-    )));
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("Before: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(captured_short),
-        Span::raw("  →  "),
-        Span::styled("After: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(current_short),
-    ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "[R]/Enter  reset — discard commit and fail this run".to_string(),
-        Style::default().fg(Color::Red),
-    )));
-    lines.push(Line::from(Span::styled(
-        "[K]        keep  — preserve commit and continue".to_string(),
-        Style::default().fg(Color::Green),
-    )));
-    lines.push(Line::from(Span::styled(
-        "[Q]        quit".to_string(),
-        Style::default().fg(Color::DarkGray),
-    )));
+    let lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Before: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(captured_short),
+            Span::raw("  →  "),
+            Span::styled("After: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(current_short),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[R]/Enter  reset — discard commit and fail this run".to_string(),
+            Style::default().fg(Color::Red),
+        )),
+        Line::from(Span::styled(
+            "[K]        keep  — preserve commit and continue".to_string(),
+            Style::default().fg(Color::Green),
+        )),
+        Line::from(Span::styled(
+            "[Q]        quit".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
 
     let inner_width = modal_width.saturating_sub(2).max(1) as usize;
     let wrapped: u16 = lines

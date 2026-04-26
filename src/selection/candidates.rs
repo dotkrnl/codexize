@@ -377,13 +377,13 @@ fn build_candidate(
         .or_else(|| quota::find_quota_by_heuristic(&model.name, vendor, quotas));
 
     let idea_probability =
-        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Idea);
+        ranking::legacy_selection_probability(&model, quota_percent, vendor, SelectionPhase::Idea);
     let planning_probability =
-        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Planning);
+        ranking::legacy_selection_probability(&model, quota_percent, vendor, SelectionPhase::Planning);
     let build_probability =
-        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Build);
+        ranking::legacy_selection_probability(&model, quota_percent, vendor, SelectionPhase::Build);
     let review_probability =
-        ranking::selection_probability(&model, quota_percent, vendor, SelectionPhase::Review);
+        ranking::legacy_selection_probability(&model, quota_percent, vendor, SelectionPhase::Review);
 
     let mut candidate = Candidate {
         vendor,
@@ -600,25 +600,25 @@ mod tests {
         let pro = build_candidate(pro_model.clone(), &quotas).expect("pro candidate");
         let epsilon = 1e-12;
 
-        let expected_idea = ranking::selection_probability(
+        let expected_idea = ranking::legacy_selection_probability(
             &pro_model,
             Some(80),
             VendorKind::Gemini,
             SelectionPhase::Idea,
         );
-        let expected_planning = ranking::selection_probability(
+        let expected_planning = ranking::legacy_selection_probability(
             &pro_model,
             Some(80),
             VendorKind::Gemini,
             SelectionPhase::Planning,
         );
-        let expected_build = ranking::selection_probability(
+        let expected_build = ranking::legacy_selection_probability(
             &pro_model,
             Some(80),
             VendorKind::Gemini,
             SelectionPhase::Build,
         );
-        let expected_review = ranking::selection_probability(
+        let expected_review = ranking::legacy_selection_probability(
             &pro_model,
             Some(80),
             VendorKind::Gemini,

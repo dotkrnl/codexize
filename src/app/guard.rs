@@ -48,6 +48,9 @@ pub struct Snapshot {
     /// `AutoReset`.
     #[serde(default)]
     pub mode: GuardMode,
+    /// Reviewer-only working-tree baseline when dirty changes are in scope.
+    #[serde(default)]
+    pub working_tree_baseline: Option<String>,
 }
 
 /// Outcome of verifying a snapshot. Three arms so callers cannot
@@ -98,6 +101,23 @@ fn git_status() -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn git_diff_head() -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "HEAD"])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_working_tree_baseline() -> Option<String> {
+    let diff = git_diff_head()?;
+    let status = git_status()?;
+    Some(format!("diff:\n{diff}\nstatus:\n{status}"))
+}
+
 fn write_snapshot(snapshot_dir: &Path, snap: &Snapshot) -> std::io::Result<()> {
     std::fs::create_dir_all(snapshot_dir)?;
     let text = toml::to_string(snap)
@@ -117,6 +137,7 @@ pub fn capture_non_coder(
     snapshot_dir: &Path,
     _stage_tag: &str,
     mode: GuardMode,
+    track_working_tree: bool,
 ) -> std::io::Result<()> {
     let snap = Snapshot {
         head: git_head().unwrap_or_default(),
@@ -124,6 +145,7 @@ pub fn capture_non_coder(
         control_files: BTreeMap::new(),
         baseline_stash: None,
         mode,
+        working_tree_baseline: track_working_tree.then(git_working_tree_baseline).flatten(),
     };
     write_snapshot(snapshot_dir, &snap)
 }
@@ -177,6 +199,7 @@ pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std
         control_files,
         baseline_stash: None,
         mode: GuardMode::default(),
+        working_tree_baseline: None,
     };
     write_snapshot(snapshot_dir, &snap)
 }
@@ -249,6 +272,16 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
         }
     }
 
+    if let Some(expected) = &snap.working_tree_baseline {
+        let current = git_working_tree_baseline().unwrap_or_default();
+        if &current != expected {
+            return VerifyResult::HardError {
+                reason: "reviewer_modified_working_tree".to_string(),
+                warnings,
+            };
+        }
+    }
+
     VerifyResult::Ok { warnings }
 }
 
@@ -261,6 +294,7 @@ fn test_snapshot(head: &str, git_status: &str) -> Snapshot {
         control_files: BTreeMap::new(),
         baseline_stash: None,
         mode: GuardMode::AutoReset,
+        working_tree_baseline: None,
     }
 }
 
@@ -377,6 +411,22 @@ mod tests {
     }
 
     #[test]
+    fn verify_non_coder_hard_error_when_dirty_baseline_changes() {
+        let head = git_head().unwrap_or_default();
+        let status = git_status().unwrap_or_default();
+        let mut snap = test_snapshot(&head, &status);
+        snap.working_tree_baseline = Some("__baseline_that_should_not_match__".to_string());
+
+        let result = verify_non_coder(&snap);
+        match result {
+            VerifyResult::HardError { reason, .. } => {
+                assert_eq!(reason, "reviewer_modified_working_tree");
+            }
+            other => panic!("expected HardError, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn snapshot_deserializes_without_mode_as_auto_reset() {
         // Pre-existing on-disk snapshots predate the `mode` field and must
         // load as AutoReset to preserve today's behavior on resume.
@@ -397,6 +447,7 @@ git_status = ""
             control_files: BTreeMap::new(),
             baseline_stash: None,
             mode: GuardMode::AskOperator,
+            working_tree_baseline: None,
         };
         let text = toml::to_string(&snap).expect("serialize");
         assert!(

@@ -90,16 +90,15 @@ pub fn phase_rank(
     });
 
     let mut result = BTreeMap::new();
-    let mut current_rank: u32 = 1;
+    let mut current_rank: u32 = 0;
+    let mut prev_prob: Option<f64> = None;
 
-    for (i, (model, prob)) in ranked.iter().enumerate() {
-        if i > 0 {
-            let (_, prev_prob) = ranked[i - 1];
-            if (*prob - prev_prob).abs() > f64::EPSILON {
-                current_rank = (i + 1) as u32;
-            }
+    for (model, prob) in &ranked {
+        if prev_prob.is_none_or(|p: f64| (*prob - p).abs() > f64::EPSILON) {
+            current_rank += 1;
         }
         result.insert(model.name.clone(), current_rank);
+        prev_prob = Some(*prob);
     }
 
     result
@@ -252,6 +251,27 @@ mod tests {
 
         // Same quota, same axes, same overall_score → same probability → same rank
         assert_eq!(ranks["a"], ranks["b"]);
+    }
+
+    #[test]
+    fn phase_rank_dense_after_tie() {
+        // Two tied top models followed by a strictly lower-probability model
+        // should produce dense ranks 1, 1, 2 — not the competition-rank 1, 1, 3.
+        let models = vec![
+            sample_model(VendorKind::Claude, "tie-a", 80),
+            sample_model(VendorKind::Codex, "tie-b", 80),
+            CachedModel {
+                quota_percent: Some(0),
+                ..sample_model(VendorKind::Gemini, "low", 80)
+            },
+        ];
+        let index = build_version_index(&models);
+
+        let ranks = phase_rank(&models, SelectionPhase::Build, &index);
+
+        assert_eq!(ranks["tie-a"], 1);
+        assert_eq!(ranks["tie-b"], 1);
+        assert_eq!(ranks["low"], 2);
     }
 
     #[test]

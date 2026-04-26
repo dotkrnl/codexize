@@ -115,7 +115,19 @@ impl SessionPicker {
 
     fn input_height(&self, total_width: u16, total_height: u16) -> u16 {
         let inner_width = total_width.saturating_sub(2).max(1) as usize;
-        let wrapped = crate::tui::wrap_input(&self.input_buffer, inner_width).len();
+        let cursor = self.input_cursor.min(self.input_buffer.chars().count());
+        let byte = self
+            .input_buffer
+            .char_indices()
+            .nth(cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input_buffer.len());
+        let text_with_cursor = format!(
+            "{}▌{}",
+            &self.input_buffer[..byte],
+            &self.input_buffer[byte..]
+        );
+        let wrapped = crate::tui::wrap_input(&text_with_cursor, inner_width).len();
         let wrapped = wrapped.max(1) as u16;
         let max = total_height.saturating_sub(3).max(3);
         (wrapped + 2).clamp(3, max)
@@ -473,6 +485,26 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_picker(input_buffer: &str, input_cursor: usize) -> SessionPicker {
+        SessionPicker {
+            entries: Vec::new(),
+            selected: 0,
+            input_mode: true,
+            input_buffer: input_buffer.to_string(),
+            input_cursor,
+            show_archived: false,
+            confirm_delete_hard: false,
+            confirm_delete_soft: false,
+        }
+    }
+
+    #[test]
+    fn input_height_counts_cursor_wrap_at_line_end() {
+        let picker = test_picker("abcd", 4);
+
+        assert_eq!(picker.input_height(6, 10), 4);
+    }
 
     #[test]
     fn test_idea_summary_truncates() {

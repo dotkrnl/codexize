@@ -16,7 +16,11 @@ use super::{
     App, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
 };
-use crate::selection::VendorKind;
+use crate::selection::{
+    CachedModel, VendorKind,
+    display::visible_models,
+    ranking::VersionIndex,
+};
 use crate::tui::wrap_input;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -135,6 +139,15 @@ fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 
+fn model_strip_height(models: &[CachedModel], versions: &VersionIndex) -> u16 {
+    let visible_count = visible_models(models, versions).len() as u16;
+    if visible_count == 0 {
+        2
+    } else {
+        visible_count + 2
+    }
+}
+
 
 fn strip_ansi_codes(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -221,7 +234,7 @@ fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) 
 
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
-        let model_height = self.models.len().max(1) as u16 + 2;
+        let model_height = model_strip_height(&self.models, &self.versions);
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -293,9 +306,8 @@ impl App {
 
     fn model_strip(&self, strip_width: u16) -> Paragraph<'static> {
         use crate::selection::{
-            CachedModel,
             config::SelectionPhase,
-            display::{phase_rank, visible_models},
+            display::phase_rank,
             ranking::selection_probability,
         };
 
@@ -1131,6 +1143,27 @@ mod tests {
             model_line.contains("opus-4-5-20251101 (new)"),
             "fallback model should show (new) suffix on wide width: {model_line}"
         );
+    }
+
+    #[test]
+    fn model_strip_height_uses_only_visible_models() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![
+            model_with_axis_score("gpt-alpha", 100.0, 0),
+            model_with_axis_score("gpt-beta", 95.0, 1),
+            model_with_axis_score("gpt-gamma", 90.0, 2),
+            model_with_axis_score("gpt-delta", 85.0, 3),
+        ]);
+        app.versions = build_version_index(&app.models);
+
+        assert_eq!(model_strip_height(&app.models, &app.versions), 5);
+    }
+
+    #[test]
+    fn model_strip_height_is_border_only_when_no_models_are_visible() {
+        let app = test_app(Vec::new(), Vec::new(), Vec::new());
+
+        assert_eq!(model_strip_height(&app.models, &app.versions), 2);
     }
 
     #[test]

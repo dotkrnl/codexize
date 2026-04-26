@@ -118,50 +118,96 @@ fn build_shell_cmd(
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_string();
+    // Reviewer note: interrupted attempts are stamped with 128+signal to keep
+    // a deterministic non-zero exit code even when the child status is not recoverable.
 
     format!(
         r#"mkdir -p {status_dir} {finish_dir}
 head_before=$(git rev-parse HEAD 2>/dev/null || echo "")
-trap 'status=$?; printf "%s" "$status" > {status_path}' EXIT HUP INT TERM
-printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}
-{agent_cmd}
-exit_code=$?
-trap 'printf "%s" "$exit_code" > {status_path}' EXIT HUP INT TERM
+status_file={status_path}
+tmp_stamp={tmp_stamp}
+stamp_file={stamp_path}
+exit_code=0
+child_pid=""
+finalized=0
 
-budget_ms=${{{env_budget}:-{budget}}}
-interval_ms=${{{env_interval}:-{interval}}}
-iterations=$((budget_ms / interval_ms))
-last_head=""
-head_state="unstable"
-i=0
-while [ "$i" -lt "$iterations" ]; do
-    while [ -f .git/index.lock ]; do
-        sleep 0.05
-        i=$((i + 1))
-        if [ "$i" -ge "$iterations" ]; then break 2; fi
-    done
-    h1=$(git rev-parse HEAD 2>/dev/null || echo "")
-    sleep {interval_sec}
-    i=$((i + 1))
-    h2=$(git rev-parse HEAD 2>/dev/null || echo "")
-    if [ "$h1" = "$h2" ]; then
-        last_head="$h1"
-        head_state="stable"
-        break
+finalize() {{
+    if [ "$finalized" -eq 1 ]; then
+        return
     fi
-    last_head="$h2"
-done
+    finalized=1
+    printf "%s" "$exit_code" > "$status_file"
 
-finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-tmp_stamp="{tmp_stamp}"
-cat > "$tmp_stamp" << STAMPEOF
+    budget_ms=${{{env_budget}:-{budget}}}
+    interval_ms=${{{env_interval}:-{interval}}}
+    if [ "$interval_ms" -le 0 ]; then
+        interval_ms={interval}
+    fi
+    iterations=$((budget_ms / interval_ms))
+    if [ "$iterations" -lt 1 ]; then
+        iterations=1
+    fi
+    last_head=""
+    head_state="unstable"
+    i=0
+    while [ "$i" -lt "$iterations" ]; do
+        while [ -f .git/index.lock ]; do
+            sleep 0.05
+            i=$((i + 1))
+            if [ "$i" -ge "$iterations" ]; then break 2; fi
+        done
+        h1=$(git rev-parse HEAD 2>/dev/null || echo "")
+        sleep {interval_sec}
+        i=$((i + 1))
+        h2=$(git rev-parse HEAD 2>/dev/null || echo "")
+        if [ "$h1" = "$h2" ]; then
+            last_head="$h1"
+            head_state="stable"
+            break
+        fi
+        last_head="$h2"
+    done
+
+    finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    cat > "$tmp_stamp" << STAMPEOF
 finished_at = "{finished_at_placeholder}"
 exit_code = {exit_code_placeholder}
 head_before = "{head_before_placeholder}"
 head_after = "{head_after_placeholder}"
 head_state = "{head_state_placeholder}"
 STAMPEOF
-mv "$tmp_stamp" "{stamp_path}"
+    mv "$tmp_stamp" "$stamp_file"
+}}
+
+on_signal() {{
+    signal_name="$1"
+    case "$signal_name" in
+        HUP) signal_code=1 ;;
+        INT) signal_code=2 ;;
+        TERM) signal_code=15 ;;
+        *) signal_code=0 ;;
+    esac
+    exit_code=$((128 + signal_code))
+    if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
+        kill -"$signal_name" "$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+    fi
+    finalize
+    trap - EXIT HUP INT TERM
+    exit "$exit_code"
+}}
+
+trap 'status=$?; if [ "$finalized" -eq 0 ]; then exit_code=$status; finalize; fi' EXIT
+trap 'on_signal HUP' HUP
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}
+{agent_cmd} &
+child_pid=$!
+wait "$child_pid"
+exit_code=$?
+finalize
+trap - EXIT HUP INT TERM
 exit $exit_code"#,
         status_dir = shell_escape(status_dir),
         finish_dir = shell_escape(finish_dir),

@@ -1,5 +1,5 @@
 use super::config::{SELECTION_CONFIG, SelectionPhase};
-use super::ranking::{selection_probability, VersionIndex};
+use super::ranking::{VersionIndex, selection_probability};
 use super::types::{CachedModel, VendorKind};
 use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,10 +34,7 @@ pub fn pick_for_phase<'a>(
         .collect();
 
     // Find max probability across ALL models (before vendor filtering)
-    let max_prob = probabilities
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
+    let max_prob = probabilities.iter().copied().fold(0.0_f64, f64::max);
 
     if max_prob <= 0.0 {
         return None;
@@ -50,9 +47,7 @@ pub fn pick_for_phase<'a>(
     let mut candidates: Vec<(&CachedModel, f64)> = models
         .iter()
         .zip(probabilities.iter())
-        .filter(|(model, prob)| {
-            **prob >= cutoff && vendor_filter.is_none_or(|v| v == model.vendor)
-        })
+        .filter(|(model, prob)| **prob >= cutoff && vendor_filter.is_none_or(|v| v == model.vendor))
         .map(|(model, prob)| (model, *prob))
         .collect();
 
@@ -86,10 +81,14 @@ pub fn select_for_review<'a>(
     let fresh_vendor: Vec<(&CachedModel, f64)> = models
         .iter()
         .filter(|m| {
-            !used_vendors.contains(&m.vendor)
-                && !used_models.contains(&(m.vendor, m.name.clone()))
+            !used_vendors.contains(&m.vendor) && !used_models.contains(&(m.vendor, m.name.clone()))
         })
-        .map(|m| (m, selection_probability(m, SelectionPhase::Review, version_index)))
+        .map(|m| {
+            (
+                m,
+                selection_probability(m, SelectionPhase::Review, version_index),
+            )
+        })
         .collect();
 
     if let Some(model) = weighted_sample(&fresh_vendor) {
@@ -100,7 +99,12 @@ pub fn select_for_review<'a>(
     let fresh_model: Vec<(&CachedModel, f64)> = models
         .iter()
         .filter(|m| !used_models.contains(&(m.vendor, m.name.clone())))
-        .map(|m| (m, selection_probability(m, SelectionPhase::Review, version_index)))
+        .map(|m| {
+            (
+                m,
+                selection_probability(m, SelectionPhase::Review, version_index),
+            )
+        })
         .collect();
 
     weighted_sample(&fresh_model)
@@ -213,8 +217,8 @@ fn sample_seed() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::ranking::build_version_index;
+    use super::*;
 
     fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
         CachedModel {
@@ -268,8 +272,13 @@ mod tests {
         let index = build_version_index(&models);
 
         TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-        let chosen = pick_for_phase(&models, SelectionPhase::Build, Some(VendorKind::Claude), &index)
-            .expect("should pick claude");
+        let chosen = pick_for_phase(
+            &models,
+            SelectionPhase::Build,
+            Some(VendorKind::Claude),
+            &index,
+        )
+        .expect("should pick claude");
         assert_eq!(chosen.vendor, VendorKind::Claude);
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
@@ -285,7 +294,12 @@ mod tests {
         let index = build_version_index(&models);
 
         // Filter to Codex only — cutoff still based on Claude's high prob
-        let chosen = pick_for_phase(&models, SelectionPhase::Build, Some(VendorKind::Codex), &index);
+        let chosen = pick_for_phase(
+            &models,
+            SelectionPhase::Build,
+            Some(VendorKind::Codex),
+            &index,
+        );
 
         // medium-codex should survive cutoff; low-codex should not
         assert!(chosen.is_some());
@@ -330,9 +344,7 @@ mod tests {
 
     #[test]
     fn select_for_review_returns_none_when_all_used() {
-        let models = vec![
-            sample_model(VendorKind::Claude, "claude-1", 80),
-        ];
+        let models = vec![sample_model(VendorKind::Claude, "claude-1", 80)];
         let index = build_version_index(&models);
 
         let used_vendors = vec![VendorKind::Claude];
@@ -392,9 +404,7 @@ mod tests {
 
     #[test]
     fn select_excluding_returns_none_when_all_excluded() {
-        let models = vec![
-            sample_model(VendorKind::Claude, "model-1", 80),
-        ];
+        let models = vec![sample_model(VendorKind::Claude, "model-1", 80)];
         let index = build_version_index(&models);
 
         let excluded = vec![(VendorKind::Claude, "model-1".to_string())];

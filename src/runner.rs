@@ -73,10 +73,7 @@ pub fn write_finish_stamp(path: &Path, stamp: &FinishStamp) -> Result<()> {
         .to_path_buf();
     fs::create_dir_all(&dir)?;
 
-    let tmp_path = dir.join(format!(
-        ".tmp.{}.toml",
-        std::process::id()
-    ));
+    let tmp_path = dir.join(format!(".tmp.{}.toml", std::process::id()));
     let text = toml::to_string_pretty(stamp).context("failed to serialize finish stamp")?;
     fs::write(&tmp_path, text)
         .with_context(|| format!("failed to write temp stamp {}", tmp_path.display()))?;
@@ -357,7 +354,15 @@ pub fn launch_interactive(
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.interactive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, switch, status_path, run_key, artifacts_dir)
+    launch_in_window(
+        window_name,
+        &cmd,
+        adapter,
+        switch,
+        status_path,
+        run_key,
+        artifacts_dir,
+    )
 }
 
 /// Launch an agent non-interactively inside a new tmux window.
@@ -373,7 +378,15 @@ pub fn launch_noninteractive(
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
     let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
-    launch_in_window(window_name, &cmd, adapter, false, status_path, run_key, artifacts_dir)
+    launch_in_window(
+        window_name,
+        &cmd,
+        adapter,
+        false,
+        status_path,
+        run_key,
+        artifacts_dir,
+    )
 }
 
 pub fn run_child_with_timeout(
@@ -618,7 +631,11 @@ mod tests {
 
         // No partial file should remain.
         let entries: Vec<_> = fs::read_dir(&ro_dir).unwrap().flatten().collect();
-        assert!(entries.is_empty(), "expected no partial files, got {:?}", entries);
+        assert!(
+            entries.is_empty(),
+            "expected no partial files, got {:?}",
+            entries
+        );
 
         // Restore permissions so the temp dir can be cleaned up.
         #[cfg(unix)]
@@ -706,11 +723,17 @@ extra_field = "ignored"
         );
         assert!(cmd.contains("git rev-parse HEAD"), "should capture HEAD");
         assert!(cmd.contains("head_state"), "should write head_state");
-        assert!(cmd.contains(".git/index.lock"), "should wait for index.lock");
+        assert!(
+            cmd.contains(".git/index.lock"),
+            "should wait for index.lock"
+        );
         assert!(cmd.contains("stable"), "should mention stable state");
         assert!(cmd.contains("unstable"), "should mention unstable state");
         assert!(cmd.contains("mv "), "should atomically rename stamp");
-        assert!(cmd.contains("CODEXIZE_STAMP_STABILIZE_MS"), "should read env budget");
+        assert!(
+            cmd.contains("CODEXIZE_STAMP_STABILIZE_MS"),
+            "should read env budget"
+        );
     }
 
     #[test]
@@ -724,7 +747,10 @@ extra_field = "ignored"
             "/tmp/weird'path/finish/key.toml",
         );
         // Escaped paths should contain the single-quote handling.
-        assert!(cmd.contains("weird'\\''path"), "path should be shell-escaped");
+        assert!(
+            cmd.contains("weird'\\''path"),
+            "path should be shell-escaped"
+        );
     }
 
     #[test]
@@ -949,6 +975,9 @@ exit 1
             "interrupted run should still produce a finish stamp"
         );
         let stamp = read_finish_stamp(&stamp_path).expect("parse interrupted stamp");
-        assert_ne!(stamp.exit_code, 0, "interrupted run should not report success");
+        assert_ne!(
+            stamp.exit_code, 0,
+            "interrupted run should not report success"
+        );
     }
 }

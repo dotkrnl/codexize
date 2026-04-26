@@ -883,10 +883,7 @@ impl SessionState {
                 run.status = RunStatus::FailedUnverified;
                 run.ended_at = Some(chrono::Utc::now());
                 run.error = Some(reason.clone());
-                let duration = run
-                    .ended_at
-                    .unwrap()
-                    .signed_duration_since(run.started_at);
+                let duration = run.ended_at.unwrap().signed_duration_since(run.started_at);
                 let msg = Message {
                     ts: chrono::Utc::now(),
                     run_id: run.id,
@@ -899,7 +896,10 @@ impl SessionState {
                     ),
                 };
                 messages_to_append.push(msg);
-                events_to_log.push(format!("run {} failed-unverified on resume: {}", run.id, reason));
+                events_to_log.push(format!(
+                    "run {} failed-unverified on resume: {}",
+                    run.id, reason
+                ));
             }
         }
 
@@ -2019,11 +2019,13 @@ interactive = false
             assert_eq!(result.unwrap(), None);
             assert_eq!(state.agent_runs[0].status, RunStatus::FailedUnverified);
             assert!(state.agent_runs[0].error.is_some());
-            assert!(state.agent_runs[0]
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("hostname mismatch"));
+            assert!(
+                state.agent_runs[0]
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .contains("hostname mismatch")
+            );
         });
     }
 
@@ -2064,11 +2066,13 @@ interactive = false
             assert_eq!(result.unwrap(), None);
             assert_eq!(state.agent_runs[0].status, RunStatus::FailedUnverified);
             assert!(state.agent_runs[0].error.is_some());
-            assert!(state.agent_runs[0]
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("mount device mismatch"));
+            assert!(
+                state.agent_runs[0]
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .contains("mount device mismatch")
+            );
         });
     }
 

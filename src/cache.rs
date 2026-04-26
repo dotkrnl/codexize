@@ -159,7 +159,7 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
                 version: CACHE_VERSION,
                 dashboard: None,
                 quotas: None,
-            }
+            };
         }
     };
     match serde_json::from_str::<CacheFile>(&text) {
@@ -373,5 +373,4 @@ mod tests {
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_some());
     }
-
 }

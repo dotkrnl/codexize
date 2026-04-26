@@ -35,20 +35,13 @@ fn acquire(path: &Path) -> Result<()> {
                     continue;
                 }
                 if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "timed out waiting for lock at {}",
-                        path.display()
-                    );
+                    anyhow::bail!("timed out waiting for lock at {}", path.display());
                 }
                 thread::sleep(POLL_INTERVAL);
             }
             Err(err) => {
-                return Err(err).with_context(|| {
-                    format!(
-                        "failed to create lock file at {}",
-                        path.display()
-                    )
-                });
+                return Err(err)
+                    .with_context(|| format!("failed to create lock file at {}", path.display()));
             }
         }
     }
@@ -63,11 +56,7 @@ fn try_create(path: &Path) -> io::Result<()> {
         .create_new(true)
         .mode(0o644)
         .open(path)?;
-    let contents = format!(
-        "{}\n{}\n",
-        std::process::id(),
-        now_secs(),
-    );
+    let contents = format!("{}\n{}\n", std::process::id(), now_secs(),);
     file.write_all(contents.as_bytes())?;
     Ok(())
 }

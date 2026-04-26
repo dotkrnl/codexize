@@ -287,15 +287,13 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {
-                    self.state.agent_error =
-                        Some(format!("guard reset failed: {err:#}"));
+                    self.state.agent_error = Some(format!("guard reset failed: {err:#}"));
                 }
                 false
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 if let Err(err) = self.accept_guard_keep() {
-                    self.state.agent_error =
-                        Some(format!("guard keep failed: {err:#}"));
+                    self.state.agent_error = Some(format!("guard keep failed: {err:#}"));
                 }
                 false
             }

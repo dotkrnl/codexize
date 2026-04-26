@@ -126,9 +126,11 @@ pub fn selection_probability(
     // Version penalty (per-step multiplier based on version rank)
     let version_rank = version_index.version_rank(model.vendor, &model.name);
     let version_penalty = if phase.is_interactive() {
-        cfg.version_penalty_per_step_interactive.powi(version_rank as i32)
+        cfg.version_penalty_per_step_interactive
+            .powi(version_rank as i32)
     } else {
-        cfg.version_penalty_per_step_headless.powi(version_rank as i32)
+        cfg.version_penalty_per_step_headless
+            .powi(version_rank as i32)
     };
 
     // Vendor bias (optional multiplier for specific vendor/phase combinations)
@@ -147,10 +149,7 @@ pub fn selection_probability(
 /// Extract and aggregate axis scores for the given phase.
 /// Mirrors the logic in raw_axis_score but works with CachedModel.
 fn compute_axis_score(model: &CachedModel, axes: &[&str], phase: SelectionPhase) -> f64 {
-    let mut values: Vec<f64> = axes
-        .iter()
-        .filter_map(|axis| model.axis(axis))
-        .collect();
+    let mut values: Vec<f64> = axes.iter().filter_map(|axis| model.axis(axis)).collect();
 
     // Backfill missing axes with overall_score / 100
     while values.len() < axes.len() && !axes.is_empty() {
@@ -259,7 +258,10 @@ mod tests {
 
         // Each vendor has only one version, so rank is 0
         assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.5"), 0);
-        assert_eq!(index.version_rank(VendorKind::Claude, "claude-sonnet-4-6"), 0);
+        assert_eq!(
+            index.version_rank(VendorKind::Claude, "claude-sonnet-4-6"),
+            0
+        );
     }
 
     #[test]
@@ -335,8 +337,10 @@ mod tests {
         let mut model_high_variance = sample_cached_model();
         model_high_variance.standard_error = 8.0;
 
-        let prob_low_var = selection_probability(&model_low_variance, SelectionPhase::Build, &index);
-        let prob_high_var = selection_probability(&model_high_variance, SelectionPhase::Build, &index);
+        let prob_low_var =
+            selection_probability(&model_low_variance, SelectionPhase::Build, &index);
+        let prob_high_var =
+            selection_probability(&model_high_variance, SelectionPhase::Build, &index);
 
         assert!(prob_low_var > prob_high_var);
     }

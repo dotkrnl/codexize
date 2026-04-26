@@ -84,9 +84,7 @@ fn git_head() -> Option<String> {
 }
 
 pub fn git_status_dirty() -> bool {
-    git_status()
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false)
+    git_status().map(|s| !s.trim().is_empty()).unwrap_or(false)
 }
 
 fn git_status() -> Option<String> {
@@ -301,15 +299,14 @@ mod tests {
     fn verify_non_coder_warns_on_pre_dirty_status() {
         let head = git_head().unwrap_or_default();
         let current_status = git_status().unwrap_or_default();
-        let snap = test_snapshot(
-            &head,
-            &format!("{current_status} M dirty.txt\n"),
-        );
+        let snap = test_snapshot(&head, &format!("{current_status} M dirty.txt\n"));
         let result = verify_non_coder(&snap);
         assert!(matches!(result, VerifyResult::Ok { .. }));
         let warnings = warnings_of(&result);
         assert!(
-            warnings.iter().any(|w| w.contains("dirty before agent launch")),
+            warnings
+                .iter()
+                .any(|w| w.contains("dirty before agent launch")),
             "expected dirty-tree warning, got: {warnings:?}"
         );
     }
@@ -318,10 +315,7 @@ mod tests {
     fn verify_non_coder_warns_on_changed_status() {
         let head = git_head().unwrap_or_default();
         let current_status = git_status().unwrap_or_default();
-        let snap = test_snapshot(
-            &head,
-            &format!("{current_status}?? phantom-file.xyz\n"),
-        );
+        let snap = test_snapshot(&head, &format!("{current_status}?? phantom-file.xyz\n"));
         let result = verify_non_coder(&snap);
         assert!(matches!(result, VerifyResult::Ok { .. }));
         let warnings = warnings_of(&result);
@@ -405,7 +399,10 @@ git_status = ""
             mode: GuardMode::AskOperator,
         };
         let text = toml::to_string(&snap).expect("serialize");
-        assert!(text.contains("ask_operator"), "expected snake_case variant in: {text}");
+        assert!(
+            text.contains("ask_operator"),
+            "expected snake_case variant in: {text}"
+        );
         let back: Snapshot = toml::from_str(&text).expect("deserialize");
         assert_eq!(back.mode, GuardMode::AskOperator);
     }

@@ -324,7 +324,9 @@ impl App {
                             continue;
                         }
                         if let Ok(stamp) = crate::runner::read_finish_stamp(&entry.path()) {
-                            if let Ok(finished) = chrono::DateTime::parse_from_rfc3339(&stamp.finished_at) {
+                            if let Ok(finished) =
+                                chrono::DateTime::parse_from_rfc3339(&stamp.finished_at)
+                            {
                                 let finished_utc = finished.with_timezone(&chrono::Utc);
                                 if finished_utc < cutoff {
                                     let _ = std::fs::create_dir_all(&archive_dir);
@@ -6109,8 +6111,8 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             };
             std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
                 .expect("create status dir");
@@ -6196,8 +6198,8 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             };
             std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
                 .expect("create status dir");
@@ -6517,10 +6519,9 @@ mod tests {
             assert_eq!(persisted.status, RunStatus::Running);
             assert_eq!(app.current_run_id, Some(run.id));
             assert!(app.pending_drain_deadline.is_some());
-            assert!(app
-                .messages
-                .iter()
-                .any(|m| m.run_id == run.id && m.kind == MessageKind::Summary && m.text.contains("draining")));
+            assert!(app.messages.iter().any(|m| m.run_id == run.id
+                && m.kind == MessageKind::Summary
+                && m.text.contains("draining")));
         });
     }
 
@@ -6685,11 +6686,14 @@ mod tests {
                 })
                 .expect("missing-stamp warning");
             assert!(warn.text.contains("planning"));
-            assert!(app
-                .state
-                .agent_runs
-                .iter()
-                .any(|run| run.stage == "planning" && run.attempt == 2 && run.status == RunStatus::Running));
+            assert!(
+                app.state
+                    .agent_runs
+                    .iter()
+                    .any(|run| run.stage == "planning"
+                        && run.attempt == 2
+                        && run.status == RunStatus::Running)
+            );
         });
     }
 
@@ -6733,7 +6737,9 @@ mod tests {
                 !app.messages.iter().any(|message| {
                     message.run_id == run.id
                         && message.kind == MessageKind::SummaryWarn
-                        && message.text.contains("working tree was dirty before agent launch")
+                        && message
+                            .text
+                            .contains("working tree was dirty before agent launch")
                 }),
                 "guard diagnostics should not emit before drain barrier releases finalize"
             );
@@ -6745,7 +6751,9 @@ mod tests {
                 app.messages.iter().any(|message| {
                     message.run_id == run.id
                         && message.kind == MessageKind::SummaryWarn
-                        && message.text.contains("working tree was dirty before agent launch")
+                        && message
+                            .text
+                            .contains("working tree was dirty before agent launch")
                 }),
                 "guard diagnostics should emit after barrier passes"
             );
@@ -6912,8 +6920,8 @@ feedback = ["task 2 is superseded"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app.state.agent_runs[0].clone();
@@ -7012,8 +7020,8 @@ estimated_tokens = 12
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
 
             let mut app = idle_app(state);
@@ -7074,8 +7082,8 @@ estimated_tokens = 10
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app.state.agent_runs[0].clone();
@@ -7154,8 +7162,8 @@ feedback = ["split task 2"]
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
             state.agent_runs.push(RunRecord {
                 id: 8,
@@ -7170,8 +7178,8 @@ feedback = ["split task 2"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app
@@ -7230,8 +7238,8 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
             let mut app = idle_app(state);
             let err = app
@@ -7362,8 +7370,8 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             };
             state.agent_runs.push(run.clone());
             let mut app = idle_app(state);
@@ -7890,8 +7898,8 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
-            hostname: None,
-            mount_device_id: None,
+                hostname: None,
+                mount_device_id: None,
             });
 
             let mut app = idle_app(state);
@@ -8584,7 +8592,12 @@ estimated_tokens = 1
 
             let round_dir = session_dir.join("rounds").join("001");
             write_review_scope(&round_dir, "base123");
-            write_finish_stamp(&session_dir, &App::run_key_for("coder", Some(1), 1, 1), "after", "stable");
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "after",
+                "stable",
+            );
 
             let resumed = state
                 .resume_running_runs(&[])
@@ -8596,7 +8609,12 @@ estimated_tokens = 1
             app.window_launched = true;
             app.poll_agent_window();
 
-            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            let run = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
             assert_eq!(run.status, RunStatus::Done);
             assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
         });
@@ -8642,7 +8660,12 @@ estimated_tokens = 1
             app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
             app.poll_agent_window();
 
-            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            let run = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
             assert_eq!(run.status, RunStatus::FailedUnverified);
             assert!(
                 run.error
@@ -8697,20 +8720,28 @@ estimated_tokens = 1
             app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
             app.poll_agent_window();
 
-            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            let run = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
             assert_eq!(run.status, RunStatus::Done);
             assert_eq!(app.state.current_phase, Phase::PlanReviewRunning);
 
             let warned = app.messages.iter().any(|m| {
                 m.kind == MessageKind::SummaryWarn && m.text.contains("finish_stamp_missing:")
             });
-            assert!(warned, "non-coder missing stamp must warn on barrier release");
+            assert!(
+                warned,
+                "non-coder missing stamp must warn on barrier release"
+            );
         });
     }
 
     #[test]
     fn stamp_archival_moves_old_stamps_at_session_start() {
-        use crate::runner::{write_finish_stamp, FinishStamp};
+        use crate::runner::{FinishStamp, write_finish_stamp};
 
         with_temp_root(|| {
             let session_id = "stamp-archival-test";
@@ -8762,8 +8793,14 @@ estimated_tokens = 1
             let recent_stamp_path = finish_dir.join("recent-stamp.toml");
             write_finish_stamp(&recent_stamp_path, &recent_stamp).unwrap();
 
-            assert!(old_stamp_path.exists(), "old stamp should exist before App creation");
-            assert!(recent_stamp_path.exists(), "recent stamp should exist before App creation");
+            assert!(
+                old_stamp_path.exists(),
+                "old stamp should exist before App creation"
+            );
+            assert!(
+                recent_stamp_path.exists(),
+                "recent stamp should exist before App creation"
+            );
 
             // Create App which triggers archival
             let _app = App::new(mk_tmux(), state);
@@ -8771,7 +8808,10 @@ estimated_tokens = 1
             let archive_dir = finish_dir.join("archive");
             if !old_stamp_path.exists() {
                 // Stamp was archived
-                assert!(archive_dir.exists(), "archive directory should be created when stamps are archived");
+                assert!(
+                    archive_dir.exists(),
+                    "archive directory should be created when stamps are archived"
+                );
                 assert!(
                     archive_dir.join("old-stamp.toml").exists(),
                     "old stamp should be moved to archive"
@@ -8786,7 +8826,7 @@ estimated_tokens = 1
 
     #[test]
     fn archived_stamps_not_consulted_by_coder_gate() {
-        use crate::runner::{write_finish_stamp, FinishStamp};
+        use crate::runner::{FinishStamp, write_finish_stamp};
 
         with_temp_root(|| {
             let session_id = "archived-stamp-ignore";
@@ -8831,11 +8871,7 @@ estimated_tokens = 1
                 .join("rounds")
                 .join("001");
             std::fs::create_dir_all(&round_dir).unwrap();
-            std::fs::write(
-                round_dir.join("review_scope.toml"),
-                "base_sha = \"base\"\n",
-            )
-            .unwrap();
+            std::fs::write(round_dir.join("review_scope.toml"), "base_sha = \"base\"\n").unwrap();
 
             let app = App::new(mk_tmux(), SessionState::load(session_id).unwrap());
             let run = &app.state.agent_runs[0];

@@ -322,9 +322,7 @@ estimated_tokens = 0
             ("\"agent_pivot\"", ReviewStatus::AgentPivot),
         ] {
             let status: ReviewStatus = toml::from_str(&format!("status = {toml_val}\n"))
-                .map(|w: std::collections::HashMap<String, ReviewStatus>| {
-                    w["status"].clone()
-                })
+                .map(|w: std::collections::HashMap<String, ReviewStatus>| w["status"].clone())
                 .unwrap();
             assert_eq!(status, expected);
         }

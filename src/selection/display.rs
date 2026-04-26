@@ -1,5 +1,5 @@
 use super::config::SelectionPhase;
-use super::ranking::{selection_probability, VersionIndex};
+use super::ranking::{VersionIndex, selection_probability};
 use super::types::{CachedModel, VendorKind};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -51,16 +51,12 @@ pub fn visible_models(models: &[CachedModel], version_index: &VersionIndex) -> B
         if visible_vendors.contains(&vendor) {
             continue;
         }
-        if let Some(best) = models
-            .iter()
-            .filter(|m| m.vendor == vendor)
-            .max_by(|a, b| {
-                a.current_score
-                    .partial_cmp(&b.current_score)
-                    .unwrap_or(Ordering::Equal)
-                    .then_with(|| a.name.cmp(&b.name))
-            })
-        {
+        if let Some(best) = models.iter().filter(|m| m.vendor == vendor).max_by(|a, b| {
+            a.current_score
+                .partial_cmp(&b.current_score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        }) {
             visible.insert(best.name.clone());
         }
     }
@@ -106,8 +102,8 @@ pub fn phase_rank(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::ranking::build_version_index;
+    use super::*;
 
     fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
         CachedModel {

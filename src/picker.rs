@@ -486,7 +486,9 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::ImplementationRound(n) => (format!("coding r{}", n), Color::Cyan, "●"),
         Phase::ReviewRound(n) => (format!("review r{}", n), Color::Cyan, "●"),
         Phase::BuilderRecovery(_) => ("builder recovery".to_string(), Color::Cyan, "●"),
-        Phase::BuilderRecoveryPlanReview(_) => ("recovery plan review".to_string(), Color::Cyan, "●"),
+        Phase::BuilderRecoveryPlanReview(_) => {
+            ("recovery plan review".to_string(), Color::Cyan, "●")
+        }
         Phase::BuilderRecoverySharding(_) => ("recovery sharding".to_string(), Color::Cyan, "●"),
         Phase::BlockedNeedsUser => ("blocked".to_string(), Color::Red, "○"),
         Phase::Done => ("done".to_string(), Color::Green, "✓"),

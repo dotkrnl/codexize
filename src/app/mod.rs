@@ -46,6 +46,8 @@ use std::{
 
 type RetryKey = (String, Option<u32>, u32);
 type FailedModelSet = HashSet<(VendorKind, String)>;
+const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
+const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpansionOverride {
@@ -106,6 +108,8 @@ pub struct App {
     live_summary_path: Option<std::path::PathBuf>,
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,
+    pending_drain_deadline: Option<Instant>,
+    pending_drain_notice_emitted: bool,
     current_run_id: Option<u64>,
     failed_models: HashMap<RetryKey, FailedModelSet>,
     #[cfg(test)]
@@ -202,6 +206,8 @@ impl App {
             live_summary_change_rx: None,
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
+            pending_drain_deadline: None,
+            pending_drain_notice_emitted: false,
             current_run_id: None,
             failed_models,
             #[cfg(test)]
@@ -1136,6 +1142,33 @@ impl App {
         self.live_summary_path_for_run(&run.stage, run.task_id, run.round, run.attempt)
     }
 
+    fn finish_stamp_path_for_run(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) -> std::path::PathBuf {
+        let run_key = Self::run_key_for(stage, task_id, round, attempt);
+        session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join("run-finish")
+            .join(format!("{run_key}.toml"))
+    }
+
+    fn finish_stamp_path_for(&self, run: &crate::state::RunRecord) -> std::path::PathBuf {
+        self.finish_stamp_path_for_run(&run.stage, run.task_id, run.round, run.attempt)
+    }
+
+    fn stamp_timeout_duration() -> Duration {
+        std::env::var(ENV_STAMP_TIMEOUT_MS)
+            .ok()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .filter(|ms| *ms > 0)
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_TIMEOUT_MS))
+    }
+
     fn guard_dir_for(
         &self,
         stage: &str,
@@ -1258,12 +1291,7 @@ impl App {
         if base.is_empty() {
             return Some("base_missing".to_string());
         }
-        let session_dir = session_state::session_dir(&self.state.session_id);
-        let run_key = Self::run_key_for(&run.stage, run.task_id, run.round, run.attempt);
-        let stamp_path = session_dir
-            .join("artifacts")
-            .join("run-finish")
-            .join(format!("{run_key}.toml"));
+        let stamp_path = self.finish_stamp_path_for(run);
         if !Self::artifact_present(&stamp_path) {
             return Some(Self::failed_unverified_reason(
                 &stamp_path,
@@ -1616,6 +1644,8 @@ impl App {
 
     fn poll_agent_window(&mut self) {
         let Some(run_id) = self.current_run_id else {
+            self.pending_drain_deadline = None;
+            self.pending_drain_notice_emitted = false;
             return;
         };
         let Some(run) = self
@@ -1625,12 +1655,51 @@ impl App {
             .find(|run| run.id == run_id)
             .cloned()
         else {
+            self.pending_drain_deadline = None;
+            self.pending_drain_notice_emitted = false;
             return;
         };
         if self.window_exists(&run.window_name) {
+            self.pending_drain_deadline = None;
+            self.pending_drain_notice_emitted = false;
             return;
         }
 
+        let deadline = *self
+            .pending_drain_deadline
+            .get_or_insert_with(|| Instant::now() + Self::stamp_timeout_duration());
+        if !self.pending_drain_notice_emitted {
+            self.append_system_message(
+                run.id,
+                MessageKind::Summary,
+                "window closed; draining live summary and finish stamp before finalize".to_string(),
+            );
+            self.pending_drain_notice_emitted = true;
+        }
+        let now = Instant::now();
+        let live_summary_missing = !self.live_summary_path_for(&run).exists();
+        let stamp_path = self.finish_stamp_path_for(&run);
+        let stamp_present = Self::artifact_present(&stamp_path);
+        let deadline_elapsed = now >= deadline;
+        if !live_summary_missing || (!stamp_present && !deadline_elapsed) {
+            return;
+        }
+        if !stamp_present && deadline_elapsed && run.stage != "coder" {
+            // Reviewer note: fallback warning is emitted once at barrier release
+            // so non-coder runs keep legacy verdict behavior but remain diagnosable.
+            self.append_system_message(
+                run.id,
+                MessageKind::SummaryWarn,
+                format!(
+                    "finish_stamp_missing: {} (continuing with existing {} verdict logic)",
+                    stamp_path.display(),
+                    run.stage
+                ),
+            );
+        }
+
+        self.pending_drain_deadline = None;
+        self.pending_drain_notice_emitted = false;
         self.window_launched = false;
         self.current_run_id = None;
         let outcome = self.finalize_current_run(&run);
@@ -2528,8 +2597,14 @@ impl App {
     }
 
     fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
-        // Reviewer note: retry suppression for failed_unverified is intentionally
-        // deferred; this round only changes verdict attribution and UI surfacing.
+        if failed_run.status == RunStatus::FailedUnverified {
+            let _ = self.state.log_event(format!(
+                "auto-retry suppressed for {} round {} attempt {} due to failed_unverified",
+                failed_run.stage, failed_run.round, failed_run.attempt
+            ));
+            return false;
+        }
+
         if failed_run.error.as_deref() == Some("user_forced_retry") {
             return false;
         }

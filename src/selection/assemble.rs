@@ -16,19 +16,20 @@ pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
 }
 
 fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError>) {
-    let (dashboard_entries, dashboard_expired) = match loaded.dashboard {
+    let (cached_dashboard, dashboard_expired) = match loaded.dashboard {
         Some(section) => (section.data, section.expired),
         None => (Vec::new(), true),
     };
 
-    let (quota_payload, quota_expired) = match loaded.quotas {
+    let (cached_quota, quota_expired) = match loaded.quotas {
         Some(section) => (section.data, section.expired),
         None => (BTreeMap::new(), true),
     };
 
     let mut quota_errors = Vec::new();
 
-    // Fetch fresh dashboard if stale/missing
+    // Dashboard refresh (independent of quota refresh).
+    // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
         match dashboard::load_models() {
             Ok(fresh) => {
@@ -53,28 +54,24 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
                     vendor: VendorKind::Claude,
                     message: format!("dashboard fetch failed: {e}"),
                 });
-                if dashboard_entries.is_empty() {
-                    return (Vec::new(), quota_errors);
-                }
-                dashboard_entries
+                cached_dashboard
             }
         }
     } else {
-        dashboard_entries
+        cached_dashboard
     };
 
-    // Fetch fresh quotas if stale/missing
+    // Quota refresh (independent of dashboard outcome).
+    // On per-vendor error, preserve that vendor's expired cached data so
+    // a single failing vendor cannot wipe out previously-known quotas.
     let quota_payload = if quota_expired {
         let (fresh_quotas, fresh_errors) = quota::load_quota_maps();
         quota_errors.extend(fresh_errors);
-        let payload: QuotaPayload = fresh_quotas
-            .into_iter()
-            .map(|(vendor, models)| (vendor::vendor_kind_to_str(vendor).to_string(), models))
-            .collect();
-        let _ = cache::save_quotas(&payload);
-        payload
+        let merged = merge_quota_payload(&cached_quota, fresh_quotas);
+        let _ = cache::save_quotas(&merged);
+        merged
     } else {
-        quota_payload
+        cached_quota
     };
 
     // Parse quota payload into typed map.
@@ -166,6 +163,32 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
     }
 
     (models, quota_errors)
+}
+
+/// Merge a freshly-fetched quota map (keyed by `VendorKind`) into the cached
+/// payload (keyed by vendor string). Successfully-refreshed vendors overwrite
+/// cached entries; cached entries for vendors that did not refresh
+/// successfully are carried forward (stale-on-error fallback).
+fn merge_quota_payload(
+    cached: &QuotaPayload,
+    fresh: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+) -> QuotaPayload {
+    let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
+    let mut merged: QuotaPayload = BTreeMap::new();
+
+    for (vendor_str, models) in cached {
+        let preserve = match parse_vendor_str(vendor_str) {
+            Some(kind) => !succeeded.contains(&kind),
+            None => true,
+        };
+        if preserve {
+            merged.insert(vendor_str.clone(), models.clone());
+        }
+    }
+    for (vendor, models) in fresh {
+        merged.insert(vendor::vendor_kind_to_str(vendor).to_string(), models);
+    }
+    merged
 }
 
 fn parse_vendor_str(s: &str) -> Option<VendorKind> {
@@ -349,6 +372,94 @@ mod tests {
         assert_eq!(models.len(), 1);
         // Should get quota via heuristic (Claude models share quota)
         assert_eq!(models[0].quota_percent, Some(75));
+    }
+
+    #[test]
+    fn merge_preserves_expired_vendor_on_error() {
+        // Cached has data for all four vendors.
+        let mut cached: QuotaPayload = BTreeMap::new();
+        cached.insert(
+            "claude".to_string(),
+            BTreeMap::from([("claude-sonnet".to_string(), Some(50))]),
+        );
+        cached.insert(
+            "openai".to_string(),
+            BTreeMap::from([("gpt-5".to_string(), Some(60))]),
+        );
+        cached.insert(
+            "google".to_string(),
+            BTreeMap::from([("gemini-2.5-pro".to_string(), Some(70))]),
+        );
+
+        // Fresh refresh succeeded only for Claude.
+        let mut fresh: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
+        fresh.insert(
+            VendorKind::Claude,
+            BTreeMap::from([("claude-sonnet".to_string(), Some(80))]),
+        );
+
+        let merged = merge_quota_payload(&cached, fresh);
+
+        // Claude was refreshed → fresh value wins.
+        assert_eq!(
+            merged
+                .get("claude")
+                .and_then(|m| m.get("claude-sonnet").copied()),
+            Some(Some(80))
+        );
+        // OpenAI/Google failed to refresh → expired cached values preserved.
+        assert_eq!(
+            merged.get("openai").and_then(|m| m.get("gpt-5").copied()),
+            Some(Some(60))
+        );
+        assert_eq!(
+            merged
+                .get("google")
+                .and_then(|m| m.get("gemini-2.5-pro").copied()),
+            Some(Some(70))
+        );
+    }
+
+    #[test]
+    fn merge_overlays_when_cached_uses_alias_key() {
+        // Cached used the str_to_vendor alias ("codex") rather than vendor_kind_to_str ("openai").
+        let mut cached: QuotaPayload = BTreeMap::new();
+        cached.insert(
+            "codex".to_string(),
+            BTreeMap::from([("gpt-5".to_string(), Some(40))]),
+        );
+
+        let mut fresh: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
+        fresh.insert(
+            VendorKind::Codex,
+            BTreeMap::from([("gpt-5".to_string(), Some(90))]),
+        );
+
+        let merged = merge_quota_payload(&cached, fresh);
+
+        // The alias entry is dropped (its vendor was refreshed) and the canonical
+        // "openai" key carries the fresh value.
+        assert!(!merged.contains_key("codex"));
+        assert_eq!(
+            merged.get("openai").and_then(|m| m.get("gpt-5").copied()),
+            Some(Some(90))
+        );
+    }
+
+    #[test]
+    fn merge_keeps_unknown_vendor_keys() {
+        let mut cached: QuotaPayload = BTreeMap::new();
+        cached.insert(
+            "aliens".to_string(),
+            BTreeMap::from([("ufo-9000".to_string(), Some(33))]),
+        );
+
+        let merged = merge_quota_payload(&cached, BTreeMap::new());
+
+        assert_eq!(
+            merged.get("aliens").and_then(|m| m.get("ufo-9000").copied()),
+            Some(Some(33))
+        );
     }
 
     #[test]

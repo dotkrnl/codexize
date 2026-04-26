@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod app;
 pub mod artifacts;
 pub mod cache;
+pub mod cache_lock;
 pub mod dashboard;
 pub mod input_editor;
 pub mod picker;

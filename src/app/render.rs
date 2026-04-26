@@ -1904,4 +1904,32 @@ mod tests {
         assert_eq!(app.tail_detach_baseline, None);
         assert_eq!(app.viewport_top, app.max_viewport_top());
     }
+
+    #[test]
+    fn render_spec_review_paused_modal_without_panic() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SpecReviewPaused;
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    #[test]
+    fn render_plan_review_paused_modal_without_panic() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::PlanReviewPaused;
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    #[test]
+    fn render_stage_error_modal_without_panic() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SpecReviewRunning;
+        app.state.agent_error = Some("model timeout".to_string());
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
 }

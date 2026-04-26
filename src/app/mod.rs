@@ -1038,7 +1038,13 @@ impl App {
             return (None, vec![]);
         }
         let dir = self.guard_dir_for(&run.stage, run.task_id, run.round, run.attempt);
-        guard::verify(&dir, &run.stage)
+        match guard::verify(&dir, &run.stage) {
+            guard::VerifyResult::Ok { warnings } => (None, warnings),
+            guard::VerifyResult::HardError { reason, warnings } => (Some(reason), warnings),
+            // No AskOperator capture sites exist yet; treat as no-error so
+            // the run outcome is not affected until the modal is wired up.
+            guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
+        }
     }
 
     fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {

@@ -117,9 +117,9 @@ fn probability_color(pct: u8, max_pct: u8) -> Color {
     Color::Rgb(r, g, 60)
 }
 
-fn probability_span(label: &str, pct: u8, max_pct: u8) -> Span<'static> {
+fn probability_span(label: &str, pct: u8, max_pct: u8, is_top_rank: bool) -> Span<'static> {
     let mut style = Style::default().fg(probability_color(pct, max_pct));
-    if max_pct > 0 && pct == max_pct {
+    if is_top_rank {
         style = style.add_modifier(Modifier::BOLD);
     }
     Span::styled(format!("{}{:>2}", label, pct), style)
@@ -239,7 +239,7 @@ impl App {
         use crate::selection::{
             CachedModel,
             config::SelectionPhase,
-            display::visible_models,
+            display::{phase_rank, visible_models},
             ranking::selection_probability,
         };
 
@@ -257,6 +257,11 @@ impl App {
         let total_planning = total_for(SelectionPhase::Planning);
         let total_build = total_for(SelectionPhase::Build);
         let total_review = total_for(SelectionPhase::Review);
+
+        let idea_ranks = phase_rank(&self.models, SelectionPhase::Idea, &self.versions);
+        let planning_ranks = phase_rank(&self.models, SelectionPhase::Planning, &self.versions);
+        let build_ranks = phase_rank(&self.models, SelectionPhase::Build, &self.versions);
+        let review_ranks = phase_rank(&self.models, SelectionPhase::Review, &self.versions);
 
         let visible = visible_models(&self.models, &self.versions);
 
@@ -368,22 +373,42 @@ impl App {
                 let prob_i = if vendor_failed {
                     probability_unavailable_span("I")
                 } else {
-                    probability_span("I", idea_pct, max_idea)
+                    probability_span(
+                        "I",
+                        idea_pct,
+                        max_idea,
+                        idea_ranks.get(&model.name) == Some(&1),
+                    )
                 };
                 let prob_p = if vendor_failed {
                     probability_unavailable_span("P")
                 } else {
-                    probability_span("P", planning_pct, max_planning)
+                    probability_span(
+                        "P",
+                        planning_pct,
+                        max_planning,
+                        planning_ranks.get(&model.name) == Some(&1),
+                    )
                 };
                 let prob_b = if vendor_failed {
                     probability_unavailable_span("B")
                 } else {
-                    probability_span("B", build_pct, max_build)
+                    probability_span(
+                        "B",
+                        build_pct,
+                        max_build,
+                        build_ranks.get(&model.name) == Some(&1),
+                    )
                 };
                 let prob_r = if vendor_failed {
                     probability_unavailable_span("R")
                 } else {
-                    probability_span("R", review_pct, max_review)
+                    probability_span(
+                        "R",
+                        review_pct,
+                        max_review,
+                        review_ranks.get(&model.name) == Some(&1),
+                    )
                 };
                 // Both metrics share the probability gradient (red→yellow→green
                 // on 0..100), where higher is better — for stupid_level a higher
@@ -764,6 +789,7 @@ mod tests {
     use super::*;
     use crate::{
         app::tree::{flatten_visible_rows, node_key_at_path},
+        selection::{CachedModel, VendorKind, ranking::build_version_index},
         state::{
             Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
             SessionState,
@@ -863,6 +889,61 @@ mod tests {
             },
             text: text.to_string(),
         }
+    }
+
+    fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> CachedModel {
+        CachedModel {
+            vendor: VendorKind::Codex,
+            name: name.to_string(),
+            overall_score: axis_score,
+            current_score: 99.0,
+            standard_error: 0.0,
+            axes: vec![
+                ("codequality".to_string(), axis_score),
+                ("correctness".to_string(), axis_score),
+                ("debugging".to_string(), axis_score),
+                ("safety".to_string(), axis_score),
+                ("complexity".to_string(), axis_score),
+                ("edgecases".to_string(), axis_score),
+                ("contextawareness".to_string(), axis_score),
+                ("taskcompletion".to_string(), axis_score),
+                ("stability".to_string(), axis_score),
+            ],
+            quota_percent: Some(100),
+            display_order,
+            fallback_from: None,
+        }
+    }
+
+    fn full_buffer_line_text(buf: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buf.area.width)
+            .map(|x| buf.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "))
+            .collect()
+    }
+
+    #[test]
+    fn model_strip_bolds_only_phase_rank_one_when_percentages_round_together() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![
+            model_with_axis_score("gpt-alpha", 1.0, 0),
+            model_with_axis_score("gpt-beta", 0.996_655, 1),
+        ]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 90, 6);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip().render(area, &mut buf);
+
+        let beta_y = (0..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("beta"))
+            .expect("beta row should be rendered");
+        let beta_line = full_buffer_line_text(&buf, beta_y);
+        let build_col = beta_line
+            .rfind("B50")
+            .expect("beta build probability should round to B50") as u16;
+        let build_cell = buf.cell((build_col, beta_y)).expect("build cell");
+
+        assert!(!build_cell.modifier.contains(Modifier::BOLD));
     }
 
     fn node(

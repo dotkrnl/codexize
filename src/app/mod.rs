@@ -8501,6 +8501,214 @@ estimated_tokens = 1
     }
 
     #[test]
+    fn orphan_live_summary_files_removed_at_session_start() {
+        with_temp_root(|| {
+            let session_id = "orphan-live-summary-sweep";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts_dir = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts_dir).expect("artifacts dir");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let live_txt = artifacts_dir.join("live_summary.txt");
+            std::fs::write(&live_txt, "stale").expect("write live_summary.txt");
+            let running_key = App::run_key_for("brainstorm", None, 1, 1);
+            let running_path = artifacts_dir.join(format!("live_summary.{running_key}.txt"));
+            std::fs::write(&running_path, "running").expect("write running live_summary");
+            let orphan_path = artifacts_dir.join("live_summary.orphan.txt");
+            std::fs::write(&orphan_path, "orphan").expect("write orphan live_summary");
+
+            assert!(live_txt.exists());
+            assert!(running_path.exists());
+            assert!(orphan_path.exists());
+
+            let _app = App::new(mk_tmux(), state);
+
+            assert!(
+                !live_txt.exists(),
+                "pointer live_summary.txt must be removed at startup"
+            );
+            assert!(
+                running_path.exists(),
+                "live_summary.<run_key>.txt for Running record must be retained"
+            );
+            assert!(
+                !orphan_path.exists(),
+                "orphan live_summary.<run_key>.txt must be removed at startup"
+            );
+        });
+    }
+
+    #[test]
+    fn resume_missing_window_honors_present_finish_stamp_for_coder() {
+        with_temp_root(|| {
+            let session_id = "resume-coder-stamp-present";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Coder r1]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+            write_finish_stamp(&session_dir, &App::run_key_for("coder", Some(1), 1, 1), "after", "stable");
+
+            let resumed = state
+                .resume_running_runs(&[])
+                .expect("resume")
+                .expect("run id");
+
+            let mut app = idle_app(state);
+            app.current_run_id = Some(resumed);
+            app.window_launched = true;
+            app.poll_agent_window();
+
+            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            assert_eq!(run.status, RunStatus::Done);
+            assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
+        });
+    }
+
+    #[test]
+    fn resume_missing_window_missing_stamp_fails_unverified_for_coder() {
+        with_temp_root(|| {
+            let session_id = "resume-coder-stamp-missing";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Coder r1]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let resumed = state
+                .resume_running_runs(&[])
+                .expect("resume")
+                .expect("run id");
+
+            let mut app = idle_app(state);
+            app.current_run_id = Some(resumed);
+            app.window_launched = true;
+            app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+            app.poll_agent_window();
+
+            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            assert_eq!(run.status, RunStatus::FailedUnverified);
+            assert!(
+                run.error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("missing finish stamp"),
+                "must fail closed on missing stamp"
+            );
+            assert_eq!(app.state.current_phase, Phase::ImplementationRound(1));
+        });
+    }
+
+    #[test]
+    fn resume_missing_window_missing_stamp_warns_and_finalizes_for_non_coder() {
+        with_temp_root(|| {
+            let session_id = "resume-planning-stamp-missing";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts_dir = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts_dir).expect("artifacts dir");
+            std::fs::write(artifacts_dir.join("plan.md"), "# Plan\n").expect("write plan");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Planning]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let resumed = state
+                .resume_running_runs(&[])
+                .expect("resume")
+                .expect("run id");
+
+            let mut app = idle_app(state);
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness::default(),
+            )));
+            app.current_run_id = Some(resumed);
+            app.window_launched = true;
+            app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+            app.poll_agent_window();
+
+            let run = app.state.agent_runs.iter().find(|r| r.id == 1).expect("run");
+            assert_eq!(run.status, RunStatus::Done);
+            assert_eq!(app.state.current_phase, Phase::PlanReviewRunning);
+
+            let warned = app.messages.iter().any(|m| {
+                m.kind == MessageKind::SummaryWarn && m.text.contains("finish_stamp_missing:")
+            });
+            assert!(warned, "non-coder missing stamp must warn on barrier release");
+        });
+    }
+
+    #[test]
     fn stamp_archival_moves_old_stamps_at_session_start() {
         use crate::runner::{write_finish_stamp, FinishStamp};
 

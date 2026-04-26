@@ -834,7 +834,12 @@ impl SessionState {
         self.agent_runs.iter().map(|r| r.id).max().unwrap_or(0) + 1
     }
 
-    /// Resume running runs on session load. Returns the current run ID if exactly one Running run exists and its window is live.
+    /// Resume running runs on session load.
+    ///
+    /// Returns the current run ID if exactly one `Running` run exists after
+    /// applying same-host identity validation. The app is responsible for
+    /// routing missing-window runs through the drain barrier and finish-stamp
+    /// finalization path.
     pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
         // Check for hostname/device identity mismatch first
         let current_hostname = Self::capture_hostname();
@@ -929,33 +934,7 @@ impl SessionState {
             .find(|r| r.id == run_id)
             .map(|r| r.window_name.clone())
             .unwrap_or_default();
-        let window_live = live_windows.contains(&window_name);
-
-        if !window_live {
-            // Finalize as Failed - the run will re-enter drain barrier via poll_agent_window
-            let run_idx = self.agent_runs.iter().position(|r| r.id == run_id).unwrap();
-            self.agent_runs[run_idx].status = RunStatus::Failed;
-            self.agent_runs[run_idx].ended_at = Some(chrono::Utc::now());
-            self.agent_runs[run_idx].error = Some("window missing on resume".to_string());
-
-            let duration = self.agent_runs[run_idx]
-                .ended_at
-                .unwrap()
-                .signed_duration_since(self.agent_runs[run_idx].started_at);
-            let msg = Message {
-                ts: chrono::Utc::now(),
-                run_id,
-                kind: MessageKind::End,
-                sender: MessageSender::System,
-                text: format!(
-                    "failed in {}s: window missing on resume",
-                    duration.num_seconds()
-                ),
-            };
-            let _ = self.append_message(&msg); // Best-effort
-            self.save()?;
-            return Ok(None);
-        }
+        let _window_live = live_windows.contains(&window_name);
 
         self.save()?;
         Ok(Some(run_id))
@@ -1456,12 +1435,8 @@ text = "agent started · gpt-5 (openai)"
         let result = state.resume_running_runs(&live_windows);
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), None);
-        assert_eq!(state.agent_runs[0].status, RunStatus::Failed);
-        assert_eq!(
-            state.agent_runs[0].error,
-            Some("window missing on resume".to_string())
-        );
+        assert_eq!(result.unwrap(), Some(1));
+        assert_eq!(state.agent_runs[0].status, RunStatus::Running);
     }
 
     #[test]
@@ -2059,7 +2034,7 @@ interactive = false
                 return;
             }
 
-            let different_device = current_device.map(|d| if d == 0 { 1 } else { d - 1 });
+            let different_device = current_device.map(|d| d.wrapping_add(1));
 
             state.agent_runs.push(RunRecord {
                 id: 1,

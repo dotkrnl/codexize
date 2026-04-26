@@ -284,15 +284,12 @@ impl App {
                     }
                     if name_str.starts_with("live_summary.")
                         && name_str.ends_with(".txt")
-                    {
-                        if let Some(run_key) = name_str
+                        && let Some(run_key) = name_str
                             .strip_prefix("live_summary.")
                             .and_then(|s| s.strip_suffix(".txt"))
-                        {
-                            if !running_keys.contains(run_key) {
-                                let _ = std::fs::remove_file(entry.path());
-                            }
-                        }
+                        && !running_keys.contains(run_key)
+                    {
+                        let _ = std::fs::remove_file(entry.path());
                     }
                 }
             }

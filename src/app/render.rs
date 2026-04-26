@@ -163,6 +163,48 @@ pub fn sanitize_live_summary(text: &str) -> String {
     collapsed.chars().take(500).collect()
 }
 
+fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) -> Vec<Span<'static>> {
+    const SUFFIX: &str = " (new)";
+    const ELLIPSIS: &str = "...";
+
+    let name_len = short_name.chars().count();
+    let suffix_len = SUFFIX.chars().count();
+    let ellipsis_len = ELLIPSIS.chars().count();
+
+    let full_len = if is_new {
+        name_len + suffix_len
+    } else {
+        name_len
+    };
+
+    if full_len <= target_width {
+        let pad = target_width.saturating_sub(full_len);
+        let mut spans = vec![Span::styled(
+            short_name.to_string(),
+            Style::default().fg(Color::Cyan),
+        )];
+        if is_new {
+            spans.push(Span::styled(SUFFIX, Style::default().fg(Color::DarkGray)));
+        }
+        if pad > 0 {
+            spans.push(Span::raw(" ".repeat(pad)));
+        }
+        spans
+    } else if target_width > ellipsis_len {
+        let visible_chars = target_width.saturating_sub(ellipsis_len);
+        let truncated: String = short_name.chars().take(visible_chars).collect();
+        vec![
+            Span::styled(truncated, Style::default().fg(Color::Cyan)),
+            Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)),
+        ]
+    } else {
+        vec![Span::styled(
+            ELLIPSIS.chars().take(target_width).collect::<String>(),
+            Style::default().fg(Color::DarkGray),
+        )]
+    }
+}
+
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
         let model_height = self.models.len().max(1) as u16 + 2;
@@ -182,7 +224,7 @@ impl App {
 
         frame.render_widget(self.header(), root[0]);
         frame.render_widget(PipelineWidget { app: self }, root[1]);
-        frame.render_widget(self.model_strip(), root[2]);
+        frame.render_widget(self.model_strip(root[2].width), root[2]);
 
         if self.state.current_phase == Phase::SkipToImplPending {
             render_skip_to_impl_modal(
@@ -235,12 +277,24 @@ impl App {
         ]))
     }
 
-    fn model_strip(&self) -> Paragraph<'static> {
+    fn model_strip(&self, strip_width: u16) -> Paragraph<'static> {
         use crate::selection::{
             CachedModel,
             config::SelectionPhase,
             display::{phase_rank, visible_models},
             ranking::selection_probability,
+        };
+
+        // Fixed-width parts: vendor tag (8) + stupid (2) + "  " (2) + quota (4) +
+        // "  " (2) + "Ixx Pxx Bxx Rxx" (15) + block borders (2) = 35.
+        // The remaining width goes to the model name column.
+        const FIXED_WIDTH: usize = 35;
+        const MIN_NAME_WIDTH: usize = 8;
+        const DEFAULT_NAME_WIDTH: usize = 28;
+        let name_width = if strip_width as usize > FIXED_WIDTH + MIN_NAME_WIDTH {
+            (strip_width as usize - FIXED_WIDTH).min(DEFAULT_NAME_WIDTH)
+        } else {
+            MIN_NAME_WIDTH
         };
 
         // Probabilities are computed on demand per phase and normalised against
@@ -348,25 +402,11 @@ impl App {
                     .iter()
                     .any(|err| err.vendor == model.vendor);
 
-                let mut name_spans: Vec<Span> = Vec::new();
-                if model.fallback_from.is_some() {
-                    let suffix = " (new)";
-                    let used = short_name.chars().count() + suffix.chars().count();
-                    let pad = 28usize.saturating_sub(used);
-                    name_spans.push(Span::styled(
-                        short_name.clone(),
-                        Style::default().fg(Color::Cyan),
-                    ));
-                    name_spans.push(Span::styled(suffix, Style::default().fg(Color::DarkGray)));
-                    if pad > 0 {
-                        name_spans.push(Span::raw(" ".repeat(pad)));
-                    }
-                } else {
-                    name_spans.push(Span::styled(
-                        format!("{:<28}", short_name),
-                        Style::default().fg(Color::Cyan),
-                    ));
-                }
+                let name_spans = format_model_name_spans(
+                    &short_name,
+                    model.fallback_from.is_some(),
+                    name_width,
+                );
 
                 let mut line_spans = vec![tag_span];
                 line_spans.extend(name_spans);
@@ -932,7 +972,7 @@ mod tests {
 
         let area = Rect::new(0, 0, 90, 6);
         let mut buf = ratatui::buffer::Buffer::empty(area);
-        app.model_strip().render(area, &mut buf);
+        app.model_strip(area.width).render(area, &mut buf);
 
         let beta_y = (0..area.height)
             .find(|y| full_buffer_line_text(&buf, *y).contains("beta"))
@@ -944,6 +984,85 @@ mod tests {
         let build_cell = buf.cell((build_col, beta_y)).expect("build cell");
 
         assert!(!build_cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn model_strip_truncates_long_names_on_narrow_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![model_with_axis_score(
+            "gpt-very-long-model-name-that-will-overflow",
+            1.0,
+            0,
+        )]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 50, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("codex"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("..."),
+            "narrow width should truncate name with ellipsis: {model_line}"
+        );
+        assert!(
+            !model_line.contains("very-long-model-name-that-will-overflow"),
+            "full name should not fit: {model_line}"
+        );
+    }
+
+    #[test]
+    fn model_strip_preserves_metrics_on_narrow_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![model_with_axis_score(
+            "gpt-very-long-model-name-that-will-overflow",
+            1.0,
+            0,
+        )]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 50, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("codex"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("I") && model_line.contains("P") && model_line.contains("B") && model_line.contains("R"),
+            "metrics IPBR should still appear on narrow width: {model_line}"
+        );
+    }
+
+    #[test]
+    fn model_strip_shows_full_name_on_wide_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.set_models(vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 90, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("codex"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("opus-4-5-20251101"),
+            "full short name should appear on wide width: {model_line}"
+        );
+        assert!(
+            !model_line.contains("..."),
+            "should not truncate on wide width: {model_line}"
+        );
     }
 
     fn node(

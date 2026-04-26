@@ -192,11 +192,29 @@ fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) 
         spans
     } else if target_width > ellipsis_len {
         let visible_chars = target_width.saturating_sub(ellipsis_len);
-        let truncated: String = short_name.chars().take(visible_chars).collect();
-        vec![
-            Span::styled(truncated, Style::default().fg(Color::Cyan)),
-            Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)),
-        ]
+        if is_new && name_len <= visible_chars {
+            // Name fits but suffix doesn't; include as much suffix as possible.
+            let suffix_room = visible_chars.saturating_sub(name_len);
+            let suffix_part: String = SUFFIX.chars().take(suffix_room).collect();
+            let mut spans = vec![Span::styled(
+                short_name.to_string(),
+                Style::default().fg(Color::Cyan),
+            )];
+            if !suffix_part.is_empty() {
+                spans.push(Span::styled(
+                    suffix_part,
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+            spans.push(Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)));
+            spans
+        } else {
+            let truncated: String = short_name.chars().take(visible_chars).collect();
+            vec![
+                Span::styled(truncated, Style::default().fg(Color::Cyan)),
+                Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)),
+            ]
+        }
     } else {
         vec![Span::styled(
             ELLIPSIS.chars().take(target_width).collect::<String>(),
@@ -961,6 +979,10 @@ mod tests {
             .collect()
     }
 
+    fn spans_text(spans: &[Span<'_>]) -> String {
+        spans.iter().map(|span| span.content.as_ref()).collect()
+    }
+
     #[test]
     fn model_strip_bolds_only_phase_rank_one_when_percentages_round_together() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
@@ -1041,6 +1063,33 @@ mod tests {
     }
 
     #[test]
+    fn model_strip_truncates_fallback_marker_text_on_narrow_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        let mut model = model_with_axis_score("gpt-opus-4-1", 1.0, 0);
+        model.fallback_from = Some("gpt-4-1".to_string());
+        app.set_models(vec![model]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 48, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("codex"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("opus-4-1 (..."),
+            "fallback marker should participate in truncation: {model_line}"
+        );
+        assert!(
+            !model_line.contains("opus-4-1..."),
+            "fallback marker should not be dropped before truncation: {model_line}"
+        );
+    }
+
+    #[test]
     fn model_strip_shows_full_name_on_wide_width() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.set_models(vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)]);
@@ -1063,6 +1112,62 @@ mod tests {
             !model_line.contains("..."),
             "should not truncate on wide width: {model_line}"
         );
+    }
+
+    #[test]
+    fn model_strip_shows_new_suffix_for_fallback_models_on_wide_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        let mut model = model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0);
+        model.fallback_from = Some("gpt-4-5".to_string());
+        app.set_models(vec![model]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 90, 4);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let model_y = (1..area.height)
+            .find(|y| full_buffer_line_text(&buf, *y).contains("codex"))
+            .expect("model row should be rendered");
+        let model_line = full_buffer_line_text(&buf, model_y);
+
+        assert!(
+            model_line.contains("opus-4-5-20251101 (new)"),
+            "fallback model should show (new) suffix on wide width: {model_line}"
+        );
+    }
+
+    #[test]
+    fn format_model_name_spans_exact_width() {
+        // Full name fits — padded to target width.
+        let spans = format_model_name_spans("short", false, 10);
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        assert_eq!(width, 10, "should pad when name fits");
+
+        // Name + suffix fits — padded to target width.
+        let spans = format_model_name_spans("short", true, 15);
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        assert_eq!(width, 15, "should pad when name + suffix fits");
+        assert_eq!(spans_text(&spans), "short (new)    ");
+
+        // Name truncated with ellipsis.
+        let spans = format_model_name_spans("verylongname", false, 10);
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        assert_eq!(width, 10, "truncated name should be exact width");
+        assert!(spans.iter().any(|s| s.content.contains("...")));
+        assert_eq!(spans_text(&spans), "verylon...");
+
+        // Name fits but suffix doesn't — suffix participates in truncation.
+        let spans = format_model_name_spans("gpt-4-turbo", true, 15);
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        assert_eq!(width, 15, "partial suffix + ellipsis should be exact width");
+        assert!(spans.iter().any(|s| s.content.contains("...")));
+        assert_eq!(spans_text(&spans), "gpt-4-turbo ...");
+
+        // Very narrow — only ellipsis fits.
+        let spans = format_model_name_spans("x", false, 2);
+        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        assert_eq!(width, 2, "ultra-narrow should still be exact width");
     }
 
     fn node(

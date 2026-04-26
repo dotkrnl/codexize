@@ -235,12 +235,11 @@ impl App {
             if let Ok(run_id) = app.state.resume_running_runs(&live_windows) {
                 app.current_run_id = run_id;
                 app.window_launched = run_id.is_some();
-                if run_id.is_some() {
-                    app.live_summary_path = Some(
-                        session_state::session_dir(&app.state.session_id)
-                            .join("artifacts")
-                            .join("live_summary.txt"),
-                    );
+                if let Some(rid) = run_id {
+                    if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid) {
+                        app.live_summary_path =
+                            Some(app.live_summary_path_for(run));
+                    }
                     app.read_live_summary_pipeline();
                 }
                 app.messages =
@@ -264,6 +263,41 @@ impl App {
             );
             app.state.pending_guard_decision = None;
             let _ = app.state.save();
+        }
+        // Orphan sweep: remove stale live_summary.*.txt files that do not
+        // correspond to a Running run record.
+        {
+            let artifacts_dir = session_state::session_dir(&app.state.session_id)
+                .join("artifacts");
+            let running_keys: std::collections::HashSet<String> = app
+                .state
+                .agent_runs
+                .iter()
+                .filter(|run| run.status == crate::state::RunStatus::Running)
+                .map(|run| App::run_key_for(&run.stage, run.task_id, run.round, run.attempt))
+                .collect();
+            if let Ok(entries) = std::fs::read_dir(&artifacts_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str == "live_summary.txt" {
+                        let _ = std::fs::remove_file(entry.path());
+                        continue;
+                    }
+                    if name_str.starts_with("live_summary.")
+                        && name_str.ends_with(".txt")
+                    {
+                        if let Some(run_key) = name_str
+                            .strip_prefix("live_summary.")
+                            .and_then(|s| s.strip_suffix(".txt"))
+                        {
+                            if !running_keys.contains(run_key) {
+                                let _ = std::fs::remove_file(entry.path());
+                            }
+                        }
+                    }
+                }
+            }
         }
         let _ = app.setup_watcher();
         app
@@ -1066,6 +1100,35 @@ impl App {
         self.run_status_path_for(&run.stage, run.task_id, run.round, run.attempt)
     }
 
+    fn run_key_for(
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) -> String {
+        let task = task_id
+            .map(|id| format!("task-{id}"))
+            .unwrap_or_else(|| "stage".to_string());
+        format!("{stage}-{task}-r{round}-a{attempt}")
+    }
+
+    fn live_summary_path_for_run(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+    ) -> std::path::PathBuf {
+        let run_key = Self::run_key_for(stage, task_id, round, attempt);
+        session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join(format!("live_summary.{run_key}.txt"))
+    }
+
+    fn live_summary_path_for(&self, run: &crate::state::RunRecord) -> std::path::PathBuf {
+        self.live_summary_path_for_run(&run.stage, run.task_id, run.round, run.attempt)
+    }
+
     fn guard_dir_for(
         &self,
         stage: &str,
@@ -1436,13 +1499,11 @@ impl App {
         }
         self.current_run_id = Some(run_id);
         self.window_launched = true;
-        self.live_summary_path = Some(
-            session_state::session_dir(&self.state.session_id)
-                .join("artifacts")
-                .join("live_summary.txt"),
-        );
+        self.live_summary_path =
+            Some(self.live_summary_path_for_run(stage, task_id, round, attempt));
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
+        let _ = self.setup_watcher();
         if let Err(err) = self.state.save() {
             let _ = self
                 .state
@@ -3619,9 +3680,9 @@ impl App {
         );
         match watcher_result {
             Ok(mut watcher) => {
-                let path = session_state::session_dir(&self.state.session_id)
-                    .join("artifacts")
-                    .join("live_summary.txt");
+                let Some(path) = self.live_summary_path.clone() else {
+                    return Ok(());
+                };
                 if let Err(e) = watcher.watch(&path, notify::RecursiveMode::NonRecursive) {
                     let _ = self
                         .state
@@ -3698,9 +3759,9 @@ impl App {
         if !tmux::window_exists(&run.window_name) {
             return;
         }
-        let path = session_state::session_dir(&self.state.session_id)
-            .join("artifacts")
-            .join("live_summary.txt");
+        let Some(path) = self.live_summary_path.clone() else {
+            return;
+        };
         let Ok(meta) = std::fs::metadata(&path) else {
             return;
         };
@@ -3752,9 +3813,7 @@ impl App {
     /// Emits any last summary as a Brief message, then deletes the file so
     /// the next run starts with a clean slate.
     fn drain_live_summary(&mut self, run: &crate::state::RunRecord) {
-        let path = session_state::session_dir(&self.state.session_id)
-            .join("artifacts")
-            .join("live_summary.txt");
+        let path = self.live_summary_path_for(run);
         if let Ok(content) = std::fs::read_to_string(&path) {
             let sanitized = render::sanitize_live_summary(&content);
             if !sanitized.is_empty() && sanitized != self.live_summary_cached_text {

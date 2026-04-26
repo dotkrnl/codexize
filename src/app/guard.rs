@@ -119,13 +119,18 @@ fn read_snapshot(snapshot_dir: &Path) -> Option<Snapshot> {
 
 /// Capture a snapshot for a non-coder agent. Records HEAD and working-tree
 /// status so `verify_non_coder` can detect changes and emit warnings.
-pub fn capture_non_coder(snapshot_dir: &Path, _stage_tag: &str) -> std::io::Result<()> {
+/// `mode` controls how a HEAD-advance violation is handled at verify time.
+pub fn capture_non_coder(
+    snapshot_dir: &Path,
+    _stage_tag: &str,
+    mode: GuardMode,
+) -> std::io::Result<()> {
     let snap = Snapshot {
         head: git_head().unwrap_or_default(),
         git_status: git_status().unwrap_or_default(),
         control_files: BTreeMap::new(),
         baseline_stash: None,
-        mode: GuardMode::default(),
+        mode,
     };
     write_snapshot(snapshot_dir, &snap)
 }

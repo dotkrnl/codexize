@@ -1005,9 +1005,16 @@ impl App {
     /// Snapshot the run's immutability state. Non-coder agents must leave the
     /// git tree unchanged; the coder must not edit session control files.
     /// No-op under the test harness (no real git available).
-    /// Snapshot the run's immutability state. Returns `true` if the working
-    /// tree was dirty at capture time (non-coder only; always `false` for coder).
-    fn capture_run_guard(&self, stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> bool {
+    /// Returns `true` if the working tree was dirty at capture time (non-coder
+    /// only; always `false` for coder). `mode` is ignored for the coder stage.
+    fn capture_run_guard(
+        &self,
+        stage: &str,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+        mode: guard::GuardMode,
+    ) -> bool {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return false;
@@ -1027,6 +1034,7 @@ impl App {
                         .map(|id| format!("task{id}"))
                         .unwrap_or_else(|| "stage".to_string())
                 ),
+                mode,
             );
             dirty
         }
@@ -2055,7 +2063,7 @@ impl App {
         };
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        let dirty = self.capture_run_guard("plan-review", None, round, attempt);
+        let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Recovery Plan Review]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&plan_review_path)) {
@@ -2159,7 +2167,7 @@ impl App {
         };
         let attempt = self.attempt_for("sharding", None, round);
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
-        let dirty = self.capture_run_guard("sharding", None, round, attempt);
+        let dirty = self.capture_run_guard("sharding", None, round, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Recovery Sharding]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -2745,7 +2753,7 @@ impl App {
 
         let attempt = self.attempt_for("brainstorm", None, 1);
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
-        let dirty = self.capture_run_guard("brainstorm", None, 1, attempt);
+        let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard::GuardMode::AskOperator);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model);
         let launch_result =
@@ -2876,7 +2884,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
-        let dirty = self.capture_run_guard("spec-review", None, round, attempt);
+        let dirty = self.capture_run_guard("spec-review", None, round, attempt, guard::GuardMode::AutoReset);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result
@@ -2967,7 +2975,8 @@ impl App {
         let adapter = adapter_for_vendor(vendor_kind);
         let attempt = self.attempt_for("planning", None, 1);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
-        let dirty = self.capture_run_guard("planning", None, 1, attempt);
+        let guard_mode = if interactive { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
+        let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
         let window_name = window_name_with_model("[Planning]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&plan_path)) {
@@ -3070,7 +3079,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
-        let dirty = self.capture_run_guard("plan-review", None, round, attempt);
+        let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result
@@ -3144,7 +3153,7 @@ impl App {
 
         let attempt = self.attempt_for("sharding", None, 1);
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
-        let dirty = self.capture_run_guard("sharding", None, 1, attempt);
+        let dirty = self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Sharding]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -3255,7 +3264,8 @@ impl App {
         };
         let attempt = self.attempt_for("recovery", None, round);
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
-        let dirty = self.capture_run_guard("recovery", None, round, attempt);
+        let recovery_guard_mode = if is_human_blocked { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
+        let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
         let window_name = window_name_with_model("[Recovery]", &model);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&tasks_path)) {
@@ -3353,7 +3363,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
         let attempt = self.attempt_for("coder", Some(task_id), r);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
-        self.capture_run_guard("coder", Some(task_id), r, attempt);
+        self.capture_run_guard("coder", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, None) {
             result
         } else {
@@ -3452,7 +3462,7 @@ impl App {
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
-        let dirty = self.capture_run_guard("reviewer", Some(task_id), r, attempt);
+        let dirty = self.capture_run_guard("reviewer", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
         let launch_result =
             if let Some(result) = self.try_test_launch(&status_path, Some(&review_path)) {
                 result

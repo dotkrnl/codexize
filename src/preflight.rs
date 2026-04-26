@@ -16,7 +16,7 @@ use std::{
     fs,
     path::Path,
     process::Command,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +30,11 @@ enum Scenario {
 enum WaitState {
     None,
     GeneratingGitignore,
+    AgentFailed,
 }
+
+const AGENT_TIMEOUT: Duration = Duration::from_secs(120);
+const AGENT_FAIL_DISPLAY: Duration = Duration::from_secs(2);
 
 fn detect_git() -> bool {
     Command::new("git")
@@ -272,6 +276,12 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario, wait_state:
                     Line::from("Generating .gitignore..."),
                     Line::from(""),
                 ]
+            } else if wait_state == WaitState::AgentFailed {
+                vec![
+                    Line::from(""),
+                    Line::from("Agent timed out. Using built-in .gitignore."),
+                    Line::from(""),
+                ]
             } else {
                 vec![
                     Line::from(""),
@@ -298,6 +308,12 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario, wait_state:
                 vec![
                     Line::from(""),
                     Line::from("Generating .gitignore..."),
+                    Line::from(""),
+                ]
+            } else if wait_state == WaitState::AgentFailed {
+                vec![
+                    Line::from(""),
+                    Line::from("Agent timed out. Using built-in .gitignore."),
                     Line::from(""),
                 ]
             } else {
@@ -429,11 +445,22 @@ fn run_git_init_modal(
 ) -> Result<()> {
     let mut wait_state = WaitState::None;
     let mut finish_marker: Option<std::path::PathBuf> = None;
+    let mut agent_start_time: Option<Instant> = None;
+    let mut agent_fail_display_deadline: Option<Instant> = None;
 
     loop {
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario, wait_state);
         })?;
+
+        if wait_state == WaitState::AgentFailed {
+            if agent_fail_display_deadline.map_or(false, |d| Instant::now() >= d) {
+                run_git_init()?;
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            continue;
+        }
 
         if wait_state == WaitState::GeneratingGitignore {
             if let Some(ref marker) = finish_marker
@@ -441,6 +468,12 @@ fn run_git_init_modal(
                     run_git_init()?;
                     return Ok(());
                 }
+            if agent_start_time.map_or(false, |t| t.elapsed() >= AGENT_TIMEOUT) {
+                let content = generate_heuristic_gitignore(codexize_entry);
+                fs::write(".gitignore", content).context("failed to write .gitignore")?;
+                wait_state = WaitState::AgentFailed;
+                agent_fail_display_deadline = Some(Instant::now() + AGENT_FAIL_DISPLAY);
+            }
             std::thread::sleep(Duration::from_millis(200));
             continue;
         }
@@ -454,6 +487,7 @@ fn run_git_init_modal(
                     KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                         if scenario == Scenario::NoGitHasFiles {
                             wait_state = WaitState::GeneratingGitignore;
+                            agent_start_time = Some(Instant::now());
                             finish_marker = Some(spawn_gitignore_agent(tmux, codexize_entry)?);
                         } else {
                             run_git_init()?;

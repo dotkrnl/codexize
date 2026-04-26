@@ -5240,6 +5240,8 @@ mod tests {
             live_summary_path: None,
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
+            pending_drain_deadline: None,
+            pending_drain_notice_emitted: false,
             current_run_id: Some(2),
             failed_models: HashMap::new(),
             test_launch_harness: None,
@@ -5260,6 +5262,23 @@ mod tests {
             model: "gpt-5".to_string(),
             vendor: "codex".to_string(),
             window_name: format!("[Coder t1 r{round}]"),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+        }
+    }
+
+    fn make_planning_run(id: u64, attempt: u32) -> RunRecord {
+        RunRecord {
+            id,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: format!("[Planning a{attempt}]"),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -5902,6 +5921,8 @@ mod tests {
             live_summary_path: None,
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
+            pending_drain_deadline: None,
+            pending_drain_notice_emitted: false,
             current_run_id: None,
             failed_models: HashMap::new(),
             test_launch_harness: None,
@@ -6371,6 +6392,286 @@ mod tests {
                 .expect("end message");
             assert!(end.text.contains("attempt 1 unverified"));
             assert!(end.text.contains("missing finish stamp"));
+        });
+    }
+
+    #[test]
+    fn window_disappearance_enters_drain_state_before_finalize() {
+        with_temp_root(|| {
+            let session_id = "planning-drain-before-finalize";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts_dir = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts_dir).expect("artifacts dir");
+            std::fs::write(artifacts_dir.join("plan.md"), "# Plan\n").expect("plan artifact");
+
+            let run = make_planning_run(1, 1);
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+            app.current_run_id = Some(run.id);
+            app.window_launched = true;
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                1,
+                10,
+                10,
+            )];
+
+            let status_path = app.run_status_path(&run);
+            std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
+            std::fs::write(&status_path, "0").expect("status");
+
+            let run_key = App::run_key_for("planning", None, 1, 1);
+            write_finish_stamp(&session_dir, &run_key, "head123", "stable");
+
+            let live_summary_path = app.live_summary_path_for(&run);
+            std::fs::write(&live_summary_path, "still draining\n").expect("live summary");
+
+            app.poll_agent_window();
+
+            let persisted = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|candidate| candidate.id == run.id)
+                .expect("run");
+            assert_eq!(persisted.status, RunStatus::Running);
+            assert_eq!(app.current_run_id, Some(run.id));
+            assert!(app.pending_drain_deadline.is_some());
+            assert!(app
+                .messages
+                .iter()
+                .any(|m| m.run_id == run.id && m.kind == MessageKind::Summary && m.text.contains("draining")));
+        });
+    }
+
+    #[test]
+    fn same_key_retry_waits_for_stamp_or_timeout_after_live_summary_absent() {
+        with_temp_root(|| {
+            let session_id = "planning-drain-timeout";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+            ];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![
+                        TestLaunchOutcome {
+                            exit_code: 1,
+                            artifact_contents: None,
+                        },
+                        TestLaunchOutcome {
+                            exit_code: 1,
+                            artifact_contents: None,
+                        },
+                    ]),
+                },
+            )));
+
+            app.launch_planning();
+            let first_id = app.current_run_id.expect("first planning run id");
+            let first = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|run| run.id == first_id)
+                .cloned()
+                .expect("first run");
+            let stamp_path = app.finish_stamp_path_for(&first);
+            let _ = std::fs::remove_file(&stamp_path);
+            let _ = std::fs::remove_file(app.live_summary_path_for(&first));
+
+            app.poll_agent_window();
+            assert_eq!(app.current_run_id, Some(first.id));
+            let still_first = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|run| run.id == first.id)
+                .expect("first run after barrier");
+            assert_eq!(still_first.status, RunStatus::Running);
+
+            app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+            app.poll_agent_window();
+
+            let first_done = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|run| run.id == first.id)
+                .expect("first finalized");
+            assert_eq!(first_done.status, RunStatus::Failed);
+            let second = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|run| run.stage == "planning" && run.attempt == 2)
+                .expect("retry attempt 2 launched");
+            assert_eq!(second.status, RunStatus::Running);
+            assert_eq!(app.current_run_id, Some(second.id));
+        });
+    }
+
+    #[test]
+    fn failed_unverified_coder_does_not_auto_retry() {
+        with_temp_root(|| {
+            let session_id = "coder-unverified-no-retry";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+            ];
+
+            app.finalize_current_run(&run).expect("finalize coder");
+
+            assert_eq!(app.state.agent_runs.len(), 1);
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|candidate| candidate.id == run.id)
+                .expect("finalized run");
+            assert_eq!(finalized.status, RunStatus::FailedUnverified);
+            assert!(
+                app.state
+                    .agent_error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .starts_with("failed_unverified:"),
+                "failed_unverified should block auto-retry and surface as agent_error"
+            );
+        });
+    }
+
+    #[test]
+    fn non_coder_missing_stamp_warns_and_still_retries_after_timeout() {
+        with_temp_root(|| {
+            let session_id = "planning-missing-stamp-warning";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+            ];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![
+                        TestLaunchOutcome {
+                            exit_code: 1,
+                            artifact_contents: None,
+                        },
+                        TestLaunchOutcome {
+                            exit_code: 1,
+                            artifact_contents: None,
+                        },
+                    ]),
+                },
+            )));
+
+            app.launch_planning();
+            let first_id = app.current_run_id.expect("first planning run id");
+            let first = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|run| run.id == first_id)
+                .cloned()
+                .expect("first run");
+            let _ = std::fs::remove_file(app.finish_stamp_path_for(&first));
+            let _ = std::fs::remove_file(app.live_summary_path_for(&first));
+
+            app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+            app.poll_agent_window();
+
+            let warn = app
+                .messages
+                .iter()
+                .find(|message| {
+                    message.run_id == first.id
+                        && message.kind == MessageKind::SummaryWarn
+                        && message.text.contains("finish_stamp_missing")
+                })
+                .expect("missing-stamp warning");
+            assert!(warn.text.contains("planning"));
+            assert!(app
+                .state
+                .agent_runs
+                .iter()
+                .any(|run| run.stage == "planning" && run.attempt == 2 && run.status == RunStatus::Running));
+        });
+    }
+
+    #[test]
+    fn guard_warnings_emit_only_after_drain_barrier_passes() {
+        with_temp_root(|| {
+            let session_id = "guard-after-drain";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts_dir = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts_dir).expect("artifacts dir");
+            std::fs::write(artifacts_dir.join("plan.md"), "# Plan\n").expect("plan artifact");
+
+            let run = make_planning_run(1, 1);
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+            app.current_run_id = Some(run.id);
+            app.window_launched = true;
+
+            let status_path = app.run_status_path(&run);
+            std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
+            std::fs::write(&status_path, "0").expect("status");
+
+            let run_key = App::run_key_for("planning", None, 1, 1);
+            write_finish_stamp(&session_dir, &run_key, "head123", "stable");
+
+            let guard_dir = session_dir.join(".guards").join("planning-stage-r1-a1");
+            std::fs::create_dir_all(&guard_dir).expect("guard dir");
+            std::fs::write(
+                guard_dir.join("snapshot.toml"),
+                "head = \"\"\ngit_status = \"dirty\"\nmode = \"auto_reset\"\n\n[control_files]\n",
+            )
+            .expect("guard snapshot");
+
+            let live_summary_path = app.live_summary_path_for(&run);
+            std::fs::write(&live_summary_path, "awaiting drain\n").expect("live summary");
+            app.poll_agent_window();
+
+            assert!(
+                !app.messages.iter().any(|message| {
+                    message.run_id == run.id
+                        && message.kind == MessageKind::SummaryWarn
+                        && message.text.contains("working tree was dirty before agent launch")
+                }),
+                "guard diagnostics should not emit before drain barrier releases finalize"
+            );
+
+            std::fs::remove_file(&live_summary_path).expect("remove live summary");
+            app.poll_agent_window();
+
+            assert!(
+                app.messages.iter().any(|message| {
+                    message.run_id == run.id
+                        && message.kind == MessageKind::SummaryWarn
+                        && message.text.contains("working tree was dirty before agent launch")
+                }),
+                "guard diagnostics should emit after barrier passes"
+            );
         });
     }
 
@@ -7502,6 +7803,12 @@ estimated_tokens = 1
                 std::fs::create_dir_all(parent).unwrap();
             }
             std::fs::write(&status_path, "0").unwrap();
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("reviewer", Some(1), 1, 1),
+                "head789",
+                "stable",
+            );
 
             app.poll_agent_window();
 

@@ -243,6 +243,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kimi_quota_takes_min_across_windows() {
+        let mapped = live_map_kimi(vec![
+            LiveModel {
+                name: "kimi-k1.6".to_string(),
+                quota_percent: Some(80),
+            },
+            LiveModel {
+                name: "kimi-k2".to_string(),
+                quota_percent: Some(20),
+            },
+        ]);
+
+        assert_eq!(
+            mapped.get("kimi-latest"),
+            Some(&Some(20)),
+            "should use the minimum quota across all windows"
+        );
+    }
+
+    #[test]
+    fn kimi_quota_returns_none_when_all_missing() {
+        let mapped = live_map_kimi(vec![
+            LiveModel {
+                name: "kimi-k1.6".to_string(),
+                quota_percent: None,
+            },
+        ]);
+
+        assert_eq!(
+            mapped.get("kimi-latest"),
+            Some(&None),
+            "should return None when no quotas are available"
+        );
+    }
+
+    #[test]
     fn live_map_direct_injects_known_gemini_quota_names() {
         let mapped = live_map_direct(vec![LiveModel {
             name: "gemini-3-pro-preview".to_string(),

@@ -21,17 +21,27 @@ pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
 /// refresh runs.
 pub fn assemble_from_cached_only() -> Vec<CachedModel> {
     let loaded = cache::load();
+    assemble_from_loaded(&loaded)
+}
+
+pub fn assemble_from_loaded(loaded: &LoadedCache) -> Vec<CachedModel> {
     if loaded.dashboard.is_none() {
         return Vec::new();
     }
-    let quotas = loaded.quotas.map(|s| crate::cache::LoadedSection {
-        data: s.data,
-        expired: false,
-    });
-    let dashboard = loaded.dashboard.map(|s| crate::cache::LoadedSection {
-        data: s.data,
-        expired: false,
-    });
+    let quotas = loaded
+        .quotas
+        .as_ref()
+        .map(|section| crate::cache::LoadedSection {
+            data: section.data.clone(),
+            expired: false,
+        });
+    let dashboard = loaded
+        .dashboard
+        .as_ref()
+        .map(|section| crate::cache::LoadedSection {
+            data: section.data.clone(),
+            expired: false,
+        });
     let (models, _) = assemble_from_cache(LoadedCache { dashboard, quotas });
     models
 }
@@ -67,7 +77,8 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
                         fallback_from: m.fallback_from.clone(),
                     })
                     .collect();
-                let _ = cache::save_dashboard(&entries);
+                let _ = cache::save_dashboard(&entries)
+                    .map_err(|err| eprintln!("codexize: failed to save dashboard cache: {err}"));
                 entries
             }
             Err(e) => {
@@ -89,7 +100,8 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
         let (fresh_quotas, fresh_errors) = quota::load_quota_maps();
         quota_errors.extend(fresh_errors);
         let merged = merge_quota_payload(&cached_quota, fresh_quotas);
-        let _ = cache::save_quotas(&merged);
+        let _ = cache::save_quotas(&merged)
+            .map_err(|err| eprintln!("codexize: failed to save quota cache: {err}"));
         merged
     } else {
         cached_quota
@@ -100,9 +112,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
     // or from str_to_vendor-compatible strings ("codex", "gemini", "kimi").
     let parsed_quotas: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = quota_payload
         .into_iter()
-        .filter_map(|(vendor_name, models)| {
-            parse_vendor_str(&vendor_name).map(|v| (v, models))
-        })
+        .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
         .collect();
 
     // Convert dashboard entries to DashboardModels for sibling synthesis
@@ -129,8 +139,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
             if existing.contains(name) || synthesized.contains(name) {
                 continue;
             }
-            if let Some(model) =
-                dashboard::synthesize_sibling(name, vendor_str, &dashboard_models)
+            if let Some(model) = dashboard::synthesize_sibling(name, vendor_str, &dashboard_models)
             {
                 synthesized.insert(name.clone());
                 dashboard_models.push(model);
@@ -256,10 +265,7 @@ mod tests {
         payload
     }
 
-    fn loaded_cache_with(
-        dashboard: Vec<DashboardEntry>,
-        quotas: QuotaPayload,
-    ) -> LoadedCache {
+    fn loaded_cache_with(dashboard: Vec<DashboardEntry>, quotas: QuotaPayload) -> LoadedCache {
         LoadedCache {
             dashboard: Some(cache::LoadedSection {
                 data: dashboard,
@@ -287,7 +293,10 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(models.len(), 2);
-        let claude = models.iter().find(|m| m.name == "claude-sonnet-4-6").unwrap();
+        let claude = models
+            .iter()
+            .find(|m| m.name == "claude-sonnet-4-6")
+            .unwrap();
         assert_eq!(claude.vendor, VendorKind::Claude);
         assert_eq!(claude.quota_percent, Some(80));
         let codex = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
@@ -380,6 +389,18 @@ mod tests {
         let (models, _) = assemble_from_cache(loaded);
 
         assert!(models.is_empty());
+    }
+
+    #[test]
+    fn assemble_from_loaded_uses_provided_snapshot_without_reloading() {
+        let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+        let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+
+        let models = assemble_from_loaded(&loaded_cache_with(dashboard, quotas));
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "claude-sonnet-4-6");
+        assert_eq!(models[0].quota_percent, Some(80));
     }
 
     #[test]
@@ -478,7 +499,9 @@ mod tests {
         let merged = merge_quota_payload(&cached, BTreeMap::new());
 
         assert_eq!(
-            merged.get("aliens").and_then(|m| m.get("ufo-9000").copied()),
+            merged
+                .get("aliens")
+                .and_then(|m| m.get("ufo-9000").copied()),
             Some(Some(33))
         );
     }

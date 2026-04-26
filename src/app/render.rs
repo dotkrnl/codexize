@@ -17,6 +17,7 @@ use super::{
     models::{vendor_color, vendor_prefix, vendor_tag},
 };
 use crate::selection::VendorKind;
+use crate::tui::wrap_input;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -134,57 +135,6 @@ fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 
-/// Hard-wrap the input text into lines of at most `width` chars, preferring
-/// word boundaries when the line has any spaces. Preserves explicit newlines.
-fn wrap_input(text: &str, width: usize) -> Vec<String> {
-    if width == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for raw_line in text.split('\n') {
-        if raw_line.is_empty() {
-            out.push(String::new());
-            continue;
-        }
-        let mut current = String::new();
-        let mut current_len = 0usize;
-        for word in raw_line.split_inclusive(' ') {
-            let word_len = word.chars().count();
-            if current_len + word_len <= width {
-                current.push_str(word);
-                current_len += word_len;
-                continue;
-            }
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                current_len = 0;
-            }
-            if word_len <= width {
-                current.push_str(word);
-                current_len = word_len;
-            } else {
-                let mut remaining = word;
-                while remaining.chars().count() > width {
-                    let split_at = remaining
-                        .char_indices()
-                        .nth(width)
-                        .map(|(i, _)| i)
-                        .unwrap_or(remaining.len());
-                    out.push(remaining[..split_at].to_string());
-                    remaining = &remaining[split_at..];
-                }
-                if !remaining.is_empty() {
-                    current.push_str(remaining);
-                    current_len = remaining.chars().count();
-                }
-            }
-        }
-        if !current.is_empty() {
-            out.push(current);
-        }
-    }
-    out
-}
 
 fn strip_ansi_codes(s: &str) -> String {
     let mut result = String::with_capacity(s.len());

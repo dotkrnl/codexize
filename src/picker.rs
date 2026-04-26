@@ -115,11 +115,7 @@ impl SessionPicker {
 
     fn input_height(&self, total_width: u16, total_height: u16) -> u16 {
         let inner_width = total_width.saturating_sub(2).max(1) as usize;
-        let mut wrapped: usize = 0;
-        for segment in self.input_buffer.split('\n') {
-            let len = segment.chars().count();
-            wrapped += len.div_ceil(inner_width).max(1);
-        }
+        let wrapped = crate::tui::wrap_input(&self.input_buffer, inner_width).len();
         let wrapped = wrapped.max(1) as u16;
         let max = total_height.saturating_sub(3).max(3);
         (wrapped + 2).clamp(3, max)

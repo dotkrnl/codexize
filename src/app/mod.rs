@@ -4615,6 +4615,8 @@ Inputs:
 Triage reviews first: they may contradict each other. Decide what to incorporate,
 what to reject, and why. If a trade-off is real and you cannot confidently make
 it alone, ASK the operator — this is interactive.
+Reviews are written by AI agents. Be skeptical — accept feedback only when it
+genuinely improves the spec or plan. Reject the rest with a brief reason.
 
 Once every trade-off is resolved, do TWO things IN THIS ORDER:
   1. UPDATE the spec in place at {spec} so it reflects accepted feedback and
@@ -5034,7 +5036,7 @@ fn coder_prompt(
             .join("review.toml");
         if p.exists() {
             format!(
-                "\nPrevious reviewer feedback (round {}): {}\nRead it first and address every feedback item.\n",
+                "\nPrevious reviewer feedback (round {}): {}\nReviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.\n",
                 round - 1,
                 p.display()
             )

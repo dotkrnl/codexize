@@ -27,6 +27,10 @@ pub enum Phase {
     /// Recovery-mode re-sharding inserted after a successful recovery plan review.
     /// Regenerates the task queue from the recovered spec/plan.
     BuilderRecoverySharding(u32),
+    /// Interactive non-coder run advanced HEAD under `GuardMode::AskOperator`;
+    /// the modal is up and the operator must choose reset or keep before the
+    /// run can finalize.
+    GitGuardPending,
     Done,
     BlockedNeedsUser,
 }
@@ -50,6 +54,7 @@ impl Phase {
             Phase::Done => "Done".to_string(),
             Phase::BlockedNeedsUser => "Blocked".to_string(),
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
+            Phase::GitGuardPending => "Guard Decision".to_string(),
         }
     }
 
@@ -106,6 +111,19 @@ impl Phase {
             (BlockedNeedsUser, ImplementationRound(_)) => true,
             (BlockedNeedsUser, ReviewRound(_)) => true,
             (BlockedNeedsUser, BuilderRecovery(_)) => true,
+            // Git guard pending: inbound from every non-coder running phase
+            // that may launch under AskOperator. Outbound covers both the
+            // reset-failure successors and every keep-success successor a
+            // brainstorm / planning / interactive recovery run could reach.
+            (BrainstormRunning, GitGuardPending) => true,
+            (PlanningRunning, GitGuardPending) => true,
+            (BuilderRecovery(_), GitGuardPending) => true,
+            (GitGuardPending, BlockedNeedsUser) => true,
+            (GitGuardPending, Done) => true,
+            (GitGuardPending, SpecReviewRunning) => true,
+            (GitGuardPending, SkipToImplPending) => true,
+            (GitGuardPending, PlanReviewRunning) => true,
+            (GitGuardPending, BuilderRecoveryPlanReview(_)) => true,
             // Backward transitions (go_back)
             (BrainstormRunning, IdeaInput) => true,
             (SpecReviewRunning, BrainstormRunning) => true,
@@ -141,6 +159,7 @@ impl Phase {
             Phase::BuilderRecoveryPlanReview(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::BuilderRecoverySharding(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself
+            Phase::GitGuardPending => vec![],
             _ => vec![],
         }
     }
@@ -165,6 +184,7 @@ impl Phase {
             Phase::Done => "Run completed successfully",
             Phase::BlockedNeedsUser => "Blocked - requires user intervention",
             Phase::SkipToImplPending => "Awaiting user confirmation to skip to implementation",
+            Phase::GitGuardPending => "Awaiting git guard decision",
         }
     }
 
@@ -250,6 +270,49 @@ mod tests {
         assert!(!Phase::SpecReviewRunning.can_transition_to(&Phase::SkipToImplPending));
         assert!(!Phase::PlanningRunning.can_transition_to(&Phase::SkipToImplPending));
         assert!(!Phase::SkipToImplPending.can_transition_to(&Phase::PlanningRunning));
+    }
+
+    #[test]
+    fn git_guard_pending_inbound_transitions() {
+        assert!(Phase::BrainstormRunning.can_transition_to(&Phase::GitGuardPending));
+        assert!(Phase::PlanningRunning.can_transition_to(&Phase::GitGuardPending));
+        assert!(Phase::BuilderRecovery(2).can_transition_to(&Phase::GitGuardPending));
+
+        // Phases that never launch with AskOperator must not enter the
+        // pending state directly.
+        assert!(!Phase::SpecReviewRunning.can_transition_to(&Phase::GitGuardPending));
+        assert!(!Phase::PlanReviewRunning.can_transition_to(&Phase::GitGuardPending));
+        assert!(!Phase::ShardingRunning.can_transition_to(&Phase::GitGuardPending));
+        assert!(!Phase::ImplementationRound(1).can_transition_to(&Phase::GitGuardPending));
+        assert!(!Phase::ReviewRound(1).can_transition_to(&Phase::GitGuardPending));
+    }
+
+    #[test]
+    fn git_guard_pending_outbound_transitions() {
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::BlockedNeedsUser));
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::Done));
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::SpecReviewRunning));
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::SkipToImplPending));
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::PlanReviewRunning));
+        assert!(Phase::GitGuardPending.can_transition_to(&Phase::BuilderRecoveryPlanReview(3)));
+
+        // Negative cases — pending must not bypass into stages no
+        // brainstorm/planning/recovery run could reach today.
+        assert!(!Phase::GitGuardPending.can_transition_to(&Phase::ImplementationRound(1)));
+        assert!(!Phase::GitGuardPending.can_transition_to(&Phase::ReviewRound(1)));
+        assert!(!Phase::GitGuardPending.can_transition_to(&Phase::ShardingRunning));
+        assert!(!Phase::GitGuardPending.can_transition_to(&Phase::IdeaInput));
+        assert!(!Phase::GitGuardPending.can_transition_to(&Phase::GitGuardPending));
+    }
+
+    #[test]
+    fn git_guard_pending_metadata() {
+        assert_eq!(Phase::GitGuardPending.label(), "Guard Decision");
+        assert_eq!(
+            Phase::GitGuardPending.description(),
+            "Awaiting git guard decision"
+        );
+        assert!(Phase::GitGuardPending.required_artifacts().is_empty());
     }
 
     #[test]

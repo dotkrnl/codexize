@@ -673,7 +673,11 @@ impl App {
                 .join("rounds")
                 .join(format!("{r:03}"))
                 .join("task.toml"),
-            Phase::IdeaInput | Phase::Done | Phase::BlockedNeedsUser | Phase::SkipToImplPending => {
+            Phase::IdeaInput
+            | Phase::Done
+            | Phase::BlockedNeedsUser
+            | Phase::SkipToImplPending
+            | Phase::GitGuardPending => {
                 return None;
             }
         };
@@ -832,6 +836,11 @@ impl App {
                 self.state.skip_to_impl_kind = None;
                 self.state.agent_error = None;
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
+            }
+            Phase::GitGuardPending => {
+                // No window owned by this phase; the modal is purely TUI.
+                // Operator handlers are the legitimate exit path; go_back is
+                // a no-op while the decision is pending.
             }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }
@@ -2654,6 +2663,7 @@ impl App {
             | Phase::PlanReviewPaused
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
+            | Phase::GitGuardPending
             | Phase::Done => {}
         }
         Ok(())

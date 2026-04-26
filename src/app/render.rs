@@ -167,15 +167,14 @@ fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) 
     const SUFFIX: &str = " (new)";
     const ELLIPSIS: &str = "...";
 
-    let name_len = short_name.chars().count();
-    let suffix_len = SUFFIX.chars().count();
-    let ellipsis_len = ELLIPSIS.chars().count();
-
-    let full_len = if is_new {
-        name_len + suffix_len
+    let display_name = if is_new {
+        format!("{short_name}{SUFFIX}")
     } else {
-        name_len
+        short_name.to_string()
     };
+    let name_len = short_name.chars().count();
+    let full_len = display_name.chars().count();
+    let ellipsis_len = ELLIPSIS.chars().count();
 
     if full_len <= target_width {
         let pad = target_width.saturating_sub(full_len);
@@ -192,14 +191,11 @@ fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) 
         spans
     } else if target_width > ellipsis_len {
         let visible_chars = target_width.saturating_sub(ellipsis_len);
-        if is_new && name_len <= visible_chars {
-            // Name fits but suffix doesn't; include as much suffix as possible.
-            let suffix_room = visible_chars.saturating_sub(name_len);
-            let suffix_part: String = SUFFIX.chars().take(suffix_room).collect();
-            let mut spans = vec![Span::styled(
-                short_name.to_string(),
-                Style::default().fg(Color::Cyan),
-            )];
+        let truncated_display: String = display_name.chars().take(visible_chars).collect();
+        if is_new {
+            let name_part: String = truncated_display.chars().take(name_len).collect();
+            let suffix_part: String = truncated_display.chars().skip(name_len).collect();
+            let mut spans = vec![Span::styled(name_part, Style::default().fg(Color::Cyan))];
             if !suffix_part.is_empty() {
                 spans.push(Span::styled(
                     suffix_part,
@@ -209,7 +205,7 @@ fn format_model_name_spans(short_name: &str, is_new: bool, target_width: usize) 
             spans.push(Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)));
             spans
         } else {
-            let truncated: String = short_name.chars().take(visible_chars).collect();
+            let truncated = truncated_display;
             vec![
                 Span::styled(truncated, Style::default().fg(Color::Cyan)),
                 Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)),

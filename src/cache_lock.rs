@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
+use std::io::{self, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::thread;
@@ -29,7 +30,7 @@ fn acquire(path: &Path) -> Result<()> {
     loop {
         match try_create(path) {
             Ok(()) => return Ok(()),
-            Err(_) => {
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
                 if try_break_stale(path) {
                     continue;
                 }
@@ -41,27 +42,33 @@ fn acquire(path: &Path) -> Result<()> {
                 }
                 thread::sleep(POLL_INTERVAL);
             }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to create lock file at {}",
+                        path.display()
+                    )
+                });
+            }
         }
     }
 }
 
-fn try_create(path: &Path) -> Result<()> {
+fn try_create(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("failed to create lock directory")?;
+        fs::create_dir_all(parent)?;
     }
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o644)
-        .open(path)
-        .context("lock file already exists")?;
+        .open(path)?;
     let contents = format!(
         "{}\n{}\n",
         std::process::id(),
         now_secs(),
     );
-    file.write_all(contents.as_bytes())
-        .context("failed to write lock file")?;
+    file.write_all(contents.as_bytes())?;
     Ok(())
 }
 
@@ -92,14 +99,12 @@ fn try_break_stale(path: &Path) -> bool {
 }
 
 fn release(path: &Path) {
-    if let Ok(contents) = fs::read_to_string(path) {
-        if let Some(pid_str) = contents.lines().next() {
-            if let Ok(pid) = pid_str.parse::<u32>() {
-                if pid == std::process::id() {
-                    let _ = fs::remove_file(path);
-                }
-            }
-        }
+    if let Ok(contents) = fs::read_to_string(path)
+        && let Some(pid_str) = contents.lines().next()
+        && let Ok(pid) = pid_str.parse::<u32>()
+        && pid == std::process::id()
+    {
+        let _ = fs::remove_file(path);
     }
 }
 

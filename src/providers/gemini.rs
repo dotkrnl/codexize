@@ -18,6 +18,10 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
     let token = resolve_access_token()?;
     let project_id = resolve_project_id()?;
     let payload = fetch_usage_payload(&token, &project_id)?;
+    live_models_from_payload(&payload)
+}
+
+fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
     let buckets = payload
         .get("buckets")
         .and_then(Value::as_array)
@@ -36,7 +40,10 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
             .or_else(|| bucket.get("remaining_fraction"))
             .and_then(Value::as_f64)
             .map(|value| (value * 100.0).round().clamp(0.0, 100.0) as u8);
-        models.insert(name, remaining);
+        let entry = models.entry(name).or_insert(remaining);
+        if let (Some(a), Some(b)) = (*entry, remaining) {
+            *entry = Some(a.min(b));
+        }
     }
 
     if models.is_empty() {
@@ -126,4 +133,44 @@ fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
         bail!("Gemini quota response contained an error");
     }
     Ok(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn duplicate_buckets_are_min_d() {
+        let payload = json!({
+            "buckets": [
+                { "modelId": "gemini-2.5-pro", "remainingFraction": 0.80 },
+                { "modelId": "gemini-2.5-pro", "remainingFraction": 0.30 }
+            ]
+        });
+        let models = live_models_from_payload(&payload).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "gemini-2.5-pro");
+        // MIN(80, 30) = 30
+        assert_eq!(models[0].quota_percent, Some(30));
+    }
+
+    #[test]
+    fn single_bucket_preserved() {
+        let payload = json!({
+            "buckets": [
+                { "modelId": "gemini-2.5-flash", "remainingFraction": 0.47 }
+            ]
+        });
+        let models = live_models_from_payload(&payload).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "gemini-2.5-flash");
+        assert_eq!(models[0].quota_percent, Some(47));
+    }
+
+    #[test]
+    fn missing_buckets_returns_error() {
+        let payload = json!({ "buckets": [] });
+        assert!(live_models_from_payload(&payload).is_err());
+    }
 }

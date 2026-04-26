@@ -13,6 +13,24 @@ use std::path::{Path, PathBuf};
 
 const SNAPSHOT_FILE: &str = "snapshot.toml";
 
+/// Decided at run-launch time and persisted on the snapshot so finalization
+/// and resume paths cannot lose the choice. `AutoReset` keeps today's
+/// behavior (fail closed; `git reset --hard` on HEAD-advance). `AskOperator`
+/// is reserved for interactive non-coder runs: verify reports a pending
+/// decision instead of resetting, and the operator chooses reset vs keep.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardMode {
+    AutoReset,
+    AskOperator,
+}
+
+impl Default for GuardMode {
+    fn default() -> Self {
+        GuardMode::AutoReset
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Snapshot {
     /// git HEAD at capture time (full SHA). Empty if git was unavailable.
@@ -30,6 +48,32 @@ pub struct Snapshot {
     /// used to locate and pop the entry during verify.
     #[serde(default)]
     pub baseline_stash: Option<String>,
+    /// How the guard should react to a HEAD-advance violation. Defaulted so
+    /// snapshot files written before this field existed deserialize as
+    /// `AutoReset`.
+    #[serde(default)]
+    pub mode: GuardMode,
+}
+
+/// Outcome of verifying a snapshot. Three arms so callers cannot
+/// accidentally treat a pending operator decision as a hard error.
+#[derive(Debug, Clone)]
+pub enum VerifyResult {
+    /// No protocol violation. Advisory `warnings` may still be present.
+    Ok { warnings: Vec<String> },
+    /// Hard violation that the guard already reacted to (reset, restored
+    /// control files, etc.). The run should fail with `reason`.
+    HardError {
+        reason: String,
+        warnings: Vec<String>,
+    },
+    /// Interactive non-coder run advanced HEAD. The guard did **not** reset;
+    /// the operator must choose reset vs keep.
+    PendingDecision {
+        captured_head: String,
+        current_head: String,
+        warnings: Vec<String>,
+    },
 }
 
 fn git_head() -> Option<String> {
@@ -81,6 +125,7 @@ pub fn capture_non_coder(snapshot_dir: &Path, _stage_tag: &str) -> std::io::Resu
         git_status: git_status().unwrap_or_default(),
         control_files: BTreeMap::new(),
         baseline_stash: None,
+        mode: GuardMode::default(),
     };
     write_snapshot(snapshot_dir, &snap)
 }
@@ -133,25 +178,41 @@ pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std
         git_status: String::new(),
         control_files,
         baseline_stash: None,
+        mode: GuardMode::default(),
     };
     write_snapshot(snapshot_dir, &snap)
 }
 
-/// Verify the snapshot. Returns `(hard_error, warnings)` where the first
-/// element is a protocol-violation reason (only HEAD-advance for non-coder)
-/// and the second is advisory warnings for the operator.
-pub fn verify(snapshot_dir: &Path, stage: &str) -> (Option<String>, Vec<String>) {
+/// Verify the snapshot. Returns a typed three-arm result so callers cannot
+/// accidentally treat a pending operator decision as a hard error.
+pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
     let Some(snap) = read_snapshot(snapshot_dir) else {
-        return (None, vec![]);
+        return VerifyResult::Ok { warnings: vec![] };
     };
     if stage == "coder" {
-        (verify_coder(&snap), vec![])
+        verify_coder(&snap)
     } else {
         verify_non_coder(&snap)
     }
 }
 
-fn verify_non_coder(snap: &Snapshot) -> (Option<String>, Vec<String>) {
+/// Run `git reset --hard <captured_head>` so an operator-driven reset can
+/// share the exact reset path used by `AutoReset` mode without having to
+/// re-read the snapshot.
+pub fn reset_hard_to(captured_head: &str) -> bool {
+    if captured_head.is_empty() {
+        return false;
+    }
+    std::process::Command::new("git")
+        .args(["reset", "--hard", captured_head])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
     let mut warnings = Vec::new();
 
     if !snap.git_status.trim().is_empty() {
@@ -168,15 +229,29 @@ fn verify_non_coder(snap: &Snapshot) -> (Option<String>, Vec<String>) {
     }
 
     if head_changed {
-        let _ = std::process::Command::new("git")
-            .args(["reset", "--hard", &snap.head])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output();
-        return (Some("forbidden_head_advance".to_string()), warnings);
+        match snap.mode {
+            GuardMode::AutoReset => {
+                let _ = std::process::Command::new("git")
+                    .args(["reset", "--hard", &snap.head])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+                return VerifyResult::HardError {
+                    reason: "forbidden_head_advance".to_string(),
+                    warnings,
+                };
+            }
+            GuardMode::AskOperator => {
+                return VerifyResult::PendingDecision {
+                    captured_head: snap.head.clone(),
+                    current_head,
+                    warnings,
+                };
+            }
+        }
     }
 
-    (None, warnings)
+    VerifyResult::Ok { warnings }
 }
 
 /// Construct a `Snapshot` for testing without running real git commands.
@@ -187,10 +262,11 @@ fn test_snapshot(head: &str, git_status: &str) -> Snapshot {
         git_status: git_status.to_string(),
         control_files: BTreeMap::new(),
         baseline_stash: None,
+        mode: GuardMode::AutoReset,
     }
 }
 
-fn verify_coder(snap: &Snapshot) -> Option<String> {
+fn verify_coder(snap: &Snapshot) -> VerifyResult {
     let mut violated = Vec::new();
     for (path, expected) in &snap.control_files {
         let actual = std::fs::read_to_string(path).ok();
@@ -200,15 +276,26 @@ fn verify_coder(snap: &Snapshot) -> Option<String> {
         }
     }
     if violated.is_empty() {
-        None
+        VerifyResult::Ok { warnings: vec![] }
     } else {
-        Some(format!("forbidden_control_edit: {}", violated.join(", ")))
+        VerifyResult::HardError {
+            reason: format!("forbidden_control_edit: {}", violated.join(", ")),
+            warnings: vec![],
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn warnings_of(result: &VerifyResult) -> Vec<String> {
+        match result {
+            VerifyResult::Ok { warnings }
+            | VerifyResult::HardError { warnings, .. }
+            | VerifyResult::PendingDecision { warnings, .. } => warnings.clone(),
+        }
+    }
 
     #[test]
     fn verify_non_coder_warns_on_pre_dirty_status() {
@@ -218,12 +305,11 @@ mod tests {
             &head,
             &format!("{current_status} M dirty.txt\n"),
         );
-        let (error, warnings) = verify_non_coder(&snap);
-        assert!(error.is_none());
+        let result = verify_non_coder(&snap);
+        assert!(matches!(result, VerifyResult::Ok { .. }));
+        let warnings = warnings_of(&result);
         assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("dirty before agent launch")),
+            warnings.iter().any(|w| w.contains("dirty before agent launch")),
             "expected dirty-tree warning, got: {warnings:?}"
         );
     }
@@ -236,21 +322,50 @@ mod tests {
             &head,
             &format!("{current_status}?? phantom-file.xyz\n"),
         );
-        let (error, warnings) = verify_non_coder(&snap);
-        assert!(error.is_none());
+        let result = verify_non_coder(&snap);
+        assert!(matches!(result, VerifyResult::Ok { .. }));
+        let warnings = warnings_of(&result);
         assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("modified working tree")),
+            warnings.iter().any(|w| w.contains("modified working tree")),
             "expected modified-tree warning, got: {warnings:?}"
         );
     }
 
     #[test]
-    fn verify_non_coder_hard_error_on_head_advance() {
+    fn verify_non_coder_hard_error_on_head_advance_auto_reset() {
         let snap = test_snapshot("0000000000000000000000000000000000000000", "");
-        let (error, _warnings) = verify_non_coder(&snap);
-        assert_eq!(error, Some("forbidden_head_advance".to_string()));
+        let result = verify_non_coder(&snap);
+        match result {
+            VerifyResult::HardError { reason, .. } => {
+                assert_eq!(reason, "forbidden_head_advance");
+            }
+            other => panic!("expected HardError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_non_coder_pending_on_head_advance_ask_operator() {
+        let mut snap = test_snapshot("0000000000000000000000000000000000000000", "");
+        snap.mode = GuardMode::AskOperator;
+        let current = git_head().unwrap_or_default();
+        let result = verify_non_coder(&snap);
+        match result {
+            VerifyResult::PendingDecision {
+                captured_head,
+                current_head,
+                ..
+            } => {
+                assert_eq!(captured_head, "0000000000000000000000000000000000000000");
+                assert_eq!(current_head, current);
+                // Confirm we did NOT reset: HEAD must still match what we
+                // observed before calling verify. (verify already read it
+                // once; if reset had happened, current_head would equal
+                // captured_head — which we explicitly assert is not the
+                // captured zero-SHA above.)
+                assert_ne!(current_head, captured_head);
+            }
+            other => panic!("expected PendingDecision, got {other:?}"),
+        }
     }
 
     #[test]
@@ -258,11 +373,40 @@ mod tests {
         let head = git_head().unwrap_or_default();
         let status = git_status().unwrap_or_default();
         let snap = test_snapshot(&head, &status);
-        let (error, warnings) = verify_non_coder(&snap);
-        assert!(error.is_none());
+        let result = verify_non_coder(&snap);
+        assert!(matches!(result, VerifyResult::Ok { .. }));
+        let warnings = warnings_of(&result);
         assert!(
             !warnings.iter().any(|w| w.contains("modified working tree")),
             "expected no modified-tree warning when status unchanged, got: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn snapshot_deserializes_without_mode_as_auto_reset() {
+        // Pre-existing on-disk snapshots predate the `mode` field and must
+        // load as AutoReset to preserve today's behavior on resume.
+        let toml_text = r#"
+head = "abc123"
+git_status = ""
+"#;
+        let snap: Snapshot = toml::from_str(toml_text).expect("deserialize legacy snapshot");
+        assert_eq!(snap.mode, GuardMode::AutoReset);
+        assert_eq!(snap.head, "abc123");
+    }
+
+    #[test]
+    fn guard_mode_round_trips_through_toml() {
+        let snap = Snapshot {
+            head: "deadbeef".to_string(),
+            git_status: String::new(),
+            control_files: BTreeMap::new(),
+            baseline_stash: None,
+            mode: GuardMode::AskOperator,
+        };
+        let text = toml::to_string(&snap).expect("serialize");
+        assert!(text.contains("ask_operator"), "expected snake_case variant in: {text}");
+        let back: Snapshot = toml::from_str(&text).expect("deserialize");
+        assert_eq!(back.mode, GuardMode::AskOperator);
     }
 }

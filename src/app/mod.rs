@@ -6760,6 +6760,108 @@ mod tests {
     }
 
     #[test]
+    fn rapid_retry_cycles_do_not_attribute_stale_live_summary_to_next_attempt() {
+        with_temp_root(|| {
+            let session_id = "rapid-live-summary-isolation";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let mut app = idle_app(state);
+
+            for attempt in 1..=50 {
+                let previous = make_planning_run((attempt * 2 - 1) as u64, attempt);
+                let current = make_planning_run((attempt * 2) as u64, attempt + 1);
+                app.state.agent_runs.push(previous.clone());
+                app.state.agent_runs.push(current.clone());
+                app.current_run_id = Some(current.id);
+                app.window_launched = true;
+                app.live_summary_path = Some(app.live_summary_path_for(&current));
+                app.live_summary_cached_text.clear();
+                app.live_summary_cached_mtime = Some(std::time::SystemTime::UNIX_EPOCH);
+
+                let stale_path = app.live_summary_path_for(&previous);
+                std::fs::create_dir_all(stale_path.parent().expect("summary dir"))
+                    .expect("summary dir");
+                std::fs::write(
+                    &stale_path,
+                    format!("stale attempt {attempt} from previous run\n"),
+                )
+                .expect("write stale summary");
+
+                app.poll_live_summary_fallback();
+
+                assert!(
+                    !app.messages.iter().any(|message| {
+                        message.run_id == current.id
+                            && message.kind == MessageKind::Brief
+                            && message.text.contains("stale attempt")
+                    }),
+                    "attempt {} stale summary was attributed to successor run",
+                    attempt
+                );
+
+                std::fs::remove_file(stale_path).expect("remove stale summary");
+            }
+        });
+    }
+
+    #[test]
+    fn unstable_coder_stamp_finalizes_failed_unverified_without_retry() {
+        with_temp_root(|| {
+            let session_id = "coder-unstable-stamp-no-retry";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+            app.current_run_id = Some(run.id);
+            app.window_launched = true;
+            app.models = vec![
+                ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+            ];
+
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "flapping-head",
+                "unstable",
+            );
+            let _ = std::fs::remove_file(app.live_summary_path_for(&run));
+
+            app.poll_agent_window();
+
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|candidate| candidate.id == run.id)
+                .expect("finalized run");
+            assert_eq!(finalized.status, RunStatus::FailedUnverified);
+            assert!(
+                finalized
+                    .error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("head_state=unstable")
+            );
+            assert_eq!(
+                app.state
+                    .agent_runs
+                    .iter()
+                    .filter(|candidate| candidate.stage == "coder")
+                    .count(),
+                1,
+                "failed_unverified coder runs must not launch a retry"
+            );
+        });
+    }
+
+    #[test]
     fn coder_retry_exhaustion_enters_builder_recovery() {
         with_temp_root(|| {
             let session_id = "coder-retry-exhaustion";

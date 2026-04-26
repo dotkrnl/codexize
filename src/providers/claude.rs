@@ -99,6 +99,21 @@ fn resolve_org_id() -> Result<String> {
         .context("Claude auth status did not include orgId")
 }
 
+fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
+    let client = build_http_client(5)?;
+
+    let request = client
+        .get(format!("{BASE_URL}/api/oauth/usage"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .header("User-Agent", "claude-code/2.1.118")
+        .header("x-organization-uuid", org_id)
+        .header("anthropic-beta", BETA_HEADER)
+        .header("anthropic-version", "2023-06-01");
+
+    parse_json_response(send_request(request, "Claude")?, "Claude")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,19 +179,4 @@ mod tests {
         // min(50, 100) = 50
         assert_eq!(models[0].quota_percent, Some(50));
     }
-}
-
-fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
-    let client = build_http_client(5)?;
-
-    let request = client
-        .get(format!("{BASE_URL}/api/oauth/usage"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Content-Type", "application/json")
-        .header("User-Agent", "claude-code/2.1.118")
-        .header("x-organization-uuid", org_id)
-        .header("anthropic-beta", BETA_HEADER)
-        .header("anthropic-version", "2023-06-01");
-
-    parse_json_response(send_request(request, "Claude")?, "Claude")
 }

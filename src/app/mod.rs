@@ -2177,7 +2177,8 @@ impl App {
             .join("rounds")
             .join(format!("{round:03}"))
             .join("review.toml");
-        let live_summary_path = artifacts.join("live_summary.txt");
+        let attempt = self.attempt_for("plan-review", None, round);
+        let live_summary_path = self.live_summary_path_for_run("plan-review", None, round, attempt);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("recovery-plan-review-r{round}.md"));
@@ -2228,7 +2229,6 @@ impl App {
             model: model.clone(),
             prompt_path,
         };
-        let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Recovery Plan Review]", &model);
@@ -2281,7 +2281,8 @@ impl App {
         let plan_path = artifacts.join("plan.md");
         let tasks_path = artifacts.join("tasks.toml");
         let _ = std::fs::remove_file(&tasks_path);
-        let live_summary_path = artifacts.join("live_summary.txt");
+        let attempt = self.attempt_for("sharding", None, round);
+        let live_summary_path = self.live_summary_path_for_run("sharding", None, round, attempt);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("recovery-sharding-r{round}.md"));
@@ -2332,7 +2333,6 @@ impl App {
             model: model.clone(),
             prompt_path,
         };
-        let attempt = self.attempt_for("sharding", None, round);
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
         let dirty = self.capture_run_guard("sharding", None, round, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Recovery Sharding]", &model);
@@ -2916,9 +2916,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let live_summary_path = session_state::session_dir(session_id)
-            .join("artifacts")
-            .join("live_summary.txt");
+        let attempt = self.attempt_for("brainstorm", None, 1);
+        let live_summary_path = self.live_summary_path_for_run("brainstorm", None, 1, attempt);
         let prompt = brainstorm_prompt(
             &idea,
             &spec_path.display().to_string(),
@@ -2934,7 +2933,6 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let attempt = self.attempt_for("brainstorm", None, 1);
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
         let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard::GuardMode::AskOperator);
         let adapter = adapter_for_vendor(vendor_kind);
@@ -3043,14 +3041,12 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
+        let attempt = self.attempt_for("spec-review", None, round);
+        let live_summary_path = self.live_summary_path_for_run("spec-review", None, round, attempt);
         let prompt = spec_review_prompt(
             &spec_path.display().to_string(),
             &review_path.display().to_string(),
-            &session_dir
-                .join("artifacts")
-                .join("live_summary.txt")
-                .display()
-                .to_string(),
+            &live_summary_path.display().to_string(),
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -3065,7 +3061,6 @@ impl App {
             prompt_path,
         };
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
-        let attempt = self.attempt_for("spec-review", None, round);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard("spec-review", None, round, attempt, guard::GuardMode::AutoReset);
         let launch_result =
@@ -3143,7 +3138,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+        let attempt = self.attempt_for("planning", None, 1);
+        let live_summary_path = self.live_summary_path_for_run("planning", None, 1, attempt);
         let prompt = planning_prompt(&spec_path, &review_paths, &plan_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
@@ -3156,7 +3152,6 @@ impl App {
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
-        let attempt = self.attempt_for("planning", None, 1);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
         let guard_mode = if interactive { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
@@ -3237,15 +3232,13 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
+        let attempt = self.attempt_for("plan-review", None, round);
+        let live_summary_path = self.live_summary_path_for_run("plan-review", None, round, attempt);
         let prompt = plan_review_prompt(
             &spec_path.display().to_string(),
             &plan_path.display().to_string(),
             &review_path.display().to_string(),
-            &session_dir
-                .join("artifacts")
-                .join("live_summary.txt")
-                .display()
-                .to_string(),
+            &live_summary_path.display().to_string(),
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -3260,7 +3253,6 @@ impl App {
             prompt_path,
         };
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
-        let attempt = self.attempt_for("plan-review", None, round);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard("plan-review", None, round, attempt, guard::GuardMode::AutoReset);
         let launch_result =
@@ -3322,7 +3314,8 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
+        let attempt = self.attempt_for("sharding", None, 1);
+        let live_summary_path = self.live_summary_path_for_run("sharding", None, 1, attempt);
         let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
@@ -3334,7 +3327,6 @@ impl App {
             prompt_path: prompt_path.clone(),
         };
 
-        let attempt = self.attempt_for("sharding", None, 1);
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         let dirty = self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
         let window_name = window_name_with_model("[Sharding]", &model);
@@ -3419,6 +3411,8 @@ impl App {
             .into_iter()
             .collect::<Vec<_>>();
         started.sort_unstable();
+        let attempt = self.attempt_for("recovery", None, round);
+        let live_summary_path = self.live_summary_path_for_run("recovery", None, round, attempt);
         let prompt = recovery_prompt(
             &spec_path,
             &plan_path,
@@ -3427,7 +3421,7 @@ impl App {
             self.state.builder.recovery_trigger_summary.as_deref(),
             &completed,
             &started,
-            &session_dir.join("artifacts").join("live_summary.txt"),
+            &live_summary_path,
             &recovery_path,
             is_human_blocked,
         );
@@ -3445,7 +3439,6 @@ impl App {
             model: model.clone(),
             prompt_path,
         };
-        let attempt = self.attempt_for("recovery", None, round);
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
         let recovery_guard_mode = if is_human_blocked { guard::GuardMode::AskOperator } else { guard::GuardMode::AutoReset };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
@@ -3527,12 +3520,14 @@ impl App {
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        let attempt = self.attempt_for("coder", Some(task_id), r);
+        let live_summary_path = self.live_summary_path_for_run("coder", Some(task_id), r, attempt);
         let resume = self
             .state
             .agent_runs
             .iter()
             .any(|run| run.stage == "coder" && run.task_id == Some(task_id) && run.round == r);
-        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, resume);
+        let prompt = coder_prompt(&session_dir, task_id, r, &task_file, &live_summary_path, resume);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return false;
@@ -3544,7 +3539,6 @@ impl App {
         };
 
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
-        let attempt = self.attempt_for("coder", Some(task_id), r);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard("coder", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
         let launch_result = if let Some(result) = self.try_test_launch(&status_path, None) {
@@ -3621,6 +3615,8 @@ impl App {
         };
         let (model, vendor_kind, vendor) = chosen;
 
+        let attempt = self.attempt_for("reviewer", Some(task_id), r);
+        let live_summary_path = self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("reviewer-r{r}.md"));
@@ -3631,6 +3627,7 @@ impl App {
             &task_file,
             &review_scope_file,
             &review_path,
+            &live_summary_path,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
@@ -3643,7 +3640,6 @@ impl App {
         };
 
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
-        let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard("reviewer", Some(task_id), r, attempt, guard::GuardMode::AutoReset);
         let launch_result =
@@ -4548,6 +4544,7 @@ fn coder_prompt(
     task_id: u32,
     round: u32,
     task_file: &std::path::Path,
+    live_summary_path: &std::path::Path,
     resume: bool,
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
@@ -4574,8 +4571,7 @@ fn coder_prompt(
     } else {
         ""
     };
-    let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
-    let instr = live_summary_instruction(&live_summary_path);
+    let instr = live_summary_instruction(live_summary_path);
     format!(
         r#"{PROJECT_DOC_INSTR}You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
 operator is NOT available. Make your own judgement calls, document them in the
@@ -4654,11 +4650,11 @@ fn reviewer_prompt(
     task_file: &std::path::Path,
     review_scope_file: &std::path::Path,
     review_file: &std::path::Path,
+    live_summary_path: &std::path::Path,
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
-    let live_summary_path = session_dir.join("artifacts").join("live_summary.txt");
-    let instr = live_summary_instruction(&live_summary_path);
+    let instr = live_summary_instruction(live_summary_path);
     let prior_reviews = if round > 1 {
         let lines: Vec<String> = (1..round)
             .map(|r| {

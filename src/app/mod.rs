@@ -298,6 +298,45 @@ impl App {
                 }
             }
         }
+        // Stamp archival: move old finish stamps to archive/ at session start.
+        // Stamps older than the oldest Running record are archived (best effort).
+        {
+            let finish_dir = session_state::session_dir(&app.state.session_id)
+                .join("artifacts")
+                .join("run-finish");
+            let archive_dir = finish_dir.join("archive");
+            let oldest_running_timestamp = app
+                .state
+                .agent_runs
+                .iter()
+                .filter(|run| run.status == crate::state::RunStatus::Running)
+                .map(|run| run.started_at)
+                .min();
+            if let Some(cutoff) = oldest_running_timestamp {
+                if let Ok(entries) = std::fs::read_dir(&finish_dir) {
+                    for entry in entries.flatten() {
+                        if !entry.path().is_file() {
+                            continue;
+                        }
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        if !name_str.ends_with(".toml") {
+                            continue;
+                        }
+                        if let Ok(stamp) = crate::runner::read_finish_stamp(&entry.path()) {
+                            if let Ok(finished) = chrono::DateTime::parse_from_rfc3339(&stamp.finished_at) {
+                                let finished_utc = finished.with_timezone(&chrono::Utc);
+                                if finished_utc < cutoff {
+                                    let _ = std::fs::create_dir_all(&archive_dir);
+                                    let dest = archive_dir.join(&name);
+                                    let _ = std::fs::rename(entry.path(), dest);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let _ = app.setup_watcher();
         app
     }
@@ -5168,6 +5207,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -5182,6 +5223,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state
     }
@@ -5266,6 +5309,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 
@@ -5283,6 +5328,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 
@@ -5334,6 +5381,8 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                hostname: None,
+                mount_device_id: None,
             });
             let mut app = mk_app(state);
             let bs_idx = row_index(&app, "Brainstorm");
@@ -5420,6 +5469,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let mut app = mk_app(state);
         let task_idx = row_index(&app, "Task 7");
@@ -5466,6 +5517,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         app.state = state;
 
@@ -5498,6 +5551,8 @@ mod tests {
                     RunStatus::Done
                 },
                 error: None,
+                hostname: None,
+                mount_device_id: None,
             });
         }
         let mut app = mk_app(state.clone());
@@ -5613,6 +5668,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let mut app = mk_app(state);
         let coder_idx = row_index(&app, "Coder");
@@ -5664,6 +5721,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 81,
@@ -5678,6 +5737,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let mut app = mk_app(state);
         let task_idx = row_index(&app, "Task 7");
@@ -5706,6 +5767,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 32,
@@ -5720,6 +5783,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let mut app = mk_app(state);
         let round_one_idx = row_index(&app, "Round 1");
@@ -5759,6 +5824,8 @@ mod tests {
                 ended_at: None,
                 status,
                 error: None,
+                hostname: None,
+                mount_device_id: None,
             });
         }
         let mut app = mk_app(state);
@@ -5965,6 +6032,8 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                hostname: None,
+                mount_device_id: None,
             });
             state.agent_runs.push(RunRecord {
                 id: 2,
@@ -5979,6 +6048,8 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("artifact_missing".to_string()),
+                hostname: None,
+                mount_device_id: None,
             });
             state.agent_runs.push(RunRecord {
                 id: 3,
@@ -5993,6 +6064,8 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("user_forced_retry".to_string()),
+                hostname: None,
+                mount_device_id: None,
             });
             state.save().expect("save session");
 
@@ -6036,6 +6109,8 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             };
             std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
                 .expect("create status dir");
@@ -6121,6 +6196,8 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             };
             std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
                 .expect("create status dir");
@@ -6752,6 +6829,8 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                hostname: None,
+                mount_device_id: None,
             };
             let handled = app.maybe_auto_retry(&failed);
             assert!(handled);
@@ -6788,6 +6867,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("artifact_invalid: x".to_string()),
+            hostname: None,
+            mount_device_id: None,
         };
         let handled = app.maybe_auto_retry(&failed);
         assert!(handled);
@@ -6831,6 +6912,8 @@ feedback = ["task 2 is superseded"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app.state.agent_runs[0].clone();
@@ -6929,6 +7012,8 @@ estimated_tokens = 12
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
 
             let mut app = idle_app(state);
@@ -6989,6 +7074,8 @@ estimated_tokens = 10
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app.state.agent_runs[0].clone();
@@ -7067,6 +7154,8 @@ feedback = ["split task 2"]
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
             state.agent_runs.push(RunRecord {
                 id: 8,
@@ -7081,6 +7170,8 @@ feedback = ["split task 2"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
             let mut app = idle_app(state);
             let run = app
@@ -7139,6 +7230,8 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
             let mut app = idle_app(state);
             let err = app
@@ -7168,6 +7261,8 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                hostname: None,
+                mount_device_id: None,
             });
             state.agent_runs.push(RunRecord {
                 id: 11,
@@ -7182,6 +7277,8 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                hostname: None,
+                mount_device_id: None,
             });
             state.save().expect("save");
             let app = App::new(mk_tmux(), SessionState::load(session_id).expect("load"));
@@ -7265,6 +7362,8 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             };
             state.agent_runs.push(run.clone());
             let mut app = idle_app(state);
@@ -7791,6 +7890,8 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+            hostname: None,
+            mount_device_id: None,
             });
 
             let mut app = idle_app(state);
@@ -8032,6 +8133,8 @@ estimated_tokens = 1
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 
@@ -8394,6 +8497,150 @@ estimated_tokens = 1
                 "stale pending_guard_decision must be cleared on resume"
             );
             assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
+        });
+    }
+
+    #[test]
+    fn stamp_archival_moves_old_stamps_at_session_start() {
+        use crate::runner::{write_finish_stamp, FinishStamp};
+
+        with_temp_root(|| {
+            let session_id = "stamp-archival-test";
+            let mut state = SessionState::new(session_id.to_string());
+
+            let old_time = chrono::Utc::now() - chrono::Duration::hours(2);
+            let recent_time = chrono::Utc::now() - chrono::Duration::minutes(5);
+
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude".to_string(),
+                vendor: "anthropic".to_string(),
+                window_name: "[Coder 1]".to_string(),
+                started_at: recent_time,
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+            state.save().unwrap();
+
+            let finish_dir = session_state::session_dir(session_id)
+                .join("artifacts")
+                .join("run-finish");
+            std::fs::create_dir_all(&finish_dir).unwrap();
+
+            let old_stamp = FinishStamp {
+                finished_at: old_time.to_rfc3339(),
+                exit_code: 0,
+                head_before: "aaa".to_string(),
+                head_after: "bbb".to_string(),
+                head_state: "stable".to_string(),
+            };
+            let old_stamp_path = finish_dir.join("old-stamp.toml");
+            write_finish_stamp(&old_stamp_path, &old_stamp).unwrap();
+
+            let recent_stamp = FinishStamp {
+                finished_at: recent_time.to_rfc3339(),
+                exit_code: 0,
+                head_before: "ccc".to_string(),
+                head_after: "ddd".to_string(),
+                head_state: "stable".to_string(),
+            };
+            let recent_stamp_path = finish_dir.join("recent-stamp.toml");
+            write_finish_stamp(&recent_stamp_path, &recent_stamp).unwrap();
+
+            assert!(old_stamp_path.exists(), "old stamp should exist before App creation");
+            assert!(recent_stamp_path.exists(), "recent stamp should exist before App creation");
+
+            // Create App which triggers archival
+            let _app = App::new(mk_tmux(), state);
+
+            let archive_dir = finish_dir.join("archive");
+            if !old_stamp_path.exists() {
+                // Stamp was archived
+                assert!(archive_dir.exists(), "archive directory should be created when stamps are archived");
+                assert!(
+                    archive_dir.join("old-stamp.toml").exists(),
+                    "old stamp should be moved to archive"
+                );
+            }
+            assert!(
+                recent_stamp_path.exists(),
+                "recent stamp should remain in main directory"
+            );
+        });
+    }
+
+    #[test]
+    fn archived_stamps_not_consulted_by_coder_gate() {
+        use crate::runner::{write_finish_stamp, FinishStamp};
+
+        with_temp_root(|| {
+            let session_id = "archived-stamp-ignore";
+            let mut state = SessionState::new(session_id.to_string());
+
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "claude".to_string(),
+                vendor: "anthropic".to_string(),
+                window_name: "[Coder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            });
+            state.save().unwrap();
+
+            let finish_dir = session_state::session_dir(session_id)
+                .join("artifacts")
+                .join("run-finish");
+            let archive_dir = finish_dir.join("archive");
+            std::fs::create_dir_all(&archive_dir).unwrap();
+
+            let run_key = App::run_key_for("coder", Some(1), 1, 1);
+            let archived_stamp_path = archive_dir.join(format!("{run_key}.toml"));
+            let archived_stamp = FinishStamp {
+                finished_at: chrono::Utc::now().to_rfc3339(),
+                exit_code: 0,
+                head_before: "base".to_string(),
+                head_after: "advanced".to_string(),
+                head_state: "stable".to_string(),
+            };
+            write_finish_stamp(&archived_stamp_path, &archived_stamp).unwrap();
+
+            let round_dir = session_state::session_dir(session_id)
+                .join("rounds")
+                .join("001");
+            std::fs::create_dir_all(&round_dir).unwrap();
+            std::fs::write(
+                round_dir.join("review_scope.toml"),
+                "base_sha = \"base\"\n",
+            )
+            .unwrap();
+
+            let app = App::new(mk_tmux(), SessionState::load(session_id).unwrap());
+            let run = &app.state.agent_runs[0];
+            let reason = app.coder_gate_reason(run, &round_dir);
+
+            assert!(
+                reason.is_some(),
+                "archived stamp must not be consulted; should return failure reason"
+            );
+            assert!(
+                reason.unwrap().contains("missing finish stamp"),
+                "should report missing stamp, not use archived one"
+            );
         });
     }
 }

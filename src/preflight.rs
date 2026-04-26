@@ -454,7 +454,7 @@ fn run_git_init_modal(
         })?;
 
         if wait_state == WaitState::AgentFailed {
-            if agent_fail_display_deadline.map_or(false, |d| Instant::now() >= d) {
+            if agent_fail_display_deadline.is_some_and(|d| Instant::now() >= d) {
                 run_git_init()?;
                 return Ok(());
             }
@@ -468,7 +468,7 @@ fn run_git_init_modal(
                     run_git_init()?;
                     return Ok(());
                 }
-            if agent_start_time.map_or(false, |t| t.elapsed() >= AGENT_TIMEOUT) {
+            if agent_start_time.is_some_and(|t| t.elapsed() >= AGENT_TIMEOUT) {
                 let content = generate_heuristic_gitignore(codexize_entry);
                 fs::write(".gitignore", content).context("failed to write .gitignore")?;
                 wait_state = WaitState::AgentFailed;

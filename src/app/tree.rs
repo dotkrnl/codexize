@@ -944,6 +944,8 @@ mod tests {
             ended_at: None,
             status,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 
@@ -1053,6 +1055,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1067,6 +1071,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let nodes = build_tree(&state);
         let spec_review = nodes.iter().find(|n| n.label == "Spec Review").unwrap();
@@ -1100,6 +1106,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1114,6 +1122,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let nodes = build_tree(&state);
         let planning = nodes.iter().find(|n| n.label == "Planning").unwrap();
@@ -1139,6 +1149,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("timeout".to_string()),
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1153,6 +1165,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let nodes = build_tree(&state);
         let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
@@ -1197,6 +1211,8 @@ mod tests {
                 "failed_unverified: missing finish stamp at artifacts/run-finish/coder-t1-r1-a1.toml"
                     .to_string(),
             ),
+            hostname: None,
+            mount_device_id: None,
         });
 
         let nodes = build_tree(&state);
@@ -1242,6 +1258,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         let nodes = build_tree(&state);
         let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
@@ -1388,6 +1406,8 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1402,6 +1422,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let nodes = build_tree(&state);
@@ -1433,6 +1455,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let nodes = build_tree(&state);
@@ -1477,6 +1501,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -1491,6 +1517,8 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         });
 
         let nodes = build_tree(&state);

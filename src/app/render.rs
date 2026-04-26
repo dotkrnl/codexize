@@ -1016,6 +1016,8 @@ mod tests {
             },
             status,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 

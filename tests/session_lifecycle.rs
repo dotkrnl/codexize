@@ -17,6 +17,8 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         ended_at: None,
         status,
         error: None,
+        hostname: None,
+        mount_device_id: None,
     }
 }
 

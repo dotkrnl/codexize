@@ -457,6 +457,8 @@ mod tests {
             ended_at: None,
             status,
             error: None,
+            hostname: None,
+            mount_device_id: None,
         }
     }
 

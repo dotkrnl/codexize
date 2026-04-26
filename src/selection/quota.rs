@@ -234,7 +234,7 @@ fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
 fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     // Kimi only has one effective model (kimi-latest); expose it under that
     // canonical name regardless of what the API returns.
-    let quota = models.into_iter().find_map(|m| m.quota_percent);
+    let quota = models.into_iter().filter_map(|m| m.quota_percent).min();
     BTreeMap::from([("kimi-latest".to_string(), quota)])
 }
 

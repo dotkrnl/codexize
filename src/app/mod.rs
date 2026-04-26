@@ -7294,6 +7294,96 @@ estimated_tokens = 1
         });
     }
 
+    fn make_pending_guard_state(session_id: &str, run_id: u64) -> SessionState {
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::GitGuardPending;
+        state.agent_runs.push(make_brainstorm_run(run_id));
+        state.pending_guard_decision = Some(PendingGuardDecision {
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            run_id,
+            captured_head: "abc123".to_string(),
+            current_head: "def456".to_string(),
+            warnings: vec![],
+        });
+        state
+    }
+
+    fn key(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn pending_guard_modal_reset_key_dispatches_to_reset() {
+        with_temp_root(|| {
+            let mut app = mk_app(make_pending_guard_state("pending-guard-key-reset", 30));
+
+            let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+            assert!(!should_quit);
+            assert!(app.state.pending_guard_decision.is_none());
+            let finalized = app.state.agent_runs.iter().find(|r| r.id == 30).expect("run");
+            assert_eq!(finalized.status, RunStatus::Failed);
+            assert_eq!(finalized.error.as_deref(), Some("forbidden_head_advance"));
+        });
+    }
+
+    #[test]
+    fn pending_guard_modal_keep_key_dispatches_to_keep() {
+        with_temp_root(|| {
+            let session_id = "pending-guard-key-keep";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
+                .expect("write spec");
+            let mut app = mk_app(make_pending_guard_state(session_id, 31));
+
+            let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('K')));
+
+            assert!(!should_quit);
+            assert!(app.state.pending_guard_decision.is_none());
+            let finalized = app.state.agent_runs.iter().find(|r| r.id == 31).expect("run");
+            assert_eq!(finalized.status, RunStatus::Done);
+            assert_ne!(app.state.current_phase, Phase::GitGuardPending);
+        });
+    }
+
+    #[test]
+    fn pending_guard_modal_quit_keys_follow_quit_path() {
+        with_temp_root(|| {
+            let mut app = mk_app(make_pending_guard_state("pending-guard-key-quit", 32));
+
+            assert!(app.handle_key(key(crossterm::event::KeyCode::Char('q'))));
+            assert!(app.state.pending_guard_decision.is_some());
+
+            let ctrl_c = crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('c'),
+                crossterm::event::KeyModifiers::CONTROL,
+            );
+            assert!(app.handle_key(ctrl_c));
+            assert!(app.state.pending_guard_decision.is_some());
+        });
+    }
+
+    #[test]
+    fn pending_guard_modal_consumes_unrelated_keys() {
+        with_temp_root(|| {
+            let mut app = mk_app(make_pending_guard_state("pending-guard-key-consume", 33));
+            app.confirm_back = true;
+
+            let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('x')));
+
+            assert!(!should_quit);
+            assert!(
+                app.confirm_back,
+                "unrelated modal keys must not fall through to normal key handling"
+            );
+            assert!(app.state.pending_guard_decision.is_some());
+        });
+    }
+
     #[test]
     fn pending_guard_resume_fail_closed_when_decision_missing() {
         with_temp_root(|| {

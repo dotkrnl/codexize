@@ -18,6 +18,10 @@ impl App {
             return self.handle_skip_to_impl_modal_key(key);
         }
 
+        if self.state.current_phase == Phase::GitGuardPending {
+            return self.handle_guard_modal_key(key);
+        }
+
         if self.confirm_back && key.code != KeyCode::Char('b') {
             self.confirm_back = false;
             return false;
@@ -273,6 +277,29 @@ impl App {
                 }
                 false
             }
+            _ => false,
+        }
+    }
+
+    fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
+                if let Err(err) = self.accept_guard_reset() {
+                    self.state.agent_error =
+                        Some(format!("guard reset failed: {err:#}"));
+                }
+                false
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                if let Err(err) = self.accept_guard_keep() {
+                    self.state.agent_error =
+                        Some(format!("guard keep failed: {err:#}"));
+                }
+                false
+            }
+            // Consume all other keys so the UI is genuinely modal.
             _ => false,
         }
     }

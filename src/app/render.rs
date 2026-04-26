@@ -260,6 +260,10 @@ impl App {
                 self.state.skip_to_impl_kind,
             );
         }
+
+        if self.state.current_phase == Phase::GitGuardPending {
+            render_guard_decision_modal(frame, self.state.pending_guard_decision.as_ref());
+        }
     }
 
     fn header(&self) -> Paragraph<'_> {
@@ -840,6 +844,77 @@ fn render_skip_to_impl_modal(
 
     let block = Block::default()
         .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, rect);
+}
+
+fn render_guard_decision_modal(
+    frame: &mut Frame<'_>,
+    decision: Option<&crate::state::PendingGuardDecision>,
+) {
+    let area = frame.area();
+    let modal_width = area.width.saturating_sub(8).clamp(30, 72);
+
+    let (captured_short, current_short) = decision
+        .map(|d| {
+            let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
+            let cur = d.current_head.get(..7).unwrap_or(&d.current_head);
+            (cap.to_string(), cur.to_string())
+        })
+        .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
+        Style::default().fg(Color::White),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Before: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(captured_short),
+        Span::raw("  →  "),
+        Span::styled("After: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(current_short),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "[R]/Enter  reset — discard commit and fail this run".to_string(),
+        Style::default().fg(Color::Red),
+    )));
+    lines.push(Line::from(Span::styled(
+        "[K]        keep  — preserve commit and continue".to_string(),
+        Style::default().fg(Color::Green),
+    )));
+    lines.push(Line::from(Span::styled(
+        "[Q]        quit".to_string(),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
+    let wrapped: u16 = lines
+        .iter()
+        .map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if w == 0 { 1 } else { w.div_ceil(inner_width).max(1) as u16 }
+        })
+        .sum();
+    let desired_height = wrapped.saturating_add(2);
+    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
+
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let rect = ratatui::layout::Rect { x, y, width: modal_width, height: modal_height };
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = Block::default()
+        .title("Unauthorized commit detected")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(Color::Black));

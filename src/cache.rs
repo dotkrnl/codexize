@@ -79,8 +79,8 @@ fn now_secs() -> u64 {
 // Public API — schema v2
 // ---------------------------------------------------------------------------
 
-pub fn load_cache() -> LoadedCache {
-    load_cache_at(&default_cache_dir())
+pub fn load() -> LoadedCache {
+    load_at(&default_cache_dir())
 }
 
 pub fn save_dashboard(entries: &[DashboardEntry]) -> Result<()> {
@@ -95,7 +95,7 @@ pub fn save_quotas(payload: &QuotaPayload) -> Result<()> {
 // Path-parameterized implementations
 // ---------------------------------------------------------------------------
 
-fn load_cache_at(dir: &Path) -> LoadedCache {
+fn load_at(dir: &Path) -> LoadedCache {
     let empty = LoadedCache {
         dashboard: None,
         quotas: None,
@@ -149,44 +149,14 @@ fn save_quotas_at(dir: &Path, payload: &QuotaPayload) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Backward-compat wrappers (temporary — removed once app migrates)
+// Legacy adapters (temporary — removed once app migrates)
 // ---------------------------------------------------------------------------
 
-pub fn load() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
-    let loaded = load_cache();
-    let dashboard = loaded.dashboard?;
-    let expired = dashboard.expired;
-
-    let models: Vec<ModelStatus> = dashboard
-        .data
-        .into_iter()
-        .filter_map(|e| {
-            let vendor = parse_vendor(&e.vendor)?;
-            Some(ModelStatus {
-                vendor,
-                name: e.name,
-                stupid_level: Some(e.current_score.round().clamp(0.0, 99.0) as u8),
-                quota_percent: None,
-                idea_rank: 99,
-                planning_rank: 99,
-                build_rank: 99,
-                review_rank: 99,
-                idea_weight: 0.0,
-                planning_weight: 0.0,
-                build_weight: 0.0,
-                review_weight: 0.0,
-                fallback_from: e.fallback_from,
-            })
-        })
-        .collect();
-
-    if models.is_empty() {
-        return None;
-    }
-    Some((models, Vec::new(), expired))
+pub fn load_legacy_model_statuses() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
+    loaded_cache_to_legacy(load())
 }
 
-pub fn save(models: &[ModelStatus], _errors: &[QuotaError]) -> Result<()> {
+pub fn save_legacy_model_statuses(models: &[ModelStatus], errors: &[QuotaError]) -> Result<()> {
     let entries: Vec<DashboardEntry> = models
         .iter()
         .enumerate()
@@ -201,7 +171,37 @@ pub fn save(models: &[ModelStatus], _errors: &[QuotaError]) -> Result<()> {
             fallback_from: m.fallback_from.clone(),
         })
         .collect();
-    save_dashboard(&entries)
+    let mut quotas: QuotaPayload = BTreeMap::new();
+    for model in models {
+        quotas
+            .entry(vendor_str(model.vendor).to_string())
+            .or_default()
+            .insert(model.name.clone(), model.quota_percent);
+    }
+    for error in errors {
+        // REVIEWER: Legacy wrapper ambiguity: schema v2 has no explicit error
+        // section, so we persist a vendor-level failure marker as an empty
+        // quota map and rehydrate it back into `QuotaError` on load.
+        quotas
+            .entry(vendor_str(error.vendor).to_string())
+            .or_default();
+    }
+
+    let dir = default_cache_dir();
+    let lock = dir.join("models.json.lock");
+    cache_lock::with_lock(&lock, || {
+        let mut file = load_raw_or_default(&dir);
+        let fetched_at = now_secs();
+        file.dashboard = Some(Section {
+            fetched_at,
+            data: entries,
+        });
+        file.quotas = Some(Section {
+            fetched_at,
+            data: quotas,
+        });
+        atomic_write(&dir, &file)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +227,62 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
             quotas: None,
         },
     }
+}
+
+fn loaded_cache_to_legacy(loaded: LoadedCache) -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
+    let dashboard = loaded.dashboard?;
+    let quotas = loaded.quotas;
+    let expired = dashboard.expired || quotas.as_ref().is_some_and(|section| section.expired);
+
+    let mut quota_errors = Vec::new();
+    let mut parsed_quotas: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
+    if let Some(section) = quotas {
+        for (vendor_name, model_quotas) in section.data {
+            let Some(vendor) = parse_vendor(&vendor_name) else {
+                continue;
+            };
+            if model_quotas.is_empty() {
+                quota_errors.push(QuotaError {
+                    vendor,
+                    message: "cached quota refresh previously failed".to_string(),
+                });
+            }
+            parsed_quotas.insert(vendor, model_quotas);
+        }
+    }
+
+    let models: Vec<ModelStatus> = dashboard
+        .data
+        .into_iter()
+        .filter_map(|e| {
+            let vendor = parse_vendor(&e.vendor)?;
+            let quota_percent = parsed_quotas
+                .get(&vendor)
+                .and_then(|by_model| by_model.get(&e.name))
+                .copied()
+                .flatten();
+            Some(ModelStatus {
+                vendor,
+                name: e.name,
+                stupid_level: Some(e.current_score.round().clamp(0.0, 99.0) as u8),
+                quota_percent,
+                idea_rank: 99,
+                planning_rank: 99,
+                build_rank: 99,
+                review_rank: 99,
+                idea_weight: 0.0,
+                planning_weight: 0.0,
+                build_weight: 0.0,
+                review_weight: 0.0,
+                fallback_from: e.fallback_from,
+            })
+        })
+        .collect();
+
+    if models.is_empty() {
+        return None;
+    }
+    Some((models, quota_errors, expired))
 }
 
 fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
@@ -294,7 +350,7 @@ mod tests {
     fn save_and_load_dashboard() {
         let dir = TempDir::new().unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         let dash = loaded.dashboard.unwrap();
         assert!(!dash.expired);
         assert_eq!(dash.data.len(), 1);
@@ -306,7 +362,7 @@ mod tests {
     fn save_and_load_quotas() {
         let dir = TempDir::new().unwrap();
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         let q = loaded.quotas.unwrap();
         assert!(!q.expired);
         assert_eq!(
@@ -319,12 +375,12 @@ mod tests {
     fn sections_are_independent() {
         let dir = TempDir::new().unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_none());
 
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_some());
     }
@@ -339,7 +395,7 @@ mod tests {
         file.version = 999;
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_none());
         assert!(loaded.quotas.is_none());
     }
@@ -356,7 +412,7 @@ mod tests {
         }
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.unwrap().expired);
     }
 
@@ -372,7 +428,7 @@ mod tests {
         }
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.quotas.unwrap().expired);
     }
 
@@ -388,7 +444,7 @@ mod tests {
     #[test]
     fn missing_cache_file_returns_empty() {
         let dir = TempDir::new().unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_none());
         assert!(loaded.quotas.is_none());
     }
@@ -397,7 +453,7 @@ mod tests {
     fn corrupt_cache_file_returns_empty() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("models.json"), "not json at all").unwrap();
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_none());
         assert!(loaded.quotas.is_none());
     }
@@ -408,7 +464,7 @@ mod tests {
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
 
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_some());
     }
@@ -419,8 +475,43 @@ mod tests {
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
 
-        let loaded = load_cache_at(dir.path());
+        let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_some());
+    }
+
+    #[test]
+    fn legacy_adapter_maps_quota_percent_from_quota_section() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+
+        let loaded = load_at(dir.path());
+        let (models, errors, expired) =
+            loaded_cache_to_legacy(loaded).expect("legacy adapter should return models");
+
+        assert!(!expired);
+        assert!(errors.is_empty());
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].quota_percent, Some(75));
+    }
+
+    #[test]
+    fn legacy_adapter_surfaces_cached_quota_failure_markers() {
+        let loaded = LoadedCache {
+            dashboard: Some(LoadedSection {
+                expired: false,
+                data: sample_entries(),
+            }),
+            quotas: Some(LoadedSection {
+                expired: false,
+                data: BTreeMap::from([("claude".to_string(), BTreeMap::new())]),
+            }),
+        };
+
+        let (_, errors, _) = loaded_cache_to_legacy(loaded).expect("legacy adapter should return models");
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].vendor, VendorKind::Claude);
     }
 }

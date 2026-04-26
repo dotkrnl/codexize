@@ -202,7 +202,7 @@ impl App {
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
         // Load cached models if available
-        if let Some((cached, errors, expired)) = cache::load() {
+        if let Some((cached, errors, expired)) = cache::load_legacy_model_statuses() {
             app.models = cached;
             app.quota_errors = errors;
             app.model_refresh = if expired {

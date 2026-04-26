@@ -53,7 +53,7 @@ impl App {
                 Ok((models, errors)) => {
                     if !models.is_empty() {
                         self.models = models;
-                        let _ = cache::save(&self.models, &errors);
+                        let _ = cache::save_legacy_model_statuses(&self.models, &errors);
                     }
                     if errors.is_empty() {
                         self.quota_retry_delay = Duration::from_secs(60);

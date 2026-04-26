@@ -1,174 +1,6 @@
-use super::candidates::extract_version;
 use super::config::{SELECTION_CONFIG, SelectionPhase};
-use super::types::{CachedModel, Candidate, VendorKind};
-use crate::dashboard;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
-
-// Newer extract_version wins. Models with no parseable version sort last,
-// so they don't displace a versioned model on ties.
-fn version_cmp_newer_first(left: &Candidate, right: &Candidate) -> Ordering {
-    match (extract_version(&left.name), extract_version(&right.name)) {
-        (Some(l), Some(r)) => r.cmp(&l),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-pub fn top_model_union(candidates: &[Candidate]) -> BTreeSet<String> {
-    let mut retained = BTreeSet::new();
-
-    // First, ensure at least one model per vendor
-    for vendor in [
-        super::types::VendorKind::Claude,
-        super::types::VendorKind::Codex,
-        super::types::VendorKind::Gemini,
-        super::types::VendorKind::Kimi,
-    ] {
-        // Find the best model for this vendor by overall score
-        if let Some(best) = candidates
-            .iter()
-            .filter(|c| c.vendor == vendor)
-            .max_by(|a, b| {
-                a.overall_score
-                    .partial_cmp(&b.overall_score)
-                    .unwrap_or(Ordering::Equal)
-                    // Prefer the newer version on ties — keeps a synthesized
-                    // sibling-fallback model (e.g. gemini-3-flash-preview
-                    // borrowing gemini-2.5-flash's score) winning over the
-                    // source.
-                    .then_with(|| version_cmp_newer_first(b, a))
-                    .then_with(|| b.display_order.cmp(&a.display_order))
-            })
-        {
-            retained.insert(best.name.clone());
-        }
-    }
-
-    // Then add top-3 models for each task type
-    for selector in [
-        |candidate: &Candidate| candidate.idea_probability,
-        |candidate: &Candidate| candidate.planning_probability,
-        |candidate: &Candidate| candidate.build_probability,
-        |candidate: &Candidate| candidate.review_probability,
-    ] {
-        let mut ranked = candidates.iter().collect::<Vec<_>>();
-        ranked.sort_by(|left, right| compare_probability(left, right, selector));
-        for candidate in ranked.into_iter().take(3) {
-            retained.insert(candidate.name.clone());
-        }
-    }
-
-    retained
-}
-
-pub fn rank_map(
-    candidates: &[Candidate],
-    selector: impl Fn(&Candidate) -> f64 + Copy,
-) -> BTreeMap<String, u8> {
-    let mut ranked = candidates.iter().collect::<Vec<_>>();
-    ranked.sort_by(|left, right| compare_probability(left, right, selector));
-    ranked
-        .into_iter()
-        .enumerate()
-        .map(|(index, candidate)| (candidate.name.clone(), (index + 1).min(99) as u8))
-        .collect()
-}
-
-fn compare_probability(
-    left: &Candidate,
-    right: &Candidate,
-    selector: impl Fn(&Candidate) -> f64,
-) -> Ordering {
-    selector(right)
-        .partial_cmp(&selector(left))
-        .unwrap_or(Ordering::Equal)
-        .then_with(|| {
-            right
-                .overall_score
-                .partial_cmp(&left.overall_score)
-                .unwrap_or(Ordering::Equal)
-        })
-        // Newer version wins on ties — without this, a synthesized model
-        // (e.g. gemini-3-flash-preview borrowing gemini-2.5-flash's score) loses
-        // the lex tiebreak to its own source and gets retained out before
-        // version penalties even run.
-        .then_with(|| version_cmp_newer_first(left, right))
-        .then_with(|| left.display_order.cmp(&right.display_order))
-        .then_with(|| left.name.cmp(&right.name))
-}
-
-pub fn compare_candidates(left: &Candidate, right: &Candidate) -> Ordering {
-    right
-        .overall_score
-        .partial_cmp(&left.overall_score)
-        .unwrap_or(Ordering::Equal)
-        .then_with(|| version_cmp_newer_first(left, right))
-        .then_with(|| left.display_order.cmp(&right.display_order))
-        .then_with(|| left.name.cmp(&right.name))
-}
-
-/// Legacy probability calculation for DashboardModel.
-/// Used by candidates.rs during the transition period.
-/// Does not include version penalties or flash-tier penalties.
-pub fn legacy_selection_probability(
-    model: &dashboard::DashboardModel,
-    quota_percent: Option<u8>,
-    vendor: VendorKind,
-    phase: SelectionPhase,
-) -> f64 {
-    let cfg = &SELECTION_CONFIG;
-    // Assume 50% when quota is not available so unprobed models still participate
-    let quota = quota_percent.unwrap_or(50) as f64;
-    let quota_weight = cfg.quota_weight(quota);
-    if quota_weight <= 0.0 {
-        return 0.0;
-    }
-    let axis_score = raw_axis_score(model, phase.axes(), phase) / 100.0;
-    let role_weight = axis_score
-        .max(cfg.min_role_score_weight)
-        .powi(cfg.role_score_exponent);
-    let variance_factor = variance_factor(model.standard_error);
-    quota_weight * role_weight * variance_factor * cfg.vendor_bias(vendor, &model.name, phase)
-}
-
-fn raw_axis_score(model: &dashboard::DashboardModel, axes: &[&str], phase: SelectionPhase) -> f64 {
-    let axis_map = model
-        .axes
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut values = axes
-        .iter()
-        .filter_map(|axis| axis_map.get(*axis).copied())
-        .collect::<Vec<_>>();
-
-    while values.len() < axes.len() && !axes.is_empty() {
-        values.push(model.overall_score / 100.0);
-    }
-
-    if values.is_empty() {
-        return model.overall_score.clamp(0.0, 100.0);
-    }
-
-    // Idea rewards breadth (a strong spike on one axis can carry a creative
-    // pick), so it keeps the arithmetic mean. Planning/Build/Review need
-    // consistency across reliability axes — geometric mean punishes uneven
-    // profiles so a model that's great at one axis and weak at another
-    // doesn't get averaged up to a misleadingly high score.
-    let score = match phase {
-        SelectionPhase::Idea => values.iter().sum::<f64>() / values.len() as f64 * 100.0,
-        SelectionPhase::Planning | SelectionPhase::Build | SelectionPhase::Review => {
-            // Floor each axis before taking the log so a single zero doesn't
-            // annihilate the product. Axis values are on a 0..1 scale here.
-            let floor = SELECTION_CONFIG.min_role_score_weight;
-            let log_sum: f64 = values.iter().map(|v| v.max(floor).ln()).sum();
-            (log_sum / values.len() as f64).exp() * 100.0
-        }
-    };
-    score.clamp(0.0, 100.0)
-}
+use super::types::{CachedModel, VendorKind};
+use std::collections::BTreeMap;
 
 /// Linear variance-penalty factor (0..1) applied once, outside the role
 /// score exponent, so a noisy reading doesn't get cubed into oblivion.
@@ -183,6 +15,42 @@ fn variance_factor(standard_error: f64) -> f64 {
         penalty += cfg.high_variance_extra_penalty;
     }
     (1.0 - penalty / 100.0).clamp(0.0, 1.0)
+}
+
+pub(crate) fn extract_version(name: &str) -> Option<(u32, u32)> {
+    let bytes = name.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let run = i - start;
+            if run > 2 {
+                continue;
+            }
+            let major: u32 = name[start..i].parse().ok()?;
+
+            if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'.') {
+                let j = i + 1;
+                if j < bytes.len() && bytes[j].is_ascii_digit() {
+                    let mut k = j;
+                    while k < bytes.len() && bytes[k].is_ascii_digit() {
+                        k += 1;
+                    }
+                    if k - j <= 2 {
+                        let minor: u32 = name[j..k].parse().ok()?;
+                        return Some((major, minor));
+                    }
+                }
+            }
+            return Some((major, 0));
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 /// Per-vendor version ranking built once from the final assembled model set.
@@ -358,6 +226,18 @@ mod tests {
         assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.5"), 0);
         assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.4"), 1);
         assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.2"), 2);
+    }
+
+    #[test]
+    fn extract_version_parses_supported_model_names() {
+        assert_eq!(extract_version("gpt-5.5"), Some((5, 5)));
+        assert_eq!(extract_version("gpt-5.4"), Some((5, 4)));
+        assert_eq!(extract_version("gpt-5.2"), Some((5, 2)));
+        assert_eq!(extract_version("gemini-2.5-flash"), Some((2, 5)));
+        assert_eq!(extract_version("gemini-3-pro-preview"), Some((3, 0)));
+        assert_eq!(extract_version("gemini-3-flash-preview"), Some((3, 0)));
+        assert_eq!(extract_version("claude-sonnet-4-6"), Some((4, 6)));
+        assert_eq!(extract_version("gpt-4-turbo-2024-04-09"), Some((4, 0)));
     }
 
     #[test]

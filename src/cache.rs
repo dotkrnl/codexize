@@ -1,5 +1,4 @@
 use crate::cache_lock;
-use crate::selection::{ModelStatus, QuotaError, VendorKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -149,62 +148,6 @@ fn save_quotas_at(dir: &Path, payload: &QuotaPayload) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy adapters (temporary — removed once app migrates)
-// ---------------------------------------------------------------------------
-
-pub fn load_legacy_model_statuses() -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
-    loaded_cache_to_legacy(load())
-}
-
-pub fn save_legacy_model_statuses(models: &[ModelStatus], errors: &[QuotaError]) -> Result<()> {
-    let entries: Vec<DashboardEntry> = models
-        .iter()
-        .enumerate()
-        .map(|(i, m)| DashboardEntry {
-            vendor: vendor_str(m.vendor).to_string(),
-            name: m.name.clone(),
-            overall_score: 0.0,
-            current_score: m.stupid_level.unwrap_or(0) as f64,
-            standard_error: 0.0,
-            axes: Vec::new(),
-            display_order: i,
-            fallback_from: m.fallback_from.clone(),
-        })
-        .collect();
-    let mut quotas: QuotaPayload = BTreeMap::new();
-    for model in models {
-        quotas
-            .entry(vendor_str(model.vendor).to_string())
-            .or_default()
-            .insert(model.name.clone(), model.quota_percent);
-    }
-    for error in errors {
-        // REVIEWER: Legacy wrapper ambiguity: schema v2 has no explicit error
-        // section, so we persist a vendor-level failure marker as an empty
-        // quota map and rehydrate it back into `QuotaError` on load.
-        quotas
-            .entry(vendor_str(error.vendor).to_string())
-            .or_default();
-    }
-
-    let dir = default_cache_dir();
-    let lock = dir.join("models.json.lock");
-    cache_lock::with_lock(&lock, || {
-        let mut file = load_raw_or_default(&dir);
-        let fetched_at = now_secs();
-        file.dashboard = Some(Section {
-            fetched_at,
-            data: entries,
-        });
-        file.quotas = Some(Section {
-            fetched_at,
-            data: quotas,
-        });
-        atomic_write(&dir, &file)
-    })
-}
-
-// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -229,62 +172,6 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
     }
 }
 
-fn loaded_cache_to_legacy(loaded: LoadedCache) -> Option<(Vec<ModelStatus>, Vec<QuotaError>, bool)> {
-    let dashboard = loaded.dashboard?;
-    let quotas = loaded.quotas;
-    let expired = dashboard.expired || quotas.as_ref().is_some_and(|section| section.expired);
-
-    let mut quota_errors = Vec::new();
-    let mut parsed_quotas: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
-    if let Some(section) = quotas {
-        for (vendor_name, model_quotas) in section.data {
-            let Some(vendor) = parse_vendor(&vendor_name) else {
-                continue;
-            };
-            if model_quotas.is_empty() {
-                quota_errors.push(QuotaError {
-                    vendor,
-                    message: "cached quota refresh previously failed".to_string(),
-                });
-            }
-            parsed_quotas.insert(vendor, model_quotas);
-        }
-    }
-
-    let models: Vec<ModelStatus> = dashboard
-        .data
-        .into_iter()
-        .filter_map(|e| {
-            let vendor = parse_vendor(&e.vendor)?;
-            let quota_percent = parsed_quotas
-                .get(&vendor)
-                .and_then(|by_model| by_model.get(&e.name))
-                .copied()
-                .flatten();
-            Some(ModelStatus {
-                vendor,
-                name: e.name,
-                stupid_level: Some(e.current_score.round().clamp(0.0, 99.0) as u8),
-                quota_percent,
-                idea_rank: 99,
-                planning_rank: 99,
-                build_rank: 99,
-                review_rank: 99,
-                idea_weight: 0.0,
-                planning_weight: 0.0,
-                build_weight: 0.0,
-                review_weight: 0.0,
-                fallback_from: e.fallback_from,
-            })
-        })
-        .collect();
-
-    if models.is_empty() {
-        return None;
-    }
-    Some((models, quota_errors, expired))
-}
-
 fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
     fs::create_dir_all(dir).context("failed to create cache directory")?;
 
@@ -299,25 +186,6 @@ fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
     }
     fs::rename(&tmp_path, &final_path).context("failed to rename temp cache file")?;
     Ok(())
-}
-
-fn vendor_str(vendor: VendorKind) -> &'static str {
-    match vendor {
-        VendorKind::Claude => "claude",
-        VendorKind::Codex => "codex",
-        VendorKind::Gemini => "gemini",
-        VendorKind::Kimi => "kimi",
-    }
-}
-
-fn parse_vendor(s: &str) -> Option<VendorKind> {
-    match s {
-        "claude" => Some(VendorKind::Claude),
-        "codex" => Some(VendorKind::Codex),
-        "gemini" => Some(VendorKind::Gemini),
-        "kimi" => Some(VendorKind::Kimi),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -442,6 +310,32 @@ mod tests {
     }
 
     #[test]
+    fn cache_file_omits_legacy_rank_and_weight_fields() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+
+        let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
+
+        for forbidden in [
+            "idea_rank",
+            "planning_rank",
+            "build_rank",
+            "review_rank",
+            "idea_weight",
+            "planning_weight",
+            "build_weight",
+            "review_weight",
+            "stupid_level",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "cache file unexpectedly contained legacy field {forbidden}"
+            );
+        }
+    }
+
+    #[test]
     fn missing_cache_file_returns_empty() {
         let dir = TempDir::new().unwrap();
         let loaded = load_at(dir.path());
@@ -480,38 +374,4 @@ mod tests {
         assert!(loaded.quotas.is_some());
     }
 
-    #[test]
-    fn legacy_adapter_maps_quota_percent_from_quota_section() {
-        let dir = TempDir::new().unwrap();
-        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-
-        let loaded = load_at(dir.path());
-        let (models, errors, expired) =
-            loaded_cache_to_legacy(loaded).expect("legacy adapter should return models");
-
-        assert!(!expired);
-        assert!(errors.is_empty());
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].quota_percent, Some(75));
-    }
-
-    #[test]
-    fn legacy_adapter_surfaces_cached_quota_failure_markers() {
-        let loaded = LoadedCache {
-            dashboard: Some(LoadedSection {
-                expired: false,
-                data: sample_entries(),
-            }),
-            quotas: Some(LoadedSection {
-                expired: false,
-                data: BTreeMap::from([("claude".to_string(), BTreeMap::new())]),
-            }),
-        };
-
-        let (_, errors, _) = loaded_cache_to_legacy(loaded).expect("legacy adapter should return models");
-
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].vendor, VendorKind::Claude);
-    }
 }

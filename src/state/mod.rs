@@ -600,6 +600,23 @@ impl BuilderState {
 }
 
 /// The persisted state of a single codexize session.
+/// A non-coder run that produced an unauthorized HEAD advance under
+/// `GuardMode::AskOperator`. Persisted on `SessionState` until the operator
+/// chooses reset or keep so process restarts cannot lose the decision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingGuardDecision {
+    pub stage: String,
+    #[serde(default)]
+    pub task_id: Option<u32>,
+    pub round: u32,
+    pub attempt: u32,
+    pub run_id: u64,
+    pub captured_head: String,
+    pub current_head: String,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionState {
     pub session_id: String,
@@ -622,6 +639,8 @@ pub struct SessionState {
     pub skip_to_impl_rationale: Option<String>,
     #[serde(default)]
     pub skip_to_impl_kind: Option<crate::artifacts::SkipToImplKind>,
+    #[serde(default)]
+    pub pending_guard_decision: Option<PendingGuardDecision>,
 }
 
 impl SessionState {
@@ -638,6 +657,7 @@ impl SessionState {
             archived: false,
             skip_to_impl_rationale: None,
             skip_to_impl_kind: None,
+            pending_guard_decision: None,
         }
     }
 
@@ -886,6 +906,36 @@ pub(crate) fn test_fs_lock() -> &'static std::sync::Mutex<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_guard_decision_defaults_to_none_when_absent() {
+        let toml_text = r#"
+session_id = "abc"
+schema_version = 2
+current_phase = "IdeaInput"
+"#;
+        let state: SessionState =
+            toml::from_str(toml_text).expect("legacy v2 session state must deserialize");
+        assert!(state.pending_guard_decision.is_none());
+    }
+
+    #[test]
+    fn pending_guard_decision_round_trips() {
+        let mut state = SessionState::new("s".to_string());
+        state.pending_guard_decision = Some(PendingGuardDecision {
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 2,
+            run_id: 7,
+            captured_head: "abc".to_string(),
+            current_head: "def".to_string(),
+            warnings: vec!["w".to_string()],
+        });
+        let text = toml::to_string(&state).expect("serialize");
+        let back: SessionState = toml::from_str(&text).expect("deserialize");
+        assert_eq!(back.pending_guard_decision, state.pending_guard_decision);
+    }
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
         let _guard = test_fs_lock().lock().unwrap_or_else(|err| err.into_inner());

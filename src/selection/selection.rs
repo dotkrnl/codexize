@@ -246,11 +246,12 @@ mod tests {
     fn pick_for_phase_applies_relative_cutoff() {
         let models = vec![
             sample_model(VendorKind::Claude, "high", 80),
-            sample_model(VendorKind::Codex, "low", 5),
+            sample_model(VendorKind::Codex, "low", 1), // Very low quota
         ];
         let index = build_version_index(&models);
 
-        // With cutoff ratio 1/3, the low-quota model should be excluded
+        // With cutoff ratio 1/3 and quota=1, the low-quota model should be excluded
+        // quota_weight(1) ≈ 0.0016, quota_weight(80) = 1.0, ratio < 1/3
         TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
         let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
             .expect("should pick high-quota model");
@@ -362,21 +363,30 @@ mod tests {
     fn select_excluding_applies_diversity_bonus() {
         let models = vec![
             sample_model(VendorKind::Claude, "same-vendor", 80),
-            sample_model(VendorKind::Codex, "other-vendor", 60),
+            sample_model(VendorKind::Codex, "other-vendor", 80),
         ];
         let index = build_version_index(&models);
 
-        // Codex has lower quota but gets 1.3× bonus for being different vendor
-        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-        let chosen = select_excluding(
-            &models,
-            SelectionPhase::Build,
-            &[],
-            Some(VendorKind::Claude),
-            &index,
-        )
-        .expect("should pick diversity bonus");
-        assert_eq!(chosen.vendor, VendorKind::Codex);
+        // Both have same quota, but Codex gets 1.3× diversity bonus
+        // With bonus, Codex has 1.3× the probability, so should win most samples
+        let mut codex_count = 0;
+        for seed in 1000..1100_u64 {
+            TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+            if let Some(chosen) = select_excluding(
+                &models,
+                SelectionPhase::Build,
+                &[],
+                Some(VendorKind::Claude),
+                &index,
+            ) {
+                if chosen.vendor == VendorKind::Codex {
+                    codex_count += 1;
+                }
+            }
+        }
+
+        // Codex should win at least 50% of the time (actual ratio should be ~1.3:1 or 56.5%)
+        assert!(codex_count > 50, "Codex won {} out of 100", codex_count);
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 

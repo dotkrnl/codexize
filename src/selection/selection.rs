@@ -372,16 +372,16 @@ mod tests {
         let mut codex_count = 0;
         for seed in 1000..1100_u64 {
             TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-            if let Some(chosen) = select_excluding(
+            let chose_codex = select_excluding(
                 &models,
                 SelectionPhase::Build,
                 &[],
                 Some(VendorKind::Claude),
                 &index,
-            ) {
-                if chosen.vendor == VendorKind::Codex {
-                    codex_count += 1;
-                }
+            )
+            .is_some_and(|chosen| chosen.vendor == VendorKind::Codex);
+            if chose_codex {
+                codex_count += 1;
             }
         }
 

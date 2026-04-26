@@ -46,6 +46,9 @@ pub struct SelectionConfig {
     /// Lower bound on role score used before exponentiation so that weak
     /// models still retain a small chance.
     pub min_role_score_weight: f64,
+    /// Minimum probability ratio (relative to the highest probability in a
+    /// role) required to keep a candidate in the role-specific pool.
+    pub min_selection_probability_ratio: f64,
     /// Multiplier applied per version step (newest = 0 steps) for
     /// interactive phases (Idea, Planning). Smaller values penalise older
     /// versions more aggressively.
@@ -69,6 +72,7 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     role_score_exponent: 3,
     quota_soft_threshold: 25.0,
     min_role_score_weight: 0.05,
+    min_selection_probability_ratio: 1.0 / 3.0,
     version_penalty_per_step_interactive: 1.0 / 3.0,
     version_penalty_per_step_headless: 2.0 / 3.0,
     high_variance_std_err: 5.0,
@@ -99,7 +103,8 @@ impl SelectionConfig {
     }
 
     /// Concave curve: reaches 1.0 at `quota_soft_threshold`, falls off
-    /// quadratically to 0 at 0%. Above the threshold the weight stays 1.0.
+    /// quadratically to 0 at 0%. At and above the soft threshold this stays
+    /// flat at 1.0 (no extra quota penalty).
     pub fn quota_weight(&self, quota_percent: f64) -> f64 {
         if quota_percent <= 0.0 {
             return 0.0;

@@ -325,18 +325,20 @@ fn apply_version_penalties(candidates: &mut [Candidate]) {
     }
 }
 
-/// Zero out any probability that's below one third of the top probability
-/// in its phase. Keeps the top tier competing on weight and hard-excludes
-/// trailing models from both weighted sampling and round-robin fallbacks.
+/// Zero out any probability that's below the configured ratio of the top
+/// probability in its phase. Keeps the top tier competing on weight and
+/// hard-excludes trailing models from both weighted sampling and round-robin
+/// fallbacks.
 fn apply_top_third_cutoff(candidates: &mut [Candidate]) {
     fn cutoff<F: Fn(&Candidate) -> f64>(candidates: &[Candidate], selector: F) -> f64 {
-        candidates.iter().map(selector).fold(0.0_f64, f64::max) / 3.0
+        candidates.iter().map(selector).fold(0.0_f64, f64::max)
     }
 
-    let idea_cut = cutoff(candidates, |c| c.idea_probability);
-    let planning_cut = cutoff(candidates, |c| c.planning_probability);
-    let build_cut = cutoff(candidates, |c| c.build_probability);
-    let review_cut = cutoff(candidates, |c| c.review_probability);
+    let ratio = SELECTION_CONFIG.min_selection_probability_ratio;
+    let idea_cut = cutoff(candidates, |c| c.idea_probability) * ratio;
+    let planning_cut = cutoff(candidates, |c| c.planning_probability) * ratio;
+    let build_cut = cutoff(candidates, |c| c.build_probability) * ratio;
+    let review_cut = cutoff(candidates, |c| c.review_probability) * ratio;
 
     for c in candidates.iter_mut() {
         if c.idea_probability < idea_cut {

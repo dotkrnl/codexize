@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod input_editor;
 pub mod model_names;
 pub mod picker;
+pub mod preflight;
 pub mod providers;
 pub mod review;
 pub mod runner;

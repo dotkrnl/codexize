@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use codexize::{
-    app, picker, runner,
+    app, picker, preflight, runner,
     state::{self},
     tmux, tui,
 };
@@ -45,6 +45,8 @@ fn main() -> Result<()> {
         None => {
             let tmux = tmux::current_context()?;
             let mut terminal = tui::start()?;
+
+            preflight::check(&mut terminal, &tmux)?;
 
             let mut picker = picker::SessionPicker::new()?;
             let session_id = match picker.run(&mut terminal)? {

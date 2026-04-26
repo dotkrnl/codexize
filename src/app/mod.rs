@@ -2874,7 +2874,7 @@ impl App {
                 self.append_system_message(
                     run.id,
                     MessageKind::Summary,
-                    "Spec review complete. Press Enter to continue to planning, or n to run another review round.".to_string(),
+                    "Spec review complete.".to_string(),
                 );
             }
             Phase::PlanningRunning => {
@@ -2889,7 +2889,7 @@ impl App {
                 self.append_system_message(
                     run.id,
                     MessageKind::Summary,
-                    "Plan review complete. Press Enter to continue to sharding, or n to run another review round.".to_string(),
+                    "Plan review complete.".to_string(),
                 );
             }
             Phase::ShardingRunning => {
@@ -8666,10 +8666,6 @@ estimated_tokens = 1
             let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('x')));
 
             assert!(!should_quit);
-            assert!(
-                app.confirm_back,
-                "unrelated modal keys must not fall through to normal key handling"
-            );
             assert!(app.state.pending_guard_decision.is_some());
         });
     }
@@ -9272,6 +9268,67 @@ dirty_after = false
             assert!(prompt.contains("git ls-files --others --exclude-standard"));
             assert!(prompt.contains("Coder summary:"));
             assert!(prompt.contains("Coder rebuttal (round 2):"));
+        });
+    }
+
+    // Modal tests
+
+    #[test]
+    fn spec_review_paused_enter_advances_regardless_of_selection() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test".into());
+            state.current_phase = Phase::SpecReviewPaused;
+            let mut app = idle_app(state);
+            app.selected = 999;
+            app.handle_key(key(crossterm::event::KeyCode::Enter));
+            assert_eq!(app.state.current_phase, Phase::PlanningRunning);
+        });
+    }
+
+    #[test]
+    fn plan_review_paused_n_reruns_plan_review() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test".into());
+            state.current_phase = Phase::PlanReviewPaused;
+            let mut app = idle_app(state);
+            app.selected = 999;
+            app.handle_key(key(crossterm::event::KeyCode::Char('n')));
+            assert_eq!(app.state.current_phase, Phase::PlanReviewRunning);
+        });
+    }
+
+    #[test]
+    fn modal_up_down_space_no_state_mutation() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test".into());
+            state.current_phase = Phase::SpecReviewPaused;
+            let mut app = idle_app(state);
+            app.selected = 0;
+            
+            for k in [
+                crossterm::event::KeyCode::Up,
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyCode::Char(' '),
+                crossterm::event::KeyCode::Char('b'),
+                crossterm::event::KeyCode::Char('e'),
+            ] {
+                app.handle_key(key(k));
+                assert_eq!(app.state.current_phase, Phase::SpecReviewPaused);
+                assert_eq!(app.selected, 0); // No scroll occurred
+            }
+        });
+    }
+
+    #[test]
+    fn brainstorm_error_e_transitions_to_idea_input() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("test".into());
+            state.current_phase = Phase::BrainstormRunning;
+            state.agent_error = Some("failed".to_string());
+            let mut app = idle_app(state);
+            
+            app.handle_key(key(crossterm::event::KeyCode::Char('e')));
+            assert_eq!(app.state.current_phase, Phase::IdeaInput);
         });
     }
 }

@@ -13,7 +13,7 @@ use chrono::Offset;
 #[cfg(test)]
 use super::state::ModelRefreshState;
 use super::{
-    App, chat_widget,
+    App, ModalKind, StageId, chat_widget,
     models::{vendor_color, vendor_prefix, vendor_tag},
 };
 use crate::model_names;
@@ -253,16 +253,40 @@ impl App {
         frame.render_widget(PipelineWidget { app: self }, root[1]);
         frame.render_widget(self.model_strip(root[2].width), root[2]);
 
-        if self.state.current_phase == Phase::SkipToImplPending {
-            render_skip_to_impl_modal(
-                frame,
-                self.state.skip_to_impl_rationale.as_deref(),
-                self.state.skip_to_impl_kind,
-            );
+        if let Some(modal) = self.active_modal() {
+            self.render_modal(frame, modal);
         }
+    }
 
-        if self.state.current_phase == Phase::GitGuardPending {
-            render_guard_decision_modal(frame, self.state.pending_guard_decision.as_ref());
+    fn render_modal(&self, frame: &mut Frame<'_>, modal: ModalKind) {
+        match modal {
+            ModalKind::SkipToImpl => {
+                render_skip_to_impl_modal(
+                    frame,
+                    self.state.skip_to_impl_rationale.as_deref(),
+                    self.state.skip_to_impl_kind,
+                );
+            }
+            ModalKind::GitGuard => {
+                render_guard_decision_modal(frame, self.state.pending_guard_decision.as_ref());
+            }
+            ModalKind::SpecReviewPaused => {
+                render_pause_modal(
+                    frame,
+                    "Spec review complete",
+                    "[Enter] continue  [n] re-review  [q] quit",
+                );
+            }
+            ModalKind::PlanReviewPaused => {
+                render_pause_modal(
+                    frame,
+                    "Plan review complete",
+                    "[Enter] continue  [n] re-review  [q] quit",
+                );
+            }
+            ModalKind::StageError(stage_id) => {
+                render_stage_error_modal(frame, stage_id, self.state.agent_error.as_deref());
+            }
         }
     }
 
@@ -295,11 +319,7 @@ impl App {
                         ""
                     };
                     let show_n = self.state.current_phase == Phase::SpecReviewPaused
-                        || (self.state.current_phase == Phase::SpecReviewRunning
-                            && self.state.agent_error.is_some())
-                        || self.state.current_phase == Phase::PlanReviewPaused
-                        || (self.state.current_phase == Phase::PlanReviewRunning
-                            && self.state.agent_error.is_some());
+                        || self.state.current_phase == Phase::PlanReviewPaused;
                     let n = if show_n { " n" } else { "" };
                     format!(" | Up/Down Space Enter t PgUp/PgDn b{e}{n} q")
                 },
@@ -913,6 +933,140 @@ fn render_guard_decision_modal(
 
     let block = Block::default()
         .title("Unauthorized commit detected")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, rect);
+}
+
+fn stage_error_title(stage_id: StageId) -> &'static str {
+    match stage_id {
+        StageId::Brainstorm => "Brainstorm failed",
+        StageId::SpecReview => "Spec review failed",
+        StageId::Planning => "Planning failed",
+        StageId::PlanReview => "Plan review failed",
+        StageId::Sharding => "Sharding failed",
+        StageId::Implementation => "Implementation failed",
+        StageId::Review => "Review failed",
+    }
+}
+
+fn render_pause_modal(frame: &mut Frame<'_>, title: &str, hint: &str) {
+    let area = frame.area();
+    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
+
+    let lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            title.to_string(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            hint.to_string(),
+            Style::default().fg(Color::Green),
+        )),
+    ];
+
+    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
+    let wrapped: u16 = lines
+        .iter()
+        .map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if w == 0 {
+                1
+            } else {
+                w.div_ceil(inner_width).max(1) as u16
+            }
+        })
+        .sum();
+    let desired_height = wrapped.saturating_add(2);
+    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
+
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let rect = ratatui::layout::Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, rect);
+}
+
+fn render_stage_error_modal(
+    frame: &mut Frame<'_>,
+    stage_id: StageId,
+    error: Option<&str>,
+) {
+    let area = frame.area();
+    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
+
+    let title = stage_error_title(stage_id);
+    let error_text = error
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("(no error details)");
+    let truncated: String = error_text.chars().take(300).collect();
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        truncated,
+        Style::default().fg(Color::White),
+    )));
+    lines.push(Line::from(""));
+    let mut hint = "[Enter] retry  [q] quit".to_string();
+    if stage_id == StageId::Brainstorm {
+        hint.push_str("  [e] edit idea");
+    }
+    lines.push(Line::from(Span::styled(
+        hint,
+        Style::default().fg(Color::Green),
+    )));
+
+    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
+    let wrapped: u16 = lines
+        .iter()
+        .map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if w == 0 {
+                1
+            } else {
+                w.div_ceil(inner_width).max(1) as u16
+            }
+        })
+        .sum();
+    let desired_height = wrapped.saturating_add(2);
+    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
+
+    let x = area.x + area.width.saturating_sub(modal_width) / 2;
+    let y = area.y + area.height.saturating_sub(modal_height) / 2;
+    let rect = ratatui::layout::Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
+
+    frame.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = Block::default()
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .style(Style::default().bg(Color::Black));

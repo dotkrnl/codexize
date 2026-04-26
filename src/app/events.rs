@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::state::{NodeStatus, Phase};
 
-use super::{App, ExpansionOverride};
+use super::{App, ExpansionOverride, ModalKind, StageId};
 
 impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -14,12 +14,9 @@ impl App {
             return self.handle_input_key(key);
         }
 
-        if self.state.current_phase == Phase::SkipToImplPending {
-            return self.handle_skip_to_impl_modal_key(key);
-        }
-
-        if self.state.current_phase == Phase::GitGuardPending {
-            return self.handle_guard_modal_key(key);
+        if let Some(modal) = self.active_modal() {
+            self.confirm_back = false;
+            return self.handle_modal_key(modal, key);
         }
 
         if self.confirm_back && key.code != KeyCode::Char('b') {
@@ -52,85 +49,11 @@ impl App {
                 false
             }
             KeyCode::Enter => {
-                let on_current = self.selected == self.current_row();
-                if on_current {
-                    if self.state.current_phase == Phase::SpecReviewPaused {
-                        self.state.agent_error = None;
-                        let _ = self.transition_to_phase(Phase::PlanningRunning);
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::PlanReviewPaused {
-                        self.state.agent_error = None;
-                        self.queue_view_of_current_artifact("plan.md");
-                        let _ = self.transition_to_phase(Phase::ShardingRunning);
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::BrainstormRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        let idea = self.state.idea_text.clone().unwrap_or_default();
-                        self.launch_brainstorm(idea);
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::SpecReviewRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_spec_review();
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::PlanningRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_planning();
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::PlanReviewRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_plan_review();
-                        return false;
-                    }
-                    if self.state.current_phase == Phase::ShardingRunning
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_sharding();
-                        return false;
-                    }
-                    if matches!(self.state.current_phase, Phase::ImplementationRound(_))
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_coder();
-                        return false;
-                    }
-                    if matches!(self.state.current_phase, Phase::ReviewRound(_))
-                        && (self.state.agent_error.is_some() || !self.window_launched)
-                    {
-                        self.launch_reviewer();
-                        return false;
-                    }
-                }
-
                 if self.can_focus_input() {
                     self.input_mode = true;
                 }
                 // Expand/collapse is Space only (spec § Navigation System); Enter no
                 // longer toggles the body.
-                false
-            }
-            KeyCode::Char('n') => {
-                let can_redo_spec = self.state.current_phase == Phase::SpecReviewPaused
-                    || (self.state.current_phase == Phase::SpecReviewRunning
-                        && self.state.agent_error.is_some());
-                let can_redo_plan = self.state.current_phase == Phase::PlanReviewPaused
-                    || (self.state.current_phase == Phase::PlanReviewRunning
-                        && self.state.agent_error.is_some());
-                if can_redo_spec {
-                    let _ = self.transition_to_phase(Phase::SpecReviewRunning);
-                    self.launch_spec_review();
-                } else if can_redo_plan {
-                    let _ = self.transition_to_phase(Phase::PlanReviewRunning);
-                    self.launch_plan_review();
-                }
                 false
             }
             KeyCode::Char('e') => {
@@ -148,6 +71,83 @@ impl App {
                 self.scroll_viewport(step, true);
                 false
             }
+            _ => false,
+        }
+    }
+
+    fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
+        match modal {
+            ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
+            ModalKind::GitGuard => self.handle_guard_modal_key(key),
+            ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
+            ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
+            ModalKind::StageError(stage_id) => self.handle_stage_error_modal_key(stage_id, key),
+        }
+    }
+
+    fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                self.state.agent_error = None;
+                let _ = self.transition_to_phase(Phase::PlanningRunning);
+                false
+            }
+            KeyCode::Char('n') => {
+                let _ = self.transition_to_phase(Phase::SpecReviewRunning);
+                self.launch_spec_review();
+                false
+            }
+            // Consume all other keys so the UI is genuinely modal.
+            _ => false,
+        }
+    }
+
+    fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                self.state.agent_error = None;
+                self.queue_view_of_current_artifact("plan.md");
+                let _ = self.transition_to_phase(Phase::ShardingRunning);
+                false
+            }
+            KeyCode::Char('n') => {
+                let _ = self.transition_to_phase(Phase::PlanReviewRunning);
+                self.launch_plan_review();
+                false
+            }
+            // Consume all other keys so the UI is genuinely modal.
+            _ => false,
+        }
+    }
+
+    fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
+            KeyCode::Char('r') | KeyCode::Enter => {
+                match stage_id {
+                    StageId::Brainstorm => {
+                        let idea = self.state.idea_text.clone().unwrap_or_default();
+                        self.launch_brainstorm(idea);
+                    }
+                    StageId::SpecReview => self.launch_spec_review(),
+                    StageId::Planning => self.launch_planning(),
+                    StageId::PlanReview => self.launch_plan_review(),
+                    StageId::Sharding => self.launch_sharding(),
+                    StageId::Implementation => self.launch_coder(),
+                    StageId::Review => self.launch_reviewer(),
+                }
+                false
+            }
+            KeyCode::Char('e') if stage_id == StageId::Brainstorm => {
+                let _ = self.transition_to_phase(Phase::IdeaInput);
+                false
+            }
+            // Consume all other keys so the UI is genuinely modal.
             _ => false,
         }
     }

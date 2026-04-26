@@ -7,10 +7,8 @@ mod state;
 mod tree;
 
 use crate::{
-    adapters::{
-        AgentRun, adapter_for_vendor, launch_interactive, launch_noninteractive,
-        window_name_with_model,
-    },
+    adapters::{AgentRun, adapter_for_vendor, window_name_with_model},
+    runner::{launch_interactive, launch_noninteractive},
     artifacts::{ArtifactKind, SkipToImplProposal, Spec},
     cache, review,
     selection::{

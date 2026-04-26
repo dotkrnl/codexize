@@ -778,7 +778,7 @@ impl SessionState {
     ) -> u64 {
         let id = self.next_agent_run_id();
         let hostname = Self::capture_hostname();
-        let mount_device_id = Self::capture_mount_device_id(&self.session_id);
+        let mount_device_id = Self::capture_mount_device_id();
         let run = RunRecord {
             id,
             stage,
@@ -815,13 +815,17 @@ impl SessionState {
             .filter(|s| !s.is_empty())
     }
 
-    /// Capture device ID of the mount containing the session directory.
-    fn capture_mount_device_id(session_id: &str) -> Option<u64> {
-        let session_dir = session_dir(session_id);
+    /// Capture device ID of the mount containing the worktree's `.git` path.
+    fn capture_mount_device_id() -> Option<u64> {
+        let git_path = std::env::current_dir().ok()?.join(".git");
+        Self::capture_mount_device_id_for_path(&git_path)
+    }
+
+    fn capture_mount_device_id_for_path(path: &std::path::Path) -> Option<u64> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            std::fs::metadata(&session_dir).ok().map(|m| m.dev())
+            std::fs::metadata(path).ok().map(|m| m.dev())
         }
         #[cfg(not(unix))]
         {
@@ -843,7 +847,7 @@ impl SessionState {
     pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
         // Check for hostname/device identity mismatch first
         let current_hostname = Self::capture_hostname();
-        let current_device_id = Self::capture_mount_device_id(&self.session_id);
+        let current_device_id = Self::capture_mount_device_id();
 
         // Collect messages to append after the loop
         let mut messages_to_append = Vec::new();
@@ -2027,7 +2031,7 @@ interactive = false
     fn test_resume_mount_device_mismatch_marks_failed_unverified() {
         with_temp_root(|| {
             let mut state = SessionState::new("test-mount-mismatch".to_string());
-            let current_device = SessionState::capture_mount_device_id(&state.session_id);
+            let current_device = SessionState::capture_mount_device_id();
 
             // Only run this test if we can capture a device ID (Unix systems)
             if current_device.is_none() {
@@ -2073,7 +2077,7 @@ interactive = false
         with_temp_root(|| {
             let mut state = SessionState::new("test-same-host".to_string());
             let current_hostname = SessionState::capture_hostname();
-            let current_device = SessionState::capture_mount_device_id(&state.session_id);
+            let current_device = SessionState::capture_mount_device_id();
 
             state.agent_runs.push(RunRecord {
                 id: 1,

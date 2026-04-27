@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::state::{NodeStatus, Phase};
+use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
 use chrono::Offset;
 
 #[cfg(test)]
@@ -14,8 +14,12 @@ use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
     chrome::{UnreadBadge, bottom_rule, top_rule},
+    clock::{Clock, WallClock},
     focus_caps::FocusCaps,
-    footer::{extract_short_title, keymap},
+    footer::{
+        CachedSummaryFetcher, TranscriptLeafMarker, extract_short_title,
+        format_running_transcript_leaf, keymap,
+    },
     models_area,
     sheet::bottom_sheet,
 };
@@ -90,7 +94,6 @@ pub fn sanitize_live_summary(text: &str) -> String {
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()
 }
-
 
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -308,21 +311,15 @@ impl App {
                 self.state.skip_to_impl_rationale.as_deref(),
                 self.state.skip_to_impl_kind,
             ),
-            ModalKind::GitGuard => {
-                guard_content(self.state.pending_guard_decision.as_ref())
-            }
-            ModalKind::SpecReviewPaused => vec![
-                Line::from(Span::styled(
-                    "Spec review complete".to_string(),
-                    Style::default().fg(Color::White),
-                )),
-            ],
-            ModalKind::PlanReviewPaused => vec![
-                Line::from(Span::styled(
-                    "Plan review complete".to_string(),
-                    Style::default().fg(Color::White),
-                )),
-            ],
+            ModalKind::GitGuard => guard_content(self.state.pending_guard_decision.as_ref()),
+            ModalKind::SpecReviewPaused => vec![Line::from(Span::styled(
+                "Spec review complete".to_string(),
+                Style::default().fg(Color::White),
+            ))],
+            ModalKind::PlanReviewPaused => vec![Line::from(Span::styled(
+                "Plan review complete".to_string(),
+                Style::default().fg(Color::White),
+            ))],
             ModalKind::StageError(stage_id) => {
                 stage_error_content(stage_id, self.state.agent_error.as_deref())
             }
@@ -375,11 +372,7 @@ impl App {
 
         for (idx, chunk) in wrapped.iter().enumerate() {
             let show_cursor_here = idx == cursor_pos.0;
-            let split_col = if show_cursor_here {
-                cursor_pos.1
-            } else {
-                0
-            };
+            let split_col = if show_cursor_here { cursor_pos.1 } else { 0 };
 
             if show_cursor_here {
                 let byte = chunk
@@ -484,15 +477,57 @@ impl App {
                 .filter(|m| m.run_id == id)
                 .cloned()
                 .collect();
+            let running_tail = self.running_tail_for_row(index, run, &WallClock::new());
             return chat_widget::message_lines(
                 &msgs,
                 run,
                 local_offset,
-                self.spinner_tick,
+                running_tail,
                 available_width,
             );
         }
         self.render_compact_node(node, index)
+    }
+
+    /// Choose the trailing line that closes a still-running transcript body.
+    ///
+    /// Per spec, leaf transcript rows render the tail as a "live agent
+    /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows whose
+    /// children list visibly extends below them keep the legacy tree-shape
+    /// spinner with a state label so the tree topology is preserved.
+    fn running_tail_for_row<C: Clock>(
+        &self,
+        index: usize,
+        run: &RunRecord,
+        clock: &C,
+    ) -> Option<Line<'static>> {
+        if run.status != RunStatus::Running {
+            return None;
+        }
+        let row = self.visible_rows.get(index)?;
+        if row.has_children {
+            let spin = spinner_frame(self.spinner_tick);
+            let dim = Style::default().fg(Color::DarkGray);
+            let gutter = "│ ".repeat(row.depth);
+            return Some(Line::from(vec![
+                Span::styled(format!(" {gutter}  "), dim),
+                Span::styled(
+                    spin,
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  running".to_string(), dim),
+            ]));
+        }
+        let phase_label = self.state.current_phase.label();
+        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
+        Some(format_running_transcript_leaf(
+            TranscriptLeafMarker::new(),
+            clock,
+            self.spinner_tick,
+            &fetcher,
+        ))
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
@@ -511,10 +546,7 @@ impl App {
                         .fg(Color::Blue)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    format!("  running · {} lines", self.agent_line_count),
-                    dim,
-                ),
+                Span::styled(format!("  running · {} lines", self.agent_line_count), dim),
             ]));
         }
         if !node.children.is_empty() {
@@ -697,9 +729,7 @@ fn skip_to_impl_content(
     ]
 }
 
-fn guard_content(
-    decision: Option<&crate::state::PendingGuardDecision>,
-) -> Vec<Line<'static>> {
+fn guard_content(decision: Option<&crate::state::PendingGuardDecision>) -> Vec<Line<'static>> {
     let (captured_short, current_short) = decision
         .map(|d| {
             let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
@@ -747,15 +777,10 @@ fn stage_error_content(stage_id: StageId, error: Option<&str>) -> Vec<Line<'stat
     vec![
         Line::from(Span::styled(
             title.to_string(),
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            truncated,
-            Style::default().fg(Color::White),
-        )),
+        Line::from(Span::styled(truncated, Style::default().fg(Color::White))),
     ]
 }
 
@@ -949,7 +974,11 @@ mod tests {
 
         let lines = render_lines(&app, 10);
 
-        assert!(lines.iter().any(|line| line.contains("▾ Root") && line.contains("running")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("▾ Root") && line.contains("running"))
+        );
         assert!(
             lines
                 .iter()
@@ -998,7 +1027,11 @@ mod tests {
 
         let lines = render_lines(&app, 8);
 
-        assert!(lines.iter().any(|line| line.contains("Brainstorm") && line.contains("done")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Brainstorm") && line.contains("done"))
+        );
         assert!(
             lines
                 .iter()
@@ -1104,9 +1137,21 @@ mod tests {
 
         let lines = render_lines(&app, 3);
 
-        assert!(lines.iter().any(|line| line.contains("Root") && line.contains("running")));
-        assert!(lines.iter().any(|line| line.contains("Task A") && line.contains("running")));
-        assert!(lines.iter().any(|line| line.contains("Coder") && line.contains("running")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Root") && line.contains("running"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Task A") && line.contains("running"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Coder") && line.contains("running"))
+        );
         assert!(
             !lines
                 .iter()
@@ -1179,7 +1224,10 @@ mod tests {
         app.clamp_viewport();
         assert!(app.follow_tail);
         assert_eq!(app.tail_detach_baseline, None);
-        assert!(app.unread_badge().is_none(), "badge should be hidden at bottom");
+        assert!(
+            app.unread_badge().is_none(),
+            "badge should be hidden at bottom"
+        );
     }
 
     #[test]
@@ -1213,7 +1261,10 @@ mod tests {
 
         let lines = render_lines(&app, app.body_inner_height as u16 + 2);
         assert!(lines.iter().any(|line| line.contains("new unread")));
-        assert!(app.unread_badge().is_none(), "badge should be hidden when unread is visible");
+        assert!(
+            app.unread_badge().is_none(),
+            "badge should be hidden when unread is visible"
+        );
     }
 
     #[test]
@@ -1336,5 +1387,150 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    fn leaf_only_tree() -> Vec<Node> {
+        vec![node(
+            "Brainstorm",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            Vec::new(),
+            None,
+            Some(7),
+        )]
+    }
+
+    #[test]
+    fn running_leaf_row_renders_live_agent_message_not_legacy_working() {
+        let mut app = test_app(
+            leaf_only_tree(),
+            vec![run_record(7, RunStatus::Running)],
+            vec![message(7, "earlier transcript line")],
+        );
+        app.live_summary_cached_text = "drafting plan | full body of work".to_string();
+        app.state.current_phase = Phase::PlanningRunning;
+
+        let lines = render_lines(&app, 12);
+
+        assert!(
+            !lines.iter().any(|l| l.contains("working...")),
+            "running leaf must not emit the legacy 'working...' line"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("drafting plan")),
+            "running leaf tail should surface the live-summary short title"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("earlier transcript line")),
+            "historical messages must still render"
+        );
+    }
+
+    #[test]
+    fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
+        let mut app = test_app(
+            leaf_only_tree(),
+            vec![run_record(7, RunStatus::Running)],
+            Vec::new(),
+        );
+        app.state.current_phase = Phase::BrainstormRunning;
+
+        let lines = render_lines(&app, 8);
+
+        assert!(
+            lines.iter().any(|l| l.contains("Brainstorming")),
+            "leaf tail should fall back to phase label when live-summary is empty"
+        );
+        assert!(!lines.iter().any(|l| l.contains("working...")));
+    }
+
+    #[test]
+    fn running_tail_omitted_when_run_completes() {
+        let app = test_app(
+            leaf_only_tree(),
+            vec![run_record(7, RunStatus::Done)],
+            vec![message(7, "final summary")],
+        );
+
+        let lines = render_lines(&app, 8);
+
+        assert!(lines.iter().any(|l| l.contains("final summary")));
+        assert!(!lines.iter().any(|l| l.contains("working...")));
+    }
+
+    #[test]
+    fn container_row_running_tail_keeps_tree_shape_spinner() {
+        // Container with visible children: the root row's body (if any) keeps
+        // the legacy tree-shape spinner while children render their own
+        // live-agent-message tails.
+        let nodes = vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![node(
+                "Coder",
+                NodeKind::Mode,
+                NodeStatus::Running,
+                Vec::new(),
+                Some(1),
+                None,
+            )],
+            None,
+            // Root absorbs Coder's run via leaf_run_id so its body renders
+            // the transcript inline.
+            Some(1),
+        )];
+        let app = test_app(
+            nodes,
+            vec![run_record(1, RunStatus::Running)],
+            vec![message(1, "shared transcript")],
+        );
+
+        let row = &app.visible_rows[0];
+        let run = &app.state.agent_runs[0];
+        let clock = super::super::clock::WallClock::new();
+        let tail = app
+            .running_tail_for_row(0, run, &clock)
+            .expect("running container should produce a tail line");
+
+        let text: String = tail.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(
+            row.has_children,
+            "container precondition: has visible children"
+        );
+        assert!(
+            text.contains("running"),
+            "container tail should keep the 'running' state label"
+        );
+        assert!(
+            !text.contains("working..."),
+            "container tail must not regress to the legacy cyan 'working...' line"
+        );
+    }
+
+    #[test]
+    fn push_status_routes_through_status_line_with_severity_priority() {
+        let app = test_app(Vec::new(), Vec::new(), Vec::new());
+
+        app.push_status(
+            "info-msg".to_string(),
+            super::super::status_line::Severity::Warn,
+            Duration::from_secs(5),
+        );
+        let rendered = app
+            .status_line
+            .borrow()
+            .render()
+            .expect("status line should hold the warn message");
+        assert_eq!(rendered.to_string(), "info-msg");
+
+        // Lower severity must not silently overwrite a higher-severity message.
+        app.push_status(
+            "later-info".to_string(),
+            super::super::status_line::Severity::Info,
+            Duration::from_secs(5),
+        );
+        let still = app.status_line.borrow().render().unwrap();
+        assert_eq!(still.to_string(), "info-msg");
     }
 }

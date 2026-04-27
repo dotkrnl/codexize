@@ -281,6 +281,54 @@ mod tests {
     }
 
     #[test]
+    fn running_message_1hz_triple_t_then_half_then_full_second() {
+        // Spec: render at t, t+0.5s, and t+1s. The half-second render must be
+        // byte-identical to the t render (same wall-clock second). The
+        // t+1s render must differ — and only in the seconds field of the
+        // leading HH:MM:SS timestamp.
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let clock = TestClock::at(base);
+        let fetcher = FixedFetcher("working on task".to_string());
+        let marker = TranscriptLeafMarker::new();
+
+        let line_t = format_running_transcript_leaf(marker, &clock, 0, &fetcher);
+        let text_t = line_text(&line_t);
+
+        clock.advance(Duration::from_millis(500));
+        let line_half = format_running_transcript_leaf(marker, &clock, 0, &fetcher);
+        let text_half = line_text(&line_half);
+        assert_eq!(
+            text_t, text_half,
+            "render at t+0.5s must be byte-identical to render at t"
+        );
+
+        clock.advance(Duration::from_millis(500));
+        let line_t_plus_1 = format_running_transcript_leaf(marker, &clock, 0, &fetcher);
+        let text_t_plus_1 = line_text(&line_t_plus_1);
+        assert_ne!(
+            text_t, text_t_plus_1,
+            "render at t+1s must differ from render at t"
+        );
+
+        // Only the leading HH:MM:SS timestamp's seconds field differs:
+        // hours and minutes are stable, and everything after the timestamp
+        // (spinner+body) is held constant by passing the same spinner_tick.
+        let (hms_t, rest_t) = text_t.split_once(' ').expect("timestamp prefix");
+        let (hms_1, rest_1) = text_t_plus_1.split_once(' ').expect("timestamp prefix");
+        assert_eq!(rest_t, rest_1, "post-timestamp text must be unchanged");
+        assert_eq!(
+            &hms_t[..6],
+            &hms_1[..6],
+            "HH:MM portion must be unchanged across a 1s advance from {hms_t} to {hms_1}"
+        );
+        assert_ne!(
+            &hms_t[6..],
+            &hms_1[6..],
+            ":SS portion must change across a 1s advance"
+        );
+    }
+
+    #[test]
     fn running_message_spinner_advances_per_frame() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let clock = TestClock::at(base);

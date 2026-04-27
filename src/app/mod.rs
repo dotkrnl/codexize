@@ -1434,7 +1434,11 @@ impl App {
             };
         }
         if stamp.head_after == base {
-            return Some("no_commits_since_round_start".to_string());
+            // No commit and no coder_summary.toml. The no-commit alone is
+            // legitimate when the coder declares it (status = "done", with
+            // an explanation); the contract violation here is the missing
+            // summary that would have explained why nothing was committed.
+            return Some("missing_coder_summary".to_string());
         }
         None
     }
@@ -5181,8 +5185,10 @@ Job:
      before the final full test run.
   4. Commit as a series of small atomic commits (see below). The reviewer
      inspects the aggregate `base..HEAD` range for this round, where `base`
-     was pinned by the orchestrator before you started; the TUI detects
-     completion by observing HEAD advanced past base.
+     was pinned by the orchestrator before you started. No-commit is NOT
+     automatically a failure — if the task was already complete or you
+     deliberately left changes uncommitted, say so in `coder_summary.toml`
+     (see below) and the orchestrator will route to the reviewer normally.
 
 Commit granularity (MANDATORY):
   - Prefer many small atomic commits over one large one. Each commit = ONE
@@ -6729,7 +6735,7 @@ mod tests {
             let reason = app
                 .normalized_failure_reason(&run)
                 .expect("normalized failure reason");
-            assert_eq!(reason.as_deref(), Some("no_commits_since_round_start"));
+            assert_eq!(reason.as_deref(), Some("missing_coder_summary"));
         });
     }
 

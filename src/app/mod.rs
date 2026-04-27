@@ -4590,6 +4590,14 @@ reader can skim it in 30 seconds.
 This is a spec-only phase: do NOT write or modify any code; the spec file is
 your only output. Implementation happens in a later phase.
 
+The brainstorming skill EXPECTS you to interrogate the operator about the
+design — ambiguities, trade-offs, scope, success criteria — BEFORE writing
+the spec. Do not skip that conversation just because an idea + codebase
+context feels sufficient; the operator is present specifically to shape the
+design with you. Ask clarifying questions until you genuinely understand
+what they want, then write the spec. The "stop and exit" rule below applies
+to stage-transition prompts only, NOT to design clarifications.
+
 SKIP-TO-IMPLEMENTATION PROPOSAL (optional, RARE): after writing the spec, if
 the task is BOTH conceptually simple AND small in volume — so small that
 separate planning and sharding phases would add no value — you MAY write a
@@ -4627,11 +4635,13 @@ HARD rules — override anything the superpowers / brainstorming skill suggests:
   - Do NOT ask the operator whether to continue, proceed to planning, move on,
     or run any follow-up skill — including any inline "continue to next stage"
     prompt the skill may offer. When the spec is written, STOP and exit. The
-    orchestrator drives stage transitions.
+    orchestrator drives stage transitions. This is ONLY about stage
+    transitions — design clarifying questions are encouraged.
 
-The operator IS available to answer questions ABOUT THE DESIGN itself. When
-you finish, end your final message with an explicit line asking the operator
-to enter `/exit` if they have no further comments.
+The operator IS available — and expected — to answer clarifying questions
+ABOUT THE DESIGN itself, before and while you draft the spec. When you
+finish, end your final message with an explicit line asking the operator to
+enter `/exit` if they have no further comments.
 {instr}"#
     )
 }

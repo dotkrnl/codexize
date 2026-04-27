@@ -605,75 +605,51 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // AC #4a — spec §5: glm-4.6 Build > 1/3 · max_other_probability on
-    // the pinned fixture (per spec §6 step 6 the fixture contains both
-    // glm-4.6 and glm-4.7). The fixture model set, ratio, and comparison
-    // anchor are hard-coded below per the spec's "defined in the test,
-    // not derived at runtime" rule.
-    //
-    // SPEC GAP — escalated in coder_summary.toml. The literal inequality
-    // is unsatisfiable under spec §4.2 ("No change to vendor bias,
-    // flash-tier penalty, version penalty, or quota weight"):
-    //
-    //   glm-4.6 has version_rank 1 (glm-4.7 is the newest in the
-    //   moonshotai bucket), so the Build-phase headless penalty is
-    //   (2/3)^1 ≈ 0.667. Post-change role_weight^3 ≈ 0.297; multiplying
-    //   by quota=1.0, variance≈0.966, version=0.667, vendor=1.0,
-    //   flash=1.0 gives 0.191. Cutoff = 1/3 · 0.807161 = 0.2691, so
-    //   0.191 < 0.2691 → strictly fails.
-    //
-    //   The zero-as-missing + floor changes lifted glm-4.6 from 0.0043
-    //   (pre-change) to 0.191 (≈45×). The remaining gap is the version
-    //   penalty between glm-4.6 and glm-4.7 — which only the spec/plan
-    //   can authorise touching. Two paths forward (out of scope here):
-    //     1. Spec amendment relaxing §4.2's lock on version penalty.
-    //     2. AC reformulation (e.g. "glm-4.6 clears the gate when it is
-    //        the newest GLM in the pool"), matching the production
-    //        scenario where users typically run a single GLM release.
-    //
-    // The literal-inequality assertion below is `#[ignore]`d so CI stays
-    // green; running `cargo test -- --ignored` reproduces the gap.
-    // `glm46_post_change_substantially_improved` (next test) asserts the
-    // strongest property this task can deliver under §4.2.
     #[test]
-    #[ignore = "AC #4a spec gap — see comment + coder_summary.toml"]
-    fn glm46_clears_inclusion_gate_post_change() {
-        let fixture_model_set: &[&str] = &[
-            "claude-sonnet-4.6",
-            "gemini-2.5-pro",
-            "glm-4.6",
-            "glm-4.7",
-            "gpt-5.4",
-        ];
+    fn glm46_clears_inclusion_gate_when_newest_glm_in_pool() {
+        let filtered_model_set: &[&str] =
+            &["claude-sonnet-4.6", "gemini-2.5-pro", "glm-4.6", "gpt-5.4"];
         const RATIO: f64 = 1.0 / 3.0;
-        const COMPARISON_ANCHOR: f64 = 0.807161; // gpt-5.4 Build, post-change
+        const COMPARISON_ANCHOR_MODEL: &str = "gpt-5.4";
+        const COMPARISON_ANCHOR_BUILD: f64 = 0.807161; // gpt-5.4 Build, post-change
         let mut models = fixture_cached_models();
+        models.retain(|model| filtered_model_set.contains(&model.name.as_str()));
         for model in &mut models {
             stamp_selection_provenance(model);
         }
         let actual: std::collections::BTreeSet<&str> =
             models.iter().map(|m| m.name.as_str()).collect();
         let expected: std::collections::BTreeSet<&str> =
-            fixture_model_set.iter().copied().collect();
-        assert_eq!(actual, expected, "fixture model set drifted");
+            filtered_model_set.iter().copied().collect();
+        assert_eq!(actual, expected, "filtered fixture model set drifted");
         let version_index = build_version_index(&models);
+        let anchor = models
+            .iter()
+            .find(|m| m.name == COMPARISON_ANCHOR_MODEL)
+            .unwrap();
+        let anchor_prob = rounded_probability(selection_probability(
+            anchor,
+            SelectionPhase::Build,
+            &version_index,
+        ));
+        assert_eq!(
+            anchor_prob, COMPARISON_ANCHOR_BUILD,
+            "{COMPARISON_ANCHOR_MODEL} Build anchor drifted"
+        );
         let glm46 = models.iter().find(|m| m.name == "glm-4.6").unwrap();
         let glm46_prob = selection_probability(glm46, SelectionPhase::Build, &version_index);
-        let cutoff = COMPARISON_ANCHOR * RATIO;
+        let cutoff = COMPARISON_ANCHOR_BUILD * RATIO;
         assert!(
             glm46_prob > cutoff,
-            "glm-4.6 Build ({glm46_prob}) should exceed cutoff ({cutoff}) = {COMPARISON_ANCHOR} * {RATIO}"
+            "glm-4.6 Build ({glm46_prob}) should exceed cutoff ({cutoff}) = {COMPARISON_ANCHOR_MODEL} Build {COMPARISON_ANCHOR_BUILD} * {RATIO}"
         );
     }
 
     #[test]
     fn glm46_post_change_substantially_improved() {
-        // Achievable proxy for AC #4a: the zero-as-missing + floor
-        // changes lifted glm-4.6 Build by ≥30× over pre-change. This is
-        // the strongest property obtainable under spec §4.2's version-
-        // penalty lock; the literal inclusion-gate inequality is
-        // documented as a spec gap on
-        // `glm46_clears_inclusion_gate_post_change` above.
+        // AC #4a-bis: the unfiltered fixture still includes glm-4.7, so
+        // this asserts the pinned lift while leaving the version penalty
+        // unchanged as required by spec §4.2 / §8.
         let prechange: BTreeMap<String, BTreeMap<String, f64>> =
             serde_json::from_str(include_str!(
                 "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"

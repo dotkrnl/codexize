@@ -84,112 +84,100 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
             capability: Some(Capability::Back),
         },
     ];
-    let system = vec![KeyBinding {
-        glyph: "q",
-        action: "quit",
-        is_primary: false,
+    (nav, actions, system_bindings())
+}
+
+const SYSTEM_QUIT: KeyBinding = KeyBinding {
+    glyph: "q",
+    action: "quit",
+    is_primary: false,
+    capability: None,
+};
+
+fn system_bindings() -> Vec<KeyBinding> {
+    vec![SYSTEM_QUIT]
+}
+
+/// Pause modal: actions + system.
+fn pause_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![
+            KeyBinding {
+                glyph: "Enter",
+                action: "continue",
+                is_primary: true,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "n",
+                action: "re-review",
+                is_primary: false,
+                capability: None,
+            },
+        ],
+        system_bindings(),
+    )
+}
+
+/// Stage error modal: actions + system.
+fn stage_error_bindings(stage_id: StageId) -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    let mut actions = vec![KeyBinding {
+        glyph: "r",
+        action: "retry",
+        is_primary: true,
         capability: None,
     }];
-    (nav, actions, system)
-}
-
-/// Pause modal: single row with navigation-like bindings.
-fn pause_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding {
-            glyph: "Enter",
-            action: "continue",
-            is_primary: true,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "n",
-            action: "re-review",
-            is_primary: false,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "q",
-            action: "quit",
-            is_primary: false,
-            capability: None,
-        },
-    ]
-}
-
-/// Stage error modal bindings.
-fn stage_error_bindings(stage_id: StageId) -> Vec<KeyBinding> {
-    let mut bindings = vec![
-        KeyBinding {
-            glyph: "r",
-            action: "retry",
-            is_primary: true,
-            capability: None,
-        },
-    ];
     if stage_id == StageId::Brainstorm {
-        bindings.push(KeyBinding {
+        actions.push(KeyBinding {
             glyph: "e",
             action: "edit idea",
             is_primary: false,
             capability: None,
         });
     }
-    bindings.push(KeyBinding {
-        glyph: "q",
-        action: "quit",
-        is_primary: false,
-        capability: None,
-    });
-    bindings
+    (actions, system_bindings())
 }
 
-/// Skip-to-impl modal bindings.
-fn skip_to_impl_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding {
-            glyph: "y",
-            action: "accept",
-            is_primary: true,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "n",
-            action: "decline",
-            is_primary: false,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "q",
-            action: "quit",
-            is_primary: false,
-            capability: None,
-        },
-    ]
+/// Skip-to-impl modal: actions + system.
+fn skip_to_impl_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![
+            KeyBinding {
+                glyph: "y",
+                action: "accept",
+                is_primary: true,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "n",
+                action: "decline",
+                is_primary: false,
+                capability: None,
+            },
+        ],
+        system_bindings(),
+    )
 }
 
-/// Guard modal bindings.
-fn guard_bindings() -> Vec<KeyBinding> {
-    vec![
-        KeyBinding {
-            glyph: "r",
-            action: "reset",
-            is_primary: true,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "k",
-            action: "keep",
-            is_primary: false,
-            capability: None,
-        },
-        KeyBinding {
-            glyph: "q",
-            action: "quit",
-            is_primary: false,
-            capability: None,
-        },
-    ]
+/// Guard modal: actions + system.
+fn guard_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![
+            KeyBinding {
+                glyph: "r",
+                action: "reset",
+                is_primary: true,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "k",
+                action: "keep",
+                is_primary: false,
+                capability: None,
+            },
+        ],
+        system_bindings(),
+    )
 }
 
 /// Input mode bindings.
@@ -439,6 +427,69 @@ fn render_category(
     spans
 }
 
+fn select_modal_tier(actions: &[KeyBinding], system: &[KeyBinding], width: u16) -> WidthTier {
+    let w = width as usize;
+
+    let act_full = measure_simple_bindings(actions, true);
+    let sys_full = measure_system(system, true);
+    let total = act_full + SEP_CATEGORY.chars().count() + sys_full;
+    if total <= w {
+        return WidthTier::Full;
+    }
+
+    let sys_no_label = measure_system(system, false);
+    let total_drop_sys = act_full + SEP_CATEGORY.chars().count() + sys_no_label;
+    if total_drop_sys <= w {
+        return WidthTier::DropSystemLabel;
+    }
+
+    let act_no_labels = measure_simple_bindings(actions, false);
+    let total_drop_act = act_no_labels + SEP_CATEGORY.chars().count() + sys_no_label;
+    if total_drop_act <= w {
+        return WidthTier::DropActionsLabels;
+    }
+
+    WidthTier::FirstKeyOnly
+}
+
+fn render_modal_keymap(actions: &[KeyBinding], system: &[KeyBinding], width: u16) -> Line<'static> {
+    let tier = select_modal_tier(actions, system, width);
+
+    let (act_labels, sys_label, first_only) = match tier {
+        WidthTier::Full => (true, true, false),
+        WidthTier::DropSystemLabel => (true, false, false),
+        WidthTier::DropActionsLabels | WidthTier::DropNavLabels => (false, false, false),
+        WidthTier::FirstKeyOnly => (false, false, true),
+    };
+
+    let left_spans = render_category(actions, FocusCaps::default(), act_labels, first_only);
+    let sys_spans = render_category(system, FocusCaps::default(), sys_label, first_only);
+
+    let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+    let sys_len: usize = sys_spans.iter().map(|s| s.content.chars().count()).sum();
+    let sep_len = SEP_CATEGORY.chars().count();
+
+    let fill_needed = (width as usize).saturating_sub(left_len + sep_len + sys_len);
+
+    let rule_glyph = '─';
+    let mut spans = left_spans;
+
+    if fill_needed > 0 {
+        spans.push(Span::styled(
+            format!("{}{}", SEP_CATEGORY, rule_glyph.to_string().repeat(fill_needed)),
+            Style::default().fg(RULE_COLOR),
+        ));
+    } else {
+        spans.push(Span::styled(
+            SEP_CATEGORY.to_string(),
+            Style::default().fg(ENABLED_ACTION),
+        ));
+    }
+
+    spans.extend(sys_spans);
+    Line::from(spans)
+}
+
 fn render_simple_keymap(bindings: &[KeyBinding], width: u16) -> Line<'static> {
     let tier = select_simple_tier(bindings, width);
     let (show_labels, first_only) = match tier {
@@ -536,16 +587,13 @@ pub fn keymap(
     }
 
     if let Some(modal_kind) = modal {
-        return match modal_kind {
-            ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
-                render_simple_keymap(&pause_bindings(), width)
-            }
-            ModalKind::SkipToImpl => render_simple_keymap(&skip_to_impl_bindings(), width),
-            ModalKind::GitGuard => render_simple_keymap(&guard_bindings(), width),
-            ModalKind::StageError(stage_id) => {
-                render_simple_keymap(&stage_error_bindings(stage_id), width)
-            }
+        let (actions, system) = match modal_kind {
+            ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => pause_bindings(),
+            ModalKind::SkipToImpl => skip_to_impl_bindings(),
+            ModalKind::GitGuard => guard_bindings(),
+            ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
         };
+        return render_modal_keymap(&actions, &system, width);
     }
 
     render_default_keymap(caps, width)
@@ -891,6 +939,117 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("Esc"));
         assert!(text.contains("Enter"));
+    }
+
+    // Right-anchor stability across default/modal transitions
+    #[test]
+    fn q_quit_right_anchored_stable_default_vs_pause_modal() {
+        let width = 120u16;
+        let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+        let modal = keymap(
+            Phase::SpecReviewPaused,
+            Some(ModalKind::SpecReviewPaused),
+            FocusCaps::default(),
+            false,
+            width,
+        );
+        let default_text = line_text(&default);
+        let modal_text = line_text(&modal);
+
+        assert!(default_text.ends_with("q quit"));
+        assert!(modal_text.ends_with("q quit"));
+        assert_eq!(
+            default_text.chars().count(),
+            modal_text.chars().count(),
+            "line lengths must be equal for stable right-anchor"
+        );
+    }
+
+    #[test]
+    fn q_quit_right_anchored_stable_default_vs_guard_modal() {
+        let width = 120u16;
+        let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+        let modal = keymap(
+            Phase::GitGuardPending,
+            Some(ModalKind::GitGuard),
+            FocusCaps::default(),
+            false,
+            width,
+        );
+        let default_text = line_text(&default);
+        let modal_text = line_text(&modal);
+
+        assert!(default_text.ends_with("q quit"));
+        assert!(modal_text.ends_with("q quit"));
+        assert_eq!(
+            default_text.chars().count(),
+            modal_text.chars().count(),
+            "line lengths must be equal for stable right-anchor"
+        );
+    }
+
+    #[test]
+    fn q_quit_right_anchored_stable_default_vs_skip_to_impl() {
+        let width = 120u16;
+        let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+        let modal = keymap(
+            Phase::SkipToImplPending,
+            Some(ModalKind::SkipToImpl),
+            FocusCaps::default(),
+            false,
+            width,
+        );
+        let default_text = line_text(&default);
+        let modal_text = line_text(&modal);
+
+        assert!(default_text.ends_with("q quit"));
+        assert!(modal_text.ends_with("q quit"));
+        assert_eq!(
+            default_text.chars().count(),
+            modal_text.chars().count(),
+            "line lengths must be equal for stable right-anchor"
+        );
+    }
+
+    #[test]
+    fn q_quit_right_anchored_stable_default_vs_stage_error() {
+        let width = 120u16;
+        let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+        let modal = keymap(
+            Phase::BrainstormRunning,
+            Some(ModalKind::StageError(StageId::Brainstorm)),
+            FocusCaps::default(),
+            false,
+            width,
+        );
+        let default_text = line_text(&default);
+        let modal_text = line_text(&modal);
+
+        assert!(default_text.ends_with("q quit"));
+        assert!(modal_text.ends_with("q quit"));
+        assert_eq!(
+            default_text.chars().count(),
+            modal_text.chars().count(),
+            "line lengths must be equal for stable right-anchor"
+        );
+    }
+
+    #[test]
+    fn modal_q_quit_right_anchor_with_fill() {
+        let width = 200u16;
+        let modal = keymap(
+            Phase::SpecReviewPaused,
+            Some(ModalKind::SpecReviewPaused),
+            FocusCaps::default(),
+            false,
+            width,
+        );
+        let text = line_text(&modal);
+        assert!(text.ends_with("q quit"));
+        assert!(
+            text.contains('─'),
+            "wide modal should have rule fill between actions and system"
+        );
     }
 
     // Verify dim styling is correct

@@ -1508,6 +1508,253 @@ mod tests {
         );
     }
 
+    fn render_full_frame(app: &mut App, w: u16, h: u16) -> Vec<String> {
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..h).map(|y| line_text(&buf, y, w)).collect()
+    }
+
+    fn impl_round_2_running_app() -> App {
+        let nodes = vec![node(
+            "Implementation",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![node(
+                "Coder",
+                NodeKind::Mode,
+                NodeStatus::Running,
+                Vec::new(),
+                Some(42),
+                None,
+            )],
+            None,
+            None,
+        )];
+        let mut app = test_app(
+            nodes,
+            vec![run_record(42, RunStatus::Running)],
+            vec![message(42, "implementing the feature")],
+        );
+        app.state.current_phase = Phase::ImplementationRound(2);
+        app.live_summary_cached_text =
+            "wiring full-screen tests | adding render-level snapshot coverage".to_string();
+        app.current_run_id = Some(42);
+        app
+    }
+
+    /// Render at a width that fits the full default keymap (so `q quit`
+    /// appears verbatim on the last line, anchoring the assertion).
+    const FULL_FRAME_WIDTH: u16 = 200;
+
+    #[test]
+    fn full_screen_idea_input_renders_top_rule_body_bottom_rule_and_keymap() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::IdeaInput;
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+
+        // Killed chrome must NOT come back: no full-box borders or the old
+        // pipeline title row.
+        for line in &lines {
+            assert!(
+                !line.contains("┌─") && !line.contains("└─") && !line.contains("│ Pipeline"),
+                "no full-box borders in killed chrome: {line:?}"
+            );
+        }
+        // Bottom row is the keymap (right-anchored q quit).
+        assert!(
+            lines
+                .last()
+                .expect("nonempty")
+                .trim_end()
+                .ends_with("q quit"),
+            "last row is keymap; got {:?}",
+            lines.last()
+        );
+    }
+
+    #[test]
+    fn full_screen_brainstorm_running_renders_running_state_in_top_rule() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::BrainstormRunning;
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+
+        // Top rule is the first row and carries the phase label + running state.
+        assert!(
+            lines[0].contains("Brainstorm"),
+            "top rule shows phase label, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("running"),
+            "top rule shows running state, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines.last().unwrap().trim_end().ends_with("q quit"),
+            "footer keymap right-anchors q quit"
+        );
+    }
+
+    #[test]
+    fn full_screen_spec_review_paused_shows_sheet_above_keymap() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SpecReviewPaused;
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+
+        assert!(
+            lines.iter().any(|l| l.contains("Spec review complete")),
+            "sheet content visible: {lines:#?}"
+        );
+        // The sheet's controls line (keymap) is the bottom-most row; it still
+        // right-anchors q quit even when the modal swaps the action set.
+        assert!(
+            lines.last().unwrap().trim_end().ends_with("q quit"),
+            "controls line still ends with q quit; got {:?}",
+            lines.last()
+        );
+    }
+
+    #[test]
+    fn full_screen_stage_error_shows_error_sheet() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SpecReviewRunning;
+        app.state.agent_error = Some("model timeout fetching response".to_string());
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+
+        assert!(
+            lines.iter().any(|l| l.contains("Spec review failed")),
+            "stage-error title visible: {lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("model timeout")),
+            "error body visible: {lines:#?}"
+        );
+        assert!(lines.last().unwrap().trim_end().ends_with("q quit"));
+    }
+
+    #[test]
+    fn full_screen_implementation_round_2_with_active_live_summary() {
+        let mut app = impl_round_2_running_app();
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+
+        // Top rule shows the agent + live-summary short title (not the phase
+        // label fallback) because a current run is active and
+        // live_summary_cached_text is non-empty.
+        assert!(
+            lines[0].contains("[Run 42]"),
+            "top rule shows agent window name, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("wiring full-screen tests"),
+            "top rule shows live-summary short title, got {:?}",
+            lines[0]
+        );
+        assert!(lines.last().unwrap().trim_end().ends_with("q quit"));
+    }
+
+    fn footer_line_count(lines: &[String]) -> usize {
+        // Footer rows are non-empty rows below the bottom rule. The bottom rule
+        // is the row immediately above either the status line (if present) or
+        // the keymap. We count the trailing run of non-empty rows starting from
+        // the keymap row upward.
+        lines.iter().rev().take_while(|l| !l.is_empty()).count()
+    }
+
+    #[test]
+    fn pushing_status_message_adds_one_extra_footer_line_then_ttl_hides_it() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::IdeaInput;
+
+        let baseline = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let baseline_footer = footer_line_count(&baseline);
+
+        // Push with a 5-second TTL so it survives the immediate `tick` inside draw().
+        app.push_status(
+            "transient status".to_string(),
+            super::super::status_line::Severity::Warn,
+            Duration::from_secs(5),
+        );
+
+        let with_status = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        assert!(
+            with_status.iter().any(|l| l.contains("transient status")),
+            "status message visible in frame: {with_status:#?}"
+        );
+        assert_eq!(
+            footer_line_count(&with_status),
+            baseline_footer + 1,
+            "status push adds exactly one footer line"
+        );
+
+        // TTL=0 forces immediate expiry on the next render's tick.
+        app.push_status(
+            "about to expire".to_string(),
+            super::super::status_line::Severity::Warn,
+            Duration::from_millis(0),
+        );
+
+        let after_expiry = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        assert!(
+            !after_expiry.iter().any(|l| l.contains("about to expire")),
+            "expired status hidden: {after_expiry:#?}"
+        );
+        assert_eq!(
+            footer_line_count(&after_expiry),
+            baseline_footer,
+            "footer shrinks back after TTL expiry"
+        );
+    }
+
+    #[test]
+    fn frame_status_line_severity_priority_info_then_error_wins() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::IdeaInput;
+
+        app.push_status(
+            "info first".to_string(),
+            super::super::status_line::Severity::Info,
+            Duration::from_secs(10),
+        );
+        app.push_status(
+            "error wins".to_string(),
+            super::super::status_line::Severity::Error,
+            Duration::from_secs(10),
+        );
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        assert!(lines.iter().any(|l| l.contains("error wins")));
+        assert!(!lines.iter().any(|l| l.contains("info first")));
+    }
+
+    #[test]
+    fn frame_status_line_severity_priority_error_then_info_keeps_error() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::IdeaInput;
+
+        app.push_status(
+            "error stays".to_string(),
+            super::super::status_line::Severity::Error,
+            Duration::from_secs(10),
+        );
+        app.push_status(
+            "info ignored".to_string(),
+            super::super::status_line::Severity::Info,
+            Duration::from_secs(10),
+        );
+
+        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        assert!(lines.iter().any(|l| l.contains("error stays")));
+        assert!(!lines.iter().any(|l| l.contains("info ignored")));
+    }
+
     #[test]
     fn push_status_routes_through_status_line_with_severity_priority() {
         let app = test_app(Vec::new(), Vec::new(), Vec::new());

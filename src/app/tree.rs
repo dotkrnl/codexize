@@ -353,10 +353,12 @@ fn build_idea_node(state: &SessionState) -> Node {
 }
 
 fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
+    let recovery_rounds = recovery_rounds_for_stage(state, stage_key);
     let runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
         .filter(|r| r.stage == stage_key)
+        .filter(|r| !recovery_rounds.contains(&r.round))
         .collect();
     let latest = latest_attempts(&runs);
     let status = stage_status_from_runs(&latest, state, stage_key);
@@ -377,10 +379,12 @@ fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Nod
 }
 
 fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
+    let recovery_rounds = recovery_rounds_for_stage(state, stage_key);
     let runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
         .filter(|r| r.stage == stage_key)
+        .filter(|r| !recovery_rounds.contains(&r.round))
         .collect();
     let latest = latest_attempts(&runs);
     let status = stage_status_from_runs(&latest, state, stage_key);
@@ -433,6 +437,18 @@ fn build_builder_stage(state: &SessionState) -> Node {
         .agent_runs
         .iter()
         .filter(|r| r.stage == "recovery")
+        .collect();
+    let recovery_pr_rounds = recovery_rounds_for_stage(state, "plan-review");
+    let recovery_sharding_rounds = recovery_rounds_for_stage(state, "sharding");
+    let recovery_pr_runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "plan-review" && recovery_pr_rounds.contains(&r.round))
+        .collect();
+    let recovery_sharding_runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "sharding" && recovery_sharding_rounds.contains(&r.round))
         .collect();
     let status = builder_status(state, &coder_runs, &reviewer_runs, &recovery_runs);
     let summary = builder_summary(state, &recovery_runs);
@@ -582,31 +598,61 @@ fn build_builder_stage(state: &SessionState) -> Node {
             leaf_run_id: None,
         });
     }
-    if matches!(state.current_phase, Phase::BuilderRecovery(_)) || !recovery_runs.is_empty() {
-        let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> =
-            std::collections::BTreeMap::new();
+    let in_recovery_phase = matches!(
+        state.current_phase,
+        Phase::BuilderRecovery(_)
+            | Phase::BuilderRecoveryPlanReview(_)
+            | Phase::BuilderRecoverySharding(_)
+    );
+    if in_recovery_phase
+        || !recovery_runs.is_empty()
+        || !recovery_pr_runs.is_empty()
+        || !recovery_sharding_runs.is_empty()
+    {
+        // Group all recovery-mode runs (recovery agent, recovery plan-review,
+        // recovery sharding) by round so each round node shows the full
+        // recover→review→shard sub-pipeline.
+        let mut rounds: std::collections::BTreeMap<
+            u32,
+            (Vec<&RunRecord>, Vec<&RunRecord>, Vec<&RunRecord>),
+        > = std::collections::BTreeMap::new();
         for run in &recovery_runs {
-            rounds.entry(run.round).or_default().push(*run);
+            rounds.entry(run.round).or_default().0.push(*run);
+        }
+        for run in &recovery_pr_runs {
+            rounds.entry(run.round).or_default().1.push(*run);
+        }
+        for run in &recovery_sharding_runs {
+            rounds.entry(run.round).or_default().2.push(*run);
         }
         let mut round_nodes = Vec::new();
-        for (round_num, round_runs) in rounds {
+        for (round_num, (rec_runs, pr_runs, sh_runs)) in rounds {
             let mut mode_nodes = Vec::new();
-            if !round_runs.is_empty() {
-                let mut recovery_children = Vec::new();
-                for run in &round_runs {
-                    recovery_children.push(attempt_run_node(run));
+            let mut combined: Vec<&RunRecord> = Vec::new();
+            for (label, runs_for_mode) in [
+                ("Recovery", &rec_runs),
+                ("Plan Review", &pr_runs),
+                ("Sharding", &sh_runs),
+            ] {
+                if runs_for_mode.is_empty() {
+                    continue;
+                }
+                let mut children = Vec::new();
+                for run in runs_for_mode {
+                    children.push(attempt_run_node(run));
+                    combined.push(*run);
                 }
                 mode_nodes.push(Node {
-                    label: "Recovery".to_string(),
+                    label: label.to_string(),
                     kind: NodeKind::Mode,
-                    status: rollup_status(&round_runs),
+                    status: rollup_status(runs_for_mode),
                     summary: String::new(),
-                    children: recovery_children,
+                    children,
                     run_id: None,
                     leaf_run_id: None,
                 });
             }
-            let round_status = rollup_status(&round_runs);
+            let round_status = rollup_status(&combined);
             round_nodes.push(Node {
                 label: format!("Round {}", round_num),
                 kind: NodeKind::Round,
@@ -617,7 +663,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
                 leaf_run_id: None,
             });
         }
-        let recovery_status = if matches!(state.current_phase, Phase::BuilderRecovery(_)) {
+        let recovery_status = if in_recovery_phase {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -872,7 +918,11 @@ fn builder_status(
         return NodeStatus::Running;
     }
     match state.current_phase {
-        Phase::ImplementationRound(_) | Phase::ReviewRound(_) | Phase::BuilderRecovery(_) => {
+        Phase::ImplementationRound(_)
+        | Phase::ReviewRound(_)
+        | Phase::BuilderRecovery(_)
+        | Phase::BuilderRecoveryPlanReview(_)
+        | Phase::BuilderRecoverySharding(_) => {
             if state.agent_error.is_some() {
                 NodeStatus::Failed
             } else {
@@ -885,8 +935,23 @@ fn builder_status(
     }
 }
 
+fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32> {
+    state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|item| item.stage == stage && item.mode.as_deref() == Some("recovery"))
+        .filter_map(|item| item.round)
+        .collect()
+}
+
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
-    if matches!(state.current_phase, Phase::BuilderRecovery(_)) {
+    if matches!(
+        state.current_phase,
+        Phase::BuilderRecovery(_)
+            | Phase::BuilderRecoveryPlanReview(_)
+            | Phase::BuilderRecoverySharding(_)
+    ) {
         return "builder recovery in progress".to_string();
     }
     if !recovery_runs.is_empty()
@@ -1296,6 +1361,173 @@ mod tests {
         );
         assert_eq!(builder.summary, "builder recovery in progress");
         assert_eq!(builder.status, NodeStatus::Running);
+    }
+
+    #[test]
+    fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
+        use crate::state::PipelineItem;
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::BuilderRecoverySharding(6);
+        state.builder.done = vec![1, 2];
+        state.builder.pending = vec![3];
+        state.builder.iteration = 6;
+        // Original (round 1) plan-review and sharding runs.
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "plan-review".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gemini".to_string(),
+            vendor: "google".to_string(),
+            window_name: "[Plan Review 1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "claude".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Sharding]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        });
+        // Recovery plan-review and sharding runs (round 6) — should be routed
+        // under Builder Recovery, not the top-level stages.
+        state.agent_runs.push(RunRecord {
+            id: 3,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 6,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 4,
+            stage: "plan-review".to_string(),
+            task_id: None,
+            round: 6,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Recovery Plan Review]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 5,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: 6,
+            attempt: 1,
+            model: "claude".to_string(),
+            vendor: "anthropic".to_string(),
+            window_name: "[Recovery Sharding]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        });
+        // Pipeline items mark the recovery rounds.
+        state.builder.pipeline_items.push(PipelineItem {
+            id: 10,
+            stage: "plan-review".to_string(),
+            task_id: None,
+            round: Some(6),
+            status: PipelineItemStatus::Done,
+            title: Some("Recovery plan review".to_string()),
+            mode: Some("recovery".to_string()),
+            trigger: None,
+            interactive: Some(false),
+        });
+        state.builder.pipeline_items.push(PipelineItem {
+            id: 11,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: Some(6),
+            status: PipelineItemStatus::Running,
+            title: Some("Recovery sharding".to_string()),
+            mode: Some("recovery".to_string()),
+            trigger: None,
+            interactive: Some(false),
+        });
+
+        let nodes = build_tree(&state);
+
+        // Top-level Plan Review and Sharding stages must NOT contain round-6 runs.
+        let plan_review = nodes.iter().find(|n| n.label == "Plan Review").unwrap();
+        let sharding = nodes.iter().find(|n| n.label == "Sharding").unwrap();
+        assert_eq!(plan_review.status, NodeStatus::Done);
+        assert_eq!(sharding.status, NodeStatus::Done);
+
+        fn collect_run_ids(node: &Node, out: &mut Vec<u64>) {
+            if let Some(id) = node.run_id.or(node.leaf_run_id) {
+                out.push(id);
+            }
+            for child in &node.children {
+                collect_run_ids(child, out);
+            }
+        }
+        let mut pr_ids = Vec::new();
+        collect_run_ids(plan_review, &mut pr_ids);
+        assert!(
+            !pr_ids.contains(&4),
+            "recovery plan-review run leaked into top-level Plan Review: {pr_ids:?}"
+        );
+        let mut sh_ids = Vec::new();
+        collect_run_ids(sharding, &mut sh_ids);
+        assert!(
+            !sh_ids.contains(&5),
+            "recovery sharding run leaked into top-level Sharding: {sh_ids:?}"
+        );
+
+        // Builder Recovery sub-tree must contain all three recovery runs.
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let recovery = builder
+            .children
+            .iter()
+            .find(|c| c.label == "Builder Recovery")
+            .expect("Builder Recovery node missing");
+        let mut rec_ids = Vec::new();
+        collect_run_ids(recovery, &mut rec_ids);
+        for expected in [3u64, 4, 5] {
+            assert!(
+                rec_ids.contains(&expected),
+                "Builder Recovery missing run {expected}: {rec_ids:?}"
+            );
+        }
+        assert_eq!(recovery.status, NodeStatus::Running);
     }
 
     #[test]

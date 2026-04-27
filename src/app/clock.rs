@@ -1,7 +1,10 @@
+use std::time::Instant;
+
+#[cfg(test)]
 use std::{
     cell::RefCell,
     rc::Rc,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
 
 /// Clock seam that abstracts wall-clock access for testability.
@@ -44,17 +47,20 @@ impl Clock for WallClock {
 ///
 /// `advance` moves both timelines forward so TTL expiry and timestamp
 /// string changes can be tested without sleeping.
+#[cfg(test)]
 #[derive(Debug)]
 struct TestClockState {
     instant: Instant,
     system: SystemTime,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct TestClock {
     state: Rc<RefCell<TestClockState>>,
 }
 
+#[cfg(test)]
 impl TestClock {
     pub fn new() -> Self {
         Self {
@@ -81,6 +87,7 @@ impl TestClock {
     }
 }
 
+#[cfg(test)]
 impl Clock for TestClock {
     fn now(&self) -> Instant {
         self.state.borrow().instant

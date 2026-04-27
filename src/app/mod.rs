@@ -136,6 +136,7 @@ struct TestLaunchHarness {
 
 #[derive(Debug)]
 pub struct App {
+    #[allow(dead_code)]
     tmux: TmuxContext,
     state: SessionState,
     nodes: Vec<Node>,
@@ -475,6 +476,7 @@ impl App {
         current_node_index(&self.nodes)
     }
 
+    #[cfg(test)]
     fn current_row(&self) -> usize {
         let current = self.current_node();
         self.visible_rows

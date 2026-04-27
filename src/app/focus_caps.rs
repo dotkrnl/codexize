@@ -9,8 +9,3 @@ pub struct FocusCaps {
     pub can_back: bool,
 }
 
-impl FocusCaps {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}

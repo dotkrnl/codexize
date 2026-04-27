@@ -5176,84 +5176,71 @@ fn coder_prompt(
     let project_doc_instr = project_doc_instr();
     format!(
         r#"{project_doc_instr}You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
-operator is NOT available. Make your own judgement calls, document them in the
-commit message, and leave a line comment for the reviewer on anything genuinely
-ambiguous.
+operator is NOT available. Make your own judgement calls; put rationale in
+the commit message and a line comment in the code on anything genuinely
+ambiguous so the reviewer sees it.
+
+Heads up: your work will be reviewed by an AI from a DIFFERENT model vendor
+than you — a fresh pair of eyes that notices different things. Take the
+extra moment on edge cases and clarity so the review goes smoothly.
 
 Inputs:
-  Task:  {task}   (lists what to do, test steps, and line refs into spec/plan)
+  Task:  {task}   (what to do, test steps, line refs into spec/plan)
   Spec:  {spec}
   Plan:  {plan}
 {prev_review}{refine_block}{resume_hint}
 Job:
   1. Read the task file first.
-  2. Implement end-to-end on the current branch.
-  3. Make the tests described in the task pass — UNLESS the task's `test`
-     field starts with "not testable" (genuine scaffolding/intermediate
-     task). In that case you may skip writing tests, but the code you land
-     MUST still build cleanly (compiles / links / type-checks) on its own.
-     Lint is faster than full tests: run lint first and fix any warnings
-     before the final full test run.
-  4. Commit as a series of small atomic commits (see below). The reviewer
-     inspects the aggregate `base..HEAD` range for this round, where `base`
-     was pinned by the orchestrator before you started. No-commit is NOT
-     automatically a failure — if the task was already complete or you
-     deliberately left changes uncommitted, say so in `coder_summary.toml`
-     (see below) and the orchestrator will route to the reviewer normally.
+  2. Implement end-to-end on the current branch. Match existing repo
+     conventions; run the project's formatter/linter before committing.
+  3. Run lint first (faster than full tests) and fix warnings, then make
+     the task's tests pass — UNLESS the task's `test` field starts with
+     "not testable" (genuine scaffolding). In that case skip the tests,
+     but the code MUST still build cleanly (compiles / links / type-checks).
+  4. Commit as a series of small atomic commits (see below). Reviewer sees
+     `base..HEAD` for this round (`base` pinned by the orchestrator). No-
+     commit is fine if the task was already done or you deliberately left
+     changes uncommitted — declare it in `coder_summary.toml` (see below).
 
 Commit granularity (MANDATORY):
-  - Prefer many small atomic commits over one large one. Each commit = ONE
-    logical change that stands on its own (a single refactor step, a new
-    function + its test, a single bug fix, a single rename). Any commit read
-    in isolation should reveal its intent.
-  - Every commit MUST build on its own (compiles / links / type-checks at
-    that SHA). Never split in a way that leaves an intermediate commit broken.
-  - Do NOT mix unrelated changes in one commit (e.g. rename + bug fix + new
-    feature). Do NOT bundle formatting/whitespace churn into a functional
-    commit — make it a separate `style:`/`chore:` commit if at all.
-  - If a commit's real-logic diff (excluding generated files, lockfiles, large
-    fixtures) exceeds ~200 lines, consider splitting.
-  - One-task-one-commit is acceptable ONLY when the task genuinely is one
-    atomic change. Otherwise split.
+  - One logical change per commit (a refactor, a function + its test, a
+    bug fix). Every commit must build on its own at that SHA.
+  - Don't mix unrelated changes; don't bundle formatting churn into
+    functional commits — separate `style:`/`chore:` commits if needed.
+  - If real-logic diff (excluding generated files, lockfiles, fixtures)
+    exceeds ~200 lines, split. Single-commit-per-task only when the task
+    genuinely is one atomic change.
 
-Commit message (MANDATORY — reviewer rejects violations):
-  - Conventional Commits: `type(scope): summary` (feat, fix, refactor, test,
-    docs, chore, perf, style, build). E.g. `feat(auth): add refresh-token
-    rotation`, `fix(db): close pool on shutdown`.
-  - No `Co-Authored-By:` trailers or other co-author attribution.
-  - No orchestrator vocabulary: no "task <N>", "round <N>", "plan", "shard",
-    "phase", or references to this prompt. Write as if a human engineer
-    authored the change standalone.
+Commit message (reviewer rejects violations):
+  - Conventional Commits: `type(scope): summary` (feat/fix/refactor/test/
+    docs/chore/perf/style/build). E.g. `fix(db): close pool on shutdown`.
+  - No `Co-Authored-By:` trailers or co-author attribution.
+  - No orchestrator vocabulary ("task N", "round N", "plan", "shard",
+    "phase") or references to this prompt. Write as a standalone human
+    engineer would.
 
-Delegate tedious chores to subagents — bulk renames, codebase audits, test
-sweeps, dependency tracing, large refactors. They run in parallel. Give each
-a clear, self-contained brief and verify their output before committing.
+Delegate bulk chores to subagents (renames, audits, sweeps, dependency
+tracing) — never the implementation itself or the call on whether code is
+correct. Give each subagent a self-contained brief; verify before committing.
 
 Hard rules:
-  - Do NOT ask clarifying questions; work from task + spec + plan.
-  - Stay within this one task's scope. Follow-up work you uncover → note for
-    the reviewer; do NOT do it yourself.
-  - Do NOT force-push, rebase history, or delete branches.
-  - Do NOT proceed to the next task; one task per round.
+  - No clarifying questions — work from task + spec + plan.
+  - Stay in this task's scope. Follow-up work you uncover → note for the
+    reviewer, don't do it yourself.
+  - No force-push, no history rewrite, no branch deletes.
 
-Before exiting, write `{coder_summary}` in this exact TOML shape:
-  `status = "done"` or `status = "partial"`
-  `summary = "One short paragraph of what you completed in this round."`
-  `dirty_before = true|false`
-  `dirty_after = true|false`
-  `rebuttal = ["[Round N, Item M] Response to prior reviewer feedback."]`
+Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
+    status       = "done" | "partial"      # "partial" makes the run retry
+    summary      = "One short paragraph of what you completed."
+    dirty_before = true | false             # `git status --porcelain` non-empty at start
+    dirty_after  = true | false             # you intentionally left changes uncommitted
+    rebuttal     = ["[Round N, Item M] Response to prior reviewer feedback."]
+                                            # only when prior feedback was wrong or already
+                                            # addressed; prefix each item with [Round N, Item M]
 
-Rules for `coder_summary.toml`:
-  - You MUST write it before exiting.
-  - If the task was already complete and no new commit is needed, use
-    `status = "done"` and explain why in `summary`.
-  - If the work is incomplete, use `status = "partial"` so the run retries.
-  - If prior reviewer feedback was wrong or already addressed, respond in
-    `rebuttal` and prefix each item with `[Round N, Item M]`.
-  - Set `dirty_before = true` if `git status --porcelain` is non-empty when
-    you start. Set `dirty_after = true` if you intentionally leave changes
-    uncommitted. The orchestrator independently checks git state and the
-    reviewer will see the dirty delta.
+If the task was already complete and you committed nothing, status = "done"
+with the reason in summary — that's not a failure. The orchestrator
+independently checks git state, so be honest about dirty_before/after.
 {instr}"#,
         task_id = task_id,
         round = round,

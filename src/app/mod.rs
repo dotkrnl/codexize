@@ -1,9 +1,15 @@
 pub mod chat_widget;
+#[allow(dead_code)]
+mod clock;
 mod events;
+#[allow(dead_code)]
+mod focus_caps;
 mod guard;
 mod models;
 mod render;
 mod state;
+#[allow(dead_code)]
+mod status_line;
 mod tree;
 
 use crate::{
@@ -42,7 +48,9 @@ use self::{
 
 use notify::Watcher;
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    rc::Rc,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -171,6 +179,10 @@ pub struct App {
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
+    /// Shared handle for the upcoming footer cutover; this stage intentionally
+    /// exposes the primitive before existing toast/status call sites are rerouted.
+    #[allow(dead_code)]
+    status_line: Rc<RefCell<status_line::StatusLine>>,
 }
 
 fn default_expansion(
@@ -262,6 +274,7 @@ impl App {
             #[cfg(test)]
             test_launch_harness: None,
             messages,
+            status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -449,6 +462,13 @@ impl App {
                 return Ok(());
             }
         }
+    }
+
+    /// Returns a clone of the shared `StatusLine` handle so non-render call
+    /// sites can push messages.
+    #[allow(dead_code)]
+    pub(super) fn status_line_handle(&self) -> Rc<RefCell<status_line::StatusLine>> {
+        self.status_line.clone()
     }
 
     fn current_node(&self) -> usize {
@@ -5814,6 +5834,7 @@ mod tests {
             failed_models: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
+            status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -6522,6 +6543,7 @@ mod tests {
             failed_models: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
+            status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);

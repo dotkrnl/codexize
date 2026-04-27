@@ -1147,6 +1147,9 @@ mod tests {
             failed_models: HashMap::new(),
             test_launch_harness: None,
             messages,
+            status_line: std::rc::Rc::new(std::cell::RefCell::new(
+                super::super::status_line::StatusLine::new(),
+            )),
         }
     }
 

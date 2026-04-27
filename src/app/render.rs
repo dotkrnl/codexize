@@ -1,10 +1,9 @@
 use ratatui::{
     Frame,
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 use crate::state::{NodeStatus, Phase};
@@ -14,13 +13,18 @@ use chrono::Offset;
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    models::{vendor_color, vendor_prefix, vendor_tag},
+    chrome::{UnreadBadge, bottom_rule, top_rule},
+    focus_caps::FocusCaps,
+    footer::{extract_short_title, keymap},
+    models_area,
+    sheet::bottom_sheet,
 };
-use crate::model_names;
-use crate::selection::{CachedModel, VendorKind, display::visible_models, ranking::VersionIndex};
 use crate::tui::wrap_input;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const DEGENERATE_FLOOR: u16 = 16;
+const BODY_FLOOR_NORMAL: u16 = 8;
 
 struct PipelineWidget<'a> {
     app: &'a App,
@@ -28,17 +32,10 @@ struct PipelineWidget<'a> {
 
 impl Widget for PipelineWidget<'_> {
     fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
-        let block = Block::default().title("Pipeline").borders(Borders::ALL);
-        let inner = block.inner(area);
-        block.render(area, buf);
-        if inner.height == 0 || inner.width == 0 {
+        if area.height == 0 || area.width == 0 {
             return;
         }
 
-        // Build the full linear content stream: each visible row contributes one
-        // header line and, if expanded with a transcript, its full natural body.
-        // Sections never share or compete for height; overflow is handled by the
-        // pipeline-level `viewport_top` scroll instead.
         let mut lines: Vec<Line<'static>> = Vec::new();
         for index in 0..self.app.visible_rows.len() {
             let Some(node) = self.app.node_for_row(index) else {
@@ -51,98 +48,20 @@ impl Widget for PipelineWidget<'_> {
             }
         }
 
-        let area_h = inner.height as usize;
+        let area_h = area.height as usize;
         let viewport_top = self
             .app
             .viewport_top
             .min(lines.len().saturating_sub(area_h));
         let end = (viewport_top + area_h).min(lines.len());
         for (offset, line) in lines[viewport_top..end].iter().enumerate() {
-            buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
-        }
-
-        // "↓ N new" badge centered along the bottom of the pipeline frame
-        // when tail-follow is detached and messages have arrived since.
-        let unread = self.app.unread_below_count();
-        let at_bottom = self.app.viewport_top >= self.app.max_viewport_top();
-        let viewport_bottom = viewport_top + area_h;
-        let unread_below_viewport = self
-            .app
-            .first_unread_rendered_line()
-            .map(|line| line >= viewport_bottom)
-            .unwrap_or(!at_bottom);
-        if unread > 0 && unread_below_viewport && area.height >= 1 {
-            let label = format!(" ↓ {unread} new ");
-            let label_w = label.chars().count() as u16;
-            if label_w + 2 <= area.width {
-                let x = area.x + (area.width.saturating_sub(label_w)) / 2;
-                let y = area.y + area.height - 1;
-                let span = Span::styled(
-                    label,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                );
-                buf.set_line(x, y, &Line::from(span), label_w);
-            }
+            buf.set_line(area.x, area.y + offset as u16, line, area.width);
         }
     }
-}
-
-fn probability_percent(weight: f64, total: f64) -> u8 {
-    if total <= 0.0 || weight <= 0.0 {
-        return 0;
-    }
-    (weight / total * 100.0).round().clamp(0.0, 99.0) as u8
-}
-
-fn probability_color(pct: u8, max_pct: u8) -> Color {
-    if pct == 0 {
-        return Color::DarkGray;
-    }
-    // Normalise relative to the column max so the top entry always reads as
-    // full green, regardless of absolute magnitude.
-    let t = if max_pct == 0 {
-        0.0
-    } else {
-        (pct as f64 / max_pct as f64).clamp(0.0, 1.0)
-    };
-    let (r, g) = if t < 0.5 {
-        let k = t / 0.5;
-        (220, (40.0 + (220.0 - 40.0) * k) as u8)
-    } else {
-        let k = (t - 0.5) / 0.5;
-        ((220.0 - (220.0 - 60.0) * k) as u8, 220)
-    };
-    Color::Rgb(r, g, 60)
-}
-
-fn probability_span(label: &str, pct: u8, max_pct: u8, is_top_rank: bool) -> Span<'static> {
-    let mut style = Style::default().fg(probability_color(pct, max_pct));
-    if is_top_rank {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    Span::styled(format!("{}{:>2}", label, pct), style)
-}
-
-/// Span used when the vendor's quota fetch failed: shows "--" in red so the
-/// user sees that the probability data is unavailable rather than zero.
-fn probability_unavailable_span(label: &str) -> Span<'static> {
-    Span::styled(format!("{}--", label), Style::default().fg(Color::Red))
 }
 
 fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
-}
-
-fn model_strip_height(models: &[CachedModel], versions: &VersionIndex) -> u16 {
-    let visible_count = visible_models(models, versions).len() as u16;
-    if visible_count == 0 {
-        2
-    } else {
-        visible_count + 2
-    }
 }
 
 fn strip_ansi_codes(s: &str) -> String {
@@ -172,349 +91,319 @@ pub fn sanitize_live_summary(text: &str) -> String {
     collapsed.chars().take(500).collect()
 }
 
-fn format_model_name_spans(
-    short_name: &str,
-    is_new: bool,
-    target_width: usize,
-) -> Vec<Span<'static>> {
-    const SUFFIX: &str = " (new)";
-    const ELLIPSIS: &str = "...";
-
-    let display_name = if is_new {
-        format!("{short_name}{SUFFIX}")
-    } else {
-        short_name.to_string()
-    };
-    let name_len = short_name.chars().count();
-    let full_len = display_name.chars().count();
-    let ellipsis_len = ELLIPSIS.chars().count();
-
-    if full_len <= target_width {
-        let pad = target_width.saturating_sub(full_len);
-        let mut spans = vec![Span::styled(
-            short_name.to_string(),
-            Style::default().fg(Color::Cyan),
-        )];
-        if is_new {
-            spans.push(Span::styled(SUFFIX, Style::default().fg(Color::DarkGray)));
-        }
-        if pad > 0 {
-            spans.push(Span::raw(" ".repeat(pad)));
-        }
-        spans
-    } else if target_width > ellipsis_len {
-        let visible_chars = target_width.saturating_sub(ellipsis_len);
-        let truncated_display: String = display_name.chars().take(visible_chars).collect();
-        if is_new {
-            let name_part: String = truncated_display.chars().take(name_len).collect();
-            let suffix_part: String = truncated_display.chars().skip(name_len).collect();
-            let mut spans = vec![Span::styled(name_part, Style::default().fg(Color::Cyan))];
-            if !suffix_part.is_empty() {
-                spans.push(Span::styled(
-                    suffix_part,
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
-            spans.push(Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)));
-            spans
-        } else {
-            let truncated = truncated_display;
-            vec![
-                Span::styled(truncated, Style::default().fg(Color::Cyan)),
-                Span::styled(ELLIPSIS, Style::default().fg(Color::DarkGray)),
-            ]
-        }
-    } else {
-        vec![Span::styled(
-            ELLIPSIS.chars().take(target_width).collect::<String>(),
-            Style::default().fg(Color::DarkGray),
-        )]
-    }
-}
 
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
-        let model_height = model_strip_height(&self.models, &self.versions);
-        let root = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Min(8),
-                Constraint::Length(model_height),
-            ])
-            .split(frame.area());
+        let area = frame.area();
+        let term_h = area.height;
+        let width = area.width;
+        let degenerate = term_h < DEGENERATE_FLOOR;
 
-        self.body_inner_height = root[1].height.saturating_sub(2) as usize;
-        self.body_inner_width = root[1].width.saturating_sub(2) as usize;
+        // --- Models area (top) ---
+        let (model_lines, models_mode) = if degenerate {
+            (Vec::new(), self.prev_models_mode)
+        } else {
+            models_area::responsive_models_area(
+                &self.models,
+                &self.versions,
+                &self.quota_errors,
+                width,
+                term_h,
+                self.prev_models_mode,
+            )
+        };
+        self.prev_models_mode = models_mode;
+        let models_h = model_lines.len() as u16;
+
+        // --- Status line (tick + render) ---
+        let now = std::time::Instant::now();
+        self.status_line.borrow_mut().tick(now);
+        let status_line_content = if degenerate {
+            None
+        } else {
+            self.status_line.borrow().render()
+        };
+        let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
+
+        // --- Determine footer zone ---
+        // The footer is either: (modal/input) bottom sheet, or (status + keymap).
+        let modal = self.active_modal();
+
+        let caps = self.focus_caps();
+        let keymap_line = keymap(
+            self.state.current_phase,
+            modal,
+            caps,
+            self.input_mode,
+            width,
+        );
+
+        // Compute sheet content if modal or input is active.
+        let sheet_content: Option<Vec<Line<'static>>> = if self.input_mode {
+            Some(self.input_sheet_content(width))
+        } else {
+            modal.map(|m| self.modal_content_lines(m, width))
+        };
+
+        // Footer height: sheet replaces status + keymap.
+        // Without a sheet: keymap (1) + status (0 or 1).
+        let footer_h = if let Some(ref content) = sheet_content {
+            // Sheet = rule + content + controls. Min: rule + controls = 2.
+            let desired = (content.len() as u16).saturating_add(2);
+            let max_for_sheet = if degenerate {
+                // Degenerate: sheet wins over body entirely.
+                term_h.saturating_sub(models_h).saturating_sub(2) // top + bottom rule
+            } else {
+                term_h
+                    .saturating_sub(models_h)
+                    .saturating_sub(2) // rules
+                    .saturating_sub(BODY_FLOOR_NORMAL)
+            };
+            desired.min(max_for_sheet).max(1)
+        } else {
+            1 + status_h // keymap + optional status
+        };
+
+        // --- Body height ---
+        let chrome_h = models_h + 1 + 1 + footer_h; // models + top rule + bottom rule + footer
+        let body_h = term_h.saturating_sub(chrome_h);
+
+        self.body_inner_height = body_h as usize;
+        self.body_inner_width = width as usize;
         self.latch_visible_expansions();
         self.clamp_viewport();
 
-        frame.render_widget(self.header(), root[0]);
-        frame.render_widget(PipelineWidget { app: self }, root[1]);
-        frame.render_widget(self.model_strip(root[2].width), root[2]);
+        // --- Render top-down ---
+        let mut y = area.y;
 
-        if let Some(modal) = self.active_modal() {
-            self.render_modal(frame, modal);
+        // 1. Models area
+        if models_h > 0 {
+            let models_area = ratatui::layout::Rect::new(area.x, y, width, models_h);
+            frame.render_widget(Paragraph::new(model_lines), models_area);
+            y += models_h;
         }
-    }
 
-    fn render_modal(&self, frame: &mut Frame<'_>, modal: ModalKind) {
-        match modal {
-            ModalKind::SkipToImpl => {
-                render_skip_to_impl_modal(
-                    frame,
-                    self.state.skip_to_impl_rationale.as_deref(),
-                    self.state.skip_to_impl_kind,
-                );
-            }
-            ModalKind::GitGuard => {
-                render_guard_decision_modal(frame, self.state.pending_guard_decision.as_ref());
-            }
-            ModalKind::SpecReviewPaused => {
-                render_pause_modal(
-                    frame,
-                    "Spec review complete",
-                    "[Enter] continue  [n] additional reviewer  [q] quit",
-                );
-            }
-            ModalKind::PlanReviewPaused => {
-                render_pause_modal(
-                    frame,
-                    "Plan review complete",
-                    "[Enter] continue  [n] additional reviewer  [q] quit",
-                );
-            }
-            ModalKind::StageError(stage_id) => {
-                render_stage_error_modal(frame, stage_id, self.state.agent_error.as_deref());
-            }
+        // 2. Top rule
+        let top_rule_line = self.build_top_rule(width);
+        let top_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+        frame.render_widget(Paragraph::new(vec![top_rule_line]), top_rule_area);
+        y += 1;
+
+        // 3. Pipeline body
+        if body_h > 0 {
+            let body_area = ratatui::layout::Rect::new(area.x, y, width, body_h);
+            frame.render_widget(PipelineWidget { app: self }, body_area);
+            y += body_h;
         }
-    }
 
-    fn header(&self) -> Paragraph<'_> {
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Codexize",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!(" #{} ", self.state.session_id)),
-            Span::styled(
-                format!("[{}]", self.state.current_phase.label()),
-                self.nodes
-                    .get(self.current_node())
-                    .map(|n| n.status.style())
-                    .unwrap_or_default(),
-            ),
-            Span::raw(" | "),
-            Span::raw(format!(
-                "{}:{} {}",
-                self.tmux.session_name, self.tmux.window_index, self.tmux.window_name
-            )),
-            Span::styled(
-                {
-                    let e = if self.editable_artifact().is_some() {
-                        " e"
-                    } else {
-                        ""
-                    };
-                    let show_n = self.state.current_phase == Phase::SpecReviewPaused
-                        || self.state.current_phase == Phase::PlanReviewPaused;
-                    let n = if show_n { " n" } else { "" };
-                    format!(" | Up/Down Space Enter t PgUp/PgDn b{e}{n} q")
-                },
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]))
-    }
+        // 4. Bottom rule (with unread badge)
+        let badge = self.unread_badge();
+        let bottom_rule_line = bottom_rule(width, badge);
+        let bottom_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+        frame.render_widget(Paragraph::new(vec![bottom_rule_line]), bottom_rule_area);
+        y += 1;
 
-    fn model_strip(&self, strip_width: u16) -> Paragraph<'static> {
-        use crate::selection::{
-            config::SelectionPhase, display::phase_rank, ranking::selection_probability,
-        };
-
-        // Fixed-width parts: vendor tag (8) + stupid (2) + "  " (2) + quota (4) +
-        // "  " (2) + "Ixx Pxx Bxx Rxx" (15) + block borders (2) = 35.
-        // The remaining width goes to the model name column.
-        const FIXED_WIDTH: usize = 35;
-        const MIN_NAME_WIDTH: usize = 8;
-        const DEFAULT_NAME_WIDTH: usize = 28;
-        let name_width = if strip_width as usize > FIXED_WIDTH + MIN_NAME_WIDTH {
-            (strip_width as usize - FIXED_WIDTH).min(DEFAULT_NAME_WIDTH)
+        // 5. Footer zone
+        if let Some(content) = sheet_content {
+            let sheet_lines = bottom_sheet(content, keymap_line, footer_h, width);
+            for line in sheet_lines {
+                if y >= area.y + area.height {
+                    break;
+                }
+                let line_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+                frame.render_widget(Paragraph::new(vec![line]), line_area);
+                y += 1;
+            }
         } else {
-            MIN_NAME_WIDTH
-        };
-
-        // Probabilities are computed on demand per phase and normalised against
-        // the global total over every assembled model (not just the visible
-        // subset) so that filtering doesn't artificially inflate percentages.
-        let prob_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
-            selection_probability(model, phase, &self.versions)
-        };
-        let total_for =
-            |phase: SelectionPhase| -> f64 { self.models.iter().map(|m| prob_for(phase, m)).sum() };
-
-        let total_idea = total_for(SelectionPhase::Idea);
-        let total_planning = total_for(SelectionPhase::Planning);
-        let total_build = total_for(SelectionPhase::Build);
-        let total_review = total_for(SelectionPhase::Review);
-
-        let idea_ranks = phase_rank(&self.models, SelectionPhase::Idea, &self.versions);
-        let planning_ranks = phase_rank(&self.models, SelectionPhase::Planning, &self.versions);
-        let build_ranks = phase_rank(&self.models, SelectionPhase::Build, &self.versions);
-        let review_ranks = phase_rank(&self.models, SelectionPhase::Review, &self.versions);
-
-        let visible = visible_models(&self.models, &self.versions);
-
-        let mut vendor_order: Vec<VendorKind> = Vec::new();
-        let mut by_vendor: std::collections::BTreeMap<VendorKind, Vec<&CachedModel>> =
-            std::collections::BTreeMap::new();
-        for model in self.models.iter().filter(|m| visible.contains(&m.name)) {
-            if !vendor_order.contains(&model.vendor) {
-                vendor_order.push(model.vendor);
+            // Status line (optional)
+            if let Some(status) = status_line_content {
+                if y < area.y + area.height {
+                    let status_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+                    frame.render_widget(Paragraph::new(vec![status]), status_area);
+                    y += 1;
+                }
             }
-            by_vendor.entry(model.vendor).or_default().push(model);
+            // Keymap (always last)
+            if y < area.y + area.height {
+                let keymap_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+                frame.render_widget(Paragraph::new(vec![keymap_line]), keymap_area);
+            }
         }
-        for models in by_vendor.values_mut() {
-            models.sort_by_key(|m| m.display_order);
+    }
+
+    fn focus_caps(&self) -> FocusCaps {
+        FocusCaps {
+            can_expand: self
+                .visible_rows
+                .get(self.selected)
+                .is_some_and(|row| row.is_expandable()),
+            can_edit: self.editable_artifact().is_some(),
+            can_back: self.can_go_back(),
+        }
+    }
+
+    fn build_top_rule(&self, width: u16) -> Line<'static> {
+        let project = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_default();
+        let left = format!("{} · {}", project, self.state.session_id);
+
+        let right = self.top_rule_right_text();
+        top_rule(&left, right.as_deref(), width)
+    }
+
+    fn top_rule_right_text(&self) -> Option<String> {
+        // When a run is active, show "<agent-name> · <live-summary-title>".
+        // Otherwise show "<stage-label> · <state-label>".
+        if let Some(run_id) = self.current_run_id {
+            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == run_id) {
+                let agent = &run.window_name;
+                let summary = if self.live_summary_cached_text.is_empty() {
+                    self.state.current_phase.label()
+                } else {
+                    extract_short_title(&self.live_summary_cached_text)
+                };
+                return Some(format!("{} · {}", agent, summary));
+            }
         }
 
-        let max_idea = self
-            .models
-            .iter()
-            .map(|m| probability_percent(prob_for(SelectionPhase::Idea, m), total_idea))
-            .max()
-            .unwrap_or(0);
-        let max_planning = self
-            .models
-            .iter()
-            .map(|m| probability_percent(prob_for(SelectionPhase::Planning, m), total_planning))
-            .max()
-            .unwrap_or(0);
-        let max_build = self
-            .models
-            .iter()
-            .map(|m| probability_percent(prob_for(SelectionPhase::Build, m), total_build))
-            .max()
-            .unwrap_or(0);
-        let max_review = self
-            .models
-            .iter()
-            .map(|m| probability_percent(prob_for(SelectionPhase::Review, m), total_review))
-            .max()
-            .unwrap_or(0);
+        let label = self.state.current_phase.label();
+        let state_label = self.phase_state_label();
+        Some(format!("{} · {}", label, state_label))
+    }
 
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        for vendor in &vendor_order {
-            let tag = vendor_tag(*vendor);
-            let tag_color = vendor_color(*vendor);
-            let prefix = vendor_prefix(*vendor);
-            let models = &by_vendor[vendor];
+    fn phase_state_label(&self) -> &'static str {
+        if self.state.agent_error.is_some() {
+            return "error";
+        }
+        match self.state.current_phase {
+            Phase::IdeaInput | Phase::BlockedNeedsUser => "awaiting input",
+            Phase::SpecReviewPaused | Phase::PlanReviewPaused => "paused",
+            Phase::SkipToImplPending | Phase::GitGuardPending => "awaiting input",
+            Phase::Done => "done",
+            _ => "running",
+        }
+    }
 
-            for (i, model) in models.iter().enumerate() {
-                let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+    fn unread_badge(&self) -> Option<UnreadBadge> {
+        let unread = self.unread_below_count();
+        let at_bottom = self.viewport_top >= self.max_viewport_top();
+        let viewport_bottom = self.viewport_top + self.body_inner_height;
+        let unread_below_viewport = self
+            .first_unread_rendered_line()
+            .map(|line| line >= viewport_bottom)
+            .unwrap_or(!at_bottom);
 
-                let stupid_value: u8 = model.current_score.round().clamp(0.0, 99.0) as u8;
-                let stupid_level = format!("{stupid_value:>2}");
-                let quota = model
-                    .quota_percent
-                    .map(|v| format!("{v:>3}%"))
-                    .unwrap_or_else(|| " --%".to_string());
+        if unread > 0 && unread_below_viewport {
+            Some(UnreadBadge { count: unread })
+        } else {
+            None
+        }
+    }
 
-                let tag_span = if i == 0 {
+    fn modal_content_lines(&self, modal: ModalKind, _width: u16) -> Vec<Line<'static>> {
+        match modal {
+            ModalKind::SkipToImpl => skip_to_impl_content(
+                self.state.skip_to_impl_rationale.as_deref(),
+                self.state.skip_to_impl_kind,
+            ),
+            ModalKind::GitGuard => {
+                guard_content(self.state.pending_guard_decision.as_ref())
+            }
+            ModalKind::SpecReviewPaused => vec![
+                Line::from(Span::styled(
+                    "Spec review complete".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+            ],
+            ModalKind::PlanReviewPaused => vec![
+                Line::from(Span::styled(
+                    "Plan review complete".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+            ],
+            ModalKind::StageError(stage_id) => {
+                stage_error_content(stage_id, self.state.agent_error.as_deref())
+            }
+        }
+    }
+
+    fn input_sheet_content(&self, width: u16) -> Vec<Line<'static>> {
+        let inner_width = (width as usize).saturating_sub(4).max(1);
+        let placeholder = "describe what you want to build";
+        let (text, text_style) = if self.input_buffer.is_empty() {
+            (
+                placeholder.to_string(),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )
+        } else {
+            (self.input_buffer.clone(), Style::default().fg(Color::White))
+        };
+
+        let mut wrapped = wrap_input(&text, inner_width);
+        if wrapped.is_empty() {
+            wrapped.push(String::new());
+        }
+
+        let cursor_pos = {
+            let target = if self.input_buffer.is_empty() {
+                0
+            } else {
+                self.input_cursor.min(self.input_buffer.chars().count())
+            };
+            let mut acc = 0usize;
+            let mut found = (wrapped.len().saturating_sub(1), 0usize);
+            for (idx, chunk) in wrapped.iter().enumerate() {
+                let chunk_len = chunk.chars().count();
+                if target <= acc + chunk_len {
+                    found = (idx, target - acc);
+                    break;
+                }
+                acc += chunk_len;
+            }
+            found
+        };
+
+        let mut lines = Vec::new();
+        lines.push(Line::from(Span::styled(
+            "> ",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        for (idx, chunk) in wrapped.iter().enumerate() {
+            let show_cursor_here = idx == cursor_pos.0;
+            let split_col = if show_cursor_here {
+                cursor_pos.1
+            } else {
+                0
+            };
+
+            if show_cursor_here {
+                let byte = chunk
+                    .char_indices()
+                    .nth(split_col)
+                    .map(|(i, _)| i)
+                    .unwrap_or(chunk.len());
+                let (left, right) = (&chunk[..byte], &chunk[byte..]);
+                lines.push(Line::from(vec![
+                    Span::styled(left.to_string(), text_style),
                     Span::styled(
-                        format!("{:<8}", tag),
-                        Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::raw("        ")
-                };
-
-                let idea_pct =
-                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct =
-                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
-                let build_pct =
-                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
-                let review_pct =
-                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
-                let vendor_failed = self
-                    .quota_errors
-                    .iter()
-                    .any(|err| err.vendor == model.vendor);
-
-                let name_spans =
-                    format_model_name_spans(&short_name, model.fallback_from.is_some(), name_width);
-
-                let mut line_spans = vec![tag_span];
-                line_spans.extend(name_spans);
-                let prob_i = if vendor_failed {
-                    probability_unavailable_span("I")
-                } else {
-                    probability_span(
-                        "I",
-                        idea_pct,
-                        max_idea,
-                        idea_ranks.get(&model.name) == Some(&1),
-                    )
-                };
-                let prob_p = if vendor_failed {
-                    probability_unavailable_span("P")
-                } else {
-                    probability_span(
-                        "P",
-                        planning_pct,
-                        max_planning,
-                        planning_ranks.get(&model.name) == Some(&1),
-                    )
-                };
-                let prob_b = if vendor_failed {
-                    probability_unavailable_span("B")
-                } else {
-                    probability_span(
-                        "B",
-                        build_pct,
-                        max_build,
-                        build_ranks.get(&model.name) == Some(&1),
-                    )
-                };
-                let prob_r = if vendor_failed {
-                    probability_unavailable_span("R")
-                } else {
-                    probability_span(
-                        "R",
-                        review_pct,
-                        max_review,
-                        review_ranks.get(&model.name) == Some(&1),
-                    )
-                };
-                // Both metrics share the probability gradient (red→yellow→green
-                // on 0..100), where higher is better — for stupid_level a higher
-                // score literally means "more clever", and for quota_percent a
-                // higher value means "more headroom remaining".
-                let stupid_color = probability_color(stupid_value, 100);
-                let quota_color = match model.quota_percent {
-                    Some(v) => probability_color(v, 100),
-                    None => Color::DarkGray,
-                };
-                line_spans.extend(vec![
-                    Span::styled(stupid_level, Style::default().fg(stupid_color)),
-                    Span::raw("  "),
-                    Span::styled(quota, Style::default().fg(quota_color)),
-                    Span::raw("  "),
-                    prob_i,
-                    Span::raw(" "),
-                    prob_p,
-                    Span::raw(" "),
-                    prob_b,
-                    Span::raw(" "),
-                    prob_r,
-                ]);
-                lines.push(Line::from(line_spans));
+                        "▌".to_string(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::SLOW_BLINK),
+                    ),
+                    Span::styled(right.to_string(), text_style),
+                ]));
+            } else {
+                lines.push(Line::from(Span::styled(chunk.clone(), text_style)));
             }
         }
 
-        Paragraph::new(lines).block(Block::default().title("Models").borders(Borders::ALL))
+        lines
     }
 
     fn node_header(
@@ -530,11 +419,21 @@ impl App {
         } else {
             "▸"
         };
-        let is_current = index == self.current_row();
-        let mut style = if index == self.selected {
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
+        let is_focused = index == self.selected;
+        let depth = self.visible_rows[index].depth;
+
+        // Structural focus marker: `▌` in the gutter for the selected row.
+        let focus_glyph = if is_focused { "▌" } else { " " };
+
+        // Thin tree glyphs for indentation.
+        let indent = if depth > 0 {
+            format!("{}├─", "│ ".repeat(depth.saturating_sub(1)))
+        } else {
+            String::new()
+        };
+
+        let mut style = if is_focused {
+            Style::default().add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -542,34 +441,19 @@ impl App {
             style = style.fg(Color::DarkGray);
         }
 
+        let dim = Style::default().fg(Color::DarkGray);
+
         let mut spans = vec![
-            Span::raw(format!(
-                "{}{} ",
-                " ".repeat(self.visible_rows[index].depth),
-                marker
-            )),
+            Span::styled(focus_glyph, Style::default()),
+            Span::styled(indent, dim),
+            Span::raw(format!("{} ", marker)),
             Span::raw(node.label.clone()),
-            Span::raw(" | "),
+            Span::styled(" · ", dim),
             Span::styled(node.status.label(), node.status.style()),
         ];
-        // Only the Builder Loop carries useful per-stage progress in its
-        // summary ("N of M tasks done"); the other stages emit narration like
-        // "idea captured" that just clutters the title.
         if node.label == "Builder Loop" && !node.summary.is_empty() {
-            spans.push(Span::raw(" | "));
-            spans.push(Span::styled(
-                node.summary.clone(),
-                Style::default().fg(Color::Gray),
-            ));
-        }
-
-        if self.confirm_back && is_current {
-            spans.push(Span::styled(
-                "  [b again to go back and clean up — any other key to cancel]",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(" · ", dim));
+            spans.push(Span::styled(node.summary.clone(), dim));
         }
 
         Line::from(spans).style(style)
@@ -613,33 +497,39 @@ impl App {
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
+        let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
+        let gutter = "│ ".repeat(depth);
+        let dim = Style::default().fg(Color::DarkGray);
+
         if node.status == NodeStatus::Running && self.window_launched {
             let spin = spinner_frame(self.spinner_tick);
             lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
+                Span::styled(format!(" {gutter}  "), dim),
                 Span::styled(
                     spin,
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(Color::Blue)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  running · {} lines", self.agent_line_count),
-                    Style::default().fg(Color::DarkGray),
+                    dim,
                 ),
             ]));
         }
         if !node.children.is_empty() {
             lines.push(Line::from(""));
-            for child in &node.children {
+            let child_count = node.children.len();
+            for (i, child) in node.children.iter().enumerate() {
+                let is_last = i == child_count - 1;
+                let branch = if is_last { "└─" } else { "├─" };
                 lines.push(Line::from(vec![
-                    Span::styled("  ── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!(" {gutter}  {branch} "), dim),
                     Span::styled(
                         format!("{} ", child.label),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(format!("({})", child.status.label()), child.status.style()),
-                    Span::styled(" ──", Style::default().fg(Color::DarkGray)),
                 ]));
             }
         }
@@ -776,102 +666,40 @@ impl App {
     }
 }
 
-fn render_skip_to_impl_modal(
-    frame: &mut Frame<'_>,
+fn skip_to_impl_content(
     rationale: Option<&str>,
     kind: Option<crate::artifacts::SkipToImplKind>,
-) {
+) -> Vec<Line<'static>> {
     use crate::artifacts::SkipToImplKind;
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
 
     let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
-    let (header, accept_line, decline_line, title) = if is_nothing {
-        (
-            "The brainstorm agent found nothing to implement.",
-            "[Y]/Enter  accept — mark session done",
-            "[N]/Esc    decline — re-run brainstorm",
-            "Nothing to implement?",
-        )
+    let header = if is_nothing {
+        "The brainstorm agent found nothing to implement."
     } else {
-        (
-            "The brainstorm agent proposes skipping directly to implementation.",
-            "[Y]/Enter  accept — jump to implementation round 1",
-            "[N]/Esc    decline — continue through spec review",
-            "Skip to implementation?",
-        )
+        "The brainstorm agent proposes skipping directly to implementation."
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        header.to_string(),
-        Style::default().fg(Color::White),
-    )));
-    lines.push(Line::from(""));
     let rationale_text = rationale
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("(no rationale provided)");
-    lines.push(Line::from(vec![
-        Span::styled("Rationale: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(rationale_text.to_string()),
-    ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        accept_line.to_string(),
-        Style::default().fg(Color::Green),
-    )));
-    lines.push(Line::from(Span::styled(
-        decline_line.to_string(),
-        Style::default().fg(Color::Red),
-    )));
 
-    // Estimate wrapped line count so the accept/decline buttons are never clipped.
-    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
-    let wrapped: u16 = lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 {
-                1
-            } else {
-                w.div_ceil(inner_width).max(1) as u16
-            }
-        })
-        .sum();
-    let desired_height = wrapped.saturating_add(2); // borders
-    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
-
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
-
-    frame.render_widget(ratatui::widgets::Clear, rect);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(paragraph, rect);
+    vec![
+        Line::from(Span::styled(
+            header.to_string(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Rationale: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(rationale_text.to_string()),
+        ]),
+    ]
 }
 
-fn render_guard_decision_modal(
-    frame: &mut Frame<'_>,
+fn guard_content(
     decision: Option<&crate::state::PendingGuardDecision>,
-) {
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 72);
-
+) -> Vec<Line<'static>> {
     let (captured_short, current_short) = decision
         .map(|d| {
             let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
@@ -880,7 +708,7 @@ fn render_guard_decision_modal(
         })
         .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
 
-    let lines: Vec<Line<'static>> = vec![
+    vec![
         Line::from(Span::styled(
             "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
             Style::default().fg(Color::White),
@@ -893,57 +721,7 @@ fn render_guard_decision_modal(
             Span::styled("After: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(current_short),
         ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "[R]/Enter  reset — discard commit and fail this run".to_string(),
-            Style::default().fg(Color::Red),
-        )),
-        Line::from(Span::styled(
-            "[K]        keep  — preserve commit and continue".to_string(),
-            Style::default().fg(Color::Green),
-        )),
-        Line::from(Span::styled(
-            "[Q]        quit".to_string(),
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
-
-    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
-    let wrapped: u16 = lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 {
-                1
-            } else {
-                w.div_ceil(inner_width).max(1) as u16
-            }
-        })
-        .sum();
-    let desired_height = wrapped.saturating_add(2);
-    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
-
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
-
-    frame.render_widget(ratatui::widgets::Clear, rect);
-
-    let block = Block::default()
-        .title("Unauthorized commit detected")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(paragraph, rect);
+    ]
 }
 
 fn stage_error_title(stage_id: StageId) -> &'static str {
@@ -958,64 +736,7 @@ fn stage_error_title(stage_id: StageId) -> &'static str {
     }
 }
 
-fn render_pause_modal(frame: &mut Frame<'_>, title: &str, hint: &str) {
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
-
-    let lines: Vec<Line<'static>> = vec![
-        Line::from(Span::styled(
-            title.to_string(),
-            Style::default().fg(Color::White),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            hint.to_string(),
-            Style::default().fg(Color::Green),
-        )),
-    ];
-
-    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
-    let wrapped: u16 = lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 {
-                1
-            } else {
-                w.div_ceil(inner_width).max(1) as u16
-            }
-        })
-        .sum();
-    let desired_height = wrapped.saturating_add(2);
-    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
-
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
-
-    frame.render_widget(ratatui::widgets::Clear, rect);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(paragraph, rect);
-}
-
-fn render_stage_error_modal(frame: &mut Frame<'_>, stage_id: StageId, error: Option<&str>) {
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 70);
-
+fn stage_error_content(stage_id: StageId, error: Option<&str>) -> Vec<Line<'static>> {
     let title = stage_error_title(stage_id);
     let error_text = error
         .map(str::trim)
@@ -1023,57 +744,19 @@ fn render_stage_error_modal(frame: &mut Frame<'_>, stage_id: StageId, error: Opt
         .unwrap_or("(no error details)");
     let truncated: String = error_text.chars().take(300).collect();
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        truncated,
-        Style::default().fg(Color::White),
-    )));
-    lines.push(Line::from(""));
-    let mut hint = "[Enter] retry  [q] quit".to_string();
-    if stage_id == StageId::Brainstorm {
-        hint.push_str("  [e] edit idea");
-    }
-    lines.push(Line::from(Span::styled(
-        hint,
-        Style::default().fg(Color::Green),
-    )));
-
-    let inner_width = modal_width.saturating_sub(2).max(1) as usize;
-    let wrapped: u16 = lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 {
-                1
-            } else {
-                w.div_ceil(inner_width).max(1) as u16
-            }
-        })
-        .sum();
-    let desired_height = wrapped.saturating_add(2);
-    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
-
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = ratatui::layout::Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
-
-    frame.render_widget(ratatui::widgets::Clear, rect);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    frame.render_widget(paragraph, rect);
+    vec![
+        Line::from(Span::styled(
+            title.to_string(),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            truncated,
+            Style::default().fg(Color::White),
+        )),
+    ]
 }
 
 #[cfg(test)]
@@ -1149,6 +832,7 @@ mod tests {
             status_line: std::rc::Rc::new(std::cell::RefCell::new(
                 super::super::status_line::StatusLine::new(),
             )),
+            prev_models_mode: super::super::models_area::ModelsAreaMode::default(),
         }
     }
 
@@ -1265,16 +949,16 @@ mod tests {
 
         let lines = render_lines(&app, 10);
 
-        assert!(lines.iter().any(|line| line.contains("▾ Root | running")));
+        assert!(lines.iter().any(|line| line.contains("▾ Root") && line.contains("running")));
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains(" ▾ Task A | running"))
+                .any(|line| line.contains("├─▾ Task A") && line.contains("running"))
         );
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("  ▾ Coder | running"))
+                .any(|line| line.contains("├─▾ Coder") && line.contains("running"))
         );
         assert!(
             lines
@@ -1314,7 +998,7 @@ mod tests {
 
         let lines = render_lines(&app, 8);
 
-        assert!(lines.iter().any(|line| line.contains("Brainstorm | done")));
+        assert!(lines.iter().any(|line| line.contains("Brainstorm") && line.contains("done")));
         assert!(
             lines
                 .iter()
@@ -1368,7 +1052,7 @@ mod tests {
             .expect("first body rendered");
         let second_header = lines
             .iter()
-            .position(|line| line.contains("Second | running"))
+            .position(|line| line.contains("Second") && line.contains("running"))
             .expect("second header rendered");
         let second_body = lines
             .iter()
@@ -1405,7 +1089,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("Coder | failed-unverified"))
+                .any(|line| line.contains("Coder") && line.contains("failed-unverified"))
         );
         assert!(lines.iter().any(|line| line.contains("run-finish")));
     }
@@ -1418,11 +1102,11 @@ mod tests {
             vec![message(1, "hidden transcript body")],
         );
 
-        let lines = render_lines(&app, 5);
+        let lines = render_lines(&app, 3);
 
-        assert!(lines.iter().any(|line| line.contains("Root | running")));
-        assert!(lines.iter().any(|line| line.contains("Task A | running")));
-        assert!(lines.iter().any(|line| line.contains("Coder | running")));
+        assert!(lines.iter().any(|line| line.contains("Root") && line.contains("running")));
+        assert!(lines.iter().any(|line| line.contains("Task A") && line.contains("running")));
+        assert!(lines.iter().any(|line| line.contains("Coder") && line.contains("running")));
         assert!(
             !lines
                 .iter()
@@ -1495,8 +1179,7 @@ mod tests {
         app.clamp_viewport();
         assert!(app.follow_tail);
         assert_eq!(app.tail_detach_baseline, None);
-        let lines = render_lines(&app, app.body_inner_height as u16 + 2);
-        assert!(!lines.iter().any(|l| l.contains("↓")));
+        assert!(app.unread_badge().is_none(), "badge should be hidden at bottom");
     }
 
     #[test]
@@ -1506,8 +1189,9 @@ mod tests {
         app.messages.push(message(1, "new unread"));
         app.viewport_top = 0;
         app.clamp_viewport();
-        let lines = render_lines(&app, app.body_inner_height as u16 + 2);
-        assert!(lines.iter().any(|l| l.contains("↓ 1 new")));
+        let badge = app.unread_badge();
+        assert!(badge.is_some(), "should report unread badge");
+        assert_eq!(badge.unwrap().count, 1);
     }
 
     #[test]
@@ -1528,9 +1212,8 @@ mod tests {
         app.scroll_viewport(2, true);
 
         let lines = render_lines(&app, app.body_inner_height as u16 + 2);
-
         assert!(lines.iter().any(|line| line.contains("new unread")));
-        assert!(!lines.iter().any(|line| line.contains("↓")));
+        assert!(app.unread_badge().is_none(), "badge should be hidden when unread is visible");
     }
 
     #[test]

@@ -130,7 +130,7 @@ impl LiveSummaryFetcher for FixedFetcher {
 /// Extract the short title from a live summary line.
 ///
 /// Format: `<short title ≤5 words> | <body>` or just `<short title>`.
-fn extract_short_title(text: &str) -> String {
+pub fn extract_short_title(text: &str) -> String {
     if let Some((title, _)) = text.split_once('|') {
         title.trim().to_string()
     } else {

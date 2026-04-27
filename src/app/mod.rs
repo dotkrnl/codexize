@@ -1,22 +1,15 @@
 pub mod chat_widget;
-#[allow(dead_code)]
 mod chrome;
-#[allow(dead_code)]
 mod clock;
-#[allow(dead_code)]
 mod footer;
 mod events;
-#[allow(dead_code)]
 mod focus_caps;
 mod guard;
 mod models;
-#[allow(dead_code)]
 mod models_area;
 mod render;
-#[allow(dead_code)]
 mod sheet;
 mod state;
-#[allow(dead_code)]
 mod status_line;
 mod tree;
 
@@ -187,10 +180,8 @@ pub struct App {
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
-    /// Shared handle for the upcoming footer cutover; this stage intentionally
-    /// exposes the primitive before existing toast/status call sites are rerouted.
-    #[allow(dead_code)]
     status_line: Rc<RefCell<status_line::StatusLine>>,
+    prev_models_mode: models_area::ModelsAreaMode,
 }
 
 fn default_expansion(
@@ -283,6 +274,7 @@ impl App {
             test_launch_harness: None,
             messages,
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
+            prev_models_mode: models_area::ModelsAreaMode::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -5843,6 +5835,7 @@ mod tests {
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
+            prev_models_mode: models_area::ModelsAreaMode::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -6552,6 +6545,7 @@ mod tests {
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
+            prev_models_mode: models_area::ModelsAreaMode::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);

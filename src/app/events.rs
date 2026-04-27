@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::state::{NodeStatus, Phase};
 
+use super::status_line::Severity;
 use super::{App, ExpansionOverride, ModalKind, StageId};
 
 impl App {
@@ -21,6 +24,7 @@ impl App {
 
         if self.confirm_back && key.code != KeyCode::Char('b') {
             self.confirm_back = false;
+            self.status_line.borrow_mut().clear();
             return false;
         }
 
@@ -30,9 +34,15 @@ impl App {
             KeyCode::Char('b') => {
                 if self.confirm_back {
                     self.confirm_back = false;
+                    self.status_line.borrow_mut().clear();
                     self.go_back();
                 } else if self.can_go_back() {
                     self.confirm_back = true;
+                    self.status_line.borrow_mut().push(
+                        "Press b again to go back — any other key to cancel".to_string(),
+                        Severity::Warn,
+                        Duration::from_secs(5),
+                    );
                 }
                 false
             }

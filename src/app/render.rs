@@ -1202,6 +1202,7 @@ mod tests {
                 ("taskcompletion".to_string(), axis_score),
                 ("stability".to_string(), axis_score),
             ],
+            axis_provenance: std::collections::BTreeMap::new(),
             quota_percent: Some(100),
             display_order,
             fallback_from: None,

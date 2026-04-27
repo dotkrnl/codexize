@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use crate::model_names;
@@ -16,7 +16,10 @@ pub struct DashboardModel {
     pub overall_score: f64,
     pub current_score: f64,
     pub standard_error: f64,
+    /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
+    /// lowercased camelCase. Backfill semantics are owned by the selection layer.
     pub axes: Vec<(String, f64)>,
+    pub axis_provenance: BTreeMap<String, String>,
     pub display_order: usize,
     /// Set when this model's score was borrowed from a same-stem sibling
     /// because the ranking API has no entry for it yet. Holds the sibling's
@@ -59,6 +62,7 @@ struct ScoreEntry {
     current_score: f64,
     standard_error: f64,
     axes: Vec<(String, f64)>,
+    axis_provenance: BTreeMap<String, String>,
     display_order: usize,
 }
 
@@ -112,7 +116,11 @@ fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
         .json::<Value>()
         .context("dashboard response was not valid JSON")?;
 
-    let data = payload.get("data").unwrap_or(&payload);
+    parse_dashboard_scores(&payload)
+}
+
+fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
+    let data = payload.get("data").unwrap_or(payload);
     let model_scores = data
         .get("modelScores")
         .or_else(|| payload.get("modelScores"))
@@ -141,6 +149,7 @@ fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
             .and_then(|map| map.get(&model_id))
             .and_then(latest_axes)
             .unwrap_or_default();
+        let axis_provenance = BTreeMap::new();
 
         entries.push(ScoreEntry {
             name,
@@ -161,6 +170,7 @@ fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
             )
             .unwrap_or(0.0),
             axes,
+            axis_provenance,
             display_order: i,
         });
     }
@@ -191,6 +201,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     current_score: sc.current_score,
                     standard_error: sc.standard_error,
                     axes: sc.axes.clone(),
+                    axis_provenance: sc.axis_provenance.clone(),
                     display_order: sc.display_order,
                     fallback_from: None,
                 }
@@ -206,6 +217,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     current_score: sc.current_score,
                     standard_error: sc.standard_error,
                     axes: sc.axes.clone(),
+                    axis_provenance: sc.axis_provenance.clone(),
                     display_order: sc.display_order,
                     fallback_from: Some(sc.name.clone()),
                 }
@@ -218,6 +230,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                     current_score: 0.0,
                     standard_error: 0.0,
                     axes: Vec::new(),
+                    axis_provenance: BTreeMap::new(),
                     display_order: inv.display_order + 10_000,
                     fallback_from: None,
                 }
@@ -237,6 +250,7 @@ fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<Dashboa
                 current_score: sc.current_score,
                 standard_error: sc.standard_error,
                 axes: sc.axes.clone(),
+                axis_provenance: sc.axis_provenance.clone(),
                 display_order: sc.display_order,
                 fallback_from: None,
             });
@@ -258,6 +272,7 @@ fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             current_score: sc.current_score,
             standard_error: sc.standard_error,
             axes: sc.axes,
+            axis_provenance: sc.axis_provenance,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -275,6 +290,7 @@ fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
             current_score: 0.0,
             standard_error: 0.0,
             axes: Vec::new(),
+            axis_provenance: BTreeMap::new(),
             display_order: inv.display_order,
             fallback_from: None,
         })
@@ -346,6 +362,7 @@ pub fn synthesize_sibling(
         current_score: sibling.current_score,
         standard_error: sibling.standard_error,
         axes: sibling.axes.clone(),
+        axis_provenance: sibling.axis_provenance.clone(),
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
@@ -388,6 +405,9 @@ fn value_to_string(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::selection::config::SelectionPhase;
+    use crate::selection::ranking::{build_version_index, selection_probability};
+    use crate::selection::types::{CachedModel, VendorKind};
 
     fn model(name: &str, score: f64) -> DashboardModel {
         DashboardModel {
@@ -397,9 +417,43 @@ mod tests {
             current_score: score,
             standard_error: 0.0,
             axes: Vec::new(),
+            axis_provenance: BTreeMap::new(),
             display_order: 0,
             fallback_from: None,
         }
+    }
+
+    fn fixture_cached_models() -> Vec<CachedModel> {
+        let payload: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
+        ))
+        .expect("fixture should be valid JSON");
+        parse_dashboard_scores(&payload)
+            .expect("fixture should parse")
+            .into_iter()
+            .map(|entry| CachedModel {
+                vendor: match entry.vendor.as_str() {
+                    "anthropic" | "claude" => VendorKind::Claude,
+                    "openai" => VendorKind::Codex,
+                    "google" => VendorKind::Gemini,
+                    "moonshotai" => VendorKind::Kimi,
+                    other => panic!("fixture vendor {other} is not mapped"),
+                },
+                name: entry.name,
+                overall_score: entry.overall_score,
+                current_score: entry.current_score,
+                standard_error: entry.standard_error,
+                axes: entry.axes,
+                axis_provenance: entry.axis_provenance,
+                quota_percent: Some(80),
+                display_order: entry.display_order,
+                fallback_from: None,
+            })
+            .collect()
+    }
+
+    fn rounded_probability(value: f64) -> f64 {
+        (value * 1_000_000.0).round() / 1_000_000.0
     }
 
     #[test]
@@ -429,5 +483,35 @@ mod tests {
         let existing = vec![model("gpt-5.2", 70.0), model("gpt-4.1", 50.0)];
         let synth = synthesize_sibling("gpt-5.5", "openai", &existing).unwrap();
         assert_eq!(synth.fallback_from.as_deref(), Some("gpt-5.2"));
+    }
+
+    #[test]
+    fn fixture_prechange_selection_probability_baseline_matches_artifact() {
+        let models = fixture_cached_models();
+        let version_index = build_version_index(&models);
+        let phases = [
+            ("idea", SelectionPhase::Idea),
+            ("planning", SelectionPhase::Planning),
+            ("build", SelectionPhase::Build),
+            ("review", SelectionPhase::Review),
+        ];
+        let mut snapshot = BTreeMap::new();
+        for model in &models {
+            let mut phase_probabilities = BTreeMap::new();
+            for (label, phase) in phases {
+                phase_probabilities.insert(
+                    label.to_string(),
+                    rounded_probability(selection_probability(model, phase, &version_index)),
+                );
+            }
+            snapshot.insert(model.name.clone(), phase_probabilities);
+        }
+
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+        ))
+        .expect("baseline artifact should be valid JSON");
+        let actual = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(actual, expected);
     }
 }

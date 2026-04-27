@@ -12,6 +12,8 @@ pub struct QuotaError {
     pub message: String,
 }
 
+use std::collections::BTreeMap;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachedModel {
     pub vendor: VendorKind,
@@ -19,7 +21,10 @@ pub struct CachedModel {
     pub overall_score: f64,
     pub current_score: f64,
     pub standard_error: f64,
+    /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
+    /// lowercased camelCase. Backfill semantics are owned by the selection layer.
     pub axes: Vec<(String, f64)>,
+    pub axis_provenance: BTreeMap<String, String>,
     pub quota_percent: Option<u8>,
     pub display_order: usize,
     /// Sibling whose ranking-API score was borrowed because this model
@@ -51,6 +56,7 @@ mod tests {
                 ("correctness".to_string(), 90.0),
                 ("debugging".to_string(), 82.0),
             ],
+            axis_provenance: BTreeMap::new(),
             quota_percent: Some(73),
             display_order: 2,
             fallback_from: Some("gpt-5".to_string()),

@@ -194,6 +194,7 @@ mod tests {
                 ("codequality".to_string(), 0.88),
                 ("safety".to_string(), 0.87),
             ],
+            axis_provenance: BTreeMap::new(),
             quota_percent: Some(80),
             display_order: 1,
             fallback_from: None,

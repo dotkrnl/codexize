@@ -9,12 +9,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const TTL: Duration = Duration::from_secs(30 * 60);
 
-pub const CACHE_VERSION: u32 = 2;
+pub const CACHE_VERSION: u32 = 3;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 
 // ---------------------------------------------------------------------------
-// Schema v2 types
+// Schema v3 types
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -37,7 +37,11 @@ pub struct DashboardEntry {
     pub overall_score: f64,
     pub current_score: f64,
     pub standard_error: f64,
+    /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
+    /// lowercased camelCase. Backfill semantics are owned by the selection layer.
     pub axes: Vec<(String, f64)>,
+    #[serde(default)]
+    pub axis_provenance: BTreeMap<String, String>,
     pub display_order: usize,
     #[serde(default)]
     pub fallback_from: Option<String>,
@@ -75,7 +79,7 @@ fn now_secs() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Public API — schema v2
+// Public API — schema v3
 // ---------------------------------------------------------------------------
 
 pub fn load() -> LoadedCache {
@@ -194,6 +198,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn sample_entries() -> Vec<DashboardEntry> {
+        sample_entries_with_provenance(BTreeMap::new())
+    }
+
+    fn sample_entries_with_provenance(
+        axis_provenance: BTreeMap<String, String>,
+    ) -> Vec<DashboardEntry> {
         vec![DashboardEntry {
             vendor: "claude".to_string(),
             name: "claude-sonnet".to_string(),
@@ -201,6 +211,7 @@ mod tests {
             current_score: 82.0,
             standard_error: 1.5,
             axes: vec![("coding".to_string(), 90.0)],
+            axis_provenance,
             display_order: 0,
             fallback_from: None,
         }]
@@ -269,6 +280,45 @@ mod tests {
     }
 
     #[test]
+    fn v2_cache_file_returns_none() {
+        let dir = TempDir::new().unwrap();
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+        let path = dir.path().join("models.json");
+        let mut file: CacheFile =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        file.version = 2;
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+
+        let loaded = load_at(dir.path());
+        assert!(loaded.dashboard.is_none());
+        assert!(loaded.quotas.is_none());
+    }
+
+    #[test]
+    fn v3_cache_preserves_axis_provenance() {
+        let dir = TempDir::new().unwrap();
+        let provenance = BTreeMap::from([
+            ("correctness".to_string(), "suite:hourly".to_string()),
+            ("taskcompletion".to_string(), "suite:tooling".to_string()),
+            (
+                "contextwindow".to_string(),
+                "dropped:contextwindow".to_string(),
+            ),
+            ("edgecases".to_string(), "fallback:overall".to_string()),
+        ]);
+        save_dashboard_at(
+            dir.path(),
+            &sample_entries_with_provenance(provenance.clone()),
+        )
+        .unwrap();
+
+        let loaded = load_at(dir.path());
+        let dashboard = loaded.dashboard.unwrap();
+        assert_eq!(dashboard.data[0].axis_provenance, provenance);
+    }
+
+    #[test]
     fn ttl_expiry_dashboard() {
         let dir = TempDir::new().unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
@@ -316,6 +366,7 @@ mod tests {
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
 
         let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
 
         for forbidden in [
             "idea_rank",
@@ -333,6 +384,15 @@ mod tests {
                 "cache file unexpectedly contained legacy field {forbidden}"
             );
         }
+
+        assert!(
+            text.contains("axis_provenance"),
+            "cache file should contain the axis_provenance field"
+        );
+        assert!(
+            json.pointer("/dashboard/data/0/axis_provenance").is_some(),
+            "axis_provenance is a present cache field, not a legacy omission"
+        );
     }
 
     #[test]

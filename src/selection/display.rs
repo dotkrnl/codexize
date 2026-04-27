@@ -123,6 +123,7 @@ mod tests {
                 ("taskcompletion".to_string(), 0.85),
                 ("stability".to_string(), 0.85),
             ],
+            axis_provenance: std::collections::BTreeMap::new(),
             quota_percent: Some(quota),
             display_order: 0,
             fallback_from: None,

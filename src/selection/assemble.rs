@@ -73,6 +73,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
                         current_score: m.current_score,
                         standard_error: m.standard_error,
                         axes: m.axes.clone(),
+                        axis_provenance: m.axis_provenance.clone(),
                         display_order: m.display_order,
                         fallback_from: m.fallback_from.clone(),
                     })
@@ -125,6 +126,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
             current_score: e.current_score,
             standard_error: e.standard_error,
             axes: e.axes,
+            axis_provenance: e.axis_provenance,
             display_order: e.display_order,
             fallback_from: e.fallback_from,
         })
@@ -167,6 +169,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
                 current_score: m.current_score,
                 standard_error: m.standard_error,
                 axes: m.axes,
+                axis_provenance: m.axis_provenance,
                 quota_percent,
                 display_order: m.display_order,
                 fallback_from: m.fallback_from,
@@ -249,6 +252,7 @@ mod tests {
                 ("debugging".to_string(), 0.85),
                 ("safety".to_string(), 0.85),
             ],
+            axis_provenance: BTreeMap::new(),
             display_order: 0,
             fallback_from: None,
         }
@@ -280,10 +284,11 @@ mod tests {
 
     #[test]
     fn assemble_merges_dashboard_and_quotas() {
-        let dashboard = vec![
-            make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
-            make_entry("gpt-5.5", "openai", 80.0, 78.0),
-        ];
+        let mut claude_entry = make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0);
+        claude_entry
+            .axis_provenance
+            .insert("correctness".to_string(), "suite:hourly".to_string());
+        let dashboard = vec![claude_entry, make_entry("gpt-5.5", "openai", 80.0, 78.0)];
         let quotas = make_quota_payload(&[
             ("claude", "claude-sonnet-4-6", Some(80)),
             ("openai", "gpt-5.5", Some(70)),
@@ -299,6 +304,13 @@ mod tests {
             .unwrap();
         assert_eq!(claude.vendor, VendorKind::Claude);
         assert_eq!(claude.quota_percent, Some(80));
+        assert_eq!(
+            claude
+                .axis_provenance
+                .get("correctness")
+                .map(String::as_str),
+            Some("suite:hourly")
+        );
         let codex = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
         assert_eq!(codex.vendor, VendorKind::Codex);
         assert_eq!(codex.quota_percent, Some(70));

@@ -5,6 +5,7 @@ pub mod transitions;
 pub use phase::Phase;
 pub use transitions::execute_transition;
 
+use crate::adapters::EffortLevel;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -39,6 +40,8 @@ pub struct RunRecord {
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
     pub status: RunStatus,
     pub error: Option<String>,
+    #[serde(default)]
+    pub effort: EffortLevel,
     #[serde(default)]
     pub hostname: Option<String>,
     #[serde(default)]
@@ -784,6 +787,7 @@ impl SessionState {
         model: String,
         vendor: String,
         window_name: String,
+        effort: EffortLevel,
     ) -> u64 {
         let id = self.next_agent_run_id();
         let hostname = Self::capture_hostname();
@@ -801,6 +805,7 @@ impl SessionState {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort,
             hostname,
             mount_device_id,
         };
@@ -1071,6 +1076,7 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         };
@@ -1095,6 +1101,7 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         };
@@ -1122,6 +1129,7 @@ current_phase = "IdeaInput"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         };
@@ -1194,6 +1202,7 @@ current_phase = "IdeaInput"
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -1385,6 +1394,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1408,6 +1418,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1436,6 +1447,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1464,6 +1476,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1480,6 +1493,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1526,6 +1540,7 @@ text = "agent started · gpt-5 (openai)"
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -2009,6 +2024,7 @@ interactive = false
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: if current_hostname.is_some() {
                     different_hostname
                 } else {
@@ -2060,6 +2076,7 @@ interactive = false
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: different_device,
             });
@@ -2101,6 +2118,7 @@ interactive = false
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: current_hostname,
                 mount_device_id: current_device,
             });
@@ -2113,5 +2131,30 @@ interactive = false
             assert_eq!(state.agent_runs[0].status, RunStatus::Running);
             assert!(state.agent_runs[0].error.is_none());
         });
+    }
+
+    #[test]
+    fn test_run_record_backward_compat_missing_effort() {
+        let json = r#"{
+            "id": 42,
+            "stage": "coder",
+            "task_id": 1,
+            "round": 1,
+            "attempt": 1,
+            "model": "claude-opus-4-7",
+            "vendor": "anthropic",
+            "window_name": "[Coder r1]",
+            "started_at": "2025-01-01T00:00:00Z",
+            "ended_at": null,
+            "status": "Running",
+            "error": null
+        }"#;
+        let record: RunRecord = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(record.effort, EffortLevel::Normal);
+
+        let round_tripped = serde_json::to_string(&record).expect("should serialize");
+        let record2: RunRecord = serde_json::from_str(&round_tripped).expect("should round-trip");
+        assert_eq!(record2.effort, EffortLevel::Normal);
+        assert_eq!(record2.id, 42);
     }
 }

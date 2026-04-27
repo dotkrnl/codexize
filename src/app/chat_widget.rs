@@ -457,6 +457,7 @@ mod tests {
             ended_at: None,
             status,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }

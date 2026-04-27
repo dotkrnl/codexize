@@ -1673,6 +1673,7 @@ impl App {
         model: String,
         vendor: String,
         window_name: String,
+        effort: EffortLevel,
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
         let run_id = self.state.create_run_record(
@@ -1683,6 +1684,7 @@ impl App {
             model,
             vendor,
             window_name,
+            effort,
         );
         let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
             return;
@@ -2476,7 +2478,8 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Plan Review]", &model);
+        let window_name =
+            window_name_with_model("[Recovery Plan Review]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) = self.try_test_launch(
@@ -2499,7 +2502,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                self.start_run_tracking(
+                    "plan-review",
+                    None,
+                    round,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -2603,7 +2614,8 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Sharding]", &model);
+        let window_name =
+            window_name_with_model("[Recovery Sharding]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -2623,7 +2635,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("sharding", None, round, model, vendor, window_name);
+                self.start_run_tracking(
+                    "sharding",
+                    None,
+                    round,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3298,7 +3318,7 @@ impl App {
             guard::GuardMode::AskOperator,
         );
         let adapter = adapter_for_vendor(vendor_kind);
-        let window_name = window_name_with_model("[Brainstorm]", &model);
+        let window_name = window_name_with_model("[Brainstorm]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3321,7 +3341,15 @@ impl App {
                 self.state.idea_text = Some(idea.clone());
                 self.state.selected_model = Some(model.clone());
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
-                self.start_run_tracking("brainstorm", None, 1, model, vendor, window_name);
+                self.start_run_tracking(
+                    "brainstorm",
+                    None,
+                    1,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3436,7 +3464,11 @@ impl App {
             prompt_path,
             effort: EffortLevel::Normal,
         };
-        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
+        let window_name = window_name_with_model(
+            &format!("[Spec Review {round}]"),
+            &model,
+            EffortLevel::Normal,
+        );
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "spec-review",
@@ -3464,7 +3496,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("spec-review", None, round, model, vendor, window_name);
+                self.start_run_tracking(
+                    "spec-review",
+                    None,
+                    round,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3556,7 +3596,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
-        let window_name = window_name_with_model("[Planning]", &model);
+        let window_name = window_name_with_model("[Planning]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3585,7 +3625,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("planning", None, 1, model, vendor, window_name);
+                self.start_run_tracking(
+                    "planning",
+                    None,
+                    1,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3675,7 +3723,11 @@ impl App {
             prompt_path,
             effort: EffortLevel::Normal,
         };
-        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
+        let window_name = window_name_with_model(
+            &format!("[Plan Review {round}]"),
+            &model,
+            EffortLevel::Normal,
+        );
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
@@ -3703,7 +3755,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("plan-review", None, round, model, vendor, window_name);
+                self.start_run_tracking(
+                    "plan-review",
+                    None,
+                    round,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3774,7 +3834,7 @@ impl App {
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         let dirty =
             self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
-        let window_name = window_name_with_model("[Sharding]", &model);
+        let window_name = window_name_with_model("[Sharding]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3794,7 +3854,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("sharding", None, 1, model, vendor, window_name);
+                self.start_run_tracking(
+                    "sharding",
+                    None,
+                    1,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -3906,7 +3974,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
-        let window_name = window_name_with_model("[Recovery]", &model);
+        let window_name = window_name_with_model("[Recovery]", &model, EffortLevel::Normal);
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3938,7 +4006,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("recovery", None, round, model, vendor, window_name);
+                self.start_run_tracking(
+                    "recovery",
+                    None,
+                    round,
+                    model,
+                    vendor,
+                    window_name,
+                    EffortLevel::Normal,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -4050,7 +4126,7 @@ impl App {
             effort,
         };
 
-        let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
+        let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model, effort);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard(
             "coder",
@@ -4078,7 +4154,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("coder", Some(task_id), r, model, vendor, window_name);
+                self.start_run_tracking(
+                    "coder",
+                    Some(task_id),
+                    r,
+                    model,
+                    vendor,
+                    window_name,
+                    effort,
+                );
                 true
             }
             Err(e) => {
@@ -4205,7 +4289,7 @@ impl App {
             effort,
         };
 
-        let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
+        let window_name = window_name_with_model(&format!("[Review r{r}]"), &model, effort);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard(
             "reviewer",
@@ -4233,7 +4317,15 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.start_run_tracking("reviewer", Some(task_id), r, model, vendor, window_name);
+                self.start_run_tracking(
+                    "reviewer",
+                    Some(task_id),
+                    r,
+                    model,
+                    vendor,
+                    window_name,
+                    effort,
+                );
                 if dirty {
                     self.emit_dirty_tree_warning();
                 }
@@ -4881,12 +4973,22 @@ Required fields per task:
                      recipe-style detail
   `lines` is a range like "12-45" or a single number.
 
+Difficulty:
+  - Mark `tough = true` on tasks that need deep reasoning: algorithmic
+    complexity, concurrency, security-sensitive logic, tricky state
+    machines, cross-cutting refactors touching many modules, or code
+    with poor test coverage / documentation that demands careful reading.
+  - Default is `tough = false` (the majority of tasks). When in doubt,
+    leave it false — the system routes extra compute to tough tasks, so
+    over-marking wastes budget.
+
 Output: write {tasks} as TOML. No prose around it. Validated programmatically;
 missing/empty fields cause rejection.
 
     [[tasks]]
     id = 1
     title = "Scaffold the worker pool"
+    tough = false
     description = """
     Wire up a Tokio worker pool in src/pool.rs. …
     """
@@ -5124,6 +5226,15 @@ Required fields per task: id / title (≤60 chars, imperative) / description
 `"not testable — <reason>"` for scaffolding) / estimated_tokens /
 spec_refs / plan_refs (`{{ path, lines }}`).
 
+Difficulty:
+  - Mark `tough = true` on tasks that need deep reasoning: algorithmic
+    complexity, concurrency, security-sensitive logic, tricky state
+    machines, cross-cutting refactors touching many modules, or code
+    with poor test coverage / documentation that demands careful reading.
+  - Default is `tough = false` (the majority of tasks). When in doubt,
+    leave it false — the system routes extra compute to tough tasks, so
+    over-marking wastes budget.
+
 Output: write {output} as TOML in this shape. No prose around it.
 Validated programmatically; missing/empty fields or ids ≤ {id_floor}
 cause rejection.
@@ -5131,6 +5242,7 @@ cause rejection.
     [[tasks]]
     id = N                                      # N > {id_floor}
     title = "Imperative summary"
+    tough = false
     description = """
     Outcome-oriented description...
     """
@@ -5576,6 +5688,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -5592,6 +5705,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -5677,6 +5791,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }
@@ -5696,6 +5811,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }
@@ -5745,6 +5861,7 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -5833,6 +5950,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -5881,6 +5999,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -5915,6 +6034,7 @@ mod tests {
                     RunStatus::Done
                 },
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6032,6 +6152,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -6085,6 +6206,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -6101,6 +6223,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -6131,6 +6254,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -6147,6 +6271,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -6185,6 +6310,7 @@ mod tests {
                 ended_at: None,
                 status,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6389,6 +6515,7 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6405,6 +6532,7 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("artifact_missing".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6421,6 +6549,7 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("user_forced_retry".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6466,6 +6595,7 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6510,6 +6640,7 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6551,6 +6682,7 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6657,6 +6789,7 @@ mod tests {
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -7389,6 +7522,7 @@ mod tests {
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -7427,6 +7561,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("artifact_invalid: x".to_string()),
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         };
@@ -7472,6 +7607,7 @@ feedback = ["task 2 is superseded"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7572,6 +7708,7 @@ estimated_tokens = 12
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7634,6 +7771,7 @@ estimated_tokens = 10
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7714,6 +7852,7 @@ feedback = ["split task 2"]
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7730,6 +7869,7 @@ feedback = ["split task 2"]
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7790,6 +7930,7 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7821,6 +7962,7 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7837,6 +7979,7 @@ estimated_tokens = 10
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7922,6 +8065,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             };
@@ -8450,6 +8594,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8693,6 +8838,7 @@ estimated_tokens = 1
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }
@@ -9079,6 +9225,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9134,6 +9281,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9190,6 +9338,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9250,6 +9399,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9311,6 +9461,7 @@ estimated_tokens = 1
                 ended_at: None,
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9395,6 +9546,7 @@ estimated_tokens = 1
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Running,
                 error: None,
+                effort: EffortLevel::Normal,
                 hostname: None,
                 mount_device_id: None,
             });

@@ -48,10 +48,13 @@ pub fn short_model(model: &str) -> String {
 }
 
 /// Build a tmux window name that embeds the model, e.g. `[Coder r1] sonnet-4.6`.
-/// The base (including brackets) is preserved verbatim as a prefix so kill /
-/// lookup paths can match by base.
-pub fn window_name_with_model(base: &str, model: &str) -> String {
-    format!("{base} {}", short_model(model))
+/// Appends `[tough]` when effort is `Tough`.
+pub fn window_name_with_model(base: &str, model: &str, effort: EffortLevel) -> String {
+    let short = short_model(model);
+    match effort {
+        EffortLevel::Tough => format!("{base} {short} [tough]"),
+        EffortLevel::Normal => format!("{base} {short}"),
+    }
 }
 
 pub(crate) fn shell_escape(s: &str) -> String {
@@ -77,5 +80,17 @@ mod tests {
     #[test]
     fn short_model_uses_gemini_preview_display_label() {
         assert_eq!(short_model("gemini-3.1-pro-preview"), "3.1-pro");
+    }
+
+    #[test]
+    fn window_name_with_model_normal_omits_suffix() {
+        let name = window_name_with_model("[Coder r1]", "claude-sonnet-4.6", EffortLevel::Normal);
+        assert_eq!(name, "[Coder r1] sonnet-4.6");
+    }
+
+    #[test]
+    fn window_name_with_model_tough_appends_suffix() {
+        let name = window_name_with_model("[Coder r1]", "claude-sonnet-4.6", EffortLevel::Tough);
+        assert_eq!(name, "[Coder r1] sonnet-4.6 [tough]");
     }
 }

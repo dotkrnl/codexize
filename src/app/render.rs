@@ -1165,6 +1165,7 @@ mod tests {
             },
             status,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }

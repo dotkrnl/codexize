@@ -666,8 +666,14 @@ fn attempt_run_node(run: &RunRecord) -> Node {
 }
 
 fn agent_run_node(run: &RunRecord) -> Node {
+    let base_label = format!("{} · {}", role_label(&run.stage), run.model);
+    let label = if run.effort == crate::adapters::EffortLevel::Tough {
+        format!("{base_label} [tough]")
+    } else {
+        base_label
+    };
     Node {
-        label: format!("{} · {}", role_label(&run.stage), run.model),
+        label,
         kind: NodeKind::AgentRun,
         status: run_status_to_node(run.status),
         summary: String::new(),
@@ -944,6 +950,7 @@ mod tests {
             ended_at: None,
             status,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         }
@@ -1055,6 +1062,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1071,6 +1079,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1106,6 +1115,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1122,6 +1132,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1149,6 +1160,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
             error: Some("timeout".to_string()),
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1165,6 +1177,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1211,6 +1224,7 @@ mod tests {
                 "failed_unverified: missing finish stamp at artifacts/run-finish/coder-t1-r1-a1.toml"
                     .to_string(),
             ),
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1258,6 +1272,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1406,6 +1421,7 @@ mod tests {
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1422,6 +1438,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1455,6 +1472,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1501,6 +1519,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1517,6 +1536,7 @@ mod tests {
             ended_at: None,
             status: RunStatus::Running,
             error: None,
+            effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
         });
@@ -1528,6 +1548,27 @@ mod tests {
         let chosen_node = node_at_path(&nodes, chosen).expect("chosen node");
 
         assert_eq!(chosen_node.run_id.or(chosen_node.leaf_run_id), Some(2));
+    }
+
+    #[test]
+    fn test_agent_run_node_tough_suffix() {
+        let mut normal_run = run(1, "coder", RunStatus::Running);
+        normal_run.effort = crate::adapters::EffortLevel::Normal;
+        let node = agent_run_node(&normal_run);
+        assert!(
+            !node.label.contains("[tough]"),
+            "Normal run should not have [tough] suffix, got: {}",
+            node.label
+        );
+
+        let mut tough_run = run(2, "coder", RunStatus::Running);
+        tough_run.effort = crate::adapters::EffortLevel::Tough;
+        let node = agent_run_node(&tough_run);
+        assert!(
+            node.label.ends_with("[tough]"),
+            "Tough run should end with [tough], got: {}",
+            node.label
+        );
     }
 }
 

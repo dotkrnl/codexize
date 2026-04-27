@@ -87,7 +87,7 @@ impl Clock for TestClock {
     }
 
     fn timestamp_string(&self) -> String {
-        let dt = chrono::DateTime::<chrono::Utc>::from(self.state.borrow().system);
+        let dt = chrono::DateTime::<chrono::Local>::from(self.state.borrow().system);
         dt.format("%H:%M:%S").to_string()
     }
 }

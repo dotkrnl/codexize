@@ -607,13 +607,16 @@ mod tests {
 
     #[test]
     fn glm46_clears_inclusion_gate_post_change() {
+        // AC #4a tests that zero-as-missing + floor bump make glm-4.6 viable.
+        // Per spec §5 AC #4a: "comparison anchor... defined in the test."
+        // We exclude glm-4.7 from the version index because we're testing the
+        // *specific* effect of this task's changes (zero-as-missing, floor),
+        // not glm-4.6's viability under all penalties. With glm-4.7 present,
+        // glm-4.6 incurs a version penalty that masks the improvements.
         let mut models = fixture_cached_models();
         for model in &mut models {
             stamp_selection_provenance(model);
         }
-        // Build version index from a subset excluding glm-4.7 to isolate
-        // zero-as-missing + floor effect from the version-penalty mechanism.
-        // The comparison anchor is defined by the test per spec §5 AC #4a.
         let test_models: Vec<CachedModel> = models
             .iter()
             .filter(|m| m.name != "glm-4.7")
@@ -675,25 +678,20 @@ mod tests {
 
     #[test]
     fn ranking_order_among_healthy_models_unchanged() {
-        // AC #8: healthy models (no zero axis) keep the same ranking order
+        // AC #8: healthy models (no zero axis) keep the same ranking order.
+        // Healthy models identified from fixture axes (not derived dynamically):
+        // - claude-sonnet-4.6: hourly suite, all axes non-zero
+        // - gemini-2.5-pro: parse-failure on correctness (skipped), contextWindow dropped, rest non-zero
+        // - gpt-5.4: hourly suite, all axes non-zero
+        // Unhealthy (have zero axes): glm-4.6, glm-4.7
+        let healthy: &[&str] = &["claude-sonnet-4.6", "gemini-2.5-pro", "gpt-5.4"];
+
         let prechange: BTreeMap<String, BTreeMap<String, f64>> =
             serde_json::from_str(include_str!(
                 "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
             ))
             .unwrap();
         let postchange = fixture_postchange_snapshot();
-
-        // Healthy models: those whose probabilities are identical pre/post
-        // (i.e. they had no zero axes affected by the change)
-        let healthy: Vec<&str> = prechange
-            .keys()
-            .filter(|name| prechange[*name] == postchange[*name])
-            .map(String::as_str)
-            .collect();
-        assert!(
-            healthy.len() >= 2,
-            "need at least 2 healthy models to compare ranking"
-        );
 
         for phase_name in ["build", "idea", "planning", "review"] {
             let mut pre_order: Vec<(&str, f64)> = healthy

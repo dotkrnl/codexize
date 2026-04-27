@@ -4590,21 +4590,29 @@ reader can skim it in 30 seconds.
 This is a spec-only phase: do NOT write or modify any code; the spec file is
 your only output. Implementation happens in a later phase.
 
-SKIP-TO-IMPLEMENTATION PROPOSAL (optional): after writing the spec, if the task
-is small and self-contained enough that separate planning and sharding phases
-would add no value (e.g. a single-file change, a bug fix with an obvious edit
-site, a trivial refactor), you MAY write a skip proposal to
-`artifacts/skip_proposal.toml` ALONGSIDE the spec. Format:
+SKIP-TO-IMPLEMENTATION PROPOSAL (optional, RARE): after writing the spec, if
+the task is BOTH conceptually simple AND small in volume — so small that
+separate planning and sharding phases would add no value — you MAY write a
+skip proposal to `artifacts/skip_proposal.toml` ALONGSIDE the spec. Format:
     proposed = true
     status = "skip_to_impl"
     rationale = "<=500 chars explaining why"
-Only emit this when the spec genuinely needs no further breakdown. When in
-doubt, omit the file — the normal spec-review → planning → sharding pipeline
-is the default. If you emit `"proposed": true`, the rationale MUST be a
-non-empty, <=500 character explanation the operator will read before
-accepting. When proposing the skip, keep the spec concise — just enough for a
-coder to implement directly (goal, edit sites, acceptance check); skip the
-long-form sections a planning phase would normally expand.
+Hard gates (ALL must hold to propose skip):
+  - Single edit site, or at most 2–3 closely-related sites in one file.
+  - One coherent change a coder can land in a single commit without
+    intermediate checkpoints.
+  - No new modules, no cross-cutting refactors, no migrations, no multi-file
+    coordination.
+"Conceptually simple but long" tasks (many call sites to update, repetitive
+edits across files, mechanical refactors touching several modules) DO NOT
+qualify — they still need sharding so the work can be parallelised and
+reviewed incrementally. When in doubt, omit the file — the normal
+spec-review → planning → sharding pipeline is the default. If you emit
+`proposed = true`, the rationale MUST be a non-empty, <=500 character
+explanation the operator will read before accepting. When proposing the skip,
+keep the spec concise — just enough for a coder to implement directly (goal,
+edit sites, acceptance check); skip the long-form sections a planning phase
+would normally expand.
 
 NOTHING-TO-IMPLEMENT (optional): if there is genuinely nothing to do (already
 in place, invalid premise, pure question), skip the spec and write ONLY:

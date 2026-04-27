@@ -1,4 +1,4 @@
-use super::AgentAdapter;
+use super::{AgentAdapter, EffortLevel};
 use std::process::Command;
 
 const KIMI_READY_MAX_POLLS: u32 = 50;
@@ -17,12 +17,16 @@ impl AgentAdapter for KimiAdapter {
             .unwrap_or(false)
     }
 
-    fn interactive_command(&self, _model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, _model: &str, prompt_path: &str, effort: EffortLevel) -> String {
         // kimi's `-p/--prompt` always exits after the query (one-shot), so we
         // background a tmux paste that polls for TUI readiness before firing,
         // then exec kimi in interactive mode.
         // The readiness glyphs are based on Kimi's current TUI prompt; if they
         // change, the bounded loop still falls back to pasting after timeout.
+        let thinking_flag = match effort {
+            EffortLevel::Normal => "--no-thinking",
+            EffortLevel::Tough => "--thinking",
+        };
         format!(
             concat!(
                 r#"(sleep {initial_delay}; for i in $(seq 1 {max_polls}); do "#,
@@ -31,21 +35,32 @@ impl AgentAdapter for KimiAdapter {
                 r#"done && sleep {settle_delay} && "#,
                 r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
                 r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE" && "#,
-                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo"#,
+                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo {thinking_flag}"#,
             ),
             max_polls = KIMI_READY_MAX_POLLS,
             poll_interval = KIMI_READY_POLL_INTERVAL,
             initial_delay = KIMI_READY_INITIAL_DELAY,
             settle_delay = KIMI_READY_SETTLE_DELAY,
+            thinking_flag = thinking_flag,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
 
-    fn noninteractive_command(&self, _model: &str, prompt_path: &str) -> String {
+    fn noninteractive_command(
+        &self,
+        _model: &str,
+        prompt_path: &str,
+        effort: EffortLevel,
+    ) -> String {
         // `-p` is one-shot and renders its own nicely formatted output — more
         // readable than --print stream-json piped through jq, so use it.
+        let thinking_flag = match effort {
+            EffortLevel::Normal => "--no-thinking",
+            EffortLevel::Tough => "--thinking",
+        };
         format!(
-            r#"kimi --yolo -p "$(cat {prompt_path})""#,
+            r#"kimi --yolo {thinking_flag} -p "$(cat {prompt_path})""#,
+            thinking_flag = thinking_flag,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
@@ -58,7 +73,7 @@ mod tests {
     #[test]
     fn interactive_command_polls_for_readiness() {
         let adapter = KimiAdapter;
-        let cmd = adapter.interactive_command("any-model", "/tmp/prompt.txt");
+        let cmd = adapter.interactive_command("any-model", "/tmp/prompt.txt", EffortLevel::Normal);
 
         assert!(
             cmd.contains("sleep 1.5"),
@@ -90,7 +105,11 @@ mod tests {
     #[test]
     fn interactive_command_escapes_prompt_path() {
         let adapter = KimiAdapter;
-        let cmd = adapter.interactive_command("m", "/tmp/path with spaces/prompt.txt");
+        let cmd = adapter.interactive_command(
+            "m",
+            "/tmp/path with spaces/prompt.txt",
+            EffortLevel::Normal,
+        );
 
         assert!(
             cmd.contains("'/tmp/path with spaces/prompt.txt'"),
@@ -101,8 +120,22 @@ mod tests {
     #[test]
     fn noninteractive_command_unchanged() {
         let adapter = KimiAdapter;
-        let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt");
+        let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
 
-        assert_eq!(cmd, r#"kimi --yolo -p "$(cat /tmp/prompt.txt)""#,);
+        assert_eq!(
+            cmd,
+            r#"kimi --yolo --no-thinking -p "$(cat /tmp/prompt.txt)""#,
+        );
+    }
+
+    #[test]
+    fn commands_emit_thinking_flag_for_effort() {
+        let adapter = KimiAdapter;
+
+        let normal = adapter.interactive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
+        let tough = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Tough);
+
+        assert!(normal.contains("exec kimi --yolo --no-thinking"));
+        assert!(tough.contains("kimi --yolo --thinking"));
     }
 }

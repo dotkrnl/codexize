@@ -1,5 +1,6 @@
 use crate::model_names;
 use crate::selection::VendorKind;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub mod claude;
@@ -12,15 +13,24 @@ pub use codex::CodexAdapter;
 pub use gemini::GeminiAdapter;
 pub use kimi::KimiAdapter;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EffortLevel {
+    #[default]
+    Normal,
+    Tough,
+}
+
 pub struct AgentRun {
     pub model: String,
     pub prompt_path: PathBuf,
+    pub effort: EffortLevel,
 }
 
 pub trait AgentAdapter: Send + Sync {
     fn detect(&self) -> bool;
-    fn interactive_command(&self, model: &str, prompt_path: &str) -> String;
-    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String;
+    fn interactive_command(&self, model: &str, prompt_path: &str, effort: EffortLevel) -> String;
+    fn noninteractive_command(&self, model: &str, prompt_path: &str, effort: EffortLevel)
+    -> String;
 }
 
 pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {

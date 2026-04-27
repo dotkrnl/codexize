@@ -235,7 +235,11 @@ Do not ask for confirmation - just analyze and write the files."#,
         ));
         fs::write(&prompt_path, &prompt).context("failed to write agent prompt")?;
 
-        let agent_cmd = adapter.noninteractive_command(model, &prompt_path.to_string_lossy());
+        let agent_cmd = adapter.noninteractive_command(
+            model,
+            &prompt_path.to_string_lossy(),
+            crate::adapters::EffortLevel::Normal,
+        );
         let shell_cmd = format!(
             r#"{agent_cmd} && touch {finish_marker}"#,
             agent_cmd = agent_cmd,

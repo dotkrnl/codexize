@@ -359,7 +359,7 @@ pub fn launch_interactive(
     artifacts_dir: &Path,
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
-    let cmd = adapter.interactive_command(&run.model, &prompt_path);
+    let cmd = adapter.interactive_command(&run.model, &prompt_path, run.effort);
     launch_in_window(
         window_name,
         &cmd,
@@ -383,7 +383,7 @@ pub fn launch_noninteractive(
     artifacts_dir: &Path,
 ) -> Result<()> {
     let prompt_path = run.prompt_path.to_string_lossy();
-    let cmd = adapter.noninteractive_command(&run.model, &prompt_path);
+    let cmd = adapter.noninteractive_command(&run.model, &prompt_path, run.effort);
     launch_in_window(
         window_name,
         &cmd,

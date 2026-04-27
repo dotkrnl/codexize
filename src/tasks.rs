@@ -16,6 +16,8 @@ pub struct Task {
     pub test: String,
     pub estimated_tokens: u32,
     #[serde(default)]
+    pub tough: bool,
+    #[serde(default)]
     pub spec_refs: Vec<Ref>,
     #[serde(default)]
     pub plan_refs: Vec<Ref>,

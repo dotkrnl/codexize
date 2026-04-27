@@ -47,6 +47,7 @@ simple enough to skip the usual planning and sharding phases.\n\n\
                 .to_string(),
         test: "Run the tests described in the spec.".to_string(),
         estimated_tokens: 1000,
+        tough: false,
         spec_refs,
         plan_refs: vec![Ref {
             path: ArtifactKind::Plan.filename().to_string(),

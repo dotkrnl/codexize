@@ -7,7 +7,7 @@ mod state;
 mod tree;
 
 use crate::{
-    adapters::{AgentRun, adapter_for_vendor, window_name_with_model},
+    adapters::{AgentRun, EffortLevel, adapter_for_vendor, window_name_with_model},
     artifacts::{ArtifactKind, ReviewScopeArtifact, SkipToImplProposal, Spec},
     cache, coder_summary, review,
     runner::{launch_interactive, launch_noninteractive},
@@ -2466,6 +2466,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
+            effort: EffortLevel::Normal,
         };
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
@@ -2592,6 +2593,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
+            effort: EffortLevel::Normal,
         };
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
         let dirty = self.capture_run_guard(
@@ -3283,6 +3285,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
+            effort: EffortLevel::Normal,
         };
 
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
@@ -3430,6 +3433,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
+            effort: EffortLevel::Normal,
         };
         let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
@@ -3540,6 +3544,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
+            effort: EffortLevel::Normal,
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -3667,6 +3672,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
+            effort: EffortLevel::Normal,
         };
         let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
@@ -3761,6 +3767,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
+            effort: EffortLevel::Normal,
         };
 
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
@@ -3889,6 +3896,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
+            effort: EffortLevel::Normal,
         };
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
         let recovery_guard_mode = if is_human_blocked {
@@ -4026,6 +4034,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
+            effort: task_effort_for(&session_dir, task_id),
         };
 
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
@@ -4172,6 +4181,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
+            effort: task_effort_for(&session_dir, task_id),
         };
 
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
@@ -4431,6 +4441,20 @@ fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<
         .find(|t| t.id == task_id)
         .ok_or_else(|| anyhow::anyhow!("task id {task_id} not found"))?;
     toml::to_string_pretty(task).context("serialize task.toml")
+}
+
+fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> EffortLevel {
+    let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+    let Ok(parsed) = tasks::validate(&tasks_path) else {
+        // Preserve the existing launch fallback when task metadata is unavailable.
+        return EffortLevel::Normal;
+    };
+    parsed
+        .tasks
+        .iter()
+        .find(|task| task.id == task_id && task.tough)
+        .map(|_| EffortLevel::Tough)
+        .unwrap_or_default()
 }
 
 fn assigned_revise_task_ids(builder: &session_state::BuilderState, count: usize) -> Vec<u32> {

@@ -1,4 +1,4 @@
-use super::AgentAdapter;
+use super::{AgentAdapter, EffortLevel};
 use std::process::Command;
 
 pub struct GeminiAdapter;
@@ -12,7 +12,7 @@ impl AgentAdapter for GeminiAdapter {
             .unwrap_or(false)
     }
 
-    fn interactive_command(&self, model: &str, prompt_path: &str) -> String {
+    fn interactive_command(&self, model: &str, prompt_path: &str, _effort: EffortLevel) -> String {
         // -i / --prompt-interactive explicitly executes the prompt and
         // continues in interactive mode (vs a bare positional which could
         // be interpreted as a subcommand name in some shells)
@@ -23,7 +23,12 @@ impl AgentAdapter for GeminiAdapter {
         )
     }
 
-    fn noninteractive_command(&self, model: &str, prompt_path: &str) -> String {
+    fn noninteractive_command(
+        &self,
+        model: &str,
+        prompt_path: &str,
+        _effort: EffortLevel,
+    ) -> String {
         // Gemini's plain -p output is readable but lacks any structure for
         // tool calls. stream-json emits init / message / tool_use /
         // tool_result / result events. We format through jq with coloured

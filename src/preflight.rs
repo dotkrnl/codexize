@@ -6,11 +6,11 @@ use crate::tui::AppTerminal;
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 use std::{
     fs,
@@ -202,12 +202,15 @@ fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
 }
 
 fn spawn_gitignore_agent(tmux: &TmuxContext, codexize_entry: &str) -> Result<std::path::PathBuf> {
-    let finish_marker = std::env::temp_dir().join(format!(
-        "codexize-gitignore-{}.done",
-        std::process::id()
-    ));
+    let finish_marker =
+        std::env::temp_dir().join(format!("codexize-gitignore-{}.done", std::process::id()));
 
-    for vendor in [VendorKind::Claude, VendorKind::Codex, VendorKind::Gemini, VendorKind::Kimi] {
+    for vendor in [
+        VendorKind::Claude,
+        VendorKind::Codex,
+        VendorKind::Gemini,
+        VendorKind::Kimi,
+    ] {
         let adapter = adapter_for_vendor(vendor);
         if !adapter.detect() {
             continue;
@@ -411,10 +414,7 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario, wait_state:
     frame.render_widget(paragraph, rect);
 }
 
-pub fn check(
-    terminal: &mut AppTerminal,
-    tmux: &TmuxContext,
-) -> Result<()> {
+pub fn check(terminal: &mut AppTerminal, tmux: &TmuxContext) -> Result<()> {
     let has_git = detect_git();
     let root = codexize_root();
     let codexize_entry = match std::env::current_dir() {
@@ -429,7 +429,12 @@ pub fn check(
         if detect_ignored(&root) {
             return Ok(());
         }
-        return run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, tmux, &codexize_entry);
+        return run_gitignore_modal(
+            terminal,
+            Scenario::GitExistsNotIgnored,
+            tmux,
+            &codexize_entry,
+        );
     }
 
     let scenario = if has_existing_files() {
@@ -468,10 +473,11 @@ fn run_git_init_modal(
 
         if wait_state == WaitState::GeneratingGitignore {
             if let Some(ref marker) = finish_marker
-                && marker.exists() {
-                    run_git_init()?;
-                    return Ok(());
-                }
+                && marker.exists()
+            {
+                run_git_init()?;
+                return Ok(());
+            }
             if agent_start_time.is_some_and(|t| t.elapsed() >= AGENT_TIMEOUT) {
                 let content = generate_heuristic_gitignore(codexize_entry);
                 fs::write(".gitignore", content).context("failed to write .gitignore")?;
@@ -483,28 +489,29 @@ fn run_git_init_modal(
         }
 
         if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                match key.code {
-                    KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                        if scenario == Scenario::NoGitHasFiles {
-                            wait_state = WaitState::GeneratingGitignore;
-                            agent_start_time = Some(Instant::now());
-                            finish_marker = Some(spawn_gitignore_agent(tmux, codexize_entry)?);
-                        } else {
-                            run_git_init()?;
-                            append_to_gitignore(codexize_entry)?;
-                            return Ok(());
-                        }
-                    }
-                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                        std::process::exit(0);
-                    }
-                    _ => {}
-                }
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
             }
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    if scenario == Scenario::NoGitHasFiles {
+                        wait_state = WaitState::GeneratingGitignore;
+                        agent_start_time = Some(Instant::now());
+                        finish_marker = Some(spawn_gitignore_agent(tmux, codexize_entry)?);
+                    } else {
+                        run_git_init()?;
+                        append_to_gitignore(codexize_entry)?;
+                        return Ok(());
+                    }
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -520,24 +527,25 @@ fn run_gitignore_modal(
         })?;
 
         if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                match key.code {
-                    KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                        append_to_gitignore(codexize_entry)?;
-                        return Ok(());
-                    }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
-                        return Ok(());
-                    }
-                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                        std::process::exit(0);
-                    }
-                    _ => {}
-                }
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
             }
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    append_to_gitignore(codexize_entry)?;
+                    return Ok(());
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') => {
+                    return Ok(());
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
     }
 }
 

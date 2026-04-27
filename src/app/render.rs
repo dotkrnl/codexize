@@ -1009,11 +1009,7 @@ fn render_pause_modal(frame: &mut Frame<'_>, title: &str, hint: &str) {
     frame.render_widget(paragraph, rect);
 }
 
-fn render_stage_error_modal(
-    frame: &mut Frame<'_>,
-    stage_id: StageId,
-    error: Option<&str>,
-) {
+fn render_stage_error_modal(frame: &mut Frame<'_>, stage_id: StageId, error: Option<&str>) {
     let area = frame.area();
     let modal_width = area.width.saturating_sub(8).clamp(30, 70);
 

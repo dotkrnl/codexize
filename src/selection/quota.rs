@@ -264,12 +264,10 @@ mod tests {
 
     #[test]
     fn kimi_quota_returns_none_when_all_missing() {
-        let mapped = live_map_kimi(vec![
-            LiveModel {
-                name: "kimi-k1.6".to_string(),
-                quota_percent: None,
-            },
-        ]);
+        let mapped = live_map_kimi(vec![LiveModel {
+            name: "kimi-k1.6".to_string(),
+            quota_percent: None,
+        }]);
 
         assert_eq!(
             mapped.get("kimi-latest"),

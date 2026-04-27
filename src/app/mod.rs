@@ -3653,6 +3653,7 @@ impl App {
             &spec_path.display().to_string(),
             &plan_path.display().to_string(),
             &review_path.display().to_string(),
+            round,
             &live_summary_path.display().to_string(),
         );
         if let Some(parent) = prompt_path.parent() {
@@ -4595,42 +4596,55 @@ fn plan_review_prompt(
     spec_path: &str,
     plan_path: &str,
     review_path: &str,
+    round: u32,
     live_summary_path: &str,
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
+    let review_dir = std::path::Path::new(review_path)
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let prior_block = if round > 1 {
+        let lines: Vec<String> = (1..round)
+            .map(|r| format!("    {review_dir}/plan-review-{r}.md"))
+            .collect();
+        format!(
+            "\nPrior plan reviews (read first; do NOT re-flag what's already addressed):\n{}\n",
+            lines.join("\n")
+        )
+    } else {
+        String::new()
+    };
     format!(
-        r#"{project_doc_instr}You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
+        r#"{project_doc_instr}You review an implementation plan. NON-INTERACTIVE — no clarifying
+questions, no source-code edits, no VCS, no test runs.
 
 Inputs:
   Plan: {plan_path}
-  Spec: {spec_path}
+  Spec: {spec_path}{prior_block}
 
 Flag ONLY critical issues — things that would block or break implementation:
-  - Spec requirement with no corresponding plan step.
-  - Plan steps ordered unbuildably (a step depends on something a later step creates).
-  - Contradictions plan↔spec, or internal contradictions that would lead to the
-    wrong build.
-  - File paths, function names, or interfaces inconsistent across steps in a way
-    that would cause real breakage.
+  - Spec requirement with no corresponding plan step, or vice versa.
+  - Plan steps ordered unbuildably (a step depends on output of a later step).
+  - Plan↔spec or internal contradictions that would lead to the wrong build.
+  - File paths / function names / interfaces inconsistent across steps in a
+    way that would cause real breakage.
   - Spec-level ambiguity severe enough that an implementer could not proceed.
-Multiple valid implementations is NOT a defect; don't force one internal design
-when several options satisfy the spec and any explicit interfaces.
+  - TL;DR drift — the plan's TL;DR misrepresents the body, or the spec's
+    TL;DR misrepresents its body after planning edits.
+
+Do NOT flag: cosmetic concerns (typos/grammar/wording/style/formatting/
+structural polish), missing low-level implementation detail, or alternative-
+but-valid implementation choices. Multiple valid implementations is NOT a
+defect — don't force one internal design when several satisfy the spec and
+the plan's explicit interfaces. When in doubt, leave it alone.
 
 If — and only if — you find critical issues, directly edit {plan_path} (and
-{spec_path} if spec-level) with the smallest fix. Then write a markdown-bullet
-changelog of what you changed and why to {review_path}. If nothing was critical,
-write a single bullet saying so — do NOT invent issues to fill space.
-
-Do NOT flag or fix: typos, grammar, wording, formatting, style, tone, structural
-polish, missing low-level implementation detail, absence of prescribed helper/
-function structure, multiple possible approaches (unless the plan/spec makes an
-explicit interface commitment that is internally contradictory), hypothetical
-edge cases the spec does not require, or minor nitpicks. When in doubt, leave it
-alone — over-editing is worse than under-editing.
-
-Rules: do NOT create or modify source code; do NOT run git or modify version
-control; do NOT ask the operator.
+{spec_path} if spec-level) with the smallest fix. Write a markdown-bullet
+changelog to {review_path}: one bullet per edit, naming the file changed and
+citing the spec section / plan step that mandated the fix (audit trail). If
+nothing was critical, write a single bullet saying so — do NOT invent issues.
 {instr}"#
     )
 }

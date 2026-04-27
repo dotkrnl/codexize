@@ -192,6 +192,7 @@ pub fn select_for_review_with_effort<'a>(
                 selection_probability(m, SelectionPhase::Review, version_index),
             )
         })
+        .filter(|(_, prob)| *prob > 0.0)
         .collect();
     if let Some(model) = weighted_sample(&fresh_vendor) {
         return Some(model);
@@ -207,6 +208,7 @@ pub fn select_for_review_with_effort<'a>(
                 selection_probability(m, SelectionPhase::Review, version_index),
             )
         })
+        .filter(|(_, prob)| *prob > 0.0)
         .collect();
     if let Some(model) = weighted_sample(&fresh_model) {
         return Some(model);
@@ -223,6 +225,7 @@ pub fn select_for_review_with_effort<'a>(
                 selection_probability(m, SelectionPhase::Review, version_index),
             )
         })
+        .filter(|(_, prob)| *prob > 0.0)
         .collect();
     if let Some(model) = weighted_sample(&any_eligible) {
         return Some(model);
@@ -755,6 +758,28 @@ mod tests {
             chosen.vendor,
             VendorKind::Kimi | VendorKind::Gemini
         ));
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 0),
+            sample_model(VendorKind::Codex, "gpt-5.5", 0),
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough)
+            .expect("degraded fallback must yield an available candidate");
+        assert!(
+            matches!(chosen.vendor, VendorKind::Kimi | VendorKind::Gemini),
+            "exhausted tough-eligible model was selected: {:?} {}",
+            chosen.vendor,
+            chosen.name
+        );
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 }

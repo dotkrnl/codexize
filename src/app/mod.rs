@@ -4598,15 +4598,17 @@ skip proposal to `artifacts/skip_proposal.toml` ALONGSIDE the spec. Format:
     status = "skip_to_impl"
     rationale = "<=500 chars explaining why"
 Hard gates (ALL must hold to propose skip):
-  - Single edit site, or at most 2–3 closely-related sites in one file.
   - One coherent change a coder can land in a single commit without
-    intermediate checkpoints.
-  - No new modules, no cross-cutting refactors, no migrations, no multi-file
-    coordination.
+    intermediate checkpoints — small enough that a reviewer can hold the
+    whole diff in their head.
+  - No new modules, no cross-cutting refactors, no migrations, no
+    coordinated multi-file rewrites.
 "Conceptually simple but long" tasks (many call sites to update, repetitive
-edits across files, mechanical refactors touching several modules) DO NOT
-qualify — they still need sharding so the work can be parallelised and
-reviewed incrementally. When in doubt, omit the file — the normal
+edits across many files, mechanical refactors touching several modules) DO
+NOT qualify — even when each individual edit is trivial, the volume means
+sharding adds value by letting work be parallelised and reviewed
+incrementally. Rule of thumb: if you'd want more than one commit, or the
+diff would be uncomfortably large to review in one sitting, do not skip. When in doubt, omit the file — the normal
 spec-review → planning → sharding pipeline is the default. If you emit
 `proposed = true`, the rationale MUST be a non-empty, <=500 character
 explanation the operator will read before accepting. When proposing the skip,

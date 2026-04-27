@@ -1535,7 +1535,9 @@ mod tests {
         let mut app = test_app(
             nodes,
             vec![run_record(42, RunStatus::Running)],
-            vec![message(42, "implementing the feature")],
+            // No historical messages — the test only needs the live running
+            // transcript leaf so the assertion surface is deterministic.
+            Vec::new(),
         );
         app.state.current_phase = Phase::ImplementationRound(2);
         app.live_summary_cached_text =
@@ -1548,30 +1550,84 @@ mod tests {
     /// appears verbatim on the last line, anchoring the assertion).
     const FULL_FRAME_WIDTH: u16 = 200;
 
+    /// Replace wall-clock timestamps with stable placeholders so that
+    /// full-frame vector assertions are deterministic regardless of when or
+    /// where the test runs.
+    fn normalize_frame(lines: Vec<String>) -> Vec<String> {
+        lines
+            .into_iter()
+            .map(|line| {
+                // Running transcript leaf: "HH:MM:SS ⠋ ..."
+                if line.len() >= 9
+                    && line.as_bytes()[0].is_ascii_digit()
+                    && line.as_bytes()[1].is_ascii_digit()
+                    && line.as_bytes()[2] == b':'
+                    && line.as_bytes()[3].is_ascii_digit()
+                    && line.as_bytes()[4].is_ascii_digit()
+                    && line.as_bytes()[5] == b':'
+                    && line.as_bytes()[6].is_ascii_digit()
+                    && line.as_bytes()[7].is_ascii_digit()
+                    && line.as_bytes()[8] == b' '
+                {
+                    format!("XX:XX:XX{}", &line[8..])
+                }
+                // Historical message: "HH:MM ✓ ..." or "HH:MM ○ ..."
+                else if line.len() >= 6
+                    && line.as_bytes()[0].is_ascii_digit()
+                    && line.as_bytes()[1].is_ascii_digit()
+                    && line.as_bytes()[2] == b':'
+                    && line.as_bytes()[3].is_ascii_digit()
+                    && line.as_bytes()[4].is_ascii_digit()
+                    && line.as_bytes()[5] == b' '
+                {
+                    format!("XX:XX{}", &line[5..])
+                } else {
+                    line
+                }
+            })
+            .collect()
+    }
+
     #[test]
     fn full_screen_idea_input_renders_top_rule_body_bottom_rule_and_keymap() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::IdeaInput;
 
-        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(200);
+        let keymap = format!(
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
+            "─".repeat(116)
+        );
 
-        // Killed chrome must NOT come back: no full-box borders or the old
-        // pipeline title row.
-        for line in &lines {
-            assert!(
-                !line.contains("┌─") && !line.contains("└─") && !line.contains("│ Pipeline"),
-                "no full-box borders in killed chrome: {line:?}"
-            );
-        }
-        // Bottom row is the keymap (right-anchored q quit).
-        assert!(
-            lines
-                .last()
-                .expect("nonempty")
-                .trim_end()
-                .ends_with("q quit"),
-            "last row is keymap; got {:?}",
-            lines.last()
+        assert_eq!(
+            lines,
+            vec![
+                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Idea Input · awaiting input",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                &rule,
+                &keymap,
+            ]
         );
     }
 
@@ -1580,22 +1636,41 @@ mod tests {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::BrainstormRunning;
 
-        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(200);
+        let keymap = format!(
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
+            "─".repeat(116)
+        );
 
-        // Top rule is the first row and carries the phase label + running state.
-        assert!(
-            lines[0].contains("Brainstorm"),
-            "top rule shows phase label, got {:?}",
-            lines[0]
-        );
-        assert!(
-            lines[0].contains("running"),
-            "top rule shows running state, got {:?}",
-            lines[0]
-        );
-        assert!(
-            lines.last().unwrap().trim_end().ends_with("q quit"),
-            "footer keymap right-anchors q quit"
+        assert_eq!(
+            lines,
+            vec![
+                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Brainstorming · running",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                &rule,
+                &keymap,
+            ]
         );
     }
 
@@ -1604,18 +1679,38 @@ mod tests {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::SpecReviewPaused;
 
-        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(200);
+        let keymap = format!("Enter continue · n re-review  ·  {}q quit", "─".repeat(161));
 
-        assert!(
-            lines.iter().any(|l| l.contains("Spec review complete")),
-            "sheet content visible: {lines:#?}"
-        );
-        // The sheet's controls line (keymap) is the bottom-most row; it still
-        // right-anchors q quit even when the modal swaps the action set.
-        assert!(
-            lines.last().unwrap().trim_end().ends_with("q quit"),
-            "controls line still ends with q quit; got {:?}",
-            lines.last()
+        assert_eq!(
+            lines,
+            vec![
+                "codexize · render-test──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Spec Review · paused",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                &rule.clone(),
+                &rule,
+                "Spec review complete",
+                &keymap,
+            ]
         );
     }
 
@@ -1625,39 +1720,81 @@ mod tests {
         app.state.current_phase = Phase::SpecReviewRunning;
         app.state.agent_error = Some("model timeout fetching response".to_string());
 
-        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(200);
+        let keymap = format!("r retry  ·  {}q quit", "─".repeat(182));
 
-        assert!(
-            lines.iter().any(|l| l.contains("Spec review failed")),
-            "stage-error title visible: {lines:#?}"
+        assert_eq!(
+            lines,
+            vec![
+                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Spec Review · error",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                &rule.clone(),
+                &rule,
+                "Spec review failed",
+                "",
+                "model timeout fetching response",
+                &keymap,
+            ]
         );
-        assert!(
-            lines.iter().any(|l| l.contains("model timeout")),
-            "error body visible: {lines:#?}"
-        );
-        assert!(lines.last().unwrap().trim_end().ends_with("q quit"));
     }
 
     #[test]
     fn full_screen_implementation_round_2_with_active_live_summary() {
         let mut app = impl_round_2_running_app();
 
-        let lines = render_full_frame(&mut app, FULL_FRAME_WIDTH, 24);
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(200);
+        let keymap = format!(
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
+            "─".repeat(116)
+        );
 
-        // Top rule shows the agent + live-summary short title (not the phase
-        // label fallback) because a current run is active and
-        // live_summary_cached_text is non-empty.
-        assert!(
-            lines[0].contains("[Run 42]"),
-            "top rule shows agent window name, got {:?}",
-            lines[0]
+        assert_eq!(
+            lines,
+            vec![
+                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
+                "▌▾ Implementation · running",
+                " ├─▾ Coder · running",
+                "XX:XX:XX ⠋ wiring full-screen tests",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                &rule,
+                &keymap,
+            ]
         );
-        assert!(
-            lines[0].contains("wiring full-screen tests"),
-            "top rule shows live-summary short title, got {:?}",
-            lines[0]
-        );
-        assert!(lines.last().unwrap().trim_end().ends_with("q quit"));
     }
 
     fn footer_line_count(lines: &[String]) -> usize {

@@ -487,7 +487,9 @@ fn value_to_string(value: &Value) -> String {
 mod tests {
     use super::*;
     use crate::selection::config::SelectionPhase;
-    use crate::selection::ranking::{build_version_index, selection_probability};
+    use crate::selection::ranking::{
+        build_version_index, selection_probability, stamp_selection_provenance,
+    };
     use crate::selection::types::{CachedModel, VendorKind};
 
     fn model(name: &str, score: f64) -> DashboardModel {
@@ -566,9 +568,11 @@ mod tests {
         assert_eq!(synth.fallback_from.as_deref(), Some("gpt-5.2"));
     }
 
-    #[test]
-    fn fixture_prechange_selection_probability_baseline_matches_artifact() {
-        let models = fixture_cached_models();
+    fn fixture_postchange_snapshot() -> BTreeMap<String, BTreeMap<String, f64>> {
+        let mut models = fixture_cached_models();
+        for model in &mut models {
+            stamp_selection_provenance(model);
+        }
         let version_index = build_version_index(&models);
         let phases = [
             ("idea", SelectionPhase::Idea),
@@ -587,13 +591,164 @@ mod tests {
             }
             snapshot.insert(model.name.clone(), phase_probabilities);
         }
+        snapshot
+    }
 
+    #[test]
+    fn fixture_postchange_selection_probability_matches_artifact() {
+        let snapshot = fixture_postchange_snapshot();
         let expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+            "../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
         ))
-        .expect("baseline artifact should be valid JSON");
+        .expect("post-change artifact should be valid JSON");
         let actual = serde_json::to_value(snapshot).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn glm46_clears_inclusion_gate_post_change() {
+        let mut models = fixture_cached_models();
+        for model in &mut models {
+            stamp_selection_provenance(model);
+        }
+        // Build version index from a subset excluding glm-4.7 to isolate
+        // zero-as-missing + floor effect from the version-penalty mechanism.
+        // The comparison anchor is defined by the test per spec §5 AC #4a.
+        let test_models: Vec<CachedModel> = models
+            .iter()
+            .filter(|m| m.name != "glm-4.7")
+            .cloned()
+            .collect();
+        let version_index = build_version_index(&test_models);
+        let glm46 = test_models.iter().find(|m| m.name == "glm-4.6").unwrap();
+        let glm46_prob = selection_probability(glm46, SelectionPhase::Build, &version_index);
+        let max_other = test_models
+            .iter()
+            .filter(|m| m.name != "glm-4.6")
+            .map(|m| selection_probability(m, SelectionPhase::Build, &version_index))
+            .fold(0.0_f64, f64::max);
+        let ratio = 1.0 / 3.0;
+        assert!(
+            glm46_prob > max_other * ratio,
+            "glm-4.6 Build ({glm46_prob}) should exceed cutoff ({}) = {max_other} * {ratio}",
+            max_other * ratio
+        );
+    }
+
+    #[test]
+    fn prechange_selectable_models_remain_above_gate() {
+        // AC #4b: explicit pre-change selectable set captured from task #1
+        let prechange_selectable: &[&str] = &["claude-sonnet-4.6", "gemini-2.5-pro", "gpt-5.4"];
+        let mut models = fixture_cached_models();
+        for model in &mut models {
+            stamp_selection_provenance(model);
+        }
+        let version_index = build_version_index(&models);
+        let ratio = 1.0 / 3.0;
+
+        for phase in [
+            SelectionPhase::Build,
+            SelectionPhase::Planning,
+            SelectionPhase::Review,
+        ] {
+            let probs: Vec<(&str, f64)> = models
+                .iter()
+                .map(|m| {
+                    (
+                        m.name.as_str(),
+                        selection_probability(m, phase, &version_index),
+                    )
+                })
+                .collect();
+            let max_prob = probs.iter().map(|(_, p)| *p).fold(0.0_f64, f64::max);
+            let cutoff = max_prob * ratio;
+            for &name in prechange_selectable {
+                let prob = probs.iter().find(|(n, _)| *n == name).unwrap().1;
+                assert!(
+                    prob >= cutoff,
+                    "{name} in {:?} ({prob}) fell below cutoff ({cutoff})",
+                    phase.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ranking_order_among_healthy_models_unchanged() {
+        // AC #8: healthy models (no zero axis) keep the same ranking order
+        let prechange: BTreeMap<String, BTreeMap<String, f64>> =
+            serde_json::from_str(include_str!(
+                "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+            ))
+            .unwrap();
+        let postchange = fixture_postchange_snapshot();
+
+        // Healthy models: those whose probabilities are identical pre/post
+        // (i.e. they had no zero axes affected by the change)
+        let healthy: Vec<&str> = prechange
+            .keys()
+            .filter(|name| prechange[*name] == postchange[*name])
+            .map(String::as_str)
+            .collect();
+        assert!(
+            healthy.len() >= 2,
+            "need at least 2 healthy models to compare ranking"
+        );
+
+        for phase_name in ["build", "idea", "planning", "review"] {
+            let mut pre_order: Vec<(&str, f64)> = healthy
+                .iter()
+                .map(|&name| (name, prechange[name][phase_name]))
+                .collect();
+            pre_order.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+            let mut post_order: Vec<(&str, f64)> = healthy
+                .iter()
+                .map(|&name| (name, postchange[name][phase_name]))
+                .collect();
+            post_order.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+            let pre_names: Vec<&str> = pre_order.iter().map(|(n, _)| *n).collect();
+            let post_names: Vec<&str> = post_order.iter().map(|(n, _)| *n).collect();
+            assert_eq!(
+                pre_names, post_names,
+                "ranking order changed in {phase_name}: pre={pre_names:?} post={post_names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn idea_phase_uses_contextawareness_and_taskcompletion() {
+        let mut models = fixture_cached_models();
+        for model in &mut models {
+            stamp_selection_provenance(model);
+        }
+        // Pick a model that has contextawareness and taskcompletion from
+        // tooling suite (glm-4.6 or glm-4.7 in the fixture)
+        let glm = models.iter().find(|m| m.name == "glm-4.6").unwrap();
+        assert!(
+            glm.axis("contextawareness").is_some(),
+            "fixture model should have contextawareness"
+        );
+        assert!(
+            glm.axis("taskcompletion").is_some(),
+            "fixture model should have taskcompletion"
+        );
+
+        let index = build_version_index(&models);
+        let score_with = selection_probability(glm, SelectionPhase::Idea, &index);
+
+        // Synthetic variant with contextawareness and taskcompletion removed
+        let mut stripped = glm.clone();
+        stripped
+            .axes
+            .retain(|(k, _)| k != "contextawareness" && k != "taskcompletion");
+        let score_without = selection_probability(&stripped, SelectionPhase::Idea, &index);
+
+        assert!(
+            (score_with - score_without).abs() > 1e-6,
+            "Idea score should differ when contextawareness/taskcompletion present ({score_with}) vs absent ({score_without})"
+        );
     }
 
     fn fixture_score_entries() -> Vec<ScoreEntry> {

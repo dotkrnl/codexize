@@ -568,4 +568,180 @@ mod tests {
             ..sample_cached_model()
         }));
     }
+
+    fn selection_counter_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn zero_axis_produces_same_score_as_absent_axis() {
+        let model_with_zero = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.85),
+                ("correctness".to_string(), 0.0),
+                ("debugging".to_string(), 0.85),
+                ("safety".to_string(), 0.85),
+            ],
+            overall_score: 70.0,
+            ..sample_cached_model()
+        };
+        let model_without = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.85),
+                ("debugging".to_string(), 0.85),
+                ("safety".to_string(), 0.85),
+            ],
+            overall_score: 70.0,
+            ..sample_cached_model()
+        };
+        let score_zero = compute_axis_score(
+            &model_with_zero,
+            SelectionPhase::Build.axes(),
+            SelectionPhase::Build,
+        );
+        let score_absent = compute_axis_score(
+            &model_without,
+            SelectionPhase::Build.axes(),
+            SelectionPhase::Build,
+        );
+        assert!(
+            (score_zero - score_absent).abs() < 1e-9,
+            "zero ({score_zero}) should equal absent ({score_absent})"
+        );
+    }
+
+    #[test]
+    fn floor_keeps_one_zero_within_thirty_percent() {
+        let index = build_version_index(&[]);
+        let mut model_with_zero = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.95),
+                ("correctness".to_string(), 0.95),
+                ("debugging".to_string(), 0.95),
+                ("safety".to_string(), 0.0),
+            ],
+            overall_score: 88.0,
+            ..sample_cached_model()
+        };
+        stamp_selection_provenance(&mut model_with_zero);
+        let all_present = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.95),
+                ("correctness".to_string(), 0.95),
+                ("debugging".to_string(), 0.95),
+                ("safety".to_string(), 0.95),
+            ],
+            overall_score: 88.0,
+            ..sample_cached_model()
+        };
+        let prob_zero = selection_probability(&model_with_zero, SelectionPhase::Build, &index);
+        let prob_all = selection_probability(&all_present, SelectionPhase::Build, &index);
+        let ratio = prob_zero / prob_all;
+        assert!(
+            ratio > 0.70,
+            "model with one zero axis should be within 30%: ratio={ratio}"
+        );
+    }
+
+    #[test]
+    fn zero_as_missing_fires_counter_and_rewrites_provenance() {
+        let _guard = selection_counter_lock();
+        clear_selection_events();
+        let mut model = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.85),
+                ("correctness".to_string(), 0.0),
+                ("debugging".to_string(), 0.85),
+                ("safety".to_string(), 0.85),
+            ],
+            axis_provenance: BTreeMap::from([
+                ("codequality".to_string(), "suite:deep".to_string()),
+                ("correctness".to_string(), "suite:deep".to_string()),
+                ("debugging".to_string(), "suite:deep".to_string()),
+                ("safety".to_string(), "suite:deep".to_string()),
+            ]),
+            ..sample_cached_model()
+        };
+        stamp_selection_provenance(&mut model);
+        let events = selection_events_snapshot();
+
+        // correctness=0.0 appears in Planning, Build, Review → 3 events
+        let correctness_events: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                matches!(e, SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness")
+            })
+            .collect();
+        assert_eq!(
+            correctness_events.len(),
+            3,
+            "expected 3 events (Planning, Build, Review), got {correctness_events:?}"
+        );
+
+        // Each (axis, phase) combo fires exactly once
+        assert!(events.iter().any(|e| matches!(
+            e,
+            SelectionEvent::ZeroAsMissing { axis, phase }
+                if axis == "correctness" && phase == "build"
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            SelectionEvent::ZeroAsMissing { axis, phase }
+                if axis == "correctness" && phase == "planning"
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            SelectionEvent::ZeroAsMissing { axis, phase }
+                if axis == "correctness" && phase == "review"
+        )));
+
+        // Provenance rewritten
+        assert_eq!(
+            model.axis_provenance.get("correctness").map(String::as_str),
+            Some("fallback:overall")
+        );
+        // Non-zero axes keep their original provenance
+        assert_eq!(
+            model.axis_provenance.get("codequality").map(String::as_str),
+            Some("suite:deep")
+        );
+    }
+
+    #[test]
+    fn truly_missing_axis_gets_fallback_overall_provenance() {
+        let _guard = selection_counter_lock();
+        clear_selection_events();
+        let mut model = CachedModel {
+            axes: vec![
+                ("codequality".to_string(), 0.85),
+                ("debugging".to_string(), 0.85),
+                ("safety".to_string(), 0.85),
+                // correctness entirely absent
+            ],
+            axis_provenance: BTreeMap::from([
+                ("codequality".to_string(), "suite:deep".to_string()),
+                ("debugging".to_string(), "suite:deep".to_string()),
+                ("safety".to_string(), "suite:deep".to_string()),
+            ]),
+            ..sample_cached_model()
+        };
+        stamp_selection_provenance(&mut model);
+
+        assert_eq!(
+            model.axis_provenance.get("correctness").map(String::as_str),
+            Some("fallback:overall")
+        );
+        // Truly-missing does NOT fire zero_as_missing counter
+        let events = selection_events_snapshot();
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness"
+            )),
+            "truly-missing axis should not fire zero_as_missing"
+        );
+    }
 }

@@ -1665,6 +1665,9 @@ impl App {
         }
     }
 
+    // This launch bookkeeping intentionally keeps the selected model metadata
+    // explicit at the call site so run records cannot silently omit a field.
+    #[allow(clippy::too_many_arguments)]
     fn start_run_tracking(
         &mut self,
         stage: &str,

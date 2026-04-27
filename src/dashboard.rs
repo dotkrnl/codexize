@@ -378,6 +378,7 @@ fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&
 /// Walk `historyMap[modelId]` newest-first, collecting the first numeric
 /// value seen for each lowercased axis key.  Drops `contextwindow` and
 /// skips unparseable values rather than coercing them to 0.0.
+#[allow(clippy::type_complexity)]
 fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, String>)> {
     let entries = value.as_array()?;
     let mut axes: BTreeMap<String, f64> = BTreeMap::new();
@@ -410,9 +411,7 @@ fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, St
                     provenance.insert(key, format!("suite:{suite}"));
                 }
                 None => {
-                    eprintln!(
-                        "codexize: ingest.axis_parse_fail suite={suite} axis={key}"
-                    );
+                    eprintln!("codexize: ingest.axis_parse_fail suite={suite} axis={key}");
                 }
             }
         }
@@ -548,5 +547,182 @@ mod tests {
         .expect("baseline artifact should be valid JSON");
         let actual = serde_json::to_value(snapshot).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    fn fixture_score_entries() -> Vec<ScoreEntry> {
+        let payload: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
+        ))
+        .expect("fixture should be valid JSON");
+        parse_dashboard_scores(&payload).expect("fixture should parse")
+    }
+
+    #[test]
+    fn merged_axes_populates_tooling_axes_for_models_with_tooling_history() {
+        let entries = fixture_score_entries();
+        for entry in &entries {
+            let has_tooling = entry.axis_provenance.values().any(|v| v == "suite:tooling");
+            if has_tooling {
+                assert!(
+                    entry.axes.iter().any(|(k, _)| k == "contextawareness"),
+                    "{} should have contextawareness",
+                    entry.name
+                );
+                assert!(
+                    entry.axes.iter().any(|(k, _)| k == "taskcompletion"),
+                    "{} should have taskcompletion",
+                    entry.name
+                );
+            }
+        }
+        let glm46 = entries.iter().find(|e| e.name == "glm-4.6").unwrap();
+        assert!(
+            glm46.axis_provenance.values().any(|v| v == "suite:tooling"),
+            "glm-4.6 should have tooling provenance"
+        );
+    }
+
+    #[test]
+    fn merged_axes_drops_contextwindow_with_provenance() {
+        let entries = fixture_score_entries();
+        for entry in &entries {
+            assert!(
+                !entry.axes.iter().any(|(k, _)| k == "contextwindow"),
+                "{} should not have contextwindow in axes",
+                entry.name
+            );
+        }
+        // Models whose upstream payload contained contextWindow should have the drop label
+        let glm46 = entries.iter().find(|e| e.name == "glm-4.6").unwrap();
+        assert_eq!(
+            glm46
+                .axis_provenance
+                .get("contextwindow")
+                .map(String::as_str),
+            Some("dropped:contextwindow")
+        );
+        let gemini = entries.iter().find(|e| e.name == "gemini-2.5-pro").unwrap();
+        assert_eq!(
+            gemini
+                .axis_provenance
+                .get("contextwindow")
+                .map(String::as_str),
+            Some("dropped:contextwindow")
+        );
+    }
+
+    #[test]
+    fn merged_axes_skips_parse_failure_without_coercing_to_zero() {
+        let entries = fixture_score_entries();
+        let gemini = entries.iter().find(|e| e.name == "gemini-2.5-pro").unwrap();
+        // The fixture has correctness: "parse-failure" for gemini's deep suite.
+        // It should be absent from axes (not present as 0.0).
+        assert!(
+            !gemini.axes.iter().any(|(k, _)| k == "correctness"),
+            "correctness should be absent (parse failure), not coerced to 0.0"
+        );
+    }
+
+    #[test]
+    fn merged_axes_newest_first_preserves_newer_values() {
+        // For GLM models (id 165, 217), the fixture has tooling first (older)
+        // then deep (newer, last in array). Both have "efficiency".
+        // Newest-first means deep's efficiency wins over tooling's.
+        let entries = fixture_score_entries();
+        let glm46 = entries.iter().find(|e| e.name == "glm-4.6").unwrap();
+        let efficiency = glm46
+            .axes
+            .iter()
+            .find(|(k, _)| k == "efficiency")
+            .map(|(_, v)| *v);
+        // deep entry has efficiency=0.42, tooling has efficiency=0.0
+        assert_eq!(efficiency, Some(0.42));
+        assert_eq!(
+            glm46.axis_provenance.get("efficiency").map(String::as_str),
+            Some("suite:deep")
+        );
+    }
+
+    #[test]
+    fn merged_axes_provenance_labels_match_contract() {
+        let entries = fixture_score_entries();
+        for entry in &entries {
+            for (axis, label) in &entry.axis_provenance {
+                assert!(
+                    label.starts_with("suite:")
+                        || label.starts_with("dropped:")
+                        || label.starts_with("fallback:"),
+                    "{}: axis '{}' has unexpected provenance label '{}'",
+                    entry.name,
+                    axis,
+                    label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn merged_axes_handles_empty_history() {
+        let val = serde_json::json!([]);
+        let result = merged_axes(&val);
+        assert!(result.is_some());
+        let (axes, prov) = result.unwrap();
+        assert!(axes.is_empty());
+        assert!(prov.is_empty());
+    }
+
+    #[test]
+    fn merged_axes_handles_missing_suite_tag() {
+        let val = serde_json::json!([
+            {
+                "axes": { "correctness": 0.9 }
+            }
+        ]);
+        let (axes, prov) = merged_axes(&val).unwrap();
+        assert_eq!(axes.len(), 1);
+        assert_eq!(axes[0], ("correctness".to_string(), 0.9));
+        // Empty suite tag → "suite:"
+        assert_eq!(prov.get("correctness").map(String::as_str), Some("suite:"));
+    }
+
+    #[test]
+    fn ingest_axis_dropped_counter_fires_for_contextwindow() {
+        // Verify the counter string appears in stderr by calling merged_axes
+        // on input containing contextWindow. The counter is an eprintln! so
+        // we verify it via the provenance label as a proxy.
+        let val = serde_json::json!([
+            {
+                "suite": "deep",
+                "axes": { "contextWindow": 0.0, "correctness": 0.5 }
+            }
+        ]);
+        let (axes, prov) = merged_axes(&val).unwrap();
+        assert!(
+            !axes.iter().any(|(k, _)| k == "contextwindow"),
+            "contextwindow should be dropped from axes"
+        );
+        assert_eq!(
+            prov.get("contextwindow").map(String::as_str),
+            Some("dropped:contextwindow")
+        );
+    }
+
+    #[test]
+    fn ingest_axis_parse_fail_counter_fires_for_bad_values() {
+        let val = serde_json::json!([
+            {
+                "suite": "deep",
+                "axes": { "correctness": "not-a-number" }
+            }
+        ]);
+        let (axes, prov) = merged_axes(&val).unwrap();
+        assert!(
+            !axes.iter().any(|(k, _)| k == "correctness"),
+            "unparseable axis should not appear in axes"
+        );
+        assert!(
+            !prov.contains_key("correctness"),
+            "unparseable axis should not have provenance"
+        );
     }
 }

@@ -1,5 +1,7 @@
 pub mod chat_widget;
 #[allow(dead_code)]
+mod chrome;
+#[allow(dead_code)]
 mod clock;
 mod events;
 #[allow(dead_code)]
@@ -7,6 +9,8 @@ mod focus_caps;
 mod guard;
 mod models;
 mod render;
+#[allow(dead_code)]
+mod sheet;
 mod state;
 #[allow(dead_code)]
 mod status_line;

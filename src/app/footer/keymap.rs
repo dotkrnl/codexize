@@ -294,7 +294,10 @@ fn select_width_tier(
     }
 
     let _left_nav_labels = measure_full_width(nav, actions, system, true)
-        - actions.iter().map(|b| 1 + b.action.chars().count()).sum::<usize>();
+        - actions
+            .iter()
+            .map(|b| 1 + b.action.chars().count())
+            .sum::<usize>();
     let nav_and_actions_no_act = {
         let mut len = 0;
         for (i, b) in nav.iter().enumerate() {
@@ -476,7 +479,11 @@ fn render_modal_keymap(actions: &[KeyBinding], system: &[KeyBinding], width: u16
 
     if fill_needed > 0 {
         spans.push(Span::styled(
-            format!("{}{}", SEP_CATEGORY, rule_glyph.to_string().repeat(fill_needed)),
+            format!(
+                "{}{}",
+                SEP_CATEGORY,
+                rule_glyph.to_string().repeat(fill_needed)
+            ),
             Style::default().fg(RULE_COLOR),
         ));
     } else {
@@ -546,7 +553,11 @@ fn render_default_keymap(caps: FocusCaps, width: u16) -> Line<'static> {
 
     if fill_needed > 0 {
         spans.push(Span::styled(
-            format!("{}{}", SEP_CATEGORY, rule_glyph.to_string().repeat(fill_needed)),
+            format!(
+                "{}{}",
+                SEP_CATEGORY,
+                rule_glyph.to_string().repeat(fill_needed)
+            ),
             Style::default().fg(RULE_COLOR),
         ));
     } else {
@@ -747,7 +758,10 @@ mod tests {
             can_back: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
-        assert!(has_dim_spans(&line), "should have dim spans for disabled expand");
+        assert!(
+            has_dim_spans(&line),
+            "should have dim spans for disabled expand"
+        );
         let text = line_text(&line);
         assert!(text.contains("Space"), "Space should still appear");
     }
@@ -760,9 +774,15 @@ mod tests {
             can_back: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
-        assert!(has_dim_spans(&line), "should have dim spans for disabled edit");
+        assert!(
+            has_dim_spans(&line),
+            "should have dim spans for disabled edit"
+        );
         let text = line_text(&line);
-        assert!(text.contains("e edit") || text.contains("e"), "e should still appear");
+        assert!(
+            text.contains("e edit") || text.contains("e"),
+            "e should still appear"
+        );
     }
 
     #[test]
@@ -773,9 +793,15 @@ mod tests {
             can_back: false,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
-        assert!(has_dim_spans(&line), "should have dim spans for disabled back");
+        assert!(
+            has_dim_spans(&line),
+            "should have dim spans for disabled back"
+        );
         let text = line_text(&line);
-        assert!(text.contains("b back") || text.contains("b"), "b should still appear");
+        assert!(
+            text.contains("b back") || text.contains("b"),
+            "b should still appear"
+        );
     }
 
     #[test]
@@ -834,7 +860,10 @@ mod tests {
         let caps = FocusCaps::default();
         let line = keymap(Phase::IdeaInput, None, caps, false, 20);
         let text = line_text(&line);
-        assert!(!text.is_empty(), "should render something even ultra-narrow");
+        assert!(
+            !text.is_empty(),
+            "should render something even ultra-narrow"
+        );
     }
 
     #[test]
@@ -1062,9 +1091,10 @@ mod tests {
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
 
-        let has_disabled_style = line.spans.iter().any(|s| {
-            s.style.fg == Some(DISABLED_GLYPH) || s.style.fg == Some(DISABLED_ACTION)
-        });
+        let has_disabled_style = line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(DISABLED_GLYPH) || s.style.fg == Some(DISABLED_ACTION));
         assert!(has_disabled_style, "should have disabled styling");
 
         let has_enabled_style = line.spans.iter().any(|s| {

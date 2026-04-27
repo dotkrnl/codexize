@@ -42,10 +42,7 @@ pub fn format_historical_message(
     };
 
     Line::from(vec![
-        Span::styled(
-            format!("{} ", timestamp),
-            Style::default().fg(symbol_color),
-        ),
+        Span::styled(format!("{} ", timestamp), Style::default().fg(symbol_color)),
         Span::styled(format!("{} ", symbol), Style::default().fg(symbol_color)),
         Span::styled(body.to_string(), body_style),
     ])
@@ -256,7 +253,10 @@ mod tests {
         let text_a = line_text(&line_a);
         let text_b = line_text(&line_b);
 
-        assert_eq!(text_a, text_b, "same-second renders should be byte-identical");
+        assert_eq!(
+            text_a, text_b,
+            "same-second renders should be byte-identical"
+        );
     }
 
     #[test]
@@ -293,10 +293,7 @@ mod tests {
         let text_0 = line_text(&line_0);
         let text_1 = line_text(&line_1);
 
-        assert_ne!(
-            text_0, text_1,
-            "spinner should advance between frames"
-        );
+        assert_ne!(text_0, text_1, "spinner should advance between frames");
         assert!(text_0.contains(SPINNER[0]));
         assert!(text_1.contains(SPINNER[1]));
     }

@@ -15,7 +15,10 @@ use crate::{
         self, CachedModel, QuotaError, VendorKind,
         config::SelectionPhase,
         ranking::{VersionIndex, build_version_index},
-        selection::{pick_for_phase, select_excluding, select_for_review},
+        selection::{
+            pick_for_phase, pick_for_phase_with_effort, select_excluding, select_for_review,
+            select_for_review_with_effort,
+        },
     },
     state::{
         self as session_state, Message, MessageKind, MessageSender, Node, PendingGuardDecision,
@@ -1594,10 +1597,9 @@ impl App {
             if code > 128 {
                 let signal_num = code - 128;
                 let stamp_path = self.finish_stamp_path_for(run);
-                let signal_received =
-                    crate::runner::read_finish_stamp(&stamp_path)
-                        .map(|s| s.signal_received)
-                        .unwrap_or_default();
+                let signal_received = crate::runner::read_finish_stamp(&stamp_path)
+                    .map(|s| s.signal_received)
+                    .unwrap_or_default();
                 // Reviewer note: legacy stamps also deserialize to an empty
                 // signal marker, so this branch means the wrapper recorded no
                 // trapped signal, not that we can distinguish historical gaps.
@@ -1615,9 +1617,7 @@ impl App {
                     "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
                     run.id, run.stage
                 ));
-                return Ok(Some(format!(
-                    "killed({signal_num}) [{detail}]"
-                )));
+                return Ok(Some(format!("killed({signal_num}) [{detail}]")));
             }
             return Ok(Some(format!("exit({code})")));
         }
@@ -2987,8 +2987,9 @@ impl App {
                         let summary_text = verdict.summary.trim();
                         if !summary_text.is_empty() {
                             let kind = match verdict.status {
-                                review::ReviewStatus::Approved
-                                | review::ReviewStatus::Refine => MessageKind::Summary,
+                                review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
+                                    MessageKind::Summary
+                                }
                                 review::ReviewStatus::Revise
                                 | review::ReviewStatus::HumanBlocked
                                 | review::ReviewStatus::AgentPivot => MessageKind::SummaryWarn,
@@ -3988,9 +3989,21 @@ impl App {
         // Pin the base HEAD before the coder runs; preserves original base on resume.
         self.capture_round_base(&round_dir);
 
+        let effort = task_effort_for(&session_dir, task_id);
+        // Override-model bypass: an explicit operator pick wins over the
+        // tough-eligibility filter (spec §3.7). The adapter still emits the
+        // correct effort flag derived from `task.tough`.
         let Some(chosen) = override_model
             .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Build, None, &self.versions))
+            .or_else(|| {
+                pick_for_phase_with_effort(
+                    &self.models,
+                    SelectionPhase::Build,
+                    None,
+                    &self.versions,
+                    effort,
+                )
+            })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
             self.state.agent_error = Some("no model available with quota".to_string());
@@ -4034,7 +4047,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            effort: task_effort_for(&session_dir, task_id),
+            effort,
         };
 
         let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model);
@@ -4117,11 +4130,19 @@ impl App {
             })
             .cloned()
             .collect::<Vec<_>>();
+        let effort = task_effort_for(&session_dir, task_id);
+        // Override-model bypass: explicit operator pick beats tough filter.
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
                 let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
-                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
+                select_for_review_with_effort(
+                    &self.models,
+                    &used_vendors,
+                    &used_models,
+                    &self.versions,
+                    effort,
+                )
             })
             .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
         else {
@@ -4181,7 +4202,7 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            effort: task_effort_for(&session_dir, task_id),
+            effort,
         };
 
         let window_name = window_name_with_model(&format!("[Review r{r}]"), &model);
@@ -6558,8 +6579,8 @@ mod tests {
                     .expect("self-exit reason"),
                 Some("killed(1) [agent exited 129]".to_string())
             );
-            let events_text = std::fs::read_to_string(session_dir.join("events.toml"))
-                .expect("read events log");
+            let events_text =
+                std::fs::read_to_string(session_dir.join("events.toml")).expect("read events log");
             assert!(
                 events_text.contains(
                     "run 11 (planning) exited 129: signal_received= (agent CLI exited 129 on its own; wrapper trapped no signal)"
@@ -9569,8 +9590,7 @@ dirty_after = false
             std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
             std::fs::write(&review_path, "review").unwrap();
 
-            let prompt =
-                planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary);
+            let prompt = planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary);
 
             assert!(prompt.contains("written by AI"));
             assert!(prompt.contains("be skeptical"));
@@ -9632,7 +9652,7 @@ dirty_after = false
             state.current_phase = Phase::SpecReviewPaused;
             let mut app = idle_app(state);
             app.selected = 0;
-            
+
             for k in [
                 crossterm::event::KeyCode::Up,
                 crossterm::event::KeyCode::Down,
@@ -9654,7 +9674,7 @@ dirty_after = false
             state.current_phase = Phase::BrainstormRunning;
             state.agent_error = Some("failed".to_string());
             let mut app = idle_app(state);
-            
+
             app.handle_key(key(crossterm::event::KeyCode::Char('e')));
             assert_eq!(app.state.current_phase, Phase::IdeaInput);
         });

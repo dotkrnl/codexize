@@ -4555,12 +4555,7 @@ fn project_doc_instr() -> String {
 
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
-        "\n\nEvery 2–3 min and whenever your sub-goal changes, overwrite {} \
-         with one line: `<short title> | <one-paragraph summary>`. Title \
-         (≤5 words) must capture the real essence and vary as focus shifts; \
-         summary is one short paragraph on current progress and next action. \
-         Process is killed if the file isn't updated for 10 min of wall time \
-         (tool-call time excluded).\n",
+        "\n\nEvery 2–3 min and on each sub-goal change, overwrite {} with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>` (process killed after 10 min wall-time idle, tool-call time excluded).\n",
         path.display()
     )
 }
@@ -4576,16 +4571,22 @@ fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &st
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
     format!(
-        r#"{project_doc_instr}You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
-spec alone. Do NOT modify code; write ONLY the review file.
+        r#"{project_doc_instr}You review a spec. NON-INTERACTIVE — no clarifying questions, no code
+changes, no VCS, no test runs. Write ONLY the review file.
 
 Spec:   {spec_path}
 Output: {review_path}
 
-Evaluate clarity, completeness, buildability, risks, and gaps. The review MUST cover:
-  - Verdict: approve / approve-with-changes / reject
-  - Specific issues (if any), each with a suggested fix
-  - Open risks the spec does not address
+Evaluate clarity, completeness, buildability, risks, and gaps. The review
+MUST cover, in this order:
+  - Specific issues (if any), each with a suggested fix. Cite the spec
+    section you're objecting to as `## Section name` or `(spec line N)` so
+    the planner can triage cheaply.
+  - Open risks the spec does not address.
+  - TL;DR check: confirm the spec's TL;DR (top of file) matches the body —
+    flag any decision in the body missing from the TL;DR or vice versa.
+  - Bottom-line judgement on the last line: ship-as-is / needs-revision /
+    reject.
 {instr}"#
     )
 }

@@ -145,11 +145,10 @@ fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
         }
 
         let model_id = item.get("id").map(value_to_string).unwrap_or_default();
-        let axes = history_map
+        let (axes, axis_provenance) = history_map
             .and_then(|map| map.get(&model_id))
-            .and_then(latest_axes)
+            .and_then(merged_axes)
             .unwrap_or_default();
-        let axis_provenance = BTreeMap::new();
 
         entries.push(ScoreEntry {
             name,
@@ -376,14 +375,50 @@ fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&
     existing.iter().find(|m| m.name == target)
 }
 
-fn latest_axes(value: &Value) -> Option<Vec<(String, f64)>> {
-    let latest = value.as_array()?.last()?;
-    let axes = latest.get("axes")?.as_object()?;
-    Some(
-        axes.iter()
-            .map(|(k, v)| (k.to_ascii_lowercase(), value_to_f64(Some(v)).unwrap_or(0.0)))
-            .collect(),
-    )
+/// Walk `historyMap[modelId]` newest-first, collecting the first numeric
+/// value seen for each lowercased axis key.  Drops `contextwindow` and
+/// skips unparseable values rather than coercing them to 0.0.
+fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, String>)> {
+    let entries = value.as_array()?;
+    let mut axes: BTreeMap<String, f64> = BTreeMap::new();
+    let mut provenance: BTreeMap<String, String> = BTreeMap::new();
+
+    for entry in entries.iter().rev() {
+        let suite = entry
+            .get("suite")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let Some(entry_axes) = entry.get("axes").and_then(Value::as_object) else {
+            continue;
+        };
+        for (k, v) in entry_axes {
+            let key = k.to_ascii_lowercase();
+            if key == "contextwindow" {
+                provenance
+                    .entry(key)
+                    .or_insert_with(|| "dropped:contextwindow".to_string());
+                eprintln!("codexize: ingest.axis_dropped reason=contextwindow");
+                continue;
+            }
+            if axes.contains_key(&key) {
+                continue;
+            }
+            match value_to_f64(Some(v)) {
+                Some(num) => {
+                    axes.insert(key.clone(), num);
+                    provenance.insert(key, format!("suite:{suite}"));
+                }
+                None => {
+                    eprintln!(
+                        "codexize: ingest.axis_parse_fail suite={suite} axis={key}"
+                    );
+                }
+            }
+        }
+    }
+
+    Some((axes.into_iter().collect(), provenance))
 }
 
 fn value_to_f64(value: Option<&Value>) -> Option<f64> {

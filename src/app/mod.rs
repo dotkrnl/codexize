@@ -2202,8 +2202,10 @@ impl App {
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
                 match verdict.status {
-                    review::ReviewStatus::Approved => {
+                    review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
                         // Reset circuit-breaker: recovery reached an approved plan review.
+                        // Refine is treated as approval here — recovery has no
+                        // "next implementation" to carry forward to.
                         self.state.builder.recovery_cycle_count = 0;
                         // Insert recovery sharding pipeline item.
                         self.state.builder.push_pipeline_item(PipelineItem {
@@ -2983,7 +2985,8 @@ impl App {
                         let summary_text = verdict.summary.trim();
                         if !summary_text.is_empty() {
                             let kind = match verdict.status {
-                                review::ReviewStatus::Approved => MessageKind::Summary,
+                                review::ReviewStatus::Approved
+                                | review::ReviewStatus::Refine => MessageKind::Summary,
                                 review::ReviewStatus::Revise
                                 | review::ReviewStatus::HumanBlocked
                                 | review::ReviewStatus::AgentPivot => MessageKind::SummaryWarn,
@@ -3054,6 +3057,28 @@ impl App {
                                     ))?;
                                 }
                             }
+                            review::ReviewStatus::Refine => {
+                                // Approve the current task and stash feedback for
+                                // the next coder. No re-review of this round.
+                                self.state
+                                    .builder
+                                    .pending_refine_feedback
+                                    .extend(verdict.feedback.iter().cloned());
+                                if let Some(task_id) = self.state.builder.current_task_id() {
+                                    let _ = self.state.builder.set_task_status(
+                                        task_id,
+                                        PipelineItemStatus::Approved,
+                                        Some(round),
+                                    );
+                                }
+                                if !self.state.builder.has_unfinished_tasks() {
+                                    self.transition_to_phase(Phase::Done)?;
+                                } else {
+                                    self.transition_to_phase(Phase::ImplementationRound(
+                                        round + 1,
+                                    ))?;
+                                }
+                            }
                             review::ReviewStatus::Revise => {
                                 if let Some(task_id) = self.state.builder.current_task_id() {
                                     if verdict.new_tasks.is_empty() {
@@ -3106,6 +3131,7 @@ impl App {
                                         (PipelineItemStatus::AgentPivot, "agent_pivot")
                                     }
                                     review::ReviewStatus::Approved
+                                    | review::ReviewStatus::Refine
                                     | review::ReviewStatus::Revise => {
                                         unreachable!("already handled")
                                     }
@@ -3975,6 +4001,13 @@ impl App {
             .agent_runs
             .iter()
             .any(|run| run.stage == "coder" && run.task_id == Some(task_id) && run.round == r);
+        // Drain refine carryover only when starting a fresh coder run; on
+        // resume we'd have already included it in the original prompt.
+        let refine_carryover: Vec<String> = if resume {
+            Vec::new()
+        } else {
+            std::mem::take(&mut self.state.builder.pending_refine_feedback)
+        };
         let prompt = coder_prompt(
             &session_dir,
             task_id,
@@ -3982,6 +4015,7 @@ impl App {
             &task_file,
             &live_summary_path,
             resume,
+            &refine_carryover,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
@@ -5132,6 +5166,7 @@ fn coder_prompt(
     task_file: &std::path::Path,
     live_summary_path: &std::path::Path,
     resume: bool,
+    refine_carryover: &[String],
 ) -> String {
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
@@ -5156,6 +5191,18 @@ fn coder_prompt(
     } else {
         String::new()
     };
+    let refine_block = if refine_carryover.is_empty() {
+        String::new()
+    } else {
+        let bullets = refine_carryover
+            .iter()
+            .map(|item| format!("  - {}", item.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nRefine carryover from prior task's reviewer (apply opportunistically — these are nice-to-haves, not blockers):\n{bullets}\n"
+        )
+    };
     let resume_hint = if resume {
         "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n"
     } else {
@@ -5173,7 +5220,7 @@ Inputs:
   Task:  {task}   (lists what to do, test steps, and line refs into spec/plan)
   Spec:  {spec}
   Plan:  {plan}
-{prev_review}{resume_hint}
+{prev_review}{refine_block}{resume_hint}
 Job:
   1. Read the task file first.
   2. Implement end-to-end on the current branch.
@@ -5251,6 +5298,7 @@ Rules for `coder_summary.toml`:
         plan = plan.display(),
         coder_summary = coder_summary.display(),
         prev_review = prev_review,
+        refine_block = refine_block,
         resume_hint = resume_hint,
         instr = instr,
     )
@@ -5352,7 +5400,7 @@ Review:
 Emit the verdict to {review} in EXACTLY this TOML shape (double-quoted strings;
 triple-quoted for multi-line; arrays of inline tables for any new task refs):
 
-    status  = "approved" | "revise" | "human_blocked" | "agent_pivot"
+    status  = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary = "One-paragraph summary of what was done and your verdict."
     feedback = [
       "Specific thing to fix, if status is revise/human_blocked/agent_pivot.",
@@ -5373,13 +5421,23 @@ triple-quoted for multi-line; arrays of inline tables for any new task refs):
 Rules:
   - approved      → outcomes delivered AND (tests pass OR task is "not testable" and
                     the code builds cleanly). Do not include new_tasks.
+  - refine        → outcomes delivered, but you have minor suggestions worth
+                    applying — code-quality nits, naming, cleanup, small
+                    improvements that aren't spec/plan violations. The current
+                    task is accepted (no re-review of this round); your
+                    `feedback` items are forwarded to the NEXT task's coder
+                    as opportunistic carryover. Use this instead of `revise`
+                    when nothing actually requires another round on this task,
+                    and instead of `approved` when you genuinely have small
+                    asks worth surfacing. Required: at least one feedback item.
+                    No new_tasks.
   - revise        → list the specific issues. For complex tasks, also suggest a
                     direction (file/approach/sketch) — do not just reject.
   - human_blocked → human judgement required; explain what's unclear.
   - agent_pivot   → autonomous recovery is required; explain the pivot.
   - Don't repeat feedback from prior reviews unless the coder ignored it
               without good reason — in which case call that out explicitly.
-  - Don't leave feedback empty for revise/human_blocked/agent_pivot, and don't emit prose
+  - Don't leave feedback empty for refine/revise/human_blocked/agent_pivot, and don't emit prose
               outside the TOML.
 {instr}"#,
         task_id = task_id,
@@ -9526,7 +9584,7 @@ dirty_after = false
             std::fs::create_dir_all(&round_dir).unwrap();
             std::fs::write(round_dir.join("review.toml"), "feedback").unwrap();
 
-            let prompt = coder_prompt(&session_dir, 1, 2, &task_file, &live_summary, true);
+            let prompt = coder_prompt(&session_dir, 1, 2, &task_file, &live_summary, true, &[]);
 
             assert!(prompt.contains("Previous reviewer feedback (round 1):"));
             assert!(prompt.contains("Reviewer feedback comes from an AI agent."));

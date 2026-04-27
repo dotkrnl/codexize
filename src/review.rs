@@ -8,6 +8,10 @@ use std::path::Path;
 #[serde(rename_all = "snake_case")]
 pub enum ReviewStatus {
     Approved,
+    /// Minor improvements suggested but the current task is accepted as-is.
+    /// No re-review of this round; feedback is carried into the next coder
+    /// prompt. Use for nice-to-haves that aren't spec/plan violations.
+    Refine,
     Revise,
     HumanBlocked,
     AgentPivot,
@@ -36,9 +40,15 @@ pub fn validate(path: &Path) -> Result<ReviewVerdict> {
     if parsed.status == ReviewStatus::Approved && !parsed.new_tasks.is_empty() {
         bail!("status=approved must not include new_tasks");
     }
+    if parsed.status == ReviewStatus::Refine && !parsed.new_tasks.is_empty() {
+        bail!("status=refine must not include new_tasks");
+    }
     if matches!(
         parsed.status,
-        ReviewStatus::Revise | ReviewStatus::HumanBlocked | ReviewStatus::AgentPivot
+        ReviewStatus::Refine
+            | ReviewStatus::Revise
+            | ReviewStatus::HumanBlocked
+            | ReviewStatus::AgentPivot
     ) && parsed.feedback.is_empty()
     {
         bail!(
@@ -134,6 +144,56 @@ feedback = ["The loop condition is wrong"]
         let verdict = validate(&path).unwrap();
         assert_eq!(verdict.status, ReviewStatus::Revise);
         assert!(!verdict.feedback.is_empty());
+    }
+
+    #[test]
+    fn review_refine_requires_feedback() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = write_review(
+            &dir,
+            r#"status = "refine"
+summary = "Mostly good"
+"#,
+        );
+        let err = validate(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("feedback"));
+    }
+
+    #[test]
+    fn review_refine_with_feedback_passes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = write_review(
+            &dir,
+            r#"status = "refine"
+summary = "Approved with nits"
+feedback = ["Rename `foo` to `foo_bar` next time", "Drop the dead import"]
+"#,
+        );
+        let verdict = validate(&path).unwrap();
+        assert_eq!(verdict.status, ReviewStatus::Refine);
+        assert_eq!(verdict.feedback.len(), 2);
+        assert!(verdict.new_tasks.is_empty());
+    }
+
+    #[test]
+    fn review_refine_must_not_have_new_tasks() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = write_review(
+            &dir,
+            r#"status = "refine"
+summary = "Nits only"
+feedback = ["Tighten the names"]
+
+[[new_tasks]]
+id = 0
+title = "Extra"
+description = "More"
+test = "cargo test"
+estimated_tokens = 100
+"#,
+        );
+        let err = validate(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("refine"));
     }
 
     #[test]
@@ -317,6 +377,7 @@ estimated_tokens = 0
     fn review_all_status_values_roundtrip() {
         for (toml_val, expected) in [
             ("\"approved\"", ReviewStatus::Approved),
+            ("\"refine\"", ReviewStatus::Refine),
             ("\"revise\"", ReviewStatus::Revise),
             ("\"human_blocked\"", ReviewStatus::HumanBlocked),
             ("\"agent_pivot\"", ReviewStatus::AgentPivot),

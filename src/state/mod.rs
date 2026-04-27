@@ -192,6 +192,10 @@ pub struct BuilderState {
     pub iteration: u32,
     #[serde(default)]
     pub last_verdict: Option<String>,
+    /// Refine feedback carried forward from a `refine` reviewer verdict on
+    /// the previous task. Drained into the next coder prompt and cleared.
+    #[serde(default)]
+    pub pending_refine_feedback: Vec<String>,
     /// Recovery context captured when entering builder recovery.
     ///
     /// Orchestrator-owned: the recovery agent may edit artifacts, but it must not

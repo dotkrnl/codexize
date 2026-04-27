@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn noninteractive_command_unchanged() {
+    fn noninteractive_command_emits_thinking_flag() {
         let adapter = KimiAdapter;
         let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
 

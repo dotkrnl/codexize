@@ -8293,6 +8293,61 @@ estimated_tokens = 1
         });
     }
 
+    #[test]
+    fn brainstorm_finalization_overlength_nothing_to_do_enters_skip_pending() {
+        with_temp_root(|| {
+            let session_id = "brainstorm-skip-overlength";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+
+            let run = RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                hostname: None,
+                mount_device_id: None,
+            };
+            state.agent_runs.push(run.clone());
+
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("mk artifacts dir");
+
+            let rationale = "x".repeat(520);
+            let proposal_toml = format!(
+                "proposed = true\nstatus = \"nothing_to_do\"\nrationale = \"{}\"\n",
+                rationale
+            );
+            std::fs::write(artifacts.join("skip_proposal.toml"), proposal_toml)
+                .expect("write skip proposal");
+
+            let mut app = idle_app(state);
+            app.complete_run_finalization(&run, None)
+                .expect("finalization should succeed");
+
+            assert_eq!(app.state.current_phase, Phase::SkipToImplPending);
+            assert_eq!(
+                app.state.skip_to_impl_kind,
+                Some(crate::artifacts::SkipProposalStatus::NothingToDo)
+            );
+            let stored_rationale = app
+                .state
+                .skip_to_impl_rationale
+                .expect("rationale should be set");
+            assert_eq!(stored_rationale.chars().count(), 500);
+        });
+    }
+
     // ── Recovery circuit-breaker and queue validation tests ──────────────────
 
     #[test]

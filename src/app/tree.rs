@@ -4,6 +4,7 @@ use crate::state::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub type NodePath = Vec<usize>;
+type RecoveryRoundRuns<'a> = (Vec<&'a RunRecord>, Vec<&'a RunRecord>, Vec<&'a RunRecord>);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StageKey {
@@ -612,10 +613,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
         // Group all recovery-mode runs (recovery agent, recovery plan-review,
         // recovery sharding) by round so each round node shows the full
         // recover→review→shard sub-pipeline.
-        let mut rounds: std::collections::BTreeMap<
-            u32,
-            (Vec<&RunRecord>, Vec<&RunRecord>, Vec<&RunRecord>),
-        > = std::collections::BTreeMap::new();
+        let mut rounds: BTreeMap<u32, RecoveryRoundRuns<'_>> = BTreeMap::new();
         for run in &recovery_runs {
             rounds.entry(run.round).or_default().0.push(*run);
         }

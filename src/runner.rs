@@ -62,6 +62,8 @@ pub struct FinishStamp {
     pub head_before: String,
     pub head_after: String,
     pub head_state: String,
+    #[serde(default)]
+    pub signal_received: String,
 }
 
 /// Atomic write of a finish stamp: write to a temp file in the same directory,
@@ -127,6 +129,7 @@ stamp_file={stamp_path}
 exit_code=0
 child_pid=""
 finalized=0
+trapped_signal=""
 
 finalize() {{
     if [ "$finalized" -eq 1 ]; then
@@ -172,6 +175,7 @@ exit_code = {exit_code_placeholder}
 head_before = "{head_before_placeholder}"
 head_after = "{head_after_placeholder}"
 head_state = "{head_state_placeholder}"
+signal_received = "{signal_received_placeholder}"
 STAMPEOF
     mv "$tmp_stamp" "$stamp_file"
 }}
@@ -184,6 +188,7 @@ on_signal() {{
         TERM) signal_code=15 ;;
         *) signal_code=0 ;;
     esac
+    trapped_signal="$signal_name"
     exit_code=$((128 + signal_code))
     if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
         kill -"$signal_name" "$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
@@ -222,6 +227,7 @@ exit $exit_code"#,
         head_before_placeholder = "$head_before",
         head_after_placeholder = "$last_head",
         head_state_placeholder = "$head_state",
+        signal_received_placeholder = "$trapped_signal",
         stamp_path = shell_escape(stamp_path),
     )
 }
@@ -601,6 +607,7 @@ mod tests {
             head_before: "abc123".to_string(),
             head_after: "def456".to_string(),
             head_state: "stable".to_string(),
+            signal_received: String::new(),
         };
         write_finish_stamp(&path, &stamp).unwrap();
         assert!(path.exists());
@@ -625,6 +632,7 @@ mod tests {
             head_before: "abc123".to_string(),
             head_after: "def456".to_string(),
             head_state: "stable".to_string(),
+            signal_received: String::new(),
         };
         let result = write_finish_stamp(&path, &stamp);
         assert!(result.is_err());
@@ -979,5 +987,27 @@ exit 1
             stamp.exit_code, 0,
             "interrupted run should not report success"
         );
+        assert_eq!(
+            stamp.signal_received, "TERM",
+            "interrupted run should record trapped signal"
+        );
+    }
+
+    #[test]
+    fn finish_stamp_parses_old_stamp_without_signal_received() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stamp.toml");
+        fs::write(
+            &path,
+            r#"finished_at = "2026-04-26T10:00:00Z"
+exit_code = 1
+head_before = "000000"
+head_after = "111111"
+head_state = "unstable"
+"#,
+        )
+        .unwrap();
+        let stamp = read_finish_stamp(&path).unwrap();
+        assert_eq!(stamp.signal_received, "");
     }
 }

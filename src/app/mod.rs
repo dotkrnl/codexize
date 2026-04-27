@@ -1134,6 +1134,7 @@ impl App {
                     head_before: "test-base".to_string(),
                     head_after: "test-after".to_string(),
                     head_state: "stable".to_string(),
+                    signal_received: String::new(),
                 };
                 let _ = crate::runner::write_finish_stamp(&stamp_path, &stamp);
                 Ok(())
@@ -5513,6 +5514,7 @@ mod tests {
             head_before: "base123".to_string(),
             head_after: head_after.to_string(),
             head_state: head_state.to_string(),
+            signal_received: String::new(),
         };
         let stamp_path = session_dir
             .join("artifacts")
@@ -9024,6 +9026,7 @@ estimated_tokens = 1
                 head_before: "aaa".to_string(),
                 head_after: "bbb".to_string(),
                 head_state: "stable".to_string(),
+                signal_received: String::new(),
             };
             let old_stamp_path = finish_dir.join("old-stamp.toml");
             write_finish_stamp(&old_stamp_path, &old_stamp).unwrap();
@@ -9034,6 +9037,7 @@ estimated_tokens = 1
                 head_before: "ccc".to_string(),
                 head_after: "ddd".to_string(),
                 head_state: "stable".to_string(),
+                signal_received: String::new(),
             };
             let recent_stamp_path = finish_dir.join("recent-stamp.toml");
             write_finish_stamp(&recent_stamp_path, &recent_stamp).unwrap();
@@ -9109,6 +9113,7 @@ estimated_tokens = 1
                 head_before: "base".to_string(),
                 head_after: "advanced".to_string(),
                 head_state: "stable".to_string(),
+                signal_received: String::new(),
             };
             write_finish_stamp(&archived_stamp_path, &archived_stamp).unwrap();
 

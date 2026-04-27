@@ -4493,17 +4493,19 @@ fn project_doc_instr() -> String {
 
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
-        "\n\nEvery 2–3 min (and whenever your sub-goal changes), overwrite {} \
-         with one plain-text line formatted as: `<short title> | <normal \
-         summary in a short paragraph>`. The short title (≤5 words) MUST \
-         capture the real essence, not a generic label, and SHOULD vary \
-         between updates whenever the focus shifts — avoid repeating the \
-         same title across successive writes when a different phrasing \
-         honestly reflects the current sub-goal. The summary is a single \
-         short paragraph covering current progress and next action in \
-         normal prose. Your process is killed if this file isn't updated for \
-         10 min of wall time (time spent inside tool calls is excluded from \
-         that budget).\n",
+        "\n\nEvery 2–3 min and whenever your sub-goal changes, overwrite {} \
+         with one line: `<short title> | <one-paragraph summary>`. Title \
+         (≤5 words) must capture the real essence and vary as focus shifts; \
+         summary is one short paragraph on current progress and next action. \
+         Process is killed if the file isn't updated for 10 min of wall time \
+         (tool-call time excluded).\n",
+        path.display()
+    )
+}
+
+fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
+    format!(
+        "\n\nEvery 2–3 min, overwrite {} with `<short title> | <one-paragraph summary>` (process killed after 10 min wall-time idle, tool-call time excluded).\n",
         path.display()
     )
 }
@@ -4571,7 +4573,7 @@ control; do NOT ask the operator.
 }
 
 fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> String {
-    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    let instr = live_summary_instruction_interactive(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
     format!(
         r#"{project_doc_instr}Invoke your brainstorming skill now.
@@ -4652,7 +4654,7 @@ fn planning_prompt(
     plan_path: &std::path::Path,
     live_summary_path: &std::path::Path,
 ) -> String {
-    let instr = live_summary_instruction(live_summary_path);
+    let instr = live_summary_instruction_interactive(live_summary_path);
     let reviews_block = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
     } else {
@@ -4835,7 +4837,11 @@ fn recovery_prompt(
     recovery_path: &std::path::Path,
     interactive: bool,
 ) -> String {
-    let instr = live_summary_instruction(live_summary_path);
+    let instr = if interactive {
+        live_summary_instruction_interactive(live_summary_path)
+    } else {
+        live_summary_instruction(live_summary_path)
+    };
     let trigger_task = trigger_task_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| "(none)".to_string());

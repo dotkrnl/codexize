@@ -8,6 +8,8 @@ mod events;
 mod focus_caps;
 mod guard;
 mod models;
+#[allow(dead_code)]
+mod models_area;
 mod render;
 #[allow(dead_code)]
 mod sheet;

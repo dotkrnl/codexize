@@ -11,6 +11,7 @@ pub fn bottom_sheet(
     content_lines: Vec<Line<'static>>,
     controls_line: Line<'static>,
     available_height: u16,
+    width: u16,
 ) -> Vec<Line<'static>> {
     let available = available_height as usize;
 
@@ -21,9 +22,7 @@ pub fn bottom_sheet(
     let rule_glyph = '─';
     let rule_style = Style::default().fg(Color::DarkGray);
     let rule_line = Line::from(Span::styled(
-        // Use a reasonable width for the rule; actual width comes from terminal
-        // In practice the caller should ensure proper width, but for testing use a default
-        rule_glyph.to_string().repeat(80),
+        rule_glyph.to_string().repeat(width as usize),
         rule_style,
     ));
 
@@ -80,22 +79,28 @@ mod tests {
         Line::from("Controls: [Space] expand | [q] quit")
     }
 
+    const W: u16 = 80;
+
+    fn rule_width(line: &Line<'static>) -> usize {
+        line.to_string().chars().filter(|c| *c == '─').count()
+    }
+
     #[test]
     fn zero_height() {
-        let result = bottom_sheet(vec![content_line(1)], controls(), 0);
+        let result = bottom_sheet(vec![content_line(1)], controls(), 0, W);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn height_1_shows_only_controls() {
-        let result = bottom_sheet(vec![content_line(1), content_line(2)], controls(), 1);
+        let result = bottom_sheet(vec![content_line(1), content_line(2)], controls(), 1, W);
         assert_eq!(result.len(), 1);
         assert!(result[0].to_string().contains("Controls"));
     }
 
     #[test]
     fn height_2_shows_rule_and_controls() {
-        let result = bottom_sheet(vec![content_line(1), content_line(2)], controls(), 2);
+        let result = bottom_sheet(vec![content_line(1), content_line(2)], controls(), 2, W);
         assert_eq!(result.len(), 2);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains("Controls"));
@@ -104,7 +109,7 @@ mod tests {
     #[test]
     fn all_content_fits() {
         let content = vec![content_line(1), content_line(2)];
-        let result = bottom_sheet(content, controls(), 5);
+        let result = bottom_sheet(content, controls(), 5, W);
         // rule + 2 content + controls = 4 lines
         assert_eq!(result.len(), 4);
         assert!(result[0].to_string().contains('─'));
@@ -122,9 +127,7 @@ mod tests {
             content_line(4),
             content_line(5),
         ];
-        let result = bottom_sheet(content, controls(), 4);
-        // available_for_content = 4 - 2 = 2
-        // Show 1 content line + ellipsis
+        let result = bottom_sheet(content, controls(), 4, W);
         assert_eq!(result.len(), 4);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains("Content line 1"));
@@ -135,8 +138,7 @@ mod tests {
     #[test]
     fn exact_fit() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 5);
-        // rule + 3 content + controls = 5 lines
+        let result = bottom_sheet(content, controls(), 5, W);
         assert_eq!(result.len(), 5);
         assert!(!result.iter().any(|l| l.to_string().contains('…')));
     }
@@ -144,7 +146,7 @@ mod tests {
     #[test]
     fn height_10() {
         let content = vec![content_line(1), content_line(2)];
-        let result = bottom_sheet(content, controls(), 10);
+        let result = bottom_sheet(content, controls(), 10, W);
         assert_eq!(result.len(), 4);
     }
 
@@ -156,28 +158,24 @@ mod tests {
             content_line(3),
             content_line(4),
         ];
-        let result = bottom_sheet(content, controls(), 3);
-        // available_for_content = 3 - 2 = 1
-        // Show ellipsis only (no content lines, since 1 - 1 = 0)
+        let result = bottom_sheet(content, controls(), 3, W);
         assert_eq!(result.len(), 3);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains('…'));
         assert!(result[2].to_string().contains("Controls"));
     }
 
-    // Snapshot tests at various available_height values
     #[test]
     fn snapshot_height_0() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 0);
+        let result = bottom_sheet(content, controls(), 0, W);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn snapshot_height_1_controls_survive() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 1);
-        // Controls line survives even when height is minimal
+        let result = bottom_sheet(content, controls(), 1, W);
         assert_eq!(result.len(), 1);
         assert!(result[0].to_string().contains("Controls"));
     }
@@ -185,7 +183,7 @@ mod tests {
     #[test]
     fn snapshot_height_2_rule_and_controls() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 2);
+        let result = bottom_sheet(content, controls(), 2, W);
         assert_eq!(result.len(), 2);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains("Controls"));
@@ -194,8 +192,7 @@ mod tests {
     #[test]
     fn snapshot_height_3_ellipsis() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 3);
-        // rule + ellipsis + controls
+        let result = bottom_sheet(content, controls(), 3, W);
         assert_eq!(result.len(), 3);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains('…'));
@@ -205,9 +202,7 @@ mod tests {
     #[test]
     fn snapshot_height_4_one_content() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 4);
-        // available_for_content = 4 - 2 = 2
-        // Take 1 content + ellipsis
+        let result = bottom_sheet(content, controls(), 4, W);
         assert_eq!(result.len(), 4);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains("Content line 1"));
@@ -218,8 +213,7 @@ mod tests {
     #[test]
     fn snapshot_height_5_all_content_fits() {
         let content = vec![content_line(1), content_line(2), content_line(3)];
-        let result = bottom_sheet(content, controls(), 5);
-        // rule + 3 content + controls (exactly fits)
+        let result = bottom_sheet(content, controls(), 5, W);
         assert_eq!(result.len(), 5);
         assert!(result[1].to_string().contains("Content line 1"));
         assert!(result[2].to_string().contains("Content line 2"));
@@ -229,9 +223,14 @@ mod tests {
 
     #[test]
     fn snapshot_height_6_with_truncation() {
-        let content = vec![content_line(1), content_line(2), content_line(3), content_line(4), content_line(5)];
-        let result = bottom_sheet(content, controls(), 6);
-        // rule + 3 content + ellipsis + controls
+        let content = vec![
+            content_line(1),
+            content_line(2),
+            content_line(3),
+            content_line(4),
+            content_line(5),
+        ];
+        let result = bottom_sheet(content, controls(), 6, W);
         assert_eq!(result.len(), 6);
         assert!(result[1].to_string().contains("Content line 1"));
         assert!(result[2].to_string().contains("Content line 2"));
@@ -242,8 +241,7 @@ mod tests {
     #[test]
     fn snapshot_height_10_all_content() {
         let content = vec![content_line(1), content_line(2)];
-        let result = bottom_sheet(content, controls(), 10);
-        // rule + 2 content + controls
+        let result = bottom_sheet(content, controls(), 10, W);
         assert_eq!(result.len(), 4);
         assert!(!result.iter().any(|l| l.to_string().contains('…')));
     }
@@ -260,17 +258,41 @@ mod tests {
             content_line(7),
             content_line(8),
         ];
-        let result = bottom_sheet(content, controls(), 3);
-        // Even with 8 content lines and height 3, controls survive
+        let result = bottom_sheet(content, controls(), 3, W);
         assert!(result.last().unwrap().to_string().contains("Controls"));
     }
 
     #[test]
     fn empty_content() {
-        let result = bottom_sheet(vec![], controls(), 5);
-        // rule + controls (no content)
+        let result = bottom_sheet(vec![], controls(), 5, W);
         assert_eq!(result.len(), 2);
         assert!(result[0].to_string().contains('─'));
         assert!(result[1].to_string().contains("Controls"));
+    }
+
+    #[test]
+    fn rule_spans_full_width_at_120() {
+        let result = bottom_sheet(vec![content_line(1)], controls(), 5, 120);
+        assert_eq!(rule_width(&result[0]), 120);
+    }
+
+    #[test]
+    fn rule_spans_full_width_at_200() {
+        let result = bottom_sheet(vec![content_line(1)], controls(), 5, 200);
+        assert_eq!(rule_width(&result[0]), 200);
+    }
+
+    #[test]
+    fn rule_spans_full_width_at_40() {
+        let result = bottom_sheet(vec![content_line(1)], controls(), 5, 40);
+        assert_eq!(rule_width(&result[0]), 40);
+    }
+
+    #[test]
+    fn rule_width_zero_collapses_rule() {
+        let result = bottom_sheet(vec![content_line(1)], controls(), 5, 0);
+        // Rule line still emitted (height-driven), but contains no glyphs.
+        assert!(result[0].to_string().is_empty());
+        assert!(result.last().unwrap().to_string().contains("Controls"));
     }
 }

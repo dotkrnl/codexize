@@ -493,7 +493,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
         .filter_map(|item| item.task_id.map(|task_id| (task_id, item.status)))
         .collect::<BTreeMap<_, _>>();
     let mut children = Vec::new();
-    for task_id in ordered_task_ids {
+    for &task_id in &ordered_task_ids {
         let task_coder: Vec<&RunRecord> = coder_runs
             .iter()
             .filter(|r| r.task_id == Some(task_id))
@@ -683,8 +683,19 @@ fn build_builder_stage(state: &SessionState) -> Node {
             run_id: None,
             leaf_run_id: None,
         };
-        let done_count = state.builder.done_task_ids().len();
-        children.insert(done_count.min(children.len()), recovery_node);
+        let fallback_pos = state.builder.done_task_ids().len().min(children.len());
+        let insert_pos = state
+            .builder
+            .recovery_trigger_task_id
+            .and_then(|trigger_task_id| {
+                ordered_task_ids
+                    .iter()
+                    .position(|task_id| *task_id == trigger_task_id)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(fallback_pos)
+            .min(children.len());
+        children.insert(insert_pos, recovery_node);
     }
     Node {
         label: "Builder Loop".to_string(),
@@ -934,13 +945,29 @@ fn builder_status(
 }
 
 fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32> {
-    state
+    let mut rounds: BTreeSet<u32> = state
         .builder
         .pipeline_items
         .iter()
         .filter(|item| item.stage == stage && item.mode.as_deref() == Some("recovery"))
         .filter_map(|item| item.round)
-        .collect()
+        .collect();
+
+    let recovery_rounds: BTreeSet<u32> = state
+        .agent_runs
+        .iter()
+        .filter(|run| run.stage == "recovery")
+        .map(|run| run.round)
+        .collect();
+    for run in state.agent_runs.iter().filter(|run| run.stage == stage) {
+        // RunRecord has no phase discriminator today; this round-only join is
+        // the recovery attribution chokepoint if phase tagging is added later.
+        if recovery_rounds.contains(&run.round) {
+            rounds.insert(run.round);
+        }
+    }
+
+    rounds
 }
 
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
@@ -1016,6 +1043,15 @@ mod tests {
             effort: crate::adapters::EffortLevel::Normal,
             hostname: None,
             mount_device_id: None,
+        }
+    }
+
+    fn collect_run_ids(node: &Node, out: &mut Vec<u64>) {
+        if let Some(id) = node.run_id.or(node.leaf_run_id) {
+            out.push(id);
+        }
+        for child in &node.children {
+            collect_run_ids(child, out);
         }
     }
 
@@ -1362,6 +1398,79 @@ mod tests {
     }
 
     #[test]
+    fn builder_recovery_uses_trigger_task_for_position() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::BuilderRecovery(4);
+        state.builder.done = vec![1];
+        state.builder.current_task = Some(2);
+        state.builder.pending = vec![3];
+        state.builder.recovery_trigger_task_id = Some(2);
+        let mut recovery = run(99, "recovery", RunStatus::Running);
+        recovery.round = 4;
+        state.agent_runs.push(recovery);
+
+        let nodes = build_tree(&state);
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let labels = builder
+            .children
+            .iter()
+            .map(|child| child.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            labels,
+            vec!["Task 1", "Task 2", "Builder Recovery", "Task 3"]
+        );
+    }
+
+    #[test]
+    fn recovery_rounds_include_sharding_run_sharing_recovery_round_without_pipeline_mode() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::BuilderRecoverySharding(6);
+        state.builder.done = vec![1, 2];
+        state.builder.pending = vec![3];
+
+        let mut recovery = run(3, "recovery", RunStatus::Done);
+        recovery.round = 6;
+        state.agent_runs.push(recovery);
+        let mut sharding = run(5, "sharding", RunStatus::Running);
+        sharding.round = 6;
+        state.agent_runs.push(sharding);
+
+        let nodes = build_tree(&state);
+        let sharding_stage = nodes.iter().find(|n| n.label == "Sharding").unwrap();
+        let mut top_level_sharding_ids = Vec::new();
+        collect_run_ids(sharding_stage, &mut top_level_sharding_ids);
+        assert!(
+            !top_level_sharding_ids.contains(&5),
+            "recovery sharding run leaked into top-level Sharding: {top_level_sharding_ids:?}"
+        );
+
+        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let recovery = builder
+            .children
+            .iter()
+            .find(|child| child.label == "Builder Recovery")
+            .expect("Builder Recovery node missing");
+        let labels = recovery
+            .children
+            .iter()
+            .map(|child| child.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(
+            labels.contains(&"Recovery") && labels.contains(&"Sharding"),
+            "Builder Recovery should show both same-round recovery modes, got: {labels:?}"
+        );
+        let mut recovery_ids = Vec::new();
+        collect_run_ids(recovery, &mut recovery_ids);
+        assert!(
+            recovery_ids.contains(&5),
+            "Builder Recovery missing same-round sharding run: {recovery_ids:?}"
+        );
+    }
+
+    #[test]
     fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         use crate::state::PipelineItem;
         let mut state = SessionState::new("test".to_string());
@@ -1489,14 +1598,6 @@ mod tests {
         assert_eq!(plan_review.status, NodeStatus::Done);
         assert_eq!(sharding.status, NodeStatus::Done);
 
-        fn collect_run_ids(node: &Node, out: &mut Vec<u64>) {
-            if let Some(id) = node.run_id.or(node.leaf_run_id) {
-                out.push(id);
-            }
-            for child in &node.children {
-                collect_run_ids(child, out);
-            }
-        }
         let mut pr_ids = Vec::new();
         collect_run_ids(plan_review, &mut pr_ids);
         assert!(

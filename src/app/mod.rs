@@ -2909,7 +2909,14 @@ impl App {
                     .join("artifacts")
                     .join(ArtifactKind::SkipToImpl.filename());
                 let proposal = match SkipToImplProposal::read_from_path(&skip_artifact_path) {
-                    Ok(p) => p,
+                    Ok((p, warnings)) => {
+                        for w in warnings {
+                            let _ = self
+                                .state
+                                .log_event(format!("warning: skip_proposal.toml: {w}"));
+                        }
+                        p
+                    }
                     Err(err) => {
                         let _ = self.state.log_event(format!(
                             "warning: skip_proposal.toml malformed or invalid, falling through to spec review: {err:#}"

@@ -56,11 +56,17 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
             .join("artifacts")
             .join(ArtifactKind::SkipToImpl.filename());
         match SkipToImplProposal::read_from_path(&path) {
-            Ok(Some(p)) if p.proposed => {
+            Ok((Some(p), warnings)) if p.proposed => {
+                for w in warnings {
+                    let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+                }
                 state.skip_to_impl_rationale = Some(p.rationale);
                 state.skip_to_impl_kind = Some(p.status);
             }
-            Ok(_) => {
+            Ok((_, warnings)) => {
+                for w in warnings {
+                    let _ = state.log_event(format!("resume: skip_proposal.toml: {w}"));
+                }
                 let _ = state.log_event(
                     "resume: skip_to_impl artifact missing or not proposed, falling through to SpecReviewRunning",
                 );

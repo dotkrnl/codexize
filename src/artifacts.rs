@@ -30,29 +30,36 @@ impl SkipToImplProposal {
 
     /// Read the skip-to-implementation proposal artifact from `path`.
     ///
-    /// Returns `Ok(None)` if the file is absent. Returns `Err` if the file is
-    /// present but malformed or invalid; callers log a warning and fall through
-    /// to the normal flow on error.
-    pub fn read_from_path(path: &std::path::Path) -> anyhow::Result<Option<Self>> {
+    /// Returns `Ok((None, []))` if the file is absent. Returns `Err` for
+    /// genuine parse failures or missing required fields. Soft issues (e.g.
+    /// over-length rationale) are returned as warnings in the second tuple
+    /// element — callers route these through their own logger.
+    pub fn read_from_path(path: &std::path::Path) -> anyhow::Result<(Option<Self>, Vec<String>)> {
         if !path.exists() {
-            return Ok(None);
+            return Ok((None, vec![]));
         }
         let content = std::fs::read_to_string(path)?;
-        let proposal: Self = toml::from_str(&content).map_err(|err| {
+        let mut proposal: Self = toml::from_str(&content).map_err(|err| {
             anyhow::anyhow!("unsupported old JSON/JSONL artifact or malformed TOML: {err}")
         })?;
-        proposal.validate()?;
-        Ok(Some(proposal))
+        let warnings = proposal.validate_and_fixup()?;
+        Ok((Some(proposal), warnings))
     }
 
-    fn validate(&self) -> anyhow::Result<()> {
+    fn validate_and_fixup(&mut self) -> anyhow::Result<Vec<String>> {
         if self.proposed && self.rationale.trim().is_empty() {
             anyhow::bail!("rationale cannot be empty if proposed is true");
         }
-        if self.rationale.len() > 500 {
-            anyhow::bail!("rationale cannot exceed 500 characters");
+        let mut warnings = Vec::new();
+        let char_count = self.rationale.chars().count();
+        if char_count > 500 {
+            let truncated: String = self.rationale.chars().take(500).collect();
+            self.rationale = truncated;
+            warnings.push(format!(
+                "rationale truncated to 500 chars (was {char_count})"
+            ));
         }
-        Ok(())
+        Ok(warnings)
     }
 }
 

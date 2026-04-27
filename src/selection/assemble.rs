@@ -79,8 +79,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
                         fallback_from: m.fallback_from.clone(),
                     })
                     .collect();
-                let _ = cache::save_dashboard(&entries)
-                    .map_err(|err| eprintln!("codexize: failed to save dashboard cache: {err}"));
+                let _ = cache::save_dashboard(&entries);
                 entries
             }
             Err(e) => {
@@ -102,8 +101,7 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
         let (fresh_quotas, fresh_errors) = quota::load_quota_maps();
         quota_errors.extend(fresh_errors);
         let merged = merge_quota_payload(&cached_quota, fresh_quotas);
-        let _ = cache::save_quotas(&merged)
-            .map_err(|err| eprintln!("codexize: failed to save quota cache: {err}"));
+        let _ = cache::save_quotas(&merged);
         merged
     } else {
         cached_quota

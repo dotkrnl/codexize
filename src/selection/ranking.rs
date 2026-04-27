@@ -23,7 +23,6 @@ fn clear_selection_events() {
 }
 
 fn record_zero_as_missing(axis: &str, phase: &str) {
-    eprintln!("codexize: selection.zero_as_missing axis={axis} phase={phase}");
     selection_events()
         .lock()
         .unwrap()

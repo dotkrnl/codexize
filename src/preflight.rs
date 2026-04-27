@@ -628,7 +628,7 @@ fn run_gitignore_modal(
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     append_to_gitignore(codexize_entry)?;
-                    maybe_auto_commit_gitignore(|msg| eprintln!("{msg}"));
+                    maybe_auto_commit_gitignore(|_| {});
                     return Ok(());
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {

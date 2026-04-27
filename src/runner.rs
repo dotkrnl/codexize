@@ -284,7 +284,6 @@ pub fn run(
     let mut log_err = log_file.try_clone()?;
     let stderr_handle = std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            eprintln!("{line}");
             let _ = writeln!(log_err, "[ERR] {line}");
         }
     });

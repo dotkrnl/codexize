@@ -33,7 +33,6 @@ fn clear_ingest_events() {
 }
 
 fn record_axis_dropped(reason: &str) {
-    eprintln!("codexize: ingest.axis_dropped reason={reason}");
     ingest_events()
         .lock()
         .unwrap()
@@ -43,7 +42,6 @@ fn record_axis_dropped(reason: &str) {
 }
 
 fn record_axis_parse_fail(suite: &str, axis: &str) {
-    eprintln!("codexize: ingest.axis_parse_fail suite={suite} axis={axis}");
     ingest_events()
         .lock()
         .unwrap()

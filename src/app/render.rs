@@ -137,32 +137,12 @@ fn spinner_frame(count: usize) -> &'static str {
 }
 
 fn model_strip_height(models: &[CachedModel], versions: &VersionIndex) -> u16 {
-    let visible = visible_models(models, versions);
-    let has_provenance = visible.iter().any(|name| {
-        models
-            .iter()
-            .find(|m| &m.name == name)
-            .is_some_and(|m| !m.axis_provenance.is_empty())
-    });
-    let visible_count = visible.len() as u16;
+    let visible_count = visible_models(models, versions).len() as u16;
     if visible_count == 0 {
         2
-    } else if has_provenance {
-        visible_count * 2 + 2
     } else {
         visible_count + 2
     }
-}
-
-fn format_provenance_line(model: &CachedModel) -> Line<'static> {
-    let mut parts: Vec<String> = model
-        .axis_provenance
-        .iter()
-        .map(|(axis, label)| format!("{axis}: {label}"))
-        .collect();
-    parts.sort();
-    let text = format!("        {}", parts.join("  "));
-    Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
 }
 
 fn strip_ansi_codes(s: &str) -> String {
@@ -531,9 +511,6 @@ impl App {
                     prob_r,
                 ]);
                 lines.push(Line::from(line_spans));
-                if !model.axis_provenance.is_empty() {
-                    lines.push(format_provenance_line(model));
-                }
             }
         }
 
@@ -1955,17 +1932,12 @@ mod tests {
     }
 
     #[test]
-    fn model_strip_renders_provenance_labels_verbatim() {
+    fn model_strip_omits_provenance_labels() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
         model.axis_provenance = std::collections::BTreeMap::from([
             ("correctness".to_string(), "suite:hourly".to_string()),
             ("contextawareness".to_string(), "suite:tooling".to_string()),
-            ("codequality".to_string(), "fallback:overall".to_string()),
-            (
-                "contextwindow".to_string(),
-                "dropped:contextwindow".to_string(),
-            ),
         ]);
         app.set_models(vec![model]);
         app.versions = build_version_index(&app.models);
@@ -1980,25 +1952,13 @@ mod tests {
             .join("\n");
 
         assert!(
-            all_text.contains("correctness: suite:hourly"),
-            "should display correctness provenance verbatim: {all_text}"
-        );
-        assert!(
-            all_text.contains("contextawareness: suite:tooling"),
-            "should display contextawareness provenance verbatim: {all_text}"
-        );
-        assert!(
-            all_text.contains("codequality: fallback:overall"),
-            "should display codequality provenance verbatim: {all_text}"
-        );
-        assert!(
-            all_text.contains("contextwindow: dropped:contextwindow"),
-            "should display contextwindow drop label verbatim: {all_text}"
+            !all_text.contains("suite:hourly") && !all_text.contains("suite:tooling"),
+            "provenance labels must not render: {all_text}"
         );
     }
 
     #[test]
-    fn model_strip_height_accounts_for_provenance_lines() {
+    fn model_strip_height_ignores_provenance() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
         model.axis_provenance = std::collections::BTreeMap::from([(
@@ -2008,7 +1968,7 @@ mod tests {
         app.set_models(vec![model]);
         app.versions = build_version_index(&app.models);
 
-        // 1 model × 2 lines (model + provenance) + 2 borders = 4
-        assert_eq!(model_strip_height(&app.models, &app.versions), 4);
+        // 1 model + 2 borders = 3
+        assert_eq!(model_strip_height(&app.models, &app.versions), 3);
     }
 }

@@ -35,6 +35,7 @@ enum WaitState {
 
 const AGENT_TIMEOUT: Duration = Duration::from_secs(120);
 const AGENT_FAIL_DISPLAY: Duration = Duration::from_secs(2);
+const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
 
 fn detect_git() -> bool {
     Command::new("git")
@@ -83,6 +84,98 @@ fn append_to_gitignore(entry: &str) -> Result<()> {
 
     fs::write(path, contents).context("failed to write .gitignore")?;
     Ok(())
+}
+
+fn is_codexize_status_path(path: &str) -> bool {
+    path == ".codexize" || path.starts_with(".codexize/")
+}
+
+fn accepted_gitignore_status(short_status: &str) -> bool {
+    matches!(short_status, " M" | "M " | "MM" | "??" | "A ")
+}
+
+fn parse_porcelain_line(line: &str) -> Option<(&str, &str)> {
+    if line.len() < 4 {
+        return None;
+    }
+    Some((&line[..2], &line[3..]))
+}
+
+fn run_git_command_with_stderr(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("failed to run `git {}`: {e}", args.join(" ")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let detail = if stderr.is_empty() {
+        format!("exit status {}", output.status)
+    } else {
+        stderr
+    };
+    Err(format!("`git {}` failed: {}", args.join(" "), detail))
+}
+
+fn maybe_auto_commit_gitignore<F>(mut warn: F)
+where
+    F: FnMut(String),
+{
+    let output = match Command::new("git")
+        .args(["status", "--porcelain=v1", "-uall"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(err) => {
+            warn(format!(
+                "warning: failed to run git status for .gitignore auto-commit: {err}"
+            ));
+            return;
+        }
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let detail = if stderr.is_empty() {
+            format!("exit status {}", output.status)
+        } else {
+            stderr
+        };
+        warn(format!(
+            "warning: failed to run git status for .gitignore auto-commit: {detail}"
+        ));
+        return;
+    }
+
+    let mut filtered: Vec<(String, String)> = Vec::new();
+    let porcelain = String::from_utf8_lossy(&output.stdout);
+    for line in porcelain.lines() {
+        let Some((short_status, path)) = parse_porcelain_line(line) else {
+            // Ambiguous porcelain output should conservatively skip auto-commit.
+            return;
+        };
+        if is_codexize_status_path(path) {
+            continue;
+        }
+        filtered.push((short_status.to_string(), path.to_string()));
+    }
+
+    if filtered.len() != 1 {
+        return;
+    }
+    let (status, path) = &filtered[0];
+    if path != ".gitignore" || !accepted_gitignore_status(status) {
+        return;
+    }
+
+    if let Err(err) = run_git_command_with_stderr(&["add", ".gitignore"]) {
+        warn(format!("warning: .gitignore auto-commit skipped: {err}"));
+        return;
+    }
+    if let Err(err) = run_git_command_with_stderr(&["commit", "-m", GITIGNORE_AUTO_COMMIT_SUBJECT])
+    {
+        warn(format!("warning: .gitignore auto-commit skipped: {err}"));
+    }
 }
 
 fn run_git_init() -> Result<()> {
@@ -535,6 +628,7 @@ fn run_gitignore_modal(
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     append_to_gitignore(codexize_entry)?;
+                    maybe_auto_commit_gitignore(|msg| eprintln!("{msg}"));
                     return Ok(());
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -553,6 +647,7 @@ fn run_gitignore_modal(
 mod tests {
     use super::*;
     use crate::state::test_fs_lock;
+    use std::ffi::OsStr;
 
     fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
         let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -624,6 +719,142 @@ mod tests {
             let content = fs::read_to_string(".gitignore").unwrap();
             assert!(content.contains("node_modules/"));
             assert!(content.contains(".codexize/"));
+        });
+    }
+
+    fn git_cmd(args: &[&str]) {
+        let status = Command::new("git").args(args).status().unwrap();
+        assert!(
+            status.success(),
+            "git command failed: git {}",
+            args.join(" ")
+        );
+    }
+
+    fn git_output(args: &[&str]) -> String {
+        let output = Command::new("git").args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git command failed: git {}",
+            args.join(" ")
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    fn git_output_allow_failure(args: &[&str], env: &[(&str, &OsStr)]) -> (bool, String, String) {
+        let mut cmd = Command::new("git");
+        cmd.args(args);
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        let output = cmd.output().unwrap();
+        (
+            output.status.success(),
+            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8(output.stderr).unwrap(),
+        )
+    }
+
+    fn init_repo_with_head() {
+        git_cmd(&["init"]);
+        git_cmd(&["config", "user.name", "Test User"]);
+        git_cmd(&["config", "user.email", "test@example.com"]);
+        fs::write("README.md", "seed\n").unwrap();
+        git_cmd(&["add", "README.md"]);
+        git_cmd(&["commit", "-m", "seed"]);
+    }
+
+    #[test]
+    fn gitignore_modal_clean_repo_auto_commits_with_fixed_subject() {
+        with_temp_dir(|| {
+            init_repo_with_head();
+            append_to_gitignore(".codexize/").unwrap();
+            maybe_auto_commit_gitignore(|_| {});
+
+            assert_eq!(
+                git_output(&["log", "-1", "--format=%s"]),
+                GITIGNORE_AUTO_COMMIT_SUBJECT
+            );
+            assert_eq!(git_output(&["status", "--porcelain"]), "");
+            let tracked = git_output(&["show", "--name-only", "--format=", "HEAD"]);
+            assert_eq!(tracked, ".gitignore");
+        });
+    }
+
+    #[test]
+    fn gitignore_modal_staged_gitignore_still_auto_commits() {
+        with_temp_dir(|| {
+            init_repo_with_head();
+            fs::write(".gitignore", "target/\nlogs/\n").unwrap();
+            git_cmd(&["add", ".gitignore"]);
+            git_cmd(&["commit", "-m", "add gitignore"]);
+            fs::write(".gitignore", "target/\nlogs/\ncache/\n").unwrap();
+            git_cmd(&["add", ".gitignore"]);
+            append_to_gitignore(".codexize/").unwrap();
+            maybe_auto_commit_gitignore(|_| {});
+
+            assert_eq!(
+                git_output(&["log", "-1", "--format=%s"]),
+                GITIGNORE_AUTO_COMMIT_SUBJECT
+            );
+            assert_eq!(git_output(&["status", "--porcelain"]), "");
+            let content = fs::read_to_string(".gitignore").unwrap();
+            assert!(content.contains("target/"));
+            assert!(content.contains(".codexize/"));
+        });
+    }
+
+    #[test]
+    fn gitignore_modal_dirty_repo_skips_auto_commit() {
+        with_temp_dir(|| {
+            init_repo_with_head();
+            let previous_head = git_output(&["rev-parse", "HEAD"]);
+            fs::write("README.md", "dirty\n").unwrap();
+            append_to_gitignore(".codexize/").unwrap();
+            maybe_auto_commit_gitignore(|_| {});
+
+            assert_eq!(git_output(&["rev-parse", "HEAD"]), previous_head);
+            let status = git_output(&["status", "--porcelain"]);
+            assert!(status.contains(".gitignore"));
+        });
+    }
+
+    #[test]
+    fn gitignore_modal_missing_identity_is_swallowed_and_warned() {
+        with_temp_dir(|| {
+            git_cmd(&["init"]);
+            git_cmd(&["config", "user.name", ""]);
+            git_cmd(&["config", "user.email", ""]);
+            let fake_home = tempfile::TempDir::new().unwrap();
+            let empty_global = fake_home.path().join("empty-gitconfig");
+            fs::write(&empty_global, "").unwrap();
+
+            let env = [
+                ("HOME", fake_home.path().as_os_str()),
+                ("XDG_CONFIG_HOME", fake_home.path().as_os_str()),
+                ("GIT_CONFIG_GLOBAL", empty_global.as_os_str()),
+                ("GIT_CONFIG_NOSYSTEM", OsStr::new("1")),
+            ];
+
+            append_to_gitignore(".codexize/").unwrap();
+            let mut warnings = Vec::new();
+            maybe_auto_commit_gitignore(|w| warnings.push(w));
+
+            let (head_ok, _stdout, _stderr) =
+                git_output_allow_failure(&["rev-parse", "HEAD"], &env);
+            assert!(
+                !head_ok,
+                "no commit should be created when identity is missing"
+            );
+            assert!(
+                warnings.iter().any(|w| {
+                    w.contains("identity")
+                        || w.contains("user.email")
+                        || w.contains("user.name")
+                        || w.contains("unable to auto-detect email address")
+                }),
+                "expected identity warning, got: {warnings:?}"
+            );
         });
     }
 }

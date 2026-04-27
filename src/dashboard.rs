@@ -2,9 +2,56 @@ use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::model_names;
+
+/// Counter events emitted by ingestion. Production callers stream them
+/// to stderr; tests read the in-memory log to assert labels without a
+/// subprocess capture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IngestEvent {
+    AxisDropped { reason: String },
+    AxisParseFail { suite: String, axis: String },
+}
+
+fn ingest_events() -> &'static Mutex<Vec<IngestEvent>> {
+    static EVENTS: OnceLock<Mutex<Vec<IngestEvent>>> = OnceLock::new();
+    EVENTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Snapshot of every ingest event recorded since process start (or since
+/// the last `clear_ingest_events`). Intended for test assertions.
+pub fn ingest_events_snapshot() -> Vec<IngestEvent> {
+    ingest_events().lock().unwrap().clone()
+}
+
+#[cfg(test)]
+fn clear_ingest_events() {
+    ingest_events().lock().unwrap().clear();
+}
+
+fn record_axis_dropped(reason: &str) {
+    eprintln!("codexize: ingest.axis_dropped reason={reason}");
+    ingest_events()
+        .lock()
+        .unwrap()
+        .push(IngestEvent::AxisDropped {
+            reason: reason.to_string(),
+        });
+}
+
+fn record_axis_parse_fail(suite: &str, axis: &str) {
+    eprintln!("codexize: ingest.axis_parse_fail suite={suite} axis={axis}");
+    ingest_events()
+        .lock()
+        .unwrap()
+        .push(IngestEvent::AxisParseFail {
+            suite: suite.to_string(),
+            axis: axis.to_string(),
+        });
+}
 
 pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
 pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
@@ -399,7 +446,7 @@ fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, St
                 provenance
                     .entry(key)
                     .or_insert_with(|| "dropped:contextwindow".to_string());
-                eprintln!("codexize: ingest.axis_dropped reason=contextwindow");
+                record_axis_dropped("contextwindow");
                 continue;
             }
             if axes.contains_key(&key) {
@@ -411,7 +458,7 @@ fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, St
                     provenance.insert(key, format!("suite:{suite}"));
                 }
                 None => {
-                    eprintln!("codexize: ingest.axis_parse_fail suite={suite} axis={key}");
+                    record_axis_parse_fail(&suite, &key);
                 }
             }
         }
@@ -685,11 +732,19 @@ mod tests {
         assert_eq!(prov.get("correctness").map(String::as_str), Some("suite:"));
     }
 
+    /// Serializes the two ingest-counter tests so the in-memory event log
+    /// can be cleared and inspected without races from parallel tests.
+    fn ingest_counter_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
     #[test]
     fn ingest_axis_dropped_counter_fires_for_contextwindow() {
-        // Verify the counter string appears in stderr by calling merged_axes
-        // on input containing contextWindow. The counter is an eprintln! so
-        // we verify it via the provenance label as a proxy.
+        let _guard = ingest_counter_lock();
+        clear_ingest_events();
         let val = serde_json::json!([
             {
                 "suite": "deep",
@@ -697,18 +752,25 @@ mod tests {
             }
         ]);
         let (axes, prov) = merged_axes(&val).unwrap();
-        assert!(
-            !axes.iter().any(|(k, _)| k == "contextwindow"),
-            "contextwindow should be dropped from axes"
-        );
+        assert!(!axes.iter().any(|(k, _)| k == "contextwindow"));
         assert_eq!(
             prov.get("contextwindow").map(String::as_str),
             Some("dropped:contextwindow")
+        );
+        let events = ingest_events_snapshot();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                IngestEvent::AxisDropped { reason } if reason == "contextwindow"
+            )),
+            "expected ingest.axis_dropped reason=contextwindow, got {events:?}"
         );
     }
 
     #[test]
     fn ingest_axis_parse_fail_counter_fires_for_bad_values() {
+        let _guard = ingest_counter_lock();
+        clear_ingest_events();
         let val = serde_json::json!([
             {
                 "suite": "deep",
@@ -716,13 +778,52 @@ mod tests {
             }
         ]);
         let (axes, prov) = merged_axes(&val).unwrap();
+        assert!(!axes.iter().any(|(k, _)| k == "correctness"));
+        assert!(!prov.contains_key("correctness"));
+        let events = ingest_events_snapshot();
         assert!(
-            !axes.iter().any(|(k, _)| k == "correctness"),
-            "unparseable axis should not appear in axes"
+            events.iter().any(|e| matches!(
+                e,
+                IngestEvent::AxisParseFail { suite, axis }
+                    if suite == "deep" && axis == "correctness"
+            )),
+            "expected ingest.axis_parse_fail suite=deep axis=correctness, got {events:?}"
         );
+    }
+
+    #[test]
+    fn fixture_emits_parse_fail_for_synthetic_row() {
+        // The fixture's gemini-2.5-pro deep suite has correctness:"parse-failure".
+        // Ingesting it must emit ingest.axis_parse_fail suite=deep axis=correctness
+        // and leave correctness absent from the axes vector.
+        let _guard = ingest_counter_lock();
+        clear_ingest_events();
+        let entries = fixture_score_entries();
+        let gemini = entries.iter().find(|e| e.name == "gemini-2.5-pro").unwrap();
+        assert!(!gemini.axes.iter().any(|(k, _)| k == "correctness"));
+        let events = ingest_events_snapshot();
         assert!(
-            !prov.contains_key("correctness"),
-            "unparseable axis should not have provenance"
+            events.iter().any(|e| matches!(
+                e,
+                IngestEvent::AxisParseFail { suite, axis }
+                    if suite == "deep" && axis == "correctness"
+            )),
+            "expected parse_fail event for gemini-2.5-pro deep correctness, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn fixture_emits_axis_dropped_for_contextwindow() {
+        let _guard = ingest_counter_lock();
+        clear_ingest_events();
+        let _ = fixture_score_entries();
+        let events = ingest_events_snapshot();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                IngestEvent::AxisDropped { reason } if reason == "contextwindow"
+            )),
+            "expected at least one axis_dropped reason=contextwindow event, got {events:?}"
         );
     }
 }

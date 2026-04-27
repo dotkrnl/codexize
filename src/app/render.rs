@@ -1960,7 +1960,8 @@ mod tests {
         let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
         model.axis_provenance = std::collections::BTreeMap::from([
             ("correctness".to_string(), "suite:hourly".to_string()),
-            ("debugging".to_string(), "suite:deep".to_string()),
+            ("contextawareness".to_string(), "suite:tooling".to_string()),
+            ("codequality".to_string(), "fallback:overall".to_string()),
             (
                 "contextwindow".to_string(),
                 "dropped:contextwindow".to_string(),
@@ -1969,7 +1970,7 @@ mod tests {
         app.set_models(vec![model]);
         app.versions = build_version_index(&app.models);
 
-        let area = Rect::new(0, 0, 120, 6);
+        let area = Rect::new(0, 0, 200, 6);
         let mut buf = ratatui::buffer::Buffer::empty(area);
         app.model_strip(area.width).render(area, &mut buf);
 
@@ -1983,8 +1984,12 @@ mod tests {
             "should display correctness provenance verbatim: {all_text}"
         );
         assert!(
-            all_text.contains("debugging: suite:deep"),
-            "should display debugging provenance verbatim: {all_text}"
+            all_text.contains("contextawareness: suite:tooling"),
+            "should display contextawareness provenance verbatim: {all_text}"
+        );
+        assert!(
+            all_text.contains("codequality: fallback:overall"),
+            "should display codequality provenance verbatim: {all_text}"
         );
         assert!(
             all_text.contains("contextwindow: dropped:contextwindow"),

@@ -300,6 +300,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let provenance = BTreeMap::from([
             ("correctness".to_string(), "suite:hourly".to_string()),
+            ("debugging".to_string(), "suite:deep".to_string()),
             ("taskcompletion".to_string(), "suite:tooling".to_string()),
             (
                 "contextwindow".to_string(),

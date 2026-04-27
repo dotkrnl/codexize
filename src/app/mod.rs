@@ -4903,55 +4903,26 @@ fn recovery_prompt(
             .join(", ")
     };
     let project_doc_instr = project_doc_instr();
-    if interactive {
-        format!(
-            r#"{project_doc_instr}You are the builder recovery agent. INTERACTIVE — the operator is present.
-
-Human judgment is required to resolve this recovery. You MUST discuss the proposed
-changes with the operator and get explicit confirmation before updating spec or plan.
-
-Your job is to repair builder artifacts so orchestration can reconcile and resume.
-You may edit ONLY:
-  - {spec}
-  - {plan}
-  - {tasks}
-  - {recovery}
-
-Context from orchestrator:
-  - Triggering task id: {trigger_task}
-  - Trigger summary / latest reviewer feedback:
-{trigger_summary}
-  - Completed task ids (must stay completed): {completed}
-  - Started task ids from run history: {started}
-
-Hard requirements:
-  - Read the triggering review first and identify the human decision needed.
-  - Present the proposed correction to the operator and wait for confirmation.
-  - Do NOT update spec or plan until the operator confirms the direction.
-  - Keep `tasks.toml` valid and include unfinished work only.
-  - Do NOT include completed ids in recovered `tasks.toml`.
-  - If you supersede/remove started-but-unfinished task ids, add a `Recovery Notes`
-    section in BOTH spec and plan, naming each superseded id and reason.
-  - Write `{recovery}` with `status`, `summary`, and `feedback` TOML fields
-    describing the confirmed recovery decision.
-  - Do NOT modify source code or version control.
-{instr}"#,
-            spec = spec_path.display(),
-            plan = plan_path.display(),
-            tasks = tasks_path.display(),
-            recovery = recovery_path.display(),
-            trigger_task = trigger_task,
-            trigger_summary = trigger_summary,
-            completed = completed,
-            started = started,
-            instr = instr,
-        )
+    let mode_label = if interactive {
+        "INTERACTIVE — operator present"
     } else {
-        format!(
-            r#"{project_doc_instr}You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
+        "NON-INTERACTIVE — no operator questions"
+    };
+    let interactive_rule = if interactive {
+        "  - Read the triggering feedback first to identify the human decision needed.\n  - Present the proposed correction to the operator and wait for explicit\n    confirmation BEFORE editing spec or plan.\n"
+    } else {
+        "  - Keep changes minimal and deterministic — no operator to consult.\n"
+    };
+    format!(
+        r#"{project_doc_instr}You are the builder recovery agent. {mode_label} — no source-code
+edits, no VCS mutations.
 
-Your job is to repair builder artifacts so orchestration can reconcile and resume.
-You may edit ONLY:
+Heads up: your recovered artifacts will be reviewed downstream by an AI from
+a DIFFERENT model vendor — bring care to the spec/plan edits and the audit
+trail.
+
+Your job is to repair builder artifacts so orchestration can reconcile and
+resume. You may edit ONLY:
   - {spec}
   - {plan}
   - {tasks}
@@ -4960,31 +4931,42 @@ You may edit ONLY:
 Context from orchestrator:
   - Triggering task id: {trigger_task}
   - Trigger summary / latest reviewer feedback:
-{trigger_summary}
+    ```
+    {trigger_summary}
+    ```
   - Completed task ids (must stay completed): {completed}
-  - Started task ids from run history: {started}
+  - Started task ids: {started}
+    (started ⊇ completed; the difference is in-flight or abandoned work
+    that may need to be reshaped or removed.)
 
 Hard requirements:
-  - Keep `tasks.toml` valid and include unfinished work only.
-  - Do NOT include completed ids in recovered `tasks.toml`.
-  - If you supersede/remove started-but-unfinished task ids, add a `Recovery Notes`
-    section in BOTH spec and plan, naming each superseded id and reason.
-  - Keep changes minimal and deterministic.
-  - Write `{recovery}` with `status`, `summary`, and `feedback` TOML fields
-    describing the recovery decision.
-  - Do NOT modify source code or version control.
+{interactive_rule}  - Keep `tasks.toml` valid; include unfinished work only. Never include
+    completed ids.
+  - If you supersede or remove a started-but-unfinished task id, add a
+    `## Recovery Notes` section to BOTH spec and plan with one bullet per
+    superseded id and the reason. Example:
+        ## Recovery Notes
+        - Task 7 superseded: original approach (X) violated spec §3 after
+          reviewer flagged Y. Replaced by tasks 9-10.
+  - Write `{recovery}` as TOML in this exact shape:
+        status        = "approved" | "revise"           # what the recovery did
+        trigger       = "human_blocked" | "agent_pivot" # mirror the originating verdict
+        interactive   = true | false                    # whether the operator was consulted
+        summary       = "One paragraph describing the decision."
+        feedback      = ["one item per remediation step (optional)"]
+        changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
+                                                        # paths you actually edited (audit trail)
 {instr}"#,
-            spec = spec_path.display(),
-            plan = plan_path.display(),
-            tasks = tasks_path.display(),
-            recovery = recovery_path.display(),
-            trigger_task = trigger_task,
-            trigger_summary = trigger_summary,
-            completed = completed,
-            started = started,
-            instr = instr,
-        )
-    }
+        spec = spec_path.display(),
+        plan = plan_path.display(),
+        tasks = tasks_path.display(),
+        recovery = recovery_path.display(),
+        trigger_task = trigger_task,
+        trigger_summary = trigger_summary,
+        completed = completed,
+        started = started,
+        instr = instr,
+    )
 }
 
 fn recovery_plan_review_prompt(
@@ -8449,7 +8431,7 @@ estimated_tokens = 1
             "human_blocked prompt must not contain NON-INTERACTIVE"
         );
         assert!(
-            prompt.contains("operator confirms"),
+            prompt.contains("wait for explicit\n    confirmation"),
             "human_blocked prompt must require operator confirmation"
         );
     }

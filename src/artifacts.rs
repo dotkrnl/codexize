@@ -57,6 +57,38 @@ impl SkipToImplProposal {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSummaryArtifact {
+    pub title: String,
+}
+
+impl SessionSummaryArtifact {
+    /// Read the session summary artifact from `path`. Returns `Ok(None)` if
+    /// the file is absent. Returns `Err` on malformed TOML or invalid
+    /// content; callers log and fall through.
+    pub fn read_from_path(path: &std::path::Path) -> anyhow::Result<Option<Self>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(path)?;
+        let artifact: Self = toml::from_str(&content)
+            .map_err(|err| anyhow::anyhow!("malformed session_summary.toml: {err}"))?;
+        artifact.validate()?;
+        Ok(Some(artifact))
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        let trimmed = self.title.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("title cannot be empty");
+        }
+        if trimmed.chars().count() > 80 {
+            anyhow::bail!("title cannot exceed 80 characters");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionArtifact {
     pub id: String,
     pub created_at: String,
@@ -175,6 +207,7 @@ pub enum ArtifactKind {
     CodeReview,
     Tasks,
     SkipToImpl,
+    SessionSummary,
 }
 
 impl ArtifactKind {
@@ -187,6 +220,7 @@ impl ArtifactKind {
             ArtifactKind::CodeReview => "review.toml",
             ArtifactKind::Tasks => "tasks.toml",
             ArtifactKind::SkipToImpl => "skip_proposal.toml",
+            ArtifactKind::SessionSummary => "session_summary.toml",
         }
     }
 }

@@ -2879,6 +2879,21 @@ impl App {
                     }
                 };
 
+                let summary_path = session_dir
+                    .join("artifacts")
+                    .join(ArtifactKind::SessionSummary.filename());
+                match crate::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
+                    Ok(Some(summary)) => {
+                        self.state.title = Some(summary.title.trim().to_string());
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        let _ = self.state.log_event(format!(
+                            "warning: session_summary.toml malformed or invalid, leaving title unset: {err:#}"
+                        ));
+                    }
+                }
+
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
 
@@ -3210,15 +3225,24 @@ impl App {
                 .join("artifacts")
                 .join(ArtifactKind::SkipToImpl.filename()),
         );
+        let _ = std::fs::remove_file(
+            session_state::session_dir(session_id)
+                .join("artifacts")
+                .join(ArtifactKind::SessionSummary.filename()),
+        );
 
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let attempt = self.attempt_for("brainstorm", None, 1);
         let live_summary_path = self.live_summary_path_for_run("brainstorm", None, 1, attempt);
+        let summary_path = session_state::session_dir(session_id)
+            .join("artifacts")
+            .join(ArtifactKind::SessionSummary.filename());
         let prompt = brainstorm_prompt(
             &idea,
             &spec_path.display().to_string(),
+            &summary_path.display().to_string(),
             &live_summary_path.display().to_string(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
@@ -4572,7 +4596,12 @@ control; do NOT ask the operator.
     )
 }
 
-fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> String {
+fn brainstorm_prompt(
+    idea: &str,
+    spec_path: &str,
+    summary_path: &str,
+    live_summary_path: &str,
+) -> String {
     let instr = live_summary_instruction_interactive(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
     format!(
@@ -4588,6 +4617,13 @@ When the skill asks where to write the design doc, write it to {spec_path}.
 At the very TOP of the spec file, before anything else, include a short
 "TL;DR" section: 3–6 bullet points capturing the key decisions so a lazy
 reader can skim it in 30 seconds.
+
+Also write a session summary to {summary_path} as TOML:
+    title = "<short, specific phrase, ≤80 chars>"
+The orchestrator uses this as the session title in the picker. Title MUST
+name the actual change (e.g. "Add Kimi adapter min-quota fallback"), not a
+generic label like "Refactor" or "New feature". This file is required —
+emit it even when proposing skip-to-impl or nothing-to-do.
 
 This is a spec-only phase: do NOT write or modify any code; the spec file is
 your only output. Implementation happens in a later phase.

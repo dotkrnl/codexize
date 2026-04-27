@@ -634,6 +634,10 @@ pub struct SessionState {
     pub current_phase: Phase,
     #[serde(default)]
     pub idea_text: Option<String>,
+    /// Operator-facing session title — set by the brainstormer once the spec
+    /// is drafted. Falls back to truncated `idea_text` for display.
+    #[serde(default)]
+    pub title: Option<String>,
     #[serde(default)]
     pub selected_model: Option<String>,
     #[serde(default)]
@@ -659,6 +663,7 @@ impl SessionState {
             agent_runs: Vec::new(),
             current_phase: Phase::IdeaInput,
             idea_text: None,
+            title: None,
             selected_model: None,
             agent_error: None,
             builder: BuilderState::default(),

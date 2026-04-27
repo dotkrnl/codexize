@@ -431,7 +431,13 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
 
         entries.push(SessionEntry {
             session_id,
-            idea_summary: truncate_idea(&state.idea_text),
+            idea_summary: state
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| truncate_idea(&state.idea_text)),
             current_phase: state.current_phase,
             last_modified,
             archived: state.archived,

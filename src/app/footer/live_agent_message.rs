@@ -86,13 +86,18 @@ pub trait LiveSummaryFetcher {
     fn fetch(&self) -> String;
 }
 
-/// Production fetcher that wraps mtime-cached reading.
-pub struct MtimeCachedFetcher<'a> {
+/// Render-time fetcher that wraps App's pre-cached live-summary text.
+///
+/// App's tick handler (`process_live_summary_changes` / `read_live_summary_pipeline`)
+/// already performs mtime-based file reading with fallback to the last cached value
+/// on partial reads. This struct borrows that cached result at render time and
+/// extracts the short title, avoiding filesystem I/O on the render path.
+pub struct CachedSummaryFetcher<'a> {
     cached_text: &'a str,
     phase_fallback: &'a str,
 }
 
-impl<'a> MtimeCachedFetcher<'a> {
+impl<'a> CachedSummaryFetcher<'a> {
     pub fn new(cached_text: &'a str, phase_fallback: &'a str) -> Self {
         Self {
             cached_text,
@@ -101,7 +106,7 @@ impl<'a> MtimeCachedFetcher<'a> {
     }
 }
 
-impl LiveSummaryFetcher for MtimeCachedFetcher<'_> {
+impl LiveSummaryFetcher for CachedSummaryFetcher<'_> {
     fn fetch(&self) -> String {
         if self.cached_text.is_empty() {
             self.phase_fallback.to_string()
@@ -313,7 +318,7 @@ mod tests {
     fn running_message_fallback_when_empty() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let clock = TestClock::at(base);
-        let fetcher = MtimeCachedFetcher::new("", "Brainstorm");
+        let fetcher = CachedSummaryFetcher::new("", "Brainstorm");
         let marker = TranscriptLeafMarker::new();
 
         let line = format_running_transcript_leaf(marker, &clock, 0, &fetcher);

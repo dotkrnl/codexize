@@ -4650,74 +4650,50 @@ Idea:
 {idea}
 ---
 
-When the skill asks where to write the design doc, write it to {spec_path}.
+Operator IS available for design questions — interrogate them on ambiguities,
+scope, and trade-offs BEFORE drafting. The "stop and exit" rule below covers
+stage-transition asks only, not design clarifications.
 
-At the very TOP of the spec file, before anything else, include a short
-"TL;DR" section: 3–6 bullet points capturing the key decisions so a lazy
-reader can skim it in 30 seconds.
+Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
+  1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy
+     reader can skim in 30 sec), then the full spec.
+  2. {summary_path} — TOML with `title = "<≤80 chars naming the actual
+     change, e.g. 'Add Kimi adapter min-quota fallback'>"`. Avoid generic
+     labels ("Refactor", "New feature", "Update files in src/"). Required,
+     even when proposing one of the escape hatches below.
 
-Also write a session summary to {summary_path} as TOML:
-    title = "<short, specific phrase, ≤80 chars>"
-The orchestrator uses this as the session title in the picker. Title MUST
-name the actual change (e.g. "Add Kimi adapter min-quota fallback"), not a
-generic label like "Refactor" or "New feature". This file is required —
-emit it even when proposing skip-to-impl or nothing-to-do.
+Optional escape hatches (RARE — when in doubt, omit and let the normal
+spec-review → planning → sharding pipeline run):
 
-This is a spec-only phase: do NOT write or modify any code; the spec file is
-your only output. Implementation happens in a later phase.
+  • Skip-to-impl: write artifacts/skip_proposal.toml as TOML:
+        proposed  = true
+        status    = "skip_to_impl"
+        rationale = "<≤500 chars why>"
+    Hard gates (ALL must hold): one coherent change landable in a single
+    commit, small enough to review in one sitting, no new modules /
+    cross-cutting refactors / migrations / multi-file rewrites.
+    "Simple but long" tasks (mechanical edits across many files) DO NOT
+    qualify — sharding adds value via parallelisation. When skipping, keep
+    the spec concise (goal, edit sites, acceptance check).
 
-The brainstorming skill EXPECTS you to interrogate the operator about the
-design — ambiguities, trade-offs, scope, success criteria — BEFORE writing
-the spec. Do not skip that conversation just because an idea + codebase
-context feels sufficient; the operator is present specifically to shape the
-design with you. Ask clarifying questions until you genuinely understand
-what they want, then write the spec. The "stop and exit" rule below applies
-to stage-transition prompts only, NOT to design clarifications.
+  • Nothing-to-do: when there is genuinely nothing to implement (already in
+    place, invalid premise, pure question). Still required:
+      - {spec_path} — one short paragraph explaining why nothing is needed.
+      - artifacts/skip_proposal.toml as TOML:
+            proposed  = true
+            status    = "nothing_to_do"
+            rationale = "<≤500 chars why>"
 
-SKIP-TO-IMPLEMENTATION PROPOSAL (optional, RARE): after writing the spec, if
-the task is BOTH conceptually simple AND small in volume — so small that
-separate planning and sharding phases would add no value — you MAY write a
-skip proposal to `artifacts/skip_proposal.toml` ALONGSIDE the spec. Format:
-    proposed = true
-    status = "skip_to_impl"
-    rationale = "<=500 chars explaining why"
-Hard gates (ALL must hold to propose skip):
-  - One coherent change a coder can land in a single commit without
-    intermediate checkpoints — small enough that a reviewer can hold the
-    whole diff in their head.
-  - No new modules, no cross-cutting refactors, no migrations, no
-    coordinated multi-file rewrites.
-"Conceptually simple but long" tasks (many call sites to update, repetitive
-edits across many files, mechanical refactors touching several modules) DO
-NOT qualify — even when each individual edit is trivial, the volume means
-sharding adds value by letting work be parallelised and reviewed
-incrementally. Rule of thumb: if you'd want more than one commit, or the
-diff would be uncomfortably large to review in one sitting, do not skip. When in doubt, omit the file — the normal
-spec-review → planning → sharding pipeline is the default. If you emit
-`proposed = true`, the rationale MUST be a non-empty, <=500 character
-explanation the operator will read before accepting. When proposing the skip,
-keep the spec concise — just enough for a coder to implement directly (goal,
-edit sites, acceptance check); skip the long-form sections a planning phase
-would normally expand.
+Hard rules (override the skill where it conflicts):
+  - No `git add`/`commit`/`stash` or any version-control mutation — files
+    stay untracked; a later phase commits.
+  - Don't ask the operator whether to continue, proceed, or run follow-up
+    skills (including any "continue to next stage" inline prompt). When
+    your output files are written, STOP and exit; the orchestrator drives
+    stage transitions.
 
-NOTHING-TO-IMPLEMENT (optional): if there is genuinely nothing to do (already
-in place, invalid premise, pure question), skip the spec and write ONLY:
-    {{"proposed": true, "kind": "nothing_to_do", "rationale": "<=500 chars"}}
-The operator confirms and the session ends. Use sparingly.
-
-HARD rules — override anything the superpowers / brainstorming skill suggests:
-  - Do NOT `git add`, `git commit`, `git stash`, or touch version control. The
-    spec stays untracked; a later phase commits.
-  - Do NOT ask the operator whether to continue, proceed to planning, move on,
-    or run any follow-up skill — including any inline "continue to next stage"
-    prompt the skill may offer. When the spec is written, STOP and exit. The
-    orchestrator drives stage transitions. This is ONLY about stage
-    transitions — design clarifying questions are encouraged.
-
-The operator IS available — and expected — to answer clarifying questions
-ABOUT THE DESIGN itself, before and while you draft the spec. When you
-finish, end your final message with an explicit line asking the operator to
-enter `/exit` if they have no further comments.
+End your final message with a line asking the operator to enter `/exit` if
+they have no further comments.
 {instr}"#
     )
 }

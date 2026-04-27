@@ -1,0 +1,32 @@
+{
+  "claude-sonnet-4.6": {
+    "build": 0.753424,
+    "idea": 0.596111,
+    "planning": 0.621558,
+    "review": 0.696435
+  },
+  "gemini-2.5-pro": {
+    "build": 0.610733,
+    "idea": 0.493416,
+    "planning": 0.487924,
+    "review": 0.556909
+  },
+  "glm-4.6": {
+    "build": 0.19148,
+    "idea": 0.037364,
+    "planning": 0.048695,
+    "review": 0.149327
+  },
+  "glm-4.7": {
+    "build": 0.322735,
+    "idea": 0.128728,
+    "planning": 0.17357,
+    "review": 0.256669
+  },
+  "gpt-5.4": {
+    "build": 0.807161,
+    "idea": 0.663223,
+    "planning": 0.697069,
+    "review": 1.14439
+  }
+}

@@ -2286,12 +2286,16 @@ impl App {
                     .into_iter()
                     .collect::<std::collections::BTreeSet<_>>();
 
-                // Validate no collisions with completed task IDs.
+                // Enforce: every new task id must be strictly greater than the
+                // highest id ever seen (completed, started, or in any recovery
+                // snapshot). Prevents reuse of ids that carry historical state
+                // — not just the no-collision-with-completed weaker check.
+                let max_seen = self.state.builder.max_task_id();
                 for task in &parsed.tasks {
-                    if done_ids.contains(&task.id) {
+                    if task.id <= max_seen {
                         let reason = format!(
-                            "recovery sharding produced task id {} that collides with a completed task",
-                            task.id
+                            "recovery sharding produced task id {} but new ids must be > {} (max id ever seen)",
+                            task.id, max_seen
                         );
                         self.finalize_run_record(run.id, false, Some(reason.clone()));
                         self.state.agent_error = Some(reason);
@@ -2560,12 +2564,14 @@ impl App {
         let (model, vendor_kind, vendor) = chosen;
 
         let completed = self.state.builder.done_task_ids();
+        let id_floor = self.state.builder.max_task_id();
         let prompt = recovery_sharding_prompt(
             &spec_path,
             &plan_path,
             &live_summary_path,
             &tasks_path,
             &completed,
+            id_floor,
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -5032,6 +5038,7 @@ fn recovery_sharding_prompt(
     live_summary_path: &std::path::Path,
     tasks_output_path: &std::path::Path,
     completed_ids: &[u32],
+    id_floor: u32,
 ) -> String {
     let completed_str = if completed_ids.is_empty() {
         "none".to_string()
@@ -5042,30 +5049,63 @@ fn recovery_sharding_prompt(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let project_doc_instr = project_doc_instr();
+    let instr = live_summary_instruction(live_summary_path);
     format!(
-        r#"You are a non-interactive recovery sharding agent.
+        r#"{project_doc_instr}You are the recovery sharding agent. NON-INTERACTIVE — no operator,
+no source-code edits, no VCS, no test runs. A recovery cycle has completed
+and the recovered spec/plan have been approved. Regenerate the task list.
 
-A recovery cycle has completed and the recovered spec/plan has been approved.
-Now regenerate the task list.
+Heads up: your tasks.toml feeds coders and reviewers from DIFFERENT model
+vendors than you — bring care to the descriptions and refs.
 
 Inputs:
   - Spec: {spec}
   - Plan: {plan}
-  - Live summary: {live_summary}
 
-Completed task ids (DO NOT include these in output): {completed}
+Read any `## Recovery Notes` sections in spec/plan FIRST — they list
+superseded task ids and the reasons; don't re-create work that was
+deliberately removed.
 
-Rules:
-  - Regenerate active unfinished tasks from the recovered spec/plan.
-  - Assign new task ids that are strictly greater than all completed ids.
-  - Do NOT add completed task ids to pending work.
-  - Keep tasks atomic and independently reviewable.
+# IMPORTANT: completed task ids: {completed}.
+# Every new task id MUST be strictly greater than {id_floor}; the
+# orchestrator rejects ids ≤ {id_floor} (covers completed plus any id
+# ever attempted, even if not finished).
 
-Write `{output}` as a valid tasks.toml file."#,
+Sizing & scope (same as initial sharding):
+  - Target ~100k tokens of implementation effort per task; prefer ≤10
+    tasks; decompose only along natural seams.
+  - Each task self-contained: builds on its own (compiles / links /
+    type-checks). Explicit dependencies in descriptions if any.
+  - Coverage: every section of the recovered plan covered by at least
+    one task's spec/plan refs.
+
+Required fields per task: id / title (≤60 chars, imperative) / description
+(outcome-oriented, NOT a patch recipe) / test (concrete steps, OR
+`"not testable — <reason>"` for scaffolding) / estimated_tokens /
+spec_refs / plan_refs (`{{ path, lines }}`).
+
+Output: write {output} as TOML in this shape. No prose around it.
+Validated programmatically; missing/empty fields or ids ≤ {id_floor}
+cause rejection.
+
+    [[tasks]]
+    id = N                                      # N > {id_floor}
+    title = "Imperative summary"
+    description = """
+    Outcome-oriented description...
+    """
+    test = """
+    Concrete verification steps.
+    """
+    estimated_tokens = 90000
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-45" }}]
+    plan_refs = [{{ path = "artifacts/plan.md", lines = "22-60" }}]
+{instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),
-        live_summary = live_summary_path.display(),
         completed = completed_str,
+        id_floor = id_floor,
         output = tasks_output_path.display(),
     )
 }

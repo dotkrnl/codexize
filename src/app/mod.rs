@@ -4793,59 +4793,51 @@ fn sharding_prompt(
     let instr = live_summary_instruction(live_summary_path);
     let project_doc_instr = project_doc_instr();
     format!(
-        r#"{project_doc_instr}You split an approved plan into actionable, self-contained, buildable tasks.
-NON-INTERACTIVE — do NOT modify any code; your ONLY output is the tasks TOML.
+        r#"{project_doc_instr}You split an approved plan into actionable, self-contained, buildable
+tasks. NON-INTERACTIVE — no code edits, no VCS, no questions; your ONLY
+output is the tasks TOML.
 
 Inputs:
   Spec: {spec}
   Plan: {plan}
-Read both carefully before sharding.
 
 Sizing:
-  - Target ~100_000 tokens of implementation effort per task — small enough for
-    one coding session without context compaction, large enough to be meaningful.
-  - Decompose only when the plan warrants it. If the whole plan fits one ~100k
-    session, a single-task tasks.toml is correct — do NOT force artificial
-    splits. Bigger plans split along natural seams (subsystem / layer / phase).
-  - Each task must be self-contained: buildable on its own (compiles / links /
-    type-checks) by a single coding session. A task does NOT have to be
-    independently testable — scaffolding or groundwork tasks that only become
-    testable after a later task lands are allowed, AS LONG AS they still build
-    cleanly on their own.
-  - Unless a dependency is explicitly listed in a task's description, no task
-    may assume another task has shipped first.
+  - Target ~100_000 tokens of implementation effort per task — fits one
+    coding session without context compaction. Decompose only along natural
+    seams (subsystem / layer / phase); if the plan fits one ~100k session,
+    a single-task tasks.toml is correct. Prefer ≤10 tasks; exceed only when
+    the plan genuinely demands it.
+  - Each task self-contained: builds on its own (compiles / links /
+    type-checks). It does NOT have to be independently testable —
+    scaffolding/groundwork tasks that only become testable after a later
+    task lands are allowed, as long as they still build cleanly.
+  - Unless a dependency is explicitly listed in a task's description, no
+    task may assume another has shipped first.
+
+Coverage: every section of the plan must be covered by at least one task's
+spec/plan refs. Don't drop work; don't invent work outside the plan.
 
 Required fields per task:
   - id               sequential integer starting at 1
-  - title            very short summary (≤60 chars, imperative, no trailing
-                     period) — shown as the task label in the pipeline UI
-  - description      detailed what-to-do (multi-line TOML string allowed)
-  - test             concrete verification steps, OR the literal string
-                     "not testable" followed by a one-line reason (e.g.
-                     "not testable — scaffolding; verified by task 4's tests").
-                     Use "not testable" ONLY for genuine intermediate/
-                     scaffolding tasks. The reviewer honors this by skipping
-                     the test-pass check for such tasks, but still requires
-                     the code to build.
-  - estimated_tokens integer estimate (target ~100_000)
-  - spec_refs        array of {{ path, lines }} pointing into the spec
-  - plan_refs        array of {{ path, lines }} pointing into the plan
+  - title            ≤60 chars, imperative, no trailing period — shown as
+                     the pipeline-UI label
+  - description      outcome-oriented (multi-line TOML string allowed). NOT
+                     a patch recipe — the planner already established the
+                     shape; preserve it. Cover required outcomes, dependencies,
+                     acceptance checks, and interfaces/touchpoints.
+  - test             concrete verification steps, OR `"not testable —
+                     <one-line reason>"` for scaffolding tasks (reviewer
+                     skips test-pass check, still requires the build to be
+                     clean).
+  - estimated_tokens integer (target ~100k)
+  - spec_refs        array of {{ path, lines }} into the spec
+  - plan_refs        array of {{ path, lines }} into the plan, pointing at
+                     goals/sequencing/interface commitments — not at
+                     recipe-style detail
   `lines` is a range like "12-45" or a single number.
 
-Description rules — outcome- and coordination-oriented:
-  - SHOULD focus on required outcomes, dependencies/ordering, acceptance checks,
-    and relevant interfaces/touchpoints (file/module touchpoints only as
-    orientation).
-  - MUST NOT be recipe-style: no step-by-step coding instructions; no miniature
-    edit scripts or pseudo-patch sequences; no mandated internal design or
-    helper/function decomposition unless required by the spec or an explicit
-    interface commitment needed for coordination.
-  - `plan_refs` MUST point to plan content about goals, sequencing,
-    dependencies, or interface commitments — not primarily to recipe-like
-    implementation instructions.
-
-Output: write the TOML to {tasks} in EXACTLY this shape (double-quoted strings;
-triple-quoted for multi-line; arrays of inline tables for refs):
+Output: write {tasks} as TOML. No prose around it. Validated programmatically;
+missing/empty fields cause rejection.
 
     [[tasks]]
     id = 1
@@ -4857,20 +4849,11 @@ triple-quoted for multi-line; arrays of inline tables for refs):
     Run `cargo test pool::` — the new tests must pass.
     """
     estimated_tokens = 90000
-    spec_refs = [
-      {{ path = "artifacts/spec.md", lines = "10-45" }},
-    ]
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-45" }}]
     plan_refs = [
       {{ path = "artifacts/plan.md", lines = "22-60" }},
       {{ path = "artifacts/plan.md", lines = "110-125" }},
     ]
-
-    [[tasks]]
-    id = 2
-    …
-
-The file is validated programmatically — missing or empty fields cause
-rejection. Do NOT emit any prose around the TOML.
 {instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),

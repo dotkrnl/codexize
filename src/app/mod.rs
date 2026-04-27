@@ -172,16 +172,10 @@ pub struct App {
 
 fn default_expansion(
     row: &VisibleNodeRow,
-    current_node: usize,
-    active_keys: &BTreeSet<NodeKey>,
+    _current_node: usize,
+    _active_keys: &BTreeSet<NodeKey>,
 ) -> bool {
-    if !row.is_expandable() {
-        return false;
-    }
-    if row.depth == 0 {
-        return row.path.first().copied() == Some(current_node);
-    }
-    active_keys.contains(&row.key)
+    row.is_expandable()
 }
 
 fn effective_expansion(
@@ -5750,15 +5744,15 @@ mod tests {
         let bs_idx = row_index(&app, "Brainstorm");
         let bs_key = app.visible_rows[bs_idx].key.clone();
         app.selected = bs_idx;
-        assert!(!app.is_expanded(bs_idx));
-        app.toggle_expand_focused();
         assert!(app.is_expanded(bs_idx));
+        app.toggle_expand_focused();
+        assert!(!app.is_expanded(bs_idx));
         assert_eq!(
             app.collapsed_overrides.get(&bs_key),
-            Some(&ExpansionOverride::Expanded)
+            Some(&ExpansionOverride::Collapsed)
         );
         app.toggle_expand_focused();
-        assert!(!app.is_expanded(bs_idx));
+        assert!(app.is_expanded(bs_idx));
         assert!(!app.collapsed_overrides.contains_key(&bs_key));
     }
 
@@ -6024,7 +6018,7 @@ mod tests {
         ));
 
         assert_eq!(app.collapsed_overrides, before);
-        assert!(!app.is_expanded(brainstorm_idx));
+        assert!(app.is_expanded(brainstorm_idx));
     }
 
     #[test]
@@ -6115,9 +6109,6 @@ mod tests {
         let round_one_idx = row_index(&app, "Round 1");
         app.selected = round_one_idx;
 
-        app.toggle_expand_focused();
-
-        let round_one_idx = row_index(&app, "Round 1");
         assert!(app.is_expanded_body(round_one_idx));
         assert_eq!(
             app.visible_rows[round_one_idx].backing_leaf_run_id,
@@ -6154,9 +6145,6 @@ mod tests {
             });
         }
         let mut app = mk_app(state);
-        let coder_idx = row_index(&app, "Coder");
-        app.selected = coder_idx;
-        app.toggle_expand_focused();
         let attempt_rows = app
             .visible_rows
             .iter()
@@ -6174,7 +6162,7 @@ mod tests {
 
         assert_eq!(
             app.collapsed_overrides.get(&attempt_rows[0].1),
-            Some(&ExpansionOverride::Expanded)
+            Some(&ExpansionOverride::Collapsed)
         );
         assert!(!app.collapsed_overrides.contains_key(&attempt_rows[1].1));
     }

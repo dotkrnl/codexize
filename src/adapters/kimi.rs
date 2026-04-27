@@ -23,10 +23,7 @@ impl AgentAdapter for KimiAdapter {
         // then exec kimi in interactive mode.
         // The readiness glyphs are based on Kimi's current TUI prompt; if they
         // change, the bounded loop still falls back to pasting after timeout.
-        let thinking_flag = match effort {
-            EffortLevel::Normal => "--no-thinking",
-            EffortLevel::Tough => "--thinking",
-        };
+        let _ = effort;
         format!(
             concat!(
                 r#"(sleep {initial_delay}; for i in $(seq 1 {max_polls}); do "#,
@@ -35,13 +32,12 @@ impl AgentAdapter for KimiAdapter {
                 r#"done && sleep {settle_delay} && "#,
                 r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
                 r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE" && "#,
-                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo {thinking_flag}"#,
+                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo --thinking"#,
             ),
             max_polls = KIMI_READY_MAX_POLLS,
             poll_interval = KIMI_READY_POLL_INTERVAL,
             initial_delay = KIMI_READY_INITIAL_DELAY,
             settle_delay = KIMI_READY_SETTLE_DELAY,
-            thinking_flag = thinking_flag,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
@@ -54,13 +50,10 @@ impl AgentAdapter for KimiAdapter {
     ) -> String {
         // `-p` is one-shot and renders its own nicely formatted output — more
         // readable than --print stream-json piped through jq, so use it.
-        let thinking_flag = match effort {
-            EffortLevel::Normal => "--no-thinking",
-            EffortLevel::Tough => "--thinking",
-        };
+        // Kimi without --thinking produces low-quality output, so always enable it.
+        let _ = effort;
         format!(
-            r#"kimi --yolo {thinking_flag} -p "$(cat {prompt_path})""#,
-            thinking_flag = thinking_flag,
+            r#"kimi --yolo --thinking -p "$(cat {prompt_path})""#,
             prompt_path = super::shell_escape(prompt_path),
         )
     }
@@ -118,24 +111,26 @@ mod tests {
     }
 
     #[test]
-    fn noninteractive_command_emits_thinking_flag() {
+    fn noninteractive_command_always_enables_thinking() {
         let adapter = KimiAdapter;
         let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
 
         assert_eq!(
             cmd,
-            r#"kimi --yolo --no-thinking -p "$(cat /tmp/prompt.txt)""#,
+            r#"kimi --yolo --thinking -p "$(cat /tmp/prompt.txt)""#,
         );
     }
 
     #[test]
-    fn commands_emit_thinking_flag_for_effort() {
+    fn commands_always_enable_thinking_regardless_of_effort() {
         let adapter = KimiAdapter;
 
         let normal = adapter.interactive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
         let tough = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Tough);
 
-        assert!(normal.contains("exec kimi --yolo --no-thinking"));
+        assert!(normal.contains("exec kimi --yolo --thinking"));
+        assert!(!normal.contains("--no-thinking"));
         assert!(tough.contains("kimi --yolo --thinking"));
+        assert!(!tough.contains("--no-thinking"));
     }
 }

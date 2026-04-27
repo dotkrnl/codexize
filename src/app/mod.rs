@@ -4476,8 +4476,20 @@ fn write_review_scope_artifact(
 }
 
 /// Prepended to every agent prompt. Surfaces project-specific guidance
-/// (CLAUDE.md / AGENTS.md) before the agent acts.
-const PROJECT_DOC_INSTR: &str = "If CLAUDE.md or AGENTS.md exist in the repo, read it first and follow those directions carefully.\n\n";
+/// (CLAUDE.md / AGENTS.md) before the agent acts. Returns an empty string
+/// if neither file is present in the cwd, to avoid wasting prompt context
+/// directing the agent to read files that don't exist.
+fn project_doc_instr() -> String {
+    let claude = std::path::Path::new("CLAUDE.md").exists();
+    let agents = std::path::Path::new("AGENTS.md").exists();
+    let docs = match (claude, agents) {
+        (true, true) => "CLAUDE.md and AGENTS.md",
+        (true, false) => "CLAUDE.md",
+        (false, true) => "AGENTS.md",
+        (false, false) => return String::new(),
+    };
+    format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
+}
 
 fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
@@ -4498,8 +4510,9 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
 
 fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &str) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
+        r#"{project_doc_instr}You review a spec. NON-INTERACTIVE — no clarifying questions; judge from the
 spec alone. Do NOT modify code; write ONLY the review file.
 
 Spec:   {spec_path}
@@ -4520,8 +4533,9 @@ fn plan_review_prompt(
     live_summary_path: &str,
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
+        r#"{project_doc_instr}You review an implementation plan. NON-INTERACTIVE — no clarifying questions.
 
 Inputs:
   Plan: {plan_path}
@@ -4558,8 +4572,9 @@ control; do NOT ask the operator.
 
 fn brainstorm_prompt(idea: &str, spec_path: &str, live_summary_path: &str) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}Invoke your brainstorming skill now.
+        r#"{project_doc_instr}Invoke your brainstorming skill now.
 
 Idea:
 ---
@@ -4628,8 +4643,9 @@ fn planning_prompt(
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}Invoke your superpowers:writing-plans skill now.
+        r#"{project_doc_instr}Invoke your superpowers:writing-plans skill now.
 
 You are turning an approved spec + any spec reviews into an implementation plan.
 
@@ -4698,8 +4714,9 @@ fn sharding_prompt(
     live_summary_path: &std::path::Path,
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}You split an approved plan into actionable, self-contained, buildable tasks.
+        r#"{project_doc_instr}You split an approved plan into actionable, self-contained, buildable tasks.
 NON-INTERACTIVE — do NOT modify any code; your ONLY output is the tasks TOML.
 
 Inputs:
@@ -4821,9 +4838,10 @@ fn recovery_prompt(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let project_doc_instr = project_doc_instr();
     if interactive {
         format!(
-            r#"{PROJECT_DOC_INSTR}You are the builder recovery agent. INTERACTIVE — the operator is present.
+            r#"{project_doc_instr}You are the builder recovery agent. INTERACTIVE — the operator is present.
 
 Human judgment is required to resolve this recovery. You MUST discuss the proposed
 changes with the operator and get explicit confirmation before updating spec or plan.
@@ -4866,7 +4884,7 @@ Hard requirements:
         )
     } else {
         format!(
-            r#"{PROJECT_DOC_INSTR}You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
+            r#"{project_doc_instr}You are the builder recovery agent. NON-INTERACTIVE — no operator questions.
 
 Your job is to repair builder artifacts so orchestration can reconcile and resume.
 You may edit ONLY:
@@ -5078,8 +5096,9 @@ fn coder_prompt(
         ""
     };
     let instr = live_summary_instruction(live_summary_path);
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
+        r#"{project_doc_instr}You are the coder for task {task_id}, round {round}. NON-INTERACTIVE — the
 operator is NOT available. Make your own judgement calls, document them in the
 commit message, and leave a line comment for the reviewer on anything genuinely
 ambiguous.
@@ -5230,8 +5249,9 @@ fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let coder_summary_note = coder_summary_note
         .map(|note| format!("  Canonical dirty-state note: {note}\n"))
         .unwrap_or_default();
+    let project_doc_instr = project_doc_instr();
     format!(
-        r#"{PROJECT_DOC_INSTR}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
+        r#"{project_doc_instr}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
 operator. Do NOT modify code. Write ONLY the review TOML.
 
 Inputs:

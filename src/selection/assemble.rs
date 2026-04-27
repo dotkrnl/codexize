@@ -1,4 +1,5 @@
 use super::quota;
+use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, QuotaError, VendorKind};
 use super::vendor;
 use crate::cache::{self, DashboardEntry, LoadedCache, QuotaPayload};
@@ -193,6 +194,12 @@ fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError
         canonical.name = "kimi-latest".to_string();
         models.retain(|m| m.vendor != VendorKind::Kimi);
         models.push(canonical);
+    }
+
+    // Stamp fallback:overall provenance for zero-as-missing and truly-missing
+    // axes, and emit selection.zero_as_missing counters.
+    for model in &mut models {
+        stamp_selection_provenance(model);
     }
 
     (models, quota_errors)

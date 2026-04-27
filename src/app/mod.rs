@@ -5063,6 +5063,11 @@ fn recovery_prompt(
     } else {
         "  - Keep changes minimal and deterministic — no operator to consult.\n"
     };
+    let exit_instruction = if interactive {
+        "\n\nEnd your final message with a line asking the operator to enter `/exit` if\nthey have no further comments."
+    } else {
+        ""
+    };
     format!(
         r#"{project_doc_instr}You are the builder recovery agent. {mode_label} — no source-code
 edits, no VCS mutations.
@@ -5106,7 +5111,7 @@ Hard requirements:
         feedback      = ["one item per remediation step (optional)"]
         changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
                                                         # paths you actually edited (audit trail)
-{instr}"#,
+{exit_instruction}{instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),
         tasks = tasks_path.display(),
@@ -5115,6 +5120,7 @@ Hard requirements:
         trigger_summary = trigger_summary,
         completed = completed,
         started = started,
+        exit_instruction = exit_instruction,
         instr = instr,
     )
 }
@@ -8674,6 +8680,10 @@ estimated_tokens = 1
             prompt.contains("wait for explicit\n    confirmation"),
             "human_blocked prompt must require operator confirmation"
         );
+        assert!(
+            prompt.contains("`/exit`"),
+            "interactive recovery prompt must ask the operator to enter /exit"
+        );
     }
 
     #[test]
@@ -8698,6 +8708,10 @@ estimated_tokens = 1
         assert!(
             !prompt.contains("INTERACTIVE — the operator"),
             "agent_pivot prompt must not be marked INTERACTIVE"
+        );
+        assert!(
+            !prompt.contains("`/exit`"),
+            "non-interactive recovery prompt must not include /exit instruction"
         );
     }
 

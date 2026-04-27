@@ -4720,58 +4720,48 @@ fn planning_prompt(
     format!(
         r#"{project_doc_instr}Invoke your superpowers:writing-plans skill now.
 
-You are turning an approved spec + any spec reviews into an implementation plan.
+Turn the approved spec + spec reviews into an implementation plan.
 
 Inputs:
   Spec:    {spec}
   Reviews:
 {reviews}
 
-Triage reviews first: they may contradict each other. Decide what to incorporate,
-what to reject, and why. If a trade-off is real and you cannot confidently make
-it alone, ASK the operator — this is interactive.
-Reviews are written by AI agents. Be skeptical — accept feedback only when it
-genuinely improves the spec or plan. Reject the rest with a brief reason.
+Triage reviews first. They may contradict each other AND are written by AI
+agents — be skeptical, accept only what genuinely improves the spec or plan,
+reject the rest with a brief reason. If a real trade-off exceeds your
+confidence, ASK the operator (this is interactive).
 
-Once every trade-off is resolved, do TWO things IN THIS ORDER:
-  1. UPDATE the spec in place at {spec} so it reflects accepted feedback and
-     every decision you just made. Another agent reading ONLY the spec must not
-     be surprised by anything in the plan.
-  2. Write the plan to {plan}. At the very TOP of the plan, before anything
-     else, include a short "TL;DR" section: 3–6 bullet points summarising the
-     key sequencing/interface decisions so a lazy reader can skim it in 30
-     seconds.
+Once trade-offs are resolved, do TWO things IN THIS ORDER:
+  1. UPDATE {spec} in place to reflect every accepted decision. If you change
+     the body, also update its TL;DR so the two stay consistent — an agent
+     reading ONLY the spec must not be surprised by anything in the plan.
+  2. Write {plan} starting with a TL;DR (3–6 bullets summarising key
+     sequencing/interface decisions, skimmable in 30 sec), then the body.
 
-Hard rules — override anything the writing-plans skill suggests:
-  - Do NOT write or modify any code (source, configs, build scripts). You may
-    only edit the spec and write the plan.
-  - Do NOT `git add`, `git commit`, `git stash`, or touch version control; both
-    files stay untracked (a later phase commits). Refuse if the skill offers to
-    commit. Do NOT offer to run tests, commit, or push.
-  - The plan MUST be an execution map for coordination. It SHOULD include:
-      sequencing and dependencies (what order matters, and why); interfaces,
-      integration points, and execution seams that must be honored; constraints
-      from the spec that narrow the correct solution space; optional likely
-      file/module touchpoints ONLY as orientation.
-  - The plan MUST NOT read like a pseudo-implementation or patch recipe: no
-      checkbox to-do lists or step-by-step coding instructions; no helper/
-      function decomposition or function-by-function edit sequences; no patch-
-      like ordering, "change this line then that line", or mini diffs; no
-      mandated internal code shape (struct fields, method signatures, class
-      layout) unless required by the spec or an explicit interface commitment
-      needed for coordination.
-  - Authority rule: the spec is the design contract and wins any conflict; the
-      plan is advisory for implementation shape; the plan is authoritative ONLY
-      for sequencing and explicit interface commitments it names. Do not turn
-      advisory detail into an implementation contract.
-  - Do NOT ask the operator whether to continue, proceed, start implementing,
-      jump to coding, run the next skill, or skip any downstream stage. When
-      the plan is written, STOP and exit — the orchestrator drives stage
-      transitions.
+Plan shape: an execution map for coordination — sequencing & dependencies
+(what order matters and why), interfaces / integration points / execution
+seams to honor, spec constraints that narrow the solution space, and (only
+as orientation) likely file/module touchpoints. Do NOT write a patch recipe:
+no checkbox to-dos, no function-by-function edit sequences, no "change line
+X then Y", no mandated code shape (struct fields, method signatures, class
+layout) unless the spec or an explicit interface commitment requires it.
 
-The operator IS available for clarifying questions about the design itself.
-When you finish, end your final message with an explicit line asking the
-operator to enter `/exit` if they have no further comments.
+Authority: spec is the design contract and wins any conflict; the plan is
+authoritative ONLY for sequencing and the explicit interfaces it names —
+everything else in the plan is advisory. Don't promote advisory detail into
+an implementation contract.
+
+Hard rules (override the skill where it conflicts):
+  - No code/config/build-script edits, no `git add`/`commit`/`stash`, no test
+    runs. You may only edit the spec and write the plan; both files stay
+    untracked. Refuse if the skill offers to commit, push, or test.
+  - Don't ask whether to continue, proceed, or run follow-up skills — when
+    both files are written, STOP and exit. The orchestrator drives stage
+    transitions.
+
+End your final message with a line asking the operator to enter `/exit` if
+they have no further comments.
 {instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,
@@ -9544,10 +9534,10 @@ dirty_after = false
             let prompt =
                 planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary);
 
-            assert!(prompt.contains("Reviews are written by AI agents."));
-            assert!(prompt.contains("Be skeptical — accept feedback only when it"));
-            assert!(prompt.contains("genuinely improves the spec or plan."));
-            assert!(prompt.contains("Reject the rest with a brief reason."));
+            assert!(prompt.contains("written by AI"));
+            assert!(prompt.contains("be skeptical"));
+            assert!(prompt.contains("genuinely improves the spec or plan"));
+            assert!(prompt.contains("reject the rest with a brief reason"));
         });
     }
 

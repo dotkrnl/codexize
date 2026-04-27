@@ -1,5 +1,12 @@
-//! Responsive models area: full-table or compact-quota line, chosen by
-//! `height_budget` with hysteresis. Pure render given prev-mode.
+//! Responsive models area: full-table, compact-quota, or omitted, chosen
+//! from the terminal height with hysteresis. Pure render given prev-mode.
+//!
+//! The renderer is the source of truth for the spec's mode-selection rule:
+//! callers pass the terminal height and the renderer derives
+//! `models_budget = term_h - 11` (1 each for top rule, bottom rule, keymap;
+//! 8 for pipeline body floor — see spec §"Mode-selection rule"). Keeping the
+//! `- 11` here means a single change site if the chrome reservation ever
+//! shifts.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -26,30 +33,41 @@ pub enum ModelsAreaMode {
     CompactQuota,
 }
 
+/// Lines reserved by surrounding chrome before the models area:
+/// top rule (1) + bottom rule (1) + keymap (1) + pipeline body floor (8).
+/// `models_budget = term_h - CHROME_RESERVED_LINES`.
+pub const CHROME_RESERVED_LINES: u16 = 11;
+
 /// Pure renderer.
 ///
-/// Returns the rendered lines (possibly empty when the budget is 0 or no
+/// `term_h` is the full terminal height; the renderer derives
+/// `models_budget = term_h - 11` itself. Returns the rendered lines (empty
+/// when the budget is below 1 line, the terminal is too narrow, or no
 /// models are visible) plus the chosen mode. The mode must be persisted by
 /// the caller and passed back as `prev_mode` next frame to honor the
-/// hysteresis described in the spec.
+/// hysteresis described in the spec: full→compact at the strict
+/// `models_budget < visible_count` threshold, compact→full only when
+/// `models_budget >= visible_count + 1`.
 pub fn responsive_models_area(
     models: &[CachedModel],
     versions: &VersionIndex,
     quota_errors: &[QuotaError],
     width: u16,
-    height_budget: u16,
+    term_h: u16,
     prev_mode: ModelsAreaMode,
 ) -> (Vec<Line<'static>>, ModelsAreaMode) {
     let visible = visible_models(models, versions);
     let visible_count = visible.len() as u16;
+    let models_budget = term_h.saturating_sub(CHROME_RESERVED_LINES);
 
-    if visible_count == 0 || height_budget == 0 || width == 0 {
-        // Nothing to draw. Preserve prev_mode so a transient zero budget
-        // does not reset the hysteresis state.
+    // Spec §"Mode-selection rule": "If even 1 line is unavailable, omit the
+    // models region entirely". Preserve prev_mode so a transient small
+    // terminal does not reset the hysteresis state when it grows back.
+    if visible_count == 0 || width == 0 || models_budget == 0 {
         return (Vec::new(), prev_mode);
     }
 
-    let mode = choose_mode(visible_count, height_budget, prev_mode);
+    let mode = choose_mode(visible_count, models_budget, prev_mode);
 
     let lines = match mode {
         ModelsAreaMode::FullTable => render_full_table(models, versions, quota_errors, width),
@@ -61,13 +79,13 @@ pub fn responsive_models_area(
 
 fn choose_mode(
     visible_count: u16,
-    height_budget: u16,
+    models_budget: u16,
     prev_mode: ModelsAreaMode,
 ) -> ModelsAreaMode {
     match prev_mode {
         ModelsAreaMode::FullTable => {
             // Full → Compact uses the strict threshold.
-            if height_budget >= visible_count {
+            if models_budget >= visible_count {
                 ModelsAreaMode::FullTable
             } else {
                 ModelsAreaMode::CompactQuota
@@ -75,7 +93,7 @@ fn choose_mode(
         }
         ModelsAreaMode::CompactQuota => {
             // Compact → Full requires +1 to absorb single-row resize jitter.
-            if height_budget >= visible_count.saturating_add(1) {
+            if models_budget >= visible_count.saturating_add(1) {
                 ModelsAreaMode::FullTable
             } else {
                 ModelsAreaMode::CompactQuota
@@ -700,34 +718,51 @@ mod tests {
             .unwrap_or_default()
     }
 
+    /// Convert a desired models budget (lines available *for the area*) to a
+    /// terminal height the renderer accepts. Mirrors `term_h - 11` in the
+    /// renderer so tests read in the same units the spec uses.
+    fn term_h_for_budget(budget: u16) -> u16 {
+        budget + CHROME_RESERVED_LINES
+    }
+
     // ----- mode-selection / hysteresis -----
 
     #[test]
     fn empty_models_returns_empty_lines() {
         let models: Vec<CachedModel> = Vec::new();
         let versions = build_version_index(&models);
-        let (lines, mode) =
-            responsive_models_area(&models, &versions, &[], 120, 20, ModelsAreaMode::FullTable);
-        assert!(lines.is_empty());
-        assert_eq!(mode, ModelsAreaMode::FullTable);
-    }
-
-    #[test]
-    fn zero_height_budget_returns_empty_preserving_prev_mode() {
-        let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
-        let versions = build_version_index(&models);
-
         let (lines, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            0,
-            ModelsAreaMode::CompactQuota,
+            term_h_for_budget(20),
+            ModelsAreaMode::FullTable,
         );
         assert!(lines.is_empty());
-        // Preserved (no flicker on transient zero budget).
-        assert_eq!(mode, ModelsAreaMode::CompactQuota);
+        assert_eq!(mode, ModelsAreaMode::FullTable);
+    }
+
+    #[test]
+    fn term_h_below_floor_returns_empty_preserving_prev_mode() {
+        // term_h <= CHROME_RESERVED_LINES → models_budget == 0 → omit area.
+        let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+        let versions = build_version_index(&models);
+
+        for term_h in [0u16, 5, CHROME_RESERVED_LINES] {
+            let (lines, mode) = responsive_models_area(
+                &models,
+                &versions,
+                &[],
+                120,
+                term_h,
+                ModelsAreaMode::CompactQuota,
+            );
+            assert!(lines.is_empty(), "term_h={term_h}");
+            // Preserved across transient small terminals so the area does not
+            // flicker mode when the terminal grows back.
+            assert_eq!(mode, ModelsAreaMode::CompactQuota, "term_h={term_h}");
+        }
     }
 
     #[test]
@@ -742,24 +777,24 @@ mod tests {
         // promotes the best-score representative when phases miss).
         let visible_count = visible_models(&models, &versions).len() as u16;
 
-        // Strict: budget == count keeps full
+        // Strict: models_budget == count keeps full.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            visible_count,
+            term_h_for_budget(visible_count),
             ModelsAreaMode::FullTable,
         );
         assert_eq!(mode, ModelsAreaMode::FullTable);
 
-        // Strict: budget == count - 1 falls to compact
+        // Strict: models_budget == count - 1 falls to compact.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            visible_count - 1,
+            term_h_for_budget(visible_count - 1),
             ModelsAreaMode::FullTable,
         );
         assert_eq!(mode, ModelsAreaMode::CompactQuota);
@@ -775,24 +810,24 @@ mod tests {
         let versions = build_version_index(&models);
         let visible_count = visible_models(&models, &versions).len() as u16;
 
-        // From compact, budget == count is NOT enough (hysteresis +1).
+        // From compact, models_budget == count is NOT enough (hysteresis +1).
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            visible_count,
+            term_h_for_budget(visible_count),
             ModelsAreaMode::CompactQuota,
         );
         assert_eq!(mode, ModelsAreaMode::CompactQuota);
 
-        // budget == count + 1 unlocks the switch back.
+        // models_budget == count + 1 unlocks the switch back.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            visible_count + 1,
+            term_h_for_budget(visible_count + 1),
             ModelsAreaMode::CompactQuota,
         );
         assert_eq!(mode, ModelsAreaMode::FullTable);
@@ -809,30 +844,28 @@ mod tests {
         ];
         let versions = build_version_index(&models);
         let visible_count = visible_models(&models, &versions).len() as u16;
+        let term_at = term_h_for_budget(visible_count);
+        let term_below = term_h_for_budget(visible_count - 1);
 
-        // Start on the strict boundary in full mode. Oscillate: count, count-1,
-        // count, count-1, ... With strict full→compact, the first frame at
-        // count keeps full, the second at count-1 drops to compact. From there
-        // the +1 hysteresis means we need count+1 to flip back; oscillation
-        // between count and count-1 stays *compact* (no flicker), even though
-        // the budget keeps crossing the strict threshold.
+        // Start on the strict boundary in full mode. With strict
+        // full→compact, the first frame at term_at keeps full and the
+        // second at term_below drops to compact. From compact the +1
+        // hysteresis means count alone never flips us back; oscillating
+        // between term_at and term_below stays *compact* every frame.
         let mut mode = ModelsAreaMode::FullTable;
 
         // Frame 1: budget == count, prev=full → stays full.
-        let (_, m) = responsive_models_area(&models, &versions, &[], 120, visible_count, mode);
+        let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_at, mode);
         assert_eq!(m, ModelsAreaMode::FullTable);
         mode = m;
 
         // Frame 2: budget == count - 1, prev=full → strict drops to compact.
-        let (_, m) = responsive_models_area(&models, &versions, &[], 120, visible_count - 1, mode);
+        let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_below, mode);
         assert_eq!(m, ModelsAreaMode::CompactQuota);
         mode = m;
 
-        // Now the oscillation: count, count-1, count, count-1, ... Once we
-        // are in compact, +1 hysteresis means count alone never flips us
-        // back. Run several cycles to prove there is no per-frame flicker.
         for _ in 0..6 {
-            let (_, m) = responsive_models_area(&models, &versions, &[], 120, visible_count, mode);
+            let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_at, mode);
             assert_eq!(
                 m,
                 ModelsAreaMode::CompactQuota,
@@ -840,11 +873,41 @@ mod tests {
             );
             mode = m;
 
-            let (_, m) =
-                responsive_models_area(&models, &versions, &[], 120, visible_count - 1, mode);
+            let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_below, mode);
             assert_eq!(m, ModelsAreaMode::CompactQuota);
             mode = m;
         }
+    }
+
+    #[test]
+    fn omit_then_grow_preserves_compact_state() {
+        // Omit must not flip the hysteresis state — when the terminal grows
+        // back, prev_mode applies as if the omit never happened.
+        let models = vec![
+            model_with_axis_score("gpt-a", 1.0, 0),
+            model_with_axis_score("gpt-b", 1.0, 1),
+            model_with_axis_score("gpt-c", 1.0, 2),
+        ];
+        let versions = build_version_index(&models);
+        let visible_count = visible_models(&models, &versions).len() as u16;
+
+        let mut mode = ModelsAreaMode::CompactQuota;
+        let (_, m) = responsive_models_area(&models, &versions, &[], 120, /*omit*/ 8, mode);
+        assert_eq!(m, ModelsAreaMode::CompactQuota, "omit preserves prev_mode");
+        mode = m;
+
+        // Grow back exactly to visible_count budget — still inside the +1
+        // hysteresis band, so we stay compact even though the strict
+        // threshold technically allows full.
+        let (_, m) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(visible_count),
+            mode,
+        );
+        assert_eq!(m, ModelsAreaMode::CompactQuota);
     }
 
     #[test]
@@ -863,8 +926,14 @@ mod tests {
         let versions = build_version_index(&models);
 
         // Width 90 → tier 1 (full IPBR).
-        let (lines, mode) =
-            responsive_models_area(&models, &versions, &[], 90, 10, ModelsAreaMode::FullTable);
+        let (lines, mode) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            90,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         assert_eq!(mode, ModelsAreaMode::FullTable);
 
         // Render to a buffer so we can inspect cell modifiers.
@@ -902,8 +971,14 @@ mod tests {
 
         // Width 50 → tier 3 (no probabilities, 2-letter vendor) with a tight
         // name budget so the full name cannot fit.
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 50, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            50,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 50);
 
         assert!(
@@ -928,8 +1003,14 @@ mod tests {
         )];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 50, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            50,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 50);
 
         assert!(
@@ -946,8 +1027,14 @@ mod tests {
         let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 80, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            80,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 80);
 
         // All four phase letters must appear at width 80.
@@ -965,8 +1052,14 @@ mod tests {
         ];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 70, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            70,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
 
         // The full IPBR string would not fit; the top-rank cell does.
         // Each row should contain exactly ONE phase-letter cell (Lxx where
@@ -1007,8 +1100,14 @@ mod tests {
         let models = vec![model];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 48, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            48,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 48);
 
         assert!(
@@ -1026,8 +1125,14 @@ mod tests {
         let models = vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 120, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 120);
 
         assert!(
@@ -1050,8 +1155,14 @@ mod tests {
         )];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 120, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 120);
 
         assert!(
@@ -1071,8 +1182,14 @@ mod tests {
         let models = vec![model];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 120, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let row = full_buffer_line(&lines, 0, 120);
 
         assert!(
@@ -1091,8 +1208,14 @@ mod tests {
         let models = vec![model];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 200, 10, ModelsAreaMode::FullTable);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            200,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
         let combined = render_to_text(&lines, 200).join("\n");
 
         assert!(
@@ -1165,7 +1288,7 @@ mod tests {
             &versions,
             &[],
             120,
-            1,
+            term_h_for_budget(1),
             ModelsAreaMode::CompactQuota,
         );
         assert_eq!(mode, ModelsAreaMode::CompactQuota);
@@ -1188,8 +1311,14 @@ mod tests {
         ];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 50, 1, ModelsAreaMode::CompactQuota);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            50,
+            term_h_for_budget(1),
+            ModelsAreaMode::CompactQuota,
+        );
         let row = full_buffer_line(&lines, 0, 50);
         assert!(row.contains("ki"), "2-letter kimi: {row:?}");
         assert!(row.contains("cl"), "2-letter claude: {row:?}");
@@ -1206,8 +1335,14 @@ mod tests {
         )];
         let versions = build_version_index(&models);
 
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 30, 1, ModelsAreaMode::CompactQuota);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            30,
+            term_h_for_budget(1),
+            ModelsAreaMode::CompactQuota,
+        );
         assert!(lines.is_empty(), "compact line must omit below 40 cols");
     }
 
@@ -1230,7 +1365,7 @@ mod tests {
             &versions,
             &errors,
             120,
-            1,
+            term_h_for_budget(1),
             ModelsAreaMode::CompactQuota,
         );
 
@@ -1268,7 +1403,7 @@ mod tests {
             &versions,
             &errors,
             120,
-            10,
+            term_h_for_budget(10),
             ModelsAreaMode::FullTable,
         );
 
@@ -1314,14 +1449,14 @@ mod tests {
         let visible_count = visible_models(&models, &versions).len() as u16;
 
         for &width in &[200u16, 120, 100, 80, 60, 40, 30] {
-            // Height budget always covers visible_count so we exercise
-            // full-mode width tiers across the matrix.
+            // Height always covers visible_count so we exercise full-mode
+            // width tiers across the matrix.
             let (lines, mode) = responsive_models_area(
                 &models,
                 &versions,
                 &[],
                 width,
-                visible_count,
+                term_h_for_budget(visible_count),
                 ModelsAreaMode::FullTable,
             );
             assert_eq!(mode, ModelsAreaMode::FullTable, "width {width}: mode");
@@ -1343,31 +1478,117 @@ mod tests {
 
     #[test]
     fn snapshot_matrix_heights_drives_mode() {
+        // Task: snapshot tests at heights 30, 20, 15, 12, 10 (terminal
+        // heights, not pre-computed budgets). With CHROME_RESERVED_LINES = 11
+        // and visible_count = 4 these map to:
+        //   term_h=30 → budget=19 → full
+        //   term_h=20 → budget= 9 → full
+        //   term_h=15 → budget= 4 → full (strict boundary, prev=full holds)
+        //   term_h=12 → budget= 1 → compact (1 < 4)
+        //   term_h=10 → budget= 0 → omit (preserves prev_mode)
+        let models = snapshot_models();
+        let versions = build_version_index(&models);
+        let visible_count = visible_models(&models, &versions).len() as u16;
+        assert_eq!(
+            visible_count, 4,
+            "fixture must keep four vendors visible for the matrix"
+        );
+
+        struct Case {
+            term_h: u16,
+            expect_mode: ModelsAreaMode,
+            expect_line_count: usize,
+        }
+        let cases = [
+            Case {
+                term_h: 30,
+                expect_mode: ModelsAreaMode::FullTable,
+                expect_line_count: visible_count as usize,
+            },
+            Case {
+                term_h: 20,
+                expect_mode: ModelsAreaMode::FullTable,
+                expect_line_count: visible_count as usize,
+            },
+            Case {
+                term_h: 15,
+                expect_mode: ModelsAreaMode::FullTable,
+                expect_line_count: visible_count as usize,
+            },
+            Case {
+                term_h: 12,
+                expect_mode: ModelsAreaMode::CompactQuota,
+                expect_line_count: 1,
+            },
+            Case {
+                term_h: 10,
+                // Omitted area preserves prev_mode (compact, from term_h=12).
+                expect_mode: ModelsAreaMode::CompactQuota,
+                expect_line_count: 0,
+            },
+        ];
+
+        let mut prev = ModelsAreaMode::FullTable;
+        for case in cases {
+            let (lines, mode) =
+                responsive_models_area(&models, &versions, &[], 120, case.term_h, prev);
+            assert_eq!(
+                mode, case.expect_mode,
+                "term_h={}: mode mismatch",
+                case.term_h
+            );
+            assert_eq!(
+                lines.len(),
+                case.expect_line_count,
+                "term_h={}: line count mismatch",
+                case.term_h
+            );
+            prev = mode;
+        }
+    }
+
+    #[test]
+    fn snapshot_matrix_heights_omit_then_grow_back_to_full() {
+        // Same fixture as the height matrix above, but starting from
+        // prev=FullTable: a transient drop into omit must not flip the
+        // preserved mode, so when the terminal grows back to a full-table
+        // budget we stay in full mode.
         let models = snapshot_models();
         let versions = build_version_index(&models);
         let visible_count = visible_models(&models, &versions).len() as u16;
 
         let mut prev = ModelsAreaMode::FullTable;
-        for &budget in &[30u16, 20, 15, 12, 10] {
-            let (_, mode) = responsive_models_area(&models, &versions, &[], 120, budget, prev);
-            // With heights >= visible_count, full table is always reachable.
-            // Specifically, all heights in this matrix exceed the count, so
-            // the renderer should stay in full mode every frame.
-            assert!(
-                budget >= visible_count,
-                "test fixture: every matrix budget should cover visible count"
-            );
-            assert_eq!(mode, ModelsAreaMode::FullTable, "budget {budget}: mode");
-            prev = mode;
-        }
+
+        // Drop into omit (term_h=10 → budget=0) while prev=full.
+        let (lines, mode) = responsive_models_area(&models, &versions, &[], 120, 10, prev);
+        assert!(lines.is_empty());
+        assert_eq!(mode, ModelsAreaMode::FullTable, "omit preserves prev_mode");
+        prev = mode;
+
+        // Grow to exactly the strict boundary; prev=full means full again.
+        let (_, mode) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(visible_count),
+            prev,
+        );
+        assert_eq!(mode, ModelsAreaMode::FullTable);
     }
 
     #[test]
     fn snapshot_compact_at_width_60_keeps_full_vendor_labels() {
         let models = snapshot_models();
         let versions = build_version_index(&models);
-        let (lines, _) =
-            responsive_models_area(&models, &versions, &[], 60, 1, ModelsAreaMode::CompactQuota);
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            60,
+            term_h_for_budget(1),
+            ModelsAreaMode::CompactQuota,
+        );
         let row = full_buffer_line(&lines, 0, 60);
         // Width 60 is at the boundary: full vendor labels apply (the
         // 2-letter rule kicks in *below* 60).

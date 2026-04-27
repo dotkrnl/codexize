@@ -304,6 +304,7 @@ impl App {
         if app.state.current_phase == Phase::GitGuardPending {
             if app.state.pending_guard_decision.is_none() {
                 app.state.agent_error = Some("guard pending state missing on resume".to_string());
+                app.clear_builder_recovery_context();
                 let _ = app.transition_to_phase(Phase::BlockedNeedsUser);
                 let _ = app.state.save();
             }
@@ -728,6 +729,13 @@ impl App {
         // streams into view.
         self.set_follow_tail(true);
         Ok(())
+    }
+
+    fn clear_builder_recovery_context(&mut self) {
+        self.state.builder.recovery_trigger_task_id = None;
+        self.state.builder.recovery_prev_max_task_id = None;
+        self.state.builder.recovery_prev_task_ids.clear();
+        self.state.builder.recovery_trigger_summary = None;
     }
 
     pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
@@ -1960,6 +1968,7 @@ impl App {
 
         if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
             self.state.agent_error = Some(format!("failed to enter builder recovery: {err}"));
+            self.clear_builder_recovery_context();
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
         }
         true
@@ -2148,10 +2157,7 @@ impl App {
             item.status = PipelineItemStatus::Done;
         }
         self.state.builder.retry_reset_run_id_cutoff = Some(recovery_run_id);
-        self.state.builder.recovery_trigger_task_id = None;
-        self.state.builder.recovery_prev_max_task_id = None;
-        self.state.builder.recovery_prev_task_ids.clear();
-        self.state.builder.recovery_trigger_summary = None;
+        self.clear_builder_recovery_context();
         Ok(())
     }
 
@@ -2306,6 +2312,7 @@ impl App {
                         );
                         self.finalize_run_record(run.id, false, Some(reason.clone()));
                         self.state.agent_error = Some(reason);
+                        self.clear_builder_recovery_context();
                         let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
                         return Ok(());
                     }
@@ -2797,6 +2804,7 @@ impl App {
             if failed_run.stage == "recovery" {
                 let summary = format!("builder recovery retry exhausted\n{summary}");
                 self.state.agent_error = Some(summary.clone());
+                self.clear_builder_recovery_context();
                 let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
                 self.append_system_message(failed_run.id, MessageKind::End, summary);
                 return true;
@@ -2852,6 +2860,7 @@ impl App {
         if failed_run.stage == "recovery" {
             let summary = format!("builder recovery retry exhausted\n{summary}");
             self.state.agent_error = Some(summary.clone());
+            self.clear_builder_recovery_context();
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             return true;
@@ -7648,6 +7657,10 @@ mod tests {
     fn recovery_retry_exhaustion_falls_back_to_blocked() {
         let mut state = SessionState::new("recovery-retry-cap".to_string());
         state.current_phase = Phase::BuilderRecovery(2);
+        state.builder.recovery_trigger_task_id = Some(7);
+        state.builder.recovery_prev_max_task_id = Some(9);
+        state.builder.recovery_prev_task_ids = vec![7, 8, 9];
+        state.builder.recovery_trigger_summary = Some("stale trigger".to_string());
         let mut app = idle_app(state);
         app.models = vec![ranked_model(
             selection::VendorKind::Claude,
@@ -7683,6 +7696,32 @@ mod tests {
                 .unwrap_or_default()
                 .starts_with("builder recovery retry exhausted")
         );
+        assert_eq!(app.state.builder.recovery_trigger_task_id, None);
+        assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
+        assert!(app.state.builder.recovery_prev_task_ids.is_empty());
+        assert_eq!(app.state.builder.recovery_trigger_summary, None);
+    }
+
+    #[test]
+    fn failed_recovery_entry_clears_recovery_context() {
+        let mut state = SessionState::new("recovery-entry-fail".to_string());
+        state.current_phase = Phase::IdeaInput;
+        state.builder.current_task = Some(3);
+        let mut app = idle_app(state);
+
+        let entered = app.enter_builder_recovery(
+            1,
+            Some(3),
+            Some("cannot enter from idea".to_string()),
+            "agent_pivot",
+        );
+
+        assert!(entered);
+        assert!(app.state.agent_error.is_some());
+        assert_eq!(app.state.builder.recovery_trigger_task_id, None);
+        assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
+        assert!(app.state.builder.recovery_prev_task_ids.is_empty());
+        assert_eq!(app.state.builder.recovery_trigger_summary, None);
     }
 
     #[test]
@@ -7997,6 +8036,10 @@ feedback = ["split task 2"]
             assert_eq!(app.state.builder.pending, vec![2, 5]);
             assert_eq!(app.state.builder.current_task, None);
             assert_eq!(app.state.builder.retry_reset_run_id_cutoff, Some(8));
+            assert_eq!(app.state.builder.recovery_trigger_task_id, None);
+            assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
+            assert!(app.state.builder.recovery_prev_task_ids.is_empty());
+            assert_eq!(app.state.builder.recovery_trigger_summary, None);
         });
     }
 
@@ -9298,6 +9341,10 @@ estimated_tokens = 1
             let session_id = "pending-guard-resume-fail";
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::GitGuardPending;
+            state.builder.recovery_trigger_task_id = Some(2);
+            state.builder.recovery_prev_max_task_id = Some(4);
+            state.builder.recovery_prev_task_ids = vec![1, 2, 3, 4];
+            state.builder.recovery_trigger_summary = Some("stale guard context".to_string());
             state.save().expect("save");
 
             let app = App::new(
@@ -9313,6 +9360,10 @@ estimated_tokens = 1
                 app.state.agent_error.is_some(),
                 "agent_error must be set on fail-closed"
             );
+            assert_eq!(app.state.builder.recovery_trigger_task_id, None);
+            assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
+            assert!(app.state.builder.recovery_prev_task_ids.is_empty());
+            assert_eq!(app.state.builder.recovery_trigger_summary, None);
         });
     }
 

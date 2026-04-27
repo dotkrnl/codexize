@@ -1594,7 +1594,32 @@ impl App {
             && code != 0
         {
             if code > 128 {
-                return Ok(Some(format!("killed({})", code - 128)));
+                let signal_num = code - 128;
+                let stamp_path = self.finish_stamp_path_for(run);
+                let signal_received =
+                    crate::runner::read_finish_stamp(&stamp_path)
+                        .map(|s| s.signal_received)
+                        .unwrap_or_default();
+                // Reviewer note: legacy stamps also deserialize to an empty
+                // signal marker, so this branch means the wrapper recorded no
+                // trapped signal, not that we can distinguish historical gaps.
+                let detail = if signal_received.is_empty() {
+                    format!("agent exited {code}")
+                } else {
+                    format!("wrapper trapped {signal_received}")
+                };
+                let log_suffix = if signal_received.is_empty() && code == 129 {
+                    " (agent CLI exited 129 on its own; wrapper trapped no signal)"
+                } else {
+                    ""
+                };
+                let _ = self.state.log_event(format!(
+                    "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
+                    run.id, run.stage
+                ));
+                return Ok(Some(format!(
+                    "killed({signal_num}) [{detail}]"
+                )));
             }
             return Ok(Some(format!("exit({code})")));
         }
@@ -6281,10 +6306,114 @@ mod tests {
                 Some("exit(1)".to_string())
             );
 
+            let signal_stamp_path = app.finish_stamp_path_for(&run);
+            crate::runner::write_finish_stamp(
+                &signal_stamp_path,
+                &crate::runner::FinishStamp {
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    exit_code: 143,
+                    head_before: "before".to_string(),
+                    head_after: "after".to_string(),
+                    head_state: "stable".to_string(),
+                    signal_received: String::new(),
+                },
+            )
+            .expect("write signal stamp");
             std::fs::write(app.run_status_path(&run), "143").expect("write signal exit");
             assert_eq!(
                 app.normalized_failure_reason(&run).expect("signal reason"),
-                Some("killed(15)".to_string())
+                Some("killed(15) [agent exited 143]".to_string())
+            );
+
+            let hup_run = RunRecord {
+                id: 10,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 2,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Planning 2]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            };
+            std::fs::create_dir_all(
+                app.run_status_path(&hup_run)
+                    .parent()
+                    .expect("status dir for hup"),
+            )
+            .expect("create hup status dir");
+            crate::runner::write_finish_stamp(
+                &app.finish_stamp_path_for(&hup_run),
+                &crate::runner::FinishStamp {
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    exit_code: 129,
+                    head_before: "before".to_string(),
+                    head_after: "after".to_string(),
+                    head_state: "stable".to_string(),
+                    signal_received: "HUP".to_string(),
+                },
+            )
+            .expect("write hup stamp");
+            std::fs::write(app.run_status_path(&hup_run), "129").expect("write hup exit");
+            assert_eq!(
+                app.normalized_failure_reason(&hup_run)
+                    .expect("hup signal reason"),
+                Some("killed(1) [wrapper trapped HUP]".to_string())
+            );
+
+            let self_exit_run = RunRecord {
+                id: 11,
+                stage: "planning".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 3,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Planning 3]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                hostname: None,
+                mount_device_id: None,
+            };
+            std::fs::create_dir_all(
+                app.run_status_path(&self_exit_run)
+                    .parent()
+                    .expect("status dir for self-exit"),
+            )
+            .expect("create self-exit status dir");
+            crate::runner::write_finish_stamp(
+                &app.finish_stamp_path_for(&self_exit_run),
+                &crate::runner::FinishStamp {
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    exit_code: 129,
+                    head_before: "before".to_string(),
+                    head_after: "after".to_string(),
+                    head_state: "stable".to_string(),
+                    signal_received: String::new(),
+                },
+            )
+            .expect("write self-exit stamp");
+            std::fs::write(app.run_status_path(&self_exit_run), "129")
+                .expect("write self-exit exit");
+            assert_eq!(
+                app.normalized_failure_reason(&self_exit_run)
+                    .expect("self-exit reason"),
+                Some("killed(1) [agent exited 129]".to_string())
+            );
+            let events_text = std::fs::read_to_string(session_dir.join("events.toml"))
+                .expect("read events log");
+            assert!(
+                events_text.contains(
+                    "run 11 (planning) exited 129: signal_received= (agent CLI exited 129 on its own; wrapper trapped no signal)"
+                ),
+                "self-exit diagnostic must be logged explicitly: {events_text}"
             );
 
             std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");

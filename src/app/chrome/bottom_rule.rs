@@ -29,7 +29,10 @@ pub fn bottom_rule(width: u16, badge: Option<UnreadBadge>) -> Line<'static> {
 
     let Some(badge) = badge else {
         // No badge: just a full-width rule
-        return Line::from(Span::styled(rule_glyph.to_string().repeat(width), rule_style));
+        return Line::from(Span::styled(
+            rule_glyph.to_string().repeat(width),
+            rule_style,
+        ));
     };
 
     let badge_text = badge.format_text();
@@ -37,7 +40,10 @@ pub fn bottom_rule(width: u16, badge: Option<UnreadBadge>) -> Line<'static> {
 
     if badge_len >= width {
         // Badge too wide, just show the rule
-        return Line::from(Span::styled(rule_glyph.to_string().repeat(width), rule_style));
+        return Line::from(Span::styled(
+            rule_glyph.to_string().repeat(width),
+            rule_style,
+        ));
     }
 
     // Center the badge

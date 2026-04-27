@@ -68,7 +68,12 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
 /// Overlay left text on a full-width rule, truncating left if needed.
 ///
 /// Truncation order: project name first, then session id (preserve trailing time).
-fn overlay_left_on_rule(left_text: &str, width: usize, rule_glyph: char, rule_style: Style) -> Line<'static> {
+fn overlay_left_on_rule(
+    left_text: &str,
+    width: usize,
+    rule_glyph: char,
+    rule_style: Style,
+) -> Line<'static> {
     let left_len = left_text.chars().count();
 
     if left_len <= width {
@@ -137,7 +142,12 @@ fn overlay_left_on_rule(left_text: &str, width: usize, rule_glyph: char, rule_st
 
                 return Line::from(vec![
                     Span::styled(final_left.clone(), Style::default().fg(Color::White)),
-                    Span::styled(rule_glyph.to_string().repeat(width.saturating_sub(final_left.chars().count())), rule_style),
+                    Span::styled(
+                        rule_glyph
+                            .to_string()
+                            .repeat(width.saturating_sub(final_left.chars().count())),
+                        rule_style,
+                    ),
                 ]);
             }
         }
@@ -180,7 +190,11 @@ mod tests {
 
     #[test]
     fn both_fit_with_generous_separator() {
-        let line = top_rule("myproject · 20260427-101009", Some("Agent · Processing"), 200);
+        let line = top_rule(
+            "myproject · 20260427-101009",
+            Some("Agent · Processing"),
+            200,
+        );
         let text = line.to_string();
         assert!(text.contains("myproject · 20260427-101009"));
         assert!(text.contains("Agent · Processing"));
@@ -205,7 +219,11 @@ mod tests {
     #[test]
     fn truncated_right_below_8_cols_is_dropped() {
         // Width 35: left=27, right needs to truncate to <8 cols, so drop it
-        let line = top_rule("myproject · 20260427-101009", Some("Agent · Very Long Processing Title"), 35);
+        let line = top_rule(
+            "myproject · 20260427-101009",
+            Some("Agent · Very Long Processing Title"),
+            35,
+        );
         let text = line.to_string();
         assert!(text.contains("myproject · 20260427-101009"));
         assert!(!text.contains("Agent"));
@@ -213,7 +231,11 @@ mod tests {
 
     #[test]
     fn right_truncated_with_ellipsis() {
-        let line = top_rule("myproject · 20260427-101009", Some("Agent · Very Long Processing Title"), 50);
+        let line = top_rule(
+            "myproject · 20260427-101009",
+            Some("Agent · Very Long Processing Title"),
+            50,
+        );
         let text = line.to_string();
         assert!(text.contains("myproject · 20260427-101009"));
         assert!(text.contains("…"));
@@ -252,10 +274,17 @@ mod tests {
     // Snapshot tests at representative widths
     #[test]
     fn snapshot_width_200() {
-        let line = top_rule("codexize · 20260427-101009", Some("Reviewer · Evaluating implementation quality"), 200);
+        let line = top_rule(
+            "codexize · 20260427-101009",
+            Some("Reviewer · Evaluating implementation quality"),
+            200,
+        );
         // Both should fit with generous separator
         assert!(line.to_string().contains("codexize · 20260427-101009"));
-        assert!(line.to_string().contains("Reviewer · Evaluating implementation quality"));
+        assert!(
+            line.to_string()
+                .contains("Reviewer · Evaluating implementation quality")
+        );
         // Should have at least 4 cols separator
         assert!(line.spans.len() == 3);
         assert!(line.spans[1].content.chars().count() >= 4);
@@ -263,21 +292,33 @@ mod tests {
 
     #[test]
     fn snapshot_width_120() {
-        let line = top_rule("codexize · 20260427-101009", Some("Implementation R2 · running"), 120);
+        let line = top_rule(
+            "codexize · 20260427-101009",
+            Some("Implementation R2 · running"),
+            120,
+        );
         assert!(line.to_string().contains("codexize · 20260427-101009"));
         assert!(line.to_string().contains("Implementation R2 · running"));
     }
 
     #[test]
     fn snapshot_width_80() {
-        let line = top_rule("codexize · 20260427-101009", Some("Spec Review · awaiting input"), 80);
+        let line = top_rule(
+            "codexize · 20260427-101009",
+            Some("Spec Review · awaiting input"),
+            80,
+        );
         assert!(line.to_string().contains("codexize · 20260427-101009"));
         assert!(line.to_string().contains("Spec Review · awaiting input"));
     }
 
     #[test]
     fn snapshot_width_60_truncated_right() {
-        let line = top_rule("codexize · 20260427-101009", Some("Very Long Agent Name · Processing complex task"), 60);
+        let line = top_rule(
+            "codexize · 20260427-101009",
+            Some("Very Long Agent Name · Processing complex task"),
+            60,
+        );
         let text = line.to_string();
         assert!(text.contains("codexize · 20260427-101009"));
         // Right should be truncated with ellipsis

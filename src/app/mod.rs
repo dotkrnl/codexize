@@ -3386,8 +3386,18 @@ impl App {
             }
             "spec-review" => self.launch_spec_review_with_model(Some(chosen)),
             "planning" => self.launch_planning_with_model(Some(chosen), true),
-            "plan-review" => self.launch_plan_review_with_model(Some(chosen)),
-            "sharding" => self.launch_sharding_with_model(Some(chosen)),
+            "plan-review" => match self.state.current_phase {
+                Phase::BuilderRecoveryPlanReview(_) => {
+                    self.launch_recovery_plan_review_with_model(Some(chosen))
+                }
+                _ => self.launch_plan_review_with_model(Some(chosen)),
+            },
+            "sharding" => match self.state.current_phase {
+                Phase::BuilderRecoverySharding(_) => {
+                    self.launch_recovery_sharding_with_model(Some(chosen))
+                }
+                _ => self.launch_sharding_with_model(Some(chosen)),
+            },
             "recovery" => self.launch_recovery_with_model(Some(chosen)),
             "coder" => self.launch_coder_with_model(Some(chosen)),
             "reviewer" => self.launch_reviewer_with_model(Some(chosen)),
@@ -7544,6 +7554,78 @@ mod tests {
                 app.state.current_phase,
                 Phase::BuilderRecovery(_)
             ));
+        });
+    }
+
+    #[test]
+    fn recovery_sharding_retry_uses_recovery_launcher() {
+        with_temp_root(|| {
+            let session_id = "recovery-sharding-retry";
+            let session_dir = session_state::session_dir(session_id);
+            std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+            std::fs::write(session_dir.join("artifacts").join("spec.md"), "# spec\n").unwrap();
+            std::fs::write(session_dir.join("artifacts").join("plan.md"), "# plan\n").unwrap();
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecoverySharding(6);
+            state.builder.done = vec![1, 2];
+            state.builder.pending = vec![3];
+            state.builder.iteration = 6;
+
+            let mut app = idle_app(state);
+            app.models = vec![
+                ranked_model(selection::VendorKind::Claude, "claude-opus-4-7", 1, 10, 10),
+                ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+            ];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            let failed = RunRecord {
+                id: 25,
+                stage: "sharding".to_string(),
+                task_id: None,
+                round: 6,
+                attempt: 1,
+                model: "claude-opus-4-7".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Recovery Sharding] opus-4-7".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("recovery_sharding_failed: tasks.toml missing".to_string()),
+                effort: EffortLevel::Normal,
+                hostname: None,
+                mount_device_id: None,
+            };
+            app.state.agent_runs.push(failed.clone());
+
+            let handled = app.maybe_auto_retry(&failed);
+            assert!(handled, "auto-retry must fire for recovery sharding");
+
+            // Newly launched run must be a recovery-sharding run at round=6,
+            // not a fresh round=1 sharding run from the original launcher.
+            let new_run = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id != 25 && r.stage == "sharding")
+                .expect("retry should create a new sharding run");
+            assert_eq!(
+                new_run.round, 6,
+                "retry must keep the recovery round, not reset to round 1"
+            );
+            assert!(
+                new_run.window_name.starts_with("[Recovery Sharding]"),
+                "retry must use the recovery-sharding window naming, got: {}",
+                new_run.window_name
+            );
+            assert_eq!(app.state.current_phase, Phase::BuilderRecoverySharding(6));
         });
     }
 

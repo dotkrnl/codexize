@@ -4,7 +4,7 @@ use std::process::Command;
 const KIMI_READY_MAX_POLLS: u32 = 50;
 const KIMI_READY_POLL_INTERVAL: f32 = 0.2;
 const KIMI_READY_INITIAL_DELAY: f32 = 1.5;
-const KIMI_READY_SETTLE_DELAY: f32 = 0.3;
+const KIMI_READY_SETTLE_DELAY: f32 = 1.0;
 
 pub struct KimiAdapter;
 
@@ -29,10 +29,9 @@ impl AgentAdapter for KimiAdapter {
                 r#"(sleep {initial_delay}; for i in $(seq 1 {max_polls}); do "#,
                 r#"tmux capture-pane -p -t "$TMUX_PANE" 2>/dev/null | grep -q ' input ' && break; "#,
                 r#"sleep {poll_interval}; "#,
-                r#"done && sleep {settle_delay} && "#,
-                r#"tmux load-buffer -b codexize_kimi {prompt_path} && "#,
-                r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE" && "#,
-                r#"tmux send-keys -t "$TMUX_PANE" Enter) & exec kimi --yolo --thinking"#,
+                r#"done && sleep {settle_delay:.1} && "#,
+                r#"{{ cat {prompt_path}; printf '\n'; }} | tmux load-buffer -b codexize_kimi - && "#,
+                r#"tmux paste-buffer -p -r -d -b codexize_kimi -t "$TMUX_PANE") & exec kimi --yolo --thinking"#,
             ),
             max_polls = KIMI_READY_MAX_POLLS,
             poll_interval = KIMI_READY_POLL_INTERVAL,
@@ -81,13 +80,25 @@ mod tests {
             "should grep for the input box label"
         );
         assert!(
-            cmd.contains("sleep 0.3"),
+            cmd.contains("sleep 1.0"),
             "should settle after readiness detection"
+        );
+        assert!(
+            cmd.contains("printf '\\n'"),
+            "should ensure pasted prompt submits via trailing newline"
+        );
+        assert!(
+            cmd.contains("tmux load-buffer -b codexize_kimi -"),
+            "should load normalized prompt content from stdin"
         );
         assert!(cmd.contains("seq 1"), "should loop with bounded retries");
         assert!(
             cmd.contains("tmux paste-buffer -p -r"),
             "should use bracketed paste with raw LF to prevent multi-line input chunking"
+        );
+        assert!(
+            !cmd.contains(r#"tmux send-keys -t "$TMUX_PANE" Enter"#),
+            "should not send a separate Enter after bracketed paste"
         );
         assert!(
             cmd.contains("exec kimi --yolo"),
@@ -115,10 +126,7 @@ mod tests {
         let adapter = KimiAdapter;
         let cmd = adapter.noninteractive_command("m", "/tmp/prompt.txt", EffortLevel::Normal);
 
-        assert_eq!(
-            cmd,
-            r#"kimi --yolo --thinking -p "$(cat /tmp/prompt.txt)""#,
-        );
+        assert_eq!(cmd, r#"kimi --yolo --thinking -p "$(cat /tmp/prompt.txt)""#,);
     }
 
     #[test]

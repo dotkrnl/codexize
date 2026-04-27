@@ -1,6 +1,8 @@
 use super::config::{SELECTION_CONFIG, SelectionPhase};
 use super::ranking::{VersionIndex, selection_probability};
 use super::types::{CachedModel, VendorKind};
+use super::vendor::is_tough_eligible;
+use crate::adapters::EffortLevel;
 use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -67,6 +69,50 @@ pub fn pick_for_phase<'a>(
     weighted_sample(&candidates)
 }
 
+/// Effort-aware variant of [`pick_for_phase`].
+///
+/// For [`EffortLevel::Tough`], runs the existing weighted-random selection
+/// over the tough-eligible subset (Claude-opus and all Codex models). The
+/// relative cutoff is computed from the *subset's* `max_prob` so a high-prob
+/// sonnet or Kimi cannot raise the bar and exclude every eligible candidate.
+/// Falls back to the full unfiltered slice only when the subset selection
+/// returns `None`, so the run still launches if no eligible model has quota.
+///
+/// For [`EffortLevel::Normal`], delegates straight to [`pick_for_phase`] so
+/// non-tough behavior is byte-identical.
+pub fn pick_for_phase_with_effort<'a>(
+    models: &'a [CachedModel],
+    phase: SelectionPhase,
+    vendor_filter: Option<VendorKind>,
+    version_index: &VersionIndex,
+    effort: EffortLevel,
+) -> Option<&'a CachedModel> {
+    if effort == EffortLevel::Normal {
+        return pick_for_phase(models, phase, vendor_filter, version_index);
+    }
+
+    let eligible: Vec<CachedModel> = models
+        .iter()
+        .filter(|m| is_tough_eligible(m))
+        .cloned()
+        .collect();
+
+    if !eligible.is_empty()
+        && let Some(chosen) = pick_for_phase(&eligible, phase, vendor_filter, version_index)
+    {
+        // Map the borrowed pick (over the local `eligible` Vec) back to a
+        // reference into the caller's slice so the returned lifetime is `'a`.
+        if let Some(found) = models
+            .iter()
+            .find(|m| m.vendor == chosen.vendor && m.name == chosen.name)
+        {
+            return Some(found);
+        }
+    }
+
+    pick_for_phase(models, phase, vendor_filter, version_index)
+}
+
 /// Select a model for review with unused-vendor preference.
 ///
 /// Prefers models from vendors not yet used, then falls back to any unused
@@ -108,6 +154,84 @@ pub fn select_for_review<'a>(
         .collect();
 
     weighted_sample(&fresh_model)
+}
+
+/// Effort-aware variant of [`select_for_review`].
+///
+/// For [`EffortLevel::Tough`], applies [`is_tough_eligible`] to each
+/// diversity tier (fresh-vendor, then fresh-model) before sampling. Only
+/// when every tough-eligible model is unavailable in *both* tiers does it
+/// degrade to the unfiltered selection — eligibility dominates diversity.
+/// In particular, if the only tough-eligible model with quota was already
+/// used by the coder, the reviewer reuses it rather than picking a fresh
+/// sonnet or Kimi.
+///
+/// For [`EffortLevel::Normal`], delegates to [`select_for_review`].
+pub fn select_for_review_with_effort<'a>(
+    models: &'a [CachedModel],
+    used_vendors: &[VendorKind],
+    used_models: &[(VendorKind, String)],
+    version_index: &VersionIndex,
+    effort: EffortLevel,
+) -> Option<&'a CachedModel> {
+    if effort == EffortLevel::Normal {
+        return select_for_review(models, used_vendors, used_models, version_index);
+    }
+
+    let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_tough_eligible(m)).collect();
+
+    // Tier 1: tough-eligible AND fresh-vendor AND fresh-model.
+    let fresh_vendor: Vec<(&CachedModel, f64)> = eligible
+        .iter()
+        .filter(|m| {
+            !used_vendors.contains(&m.vendor) && !used_models.contains(&(m.vendor, m.name.clone()))
+        })
+        .map(|m| {
+            (
+                *m,
+                selection_probability(m, SelectionPhase::Review, version_index),
+            )
+        })
+        .collect();
+    if let Some(model) = weighted_sample(&fresh_vendor) {
+        return Some(model);
+    }
+
+    // Tier 2: tough-eligible AND fresh-model (any vendor).
+    let fresh_model: Vec<(&CachedModel, f64)> = eligible
+        .iter()
+        .filter(|m| !used_models.contains(&(m.vendor, m.name.clone())))
+        .map(|m| {
+            (
+                *m,
+                selection_probability(m, SelectionPhase::Review, version_index),
+            )
+        })
+        .collect();
+    if let Some(model) = weighted_sample(&fresh_model) {
+        return Some(model);
+    }
+
+    // Tier 3: any tough-eligible model, even if used by the coder.
+    // This is "eligibility dominates diversity": prefer reusing Claude-opus
+    // over a fresh sonnet/Kimi when no fresh eligible model is available.
+    let any_eligible: Vec<(&CachedModel, f64)> = eligible
+        .iter()
+        .map(|m| {
+            (
+                *m,
+                selection_probability(m, SelectionPhase::Review, version_index),
+            )
+        })
+        .collect();
+    if let Some(model) = weighted_sample(&any_eligible) {
+        return Some(model);
+    }
+
+    // Degraded fallback: no tough-eligible model has any quota at all —
+    // run the original diversity logic over the full slice so the review
+    // still launches.
+    select_for_review(models, used_vendors, used_models, version_index)
 }
 
 /// Select a model excluding a list of models, with diversity bonus for non-last-failed vendors.
@@ -446,6 +570,191 @@ mod tests {
         }
 
         assert!(high_count > 90); // Should win most of the time
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    fn opus_sonnet_codex_kimi() -> Vec<CachedModel> {
+        vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
+            sample_model(VendorKind::Claude, "claude-haiku-4-5", 80),
+            sample_model(VendorKind::Codex, "gpt-5.5", 80),
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        ]
+    }
+
+    #[test]
+    fn pick_with_effort_normal_does_not_filter_ineligible_models() {
+        // With only ineligible models in the slice, Normal effort still
+        // returns a candidate — proving the eligibility filter is not
+        // applied. The Tough variant of this scenario exercises the
+        // degraded-fallback path; here we want the *non-degraded* selection
+        // to ignore eligibility entirely.
+        let models = vec![
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        let chosen = pick_for_phase_with_effort(
+            &models,
+            SelectionPhase::Build,
+            None,
+            &index,
+            EffortLevel::Normal,
+        )
+        .expect("Normal must pick from non-empty slice");
+        assert!(matches!(
+            chosen.vendor,
+            VendorKind::Kimi | VendorKind::Gemini
+        ));
+    }
+
+    #[test]
+    fn pick_with_effort_tough_only_picks_eligible() {
+        let models = opus_sonnet_codex_kimi();
+        let index = build_version_index(&models);
+
+        for seed in 1..200_u64 {
+            TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+            let chosen = pick_for_phase_with_effort(
+                &models,
+                SelectionPhase::Build,
+                None,
+                &index,
+                EffortLevel::Tough,
+            )
+            .expect("eligible candidate exists");
+            assert!(
+                (chosen.vendor == VendorKind::Claude && chosen.name.contains("opus"))
+                    || chosen.vendor == VendorKind::Codex,
+                "tough must never pick {:?} {}",
+                chosen.vendor,
+                chosen.name
+            );
+        }
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
+        let models = vec![
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = pick_for_phase_with_effort(
+            &models,
+            SelectionPhase::Build,
+            None,
+            &index,
+            EffortLevel::Tough,
+        )
+        .expect("degraded fallback must yield a candidate");
+        assert!(matches!(
+            chosen.vendor,
+            VendorKind::Kimi | VendorKind::Gemini
+        ));
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
+            sample_model(VendorKind::Claude, "claude-haiku-4-5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = pick_for_phase_with_effort(
+            &models,
+            SelectionPhase::Build,
+            None,
+            &index,
+            EffortLevel::Tough,
+        )
+        .expect("degraded fallback must yield a candidate");
+        assert_eq!(chosen.vendor, VendorKind::Claude);
+        assert!(!chosen.name.contains("opus"));
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_normal_can_pick_ineligible_vendor() {
+        // Under Normal effort, the reviewer can pick a Kimi model — proving
+        // it is delegating to the original `select_for_review` rather than
+        // running the tough-eligible filter.
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        ];
+        let index = build_version_index(&models);
+        let used_vendors = vec![VendorKind::Claude];
+        let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(
+            &models,
+            &used_vendors,
+            &used_models,
+            &index,
+            EffortLevel::Normal,
+        )
+        .expect("Normal review picks fresh Kimi");
+        assert_eq!(chosen.vendor, VendorKind::Kimi);
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
+        // Coder used Claude-opus and Codex (so both eligible options used);
+        // sonnet is "fresh" but ineligible. Reviewer must reuse Claude-opus.
+        // Codex is omitted entirely (exhausted upstream by quota filtering),
+        // so the only eligible model is Claude-opus, which the coder used.
+        // Sonnet is fresh-vendor + fresh-model but ineligible.
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        ];
+        let index = build_version_index(&models);
+        let used_vendors = vec![VendorKind::Claude];
+        let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(
+            &models,
+            &used_vendors,
+            &used_models,
+            &index,
+            EffortLevel::Tough,
+        )
+        .expect("eligibility-dominated reuse expected");
+        assert_eq!(chosen.vendor, VendorKind::Claude);
+        assert_eq!(chosen.name, "claude-opus-4-7");
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_tough_degrades_when_no_eligible_remain() {
+        // Only Kimi/Gemini exist — no eligible model at all. Must still
+        // launch via the unfiltered fallback.
+        let models = vec![
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough)
+            .expect("degraded fallback must yield a candidate");
+        assert!(matches!(
+            chosen.vendor,
+            VendorKind::Kimi | VendorKind::Gemini
+        ));
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 }

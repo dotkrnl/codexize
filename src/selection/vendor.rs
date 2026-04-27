@@ -1,5 +1,24 @@
-use super::types::VendorKind;
+use super::types::{CachedModel, VendorKind};
 use crate::dashboard;
+
+/// Vendors that expose a high-reasoning ("tough") mode.
+pub fn is_effort_capable(vendor: VendorKind) -> bool {
+    matches!(vendor, VendorKind::Claude | VendorKind::Codex)
+}
+
+/// Models eligible for tough tasks. Combines the vendor-capability filter
+/// with the Claude-tier filter: only opus Claude variants qualify; all
+/// Codex models qualify; Kimi and Gemini do not.
+///
+/// The Claude check is `to_lowercase().contains("opus")` so future opus
+/// names (`claude-opus-4-7`, `claude-opus-5`, …) are admitted automatically.
+pub fn is_tough_eligible(model: &CachedModel) -> bool {
+    match model.vendor {
+        VendorKind::Claude => model.name.to_lowercase().contains("opus"),
+        VendorKind::Codex => true,
+        VendorKind::Kimi | VendorKind::Gemini => false,
+    }
+}
 
 pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
     match v {

@@ -4505,7 +4505,7 @@ fn live_summary_instruction(path: &std::path::Path) -> String {
 
 fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
     format!(
-        "\n\nEvery 2–3 min, overwrite {} with `<short title> | <one-paragraph summary>` (process killed after 10 min wall-time idle, tool-call time excluded).\n",
+        "\n\nEvery 2–3 min, overwrite {} with `<short title> | <one-paragraph summary>` so the operator can follow along.\n",
         path.display()
     )
 }

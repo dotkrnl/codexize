@@ -274,14 +274,14 @@ impl App {
                 render_pause_modal(
                     frame,
                     "Spec review complete",
-                    "[Enter] continue  [n] re-review  [q] quit",
+                    "[Enter] continue  [n] additional reviewer  [q] quit",
                 );
             }
             ModalKind::PlanReviewPaused => {
                 render_pause_modal(
                     frame,
                     "Plan review complete",
-                    "[Enter] continue  [n] re-review  [q] quit",
+                    "[Enter] continue  [n] additional reviewer  [q] quit",
                 );
             }
             ModalKind::StageError(stage_id) => {

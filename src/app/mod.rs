@@ -1692,12 +1692,20 @@ impl App {
         let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
             return;
         };
+        let tough_suffix = if run.effort == EffortLevel::Tough {
+            " [tough]"
+        } else {
+            ""
+        };
         let started = Message {
             ts: chrono::Utc::now(),
             run_id,
             kind: MessageKind::Started,
             sender: MessageSender::System,
-            text: format!("agent started · {} ({})", run.model, run.vendor),
+            text: format!(
+                "agent started · {} ({}){}",
+                run.model, run.vendor, tough_suffix
+            ),
         };
         if let Err(err) = self.state.append_message(&started) {
             let _ = self.state.log_event(format!(

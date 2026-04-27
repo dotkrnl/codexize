@@ -9,7 +9,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{App, state::ModelRefreshState};
+use super::{App, state::ModelRefreshState, status_line::Severity};
+
+const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::channel();
@@ -46,6 +49,15 @@ pub(super) fn vendor_prefix(vendor: VendorKind) -> &'static str {
     }
 }
 
+fn quota_error_summary(errors: &[QuotaError]) -> String {
+    let names: Vec<&str> = errors.iter().map(|e| vendor_tag(e.vendor)).collect();
+    match names.as_slice() {
+        [] => "model refresh failed".to_string(),
+        [single] => format!("model refresh: {single} quota unavailable"),
+        many => format!("model refresh: {} quotas unavailable", many.join(", ")),
+    }
+}
+
 impl App {
     pub(super) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.versions = build_version_index(&models);
@@ -62,18 +74,30 @@ impl App {
                     if errors.is_empty() {
                         self.quota_retry_delay = Duration::from_secs(60);
                     } else {
+                        let summary = quota_error_summary(&errors);
+                        self.push_status(summary, Severity::Warn, REFRESH_STATUS_TTL);
                         self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
                     }
                     self.quota_errors = errors;
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    if started_at.elapsed() >= Duration::from_secs(60) {
+                    if started_at.elapsed() >= REFRESH_TIMEOUT {
+                        self.push_status(
+                            "model refresh timed out — retrying".to_string(),
+                            Severity::Warn,
+                            REFRESH_STATUS_TTL,
+                        );
                         self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
                         self.model_refresh = ModelRefreshState::Idle(Instant::now());
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.push_status(
+                        "model refresh worker exited unexpectedly".to_string(),
+                        Severity::Error,
+                        REFRESH_STATUS_TTL,
+                    );
                     self.quota_retry_delay = (self.quota_retry_delay * 2).min(cache::TTL);
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
                 }
@@ -99,5 +123,40 @@ impl App {
             rx: spawn_refresh(),
             started_at: Instant::now(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quota_error_summary_single_vendor() {
+        let errors = vec![QuotaError {
+            vendor: VendorKind::Claude,
+            message: "429".to_string(),
+        }];
+        assert_eq!(
+            quota_error_summary(&errors),
+            "model refresh: claude quota unavailable"
+        );
+    }
+
+    #[test]
+    fn quota_error_summary_multiple_vendors() {
+        let errors = vec![
+            QuotaError {
+                vendor: VendorKind::Claude,
+                message: "429".to_string(),
+            },
+            QuotaError {
+                vendor: VendorKind::Codex,
+                message: "503".to_string(),
+            },
+        ];
+        assert_eq!(
+            quota_error_summary(&errors),
+            "model refresh: claude, codex quotas unavailable"
+        );
     }
 }

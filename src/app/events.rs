@@ -8,6 +8,15 @@ use super::status_line::Severity;
 use super::{App, ExpansionOverride, ModalKind, StageId};
 
 impl App {
+    /// Push a transient status-line message from a non-render call site.
+    ///
+    /// Single entry point so renderer toasts and side-effect producers
+    /// (refresh worker, guard logic, key handlers) share the same
+    /// severity-priority + TTL contract enforced by `StatusLine`.
+    pub(super) fn push_status(&self, message: String, severity: Severity, ttl: Duration) {
+        self.status_line.borrow_mut().push(message, severity, ttl);
+    }
+
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;
@@ -38,7 +47,7 @@ impl App {
                     self.go_back();
                 } else if self.can_go_back() {
                     self.confirm_back = true;
-                    self.status_line.borrow_mut().push(
+                    self.push_status(
                         "Press b again to go back — any other key to cancel".to_string(),
                         Severity::Warn,
                         Duration::from_secs(5),

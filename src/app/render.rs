@@ -531,13 +531,16 @@ impl App {
             "▸"
         };
         let is_current = index == self.current_row();
-        let style = if index == self.selected {
+        let mut style = if index == self.selected {
             Style::default()
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
+        if node.status == NodeStatus::Pending {
+            style = style.fg(Color::DarkGray);
+        }
 
         let mut spans = vec![
             Span::raw(format!(

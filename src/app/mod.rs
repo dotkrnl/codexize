@@ -5309,7 +5309,7 @@ fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         )
     });
     let dirty_scope = if dirty_after {
-        "  4. DIRTY WORKING TREE: The coder left uncommitted changes in the working tree.\n     These are IN SCOPE for your review. Run:\n       `git diff HEAD`                              — uncommitted working-tree delta.\n       `git status --porcelain`                    — files modified but not staged.\n       `git ls-files --others --exclude-standard`  — untracked files.\n     Treat these changes as part of the coder's deliverable. Judge the aggregate\n     of `git diff $BASE..HEAD` AND `git diff HEAD` together.\n     The final working-tree state is authoritative: if committed and uncommitted\n     changes appear to conflict, treat what the working tree currently contains\n     as the coder's intended output.\n".to_string()
+        "  4. DIRTY WORKING TREE in scope: judge `git diff $BASE..HEAD` AND\n     `git diff HEAD` together (also `git status --porcelain` /\n     `git ls-files --others --exclude-standard` for staged/untracked). The\n     working tree is authoritative — on any conflict between committed and\n     uncommitted changes, what the tree currently contains is the coder's\n     intended output.\n".to_string()
     } else {
         "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n".to_string()
     };
@@ -5318,8 +5318,11 @@ fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         .unwrap_or_default();
     let project_doc_instr = project_doc_instr();
     format!(
-        r#"{project_doc_instr}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE — no
-operator. Do NOT modify code. Write ONLY the review TOML.
+        r#"{project_doc_instr}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
+no operator, no code edits, no VCS mutations. Write ONLY the review TOML.
+
+Heads up: the coder you're reviewing is from a DIFFERENT model vendor — bring
+fresh eyes, that's the whole point of pairing.
 
 Inputs:
   Task:         {task}
@@ -5334,34 +5337,36 @@ Review:
      `git log --oneline $BASE..HEAD` — every commit in this round.
      `git diff $BASE..HEAD`           — aggregate change.
      `git show <sha>`                 — drill into any commit.
-     The coder may have made one or more commits; judge the aggregate delta
-     against the task. Per-commit structure is the coder's choice.
+     Judge the aggregate delta; per-commit structure is the coder's choice.
   2. Judge task completion: does the aggregate delta actually deliver what's
      required? Read the task `description` AND the spec/plan sections it
-     points to (via `spec_refs` and `plan_refs` in the task file) — the task
-     is complete only when the delta satisfies all of them. A green test run
-     does NOT by itself prove completion, and a missing test run does NOT by
-     itself prove failure — read the code against those requirements.
-  3. Verify the task's test description passes (run it, inspect code). If the
-     task's `test` field starts with "not testable" (scaffolding/intermediate
-     task), SKIP the test-pass check — but still require the code to build
-     cleanly (compiles / links / type-checks). Completion still matters.
+     points to (via `spec_refs` and `plan_refs` in the task file). Task is
+     complete only when the delta satisfies all of them. A green test run
+     doesn't by itself prove completion; a missing test run doesn't by
+     itself prove failure — read the code against the requirements.
+  3. Verify the task's test description passes (run it, inspect code). If
+     the task's `test` field starts with "not testable" (scaffolding/
+     intermediate), SKIP the test-pass check — but still require the code
+     to build cleanly (compiles / links / type-checks). Completion still
+     matters.
 {dirty_scope}
 
-Emit the verdict to {review} in EXACTLY this TOML shape (double-quoted strings;
-triple-quoted for multi-line; arrays of inline tables for any new task refs):
+# IMPORTANT: emit ONLY the TOML below to {review} — no prose around it.
+# Parse failure = run failure. Use double-quoted strings; triple-quoted for
+# multi-line; arrays of inline tables for any new_task refs.
 
     status  = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary = "One-paragraph summary of what was done and your verdict."
     feedback = [
-      "Specific thing to fix, if status is revise/human_blocked/agent_pivot.",
+      "Specific thing to fix (required for refine/revise/human_blocked/agent_pivot).",
       "One item per string.",
     ]
 
-    # Optional: follow-up tasks for work genuinely out-of-scope for this task
-    # but needed later.
+    # Optional: follow-up tasks for work genuinely out-of-scope for this
+    # task but needed later. Use `id = 0` as a placeholder — the
+    # orchestrator assigns real IDs (your value is discarded).
     [[new_tasks]]
-    id = 100
+    id = 0
     title = "…"
     description = """…"""
     test = """…"""
@@ -5370,26 +5375,24 @@ triple-quoted for multi-line; arrays of inline tables for any new task refs):
     plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
 
 Rules:
-  - approved      → outcomes delivered AND (tests pass OR task is "not testable" and
-                    the code builds cleanly). Do not include new_tasks.
-  - refine        → outcomes delivered, but you have minor suggestions worth
-                    applying — code-quality nits, naming, cleanup, small
-                    improvements that aren't spec/plan violations. The current
-                    task is accepted (no re-review of this round); your
-                    `feedback` items are forwarded to the NEXT task's coder
-                    as opportunistic carryover. Use this instead of `revise`
-                    when nothing actually requires another round on this task,
-                    and instead of `approved` when you genuinely have small
-                    asks worth surfacing. Required: at least one feedback item.
-                    No new_tasks.
-  - revise        → list the specific issues. For complex tasks, also suggest a
-                    direction (file/approach/sketch) — do not just reject.
+  - approved      → outcomes delivered AND (tests pass OR task is
+                    "not testable" and the code builds cleanly). No new_tasks.
+  - refine        → outcomes delivered, but you have small nice-to-have
+                    suggestions (naming, cleanup, minor improvements that
+                    aren't spec/plan violations). The task is accepted (no
+                    re-review); your `feedback` items go to the NEXT
+                    coder as opportunistic carryover — list things worth
+                    surfacing, NOT things that must land before merge.
+                    Use instead of `approved` when you genuinely have asks,
+                    and instead of `revise` when nothing requires another
+                    round. Requires ≥1 feedback item. No new_tasks.
+  - revise        → list the specific issues. For complex tasks, also
+                    suggest a direction (file/approach/sketch) — don't
+                    just reject.
   - human_blocked → human judgement required; explain what's unclear.
-  - agent_pivot   → autonomous recovery is required; explain the pivot.
+  - agent_pivot   → autonomous recovery required; explain the pivot.
   - Don't repeat feedback from prior reviews unless the coder ignored it
-              without good reason — in which case call that out explicitly.
-  - Don't leave feedback empty for refine/revise/human_blocked/agent_pivot, and don't emit prose
-              outside the TOML.
+    without good reason — in which case call that out explicitly.
 {instr}"#,
         task_id = task_id,
         round = round,

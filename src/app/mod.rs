@@ -3,6 +3,8 @@ pub mod chat_widget;
 mod chrome;
 #[allow(dead_code)]
 mod clock;
+#[allow(dead_code)]
+mod footer;
 mod events;
 #[allow(dead_code)]
 mod focus_caps;

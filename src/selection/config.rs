@@ -34,6 +34,22 @@ impl SelectionPhase {
     pub fn is_interactive(self) -> bool {
         matches!(self, SelectionPhase::Idea | SelectionPhase::Planning)
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SelectionPhase::Idea => "idea",
+            SelectionPhase::Planning => "planning",
+            SelectionPhase::Build => "build",
+            SelectionPhase::Review => "review",
+        }
+    }
+
+    pub const ALL: [SelectionPhase; 4] = [
+        SelectionPhase::Idea,
+        SelectionPhase::Planning,
+        SelectionPhase::Build,
+        SelectionPhase::Review,
+    ];
 }
 
 pub struct SelectionConfig {
@@ -71,7 +87,10 @@ pub struct SelectionConfig {
 pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     role_score_exponent: 3,
     quota_soft_threshold: 25.0,
-    min_role_score_weight: 0.05,
+    // Spec §4.2 / §7: with role_score_exponent=3 this caps a single weak
+    // axis's penalty at (0.20/best)^3 instead of (0.05/best)^3, ~64× more
+    // lenient, so one zero/missing axis can't single-handedly disable a model.
+    min_role_score_weight: 0.20,
     min_selection_probability_ratio: 1.0 / 3.0,
     version_penalty_per_step_interactive: 1.0 / 3.0,
     version_penalty_per_step_headless: 2.0 / 3.0,

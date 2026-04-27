@@ -1,6 +1,39 @@
 use super::config::{SELECTION_CONFIG, SelectionPhase};
 use super::types::{CachedModel, VendorKind};
 use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SelectionEvent {
+    ZeroAsMissing { axis: String, phase: String },
+}
+
+fn selection_events() -> &'static Mutex<Vec<SelectionEvent>> {
+    static EVENTS: OnceLock<Mutex<Vec<SelectionEvent>>> = OnceLock::new();
+    EVENTS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub fn selection_events_snapshot() -> Vec<SelectionEvent> {
+    selection_events().lock().unwrap().clone()
+}
+
+#[cfg(test)]
+fn clear_selection_events() {
+    selection_events().lock().unwrap().clear();
+}
+
+fn record_zero_as_missing(axis: &str, phase: &str) {
+    eprintln!("codexize: selection.zero_as_missing axis={axis} phase={phase}");
+    selection_events()
+        .lock()
+        .unwrap()
+        .push(SelectionEvent::ZeroAsMissing {
+            axis: axis.to_string(),
+            phase: phase.to_string(),
+        });
+}
+
+const ZERO_THRESHOLD: f64 = 1e-9;
 
 /// Linear variance-penalty factor (0..1) applied once, outside the role
 /// score exponent, so a noisy reading doesn't get cubed into oblivion.
@@ -148,10 +181,15 @@ pub fn selection_probability(
 
 /// Extract and aggregate axis scores for the given phase.
 /// Mirrors the logic in raw_axis_score but works with CachedModel.
+/// Axis values at or below `ZERO_THRESHOLD` are treated identically to
+/// missing axes: both use the `overall_score / 100` backfill.
 fn compute_axis_score(model: &CachedModel, axes: &[&str], phase: SelectionPhase) -> f64 {
-    let mut values: Vec<f64> = axes.iter().filter_map(|axis| model.axis(axis)).collect();
+    let mut values: Vec<f64> = axes
+        .iter()
+        .filter_map(|axis| model.axis(axis).filter(|v| *v > ZERO_THRESHOLD))
+        .collect();
 
-    // Backfill missing axes with overall_score / 100
+    // Backfill missing-or-zero axes with overall_score / 100
     while values.len() < axes.len() && !axes.is_empty() {
         values.push(model.overall_score / 100.0);
     }
@@ -170,6 +208,38 @@ fn compute_axis_score(model: &CachedModel, axes: &[&str], phase: SelectionPhase)
         }
     };
     score.clamp(0.0, 100.0)
+}
+
+/// Stamp `fallback:overall` provenance on every axis that `compute_axis_score`
+/// will backfill (missing or zero-as-missing), and emit counter events for
+/// zero-as-missing substitutions. Must be called once per model before
+/// selection probabilities are used.
+pub fn stamp_selection_provenance(model: &mut CachedModel) {
+    let mut seen = std::collections::HashSet::new();
+    for phase in SelectionPhase::ALL {
+        for &axis in phase.axes() {
+            match model.axis(axis) {
+                Some(v) if v <= ZERO_THRESHOLD => {
+                    if seen.insert(axis) {
+                        model
+                            .axis_provenance
+                            .insert(axis.to_string(), "fallback:overall".to_string());
+                    }
+                    record_zero_as_missing(axis, phase.name());
+                }
+                None => {
+                    if seen.insert(axis) {
+                        model
+                            .axis_provenance
+                            .insert(axis.to_string(), "fallback:overall".to_string());
+                    }
+                }
+                _ => {
+                    seen.insert(axis);
+                }
+            }
+        }
+    }
 }
 
 fn is_flash_tier(model: &CachedModel) -> bool {
@@ -471,9 +541,8 @@ mod tests {
 
         let score = compute_axis_score(&model, SelectionPhase::Build.axes(), SelectionPhase::Build);
 
-        // Geometric mean of [0.9, 0.9, 0.1, 0.9] should be much lower than arithmetic mean
-        // Floored at min_role_score_weight (0.05) before log
-        assert!(score < 70.0); // Should be significantly pulled down
+        // Geometric mean with weak axis floored at min_role_score_weight
+        assert!(score < 70.0);
     }
 
     #[test]

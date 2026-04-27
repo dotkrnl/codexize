@@ -1,9 +1,9 @@
 pub mod chat_widget;
 mod chrome;
 mod clock;
-mod footer;
 mod events;
 mod focus_caps;
+mod footer;
 mod guard;
 mod models;
 mod models_area;
@@ -713,7 +713,7 @@ impl App {
                     &old_messages,
                     run,
                     &local_offset,
-                    self.spinner_tick,
+                    None,
                     available_width,
                 )
                 .len();
@@ -721,7 +721,7 @@ impl App {
                     &all_messages,
                     run,
                     &local_offset,
-                    self.spinner_tick,
+                    None,
                     available_width,
                 )
                 .len();

@@ -7,17 +7,15 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::app::footer::{format_historical_message, HistoricalStyleHints};
+use crate::app::footer::{HistoricalStyleHints, format_historical_message};
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
-
-const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub struct ChatWidget<'a> {
     messages: &'a [Message],
     run: &'a RunRecord,
     scroll_offset: usize,
     local_offset: FixedOffset,
-    spinner_tick: usize,
+    running_tail: Option<Line<'static>>,
 }
 
 impl<'a> ChatWidget<'a> {
@@ -26,14 +24,14 @@ impl<'a> ChatWidget<'a> {
         run: &'a RunRecord,
         scroll_offset: usize,
         local_offset: FixedOffset,
-        spinner_tick: usize,
+        running_tail: Option<Line<'static>>,
     ) -> Self {
         Self {
             messages,
             run,
             scroll_offset,
             local_offset,
-            spinner_tick,
+            running_tail,
         }
     }
 }
@@ -195,17 +193,33 @@ struct RenderedLine {
     spans: Vec<Span<'static>>,
 }
 
+/// Render an agent run's transcript as a list of lines.
+///
+/// `running_tail` is appended after the historical messages when the run is
+/// still active (status `Running` and no `End` message yet). The caller
+/// chooses the tail's shape: leaf transcript rows pass a live-agent-message
+/// line built via `format_running_transcript_leaf`; container rows pass a
+/// tree-shape spinner; non-render callers (e.g., line counters) pass `None`.
 pub fn message_lines(
     messages: &[Message],
     run: &RunRecord,
     local_offset: &FixedOffset,
-    spinner_tick: usize,
+    running_tail: Option<Line<'static>>,
     available_width: usize,
 ) -> Vec<Line<'static>> {
-    render_messages(messages, run, local_offset, available_width, spinner_tick)
-        .into_iter()
-        .map(|rendered| Line::from(rendered.spans))
-        .collect()
+    let mut lines: Vec<Line<'static>> =
+        render_messages(messages, run, local_offset, available_width)
+            .into_iter()
+            .map(|rendered| Line::from(rendered.spans))
+            .collect();
+    let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
+    if run.status == RunStatus::Running
+        && !has_end
+        && let Some(tail) = running_tail
+    {
+        lines.push(tail);
+    }
+    lines
 }
 
 fn render_messages(
@@ -213,7 +227,6 @@ fn render_messages(
     run: &RunRecord,
     local_offset: &FixedOffset,
     available_width: usize,
-    spinner_tick: usize,
 ) -> Vec<RenderedLine> {
     let now_local = local_offset.from_utc_datetime(&Utc::now().naive_utc());
     let today_local = now_local.date_naive();
@@ -300,23 +313,11 @@ fn render_messages(
                 });
             }
         } else {
-            let first_line =
-                format_historical_message(&ts_str, sym.symbol, "", sym.color, hints);
+            let first_line = format_historical_message(&ts_str, sym.symbol, "", sym.color, hints);
             lines.push(RenderedLine {
                 spans: first_line.spans,
             });
         }
-    }
-
-    let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
-    if run.status == RunStatus::Running && !has_end {
-        let spin = SPINNER[spinner_tick % SPINNER.len()];
-        lines.push(RenderedLine {
-            spans: vec![Span::styled(
-                format!("{} working...", spin),
-                Style::default().fg(Color::Cyan),
-            )],
-        });
     }
 
     lines
@@ -335,7 +336,7 @@ impl Widget for ChatWidget<'_> {
             self.messages,
             self.run,
             &self.local_offset,
-            self.spinner_tick,
+            self.running_tail.clone(),
             width,
         );
 
@@ -397,11 +398,11 @@ pub fn chat_lines(
     run: &RunRecord,
     scroll_offset: usize,
     local_offset: &FixedOffset,
-    spinner_tick: usize,
+    running_tail: Option<Line<'static>>,
     available_width: usize,
     available_height: usize,
 ) -> Vec<Line<'static>> {
-    let all_lines = message_lines(messages, run, local_offset, spinner_tick, available_width);
+    let all_lines = message_lines(messages, run, local_offset, running_tail, available_width);
 
     let total = all_lines.len();
     if total == 0 {
@@ -576,29 +577,53 @@ mod tests {
         assert_eq!(result, vec!["red text"]);
     }
 
-    #[test]
-    fn render_messages_includes_spinner_when_running() {
-        let msgs = vec![make_msg(MessageKind::Started, "agent started")];
-        let run = make_run(RunStatus::Running);
-        let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = render_messages(&msgs, &run, &offset, 60, 0);
-        let last = &lines[lines.len() - 1];
-        let text: String = last.spans.iter().map(|s| s.content.to_string()).collect();
-        assert!(text.contains("working..."));
+    fn tail_line(text: &str) -> Line<'static> {
+        Line::from(Span::raw(text.to_string()))
     }
 
     #[test]
-    fn render_messages_no_spinner_after_end() {
+    fn message_lines_appends_running_tail_when_active() {
+        let msgs = vec![make_msg(MessageKind::Started, "agent started")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, Some(tail_line("LIVE-TAIL")), 60);
+        let last_text: String = lines
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert_eq!(last_text, "LIVE-TAIL");
+    }
+
+    #[test]
+    fn message_lines_drops_legacy_working_label() {
+        let msgs = vec![make_msg(MessageKind::Started, "agent started")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 60);
+        for line in &lines {
+            let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+            assert!(
+                !text.contains("working..."),
+                "running tail must come from caller, not the legacy 'working...' line"
+            );
+        }
+    }
+
+    #[test]
+    fn message_lines_omits_tail_after_end_message() {
         let msgs = vec![
             make_msg(MessageKind::Started, "agent started"),
             make_msg(MessageKind::End, "done"),
         ];
         let run = make_run(RunStatus::Done);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = render_messages(&msgs, &run, &offset, 60, 0);
+        let lines = message_lines(&msgs, &run, &offset, Some(tail_line("LIVE-TAIL")), 60);
         for line in &lines {
             let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-            assert!(!text.contains("working..."));
+            assert!(!text.contains("LIVE-TAIL"));
         }
     }
 
@@ -610,7 +635,7 @@ mod tests {
         }
         let run = make_run(RunStatus::Done);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = chat_lines(&msgs, &run, 5, &offset, 0, 60, 10);
+        let lines = chat_lines(&msgs, &run, 5, &offset, None, 60, 10);
         let first_text: String = lines[0]
             .spans
             .iter()
@@ -641,7 +666,7 @@ mod tests {
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
         // width 30 forces wrapping. Prefix = "10:30 ◐ " = 5+3=8 chars
-        let lines = render_messages(&[msg], &run, &offset, 30, 0);
+        let lines = render_messages(&[msg], &run, &offset, 30);
         assert!(lines.len() >= 2, "should have wrapped lines");
         // Second line should be indented (starts with spaces)
         let second_text: String = lines[1]
@@ -665,7 +690,7 @@ mod tests {
         let offset = FixedOffset::east_opt(0).unwrap();
         // Height 5 means overflow; at bottom, we should be able to reach the last message.
         // Max offset should be `total - (height - 1)` when overflow.
-        let lines = chat_lines(&msgs, &run, 999, &offset, 0, 60, 5);
+        let lines = chat_lines(&msgs, &run, 999, &offset, None, 60, 5);
         let last_text: String = lines
             .last()
             .unwrap()

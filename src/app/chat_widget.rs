@@ -7,6 +7,7 @@ use ratatui::{
     widgets::Widget,
 };
 
+use crate::app::footer::{format_historical_message, HistoricalStyleHints};
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -74,6 +75,27 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
                 color: Color::Red,
             },
         },
+    }
+}
+
+fn kind_to_hints(kind: MessageKind, run_status: RunStatus) -> HistoricalStyleHints {
+    match kind {
+        MessageKind::Summary => HistoricalStyleHints {
+            is_summary: true,
+            ..Default::default()
+        },
+        MessageKind::SummaryWarn => HistoricalStyleHints {
+            is_warning: true,
+            ..Default::default()
+        },
+        MessageKind::End => match run_status {
+            RunStatus::Failed | RunStatus::FailedUnverified => HistoricalStyleHints {
+                is_error: true,
+                ..Default::default()
+            },
+            _ => Default::default(),
+        },
+        _ => Default::default(),
     }
 }
 
@@ -254,34 +276,34 @@ fn render_messages(
         }
 
         let wrapped = wrap_text(&msg.text, content_width);
-        let body_style = match msg.kind {
-            MessageKind::Summary => Style::default().fg(Color::Green),
-            MessageKind::SummaryWarn => Style::default().fg(Color::Yellow),
-            _ => Style::default().fg(Color::White),
-        };
+        let hints = kind_to_hints(msg.kind, run.status);
 
-        for (i, chunk) in wrapped.iter().enumerate() {
-            if i == 0 {
-                lines.push(RenderedLine {
-                    spans: vec![
-                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-                        Span::styled(chunk.clone(), body_style),
-                    ],
-                });
+        if let Some((first, rest)) = wrapped.split_first() {
+            let first_line =
+                format_historical_message(&ts_str, sym.symbol, first, sym.color, hints);
+            lines.push(RenderedLine {
+                spans: first_line.spans,
+            });
+
+            let body_style = if hints.is_error {
+                Style::default().fg(Color::Red)
+            } else if hints.is_warning {
+                Style::default().fg(Color::Yellow)
+            } else if hints.is_summary {
+                Style::default().fg(Color::Green)
             } else {
+                Style::default().fg(Color::White)
+            };
+            for chunk in rest {
                 lines.push(RenderedLine {
                     spans: vec![Span::styled(format!("{}{}", indent, chunk), body_style)],
                 });
             }
-        }
-
-        if wrapped.is_empty() {
+        } else {
+            let first_line =
+                format_historical_message(&ts_str, sym.symbol, "", sym.color, hints);
             lines.push(RenderedLine {
-                spans: vec![
-                    Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                    Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-                ],
+                spans: first_line.spans,
             });
         }
     }

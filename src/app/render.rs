@@ -137,12 +137,32 @@ fn spinner_frame(count: usize) -> &'static str {
 }
 
 fn model_strip_height(models: &[CachedModel], versions: &VersionIndex) -> u16 {
-    let visible_count = visible_models(models, versions).len() as u16;
+    let visible = visible_models(models, versions);
+    let has_provenance = visible.iter().any(|name| {
+        models
+            .iter()
+            .find(|m| &m.name == name)
+            .is_some_and(|m| !m.axis_provenance.is_empty())
+    });
+    let visible_count = visible.len() as u16;
     if visible_count == 0 {
         2
+    } else if has_provenance {
+        visible_count * 2 + 2
     } else {
         visible_count + 2
     }
+}
+
+fn format_provenance_line(model: &CachedModel) -> Line<'static> {
+    let mut parts: Vec<String> = model
+        .axis_provenance
+        .iter()
+        .map(|(axis, label)| format!("{axis}: {label}"))
+        .collect();
+    parts.sort();
+    let text = format!("        {}", parts.join("  "));
+    Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
 }
 
 fn strip_ansi_codes(s: &str) -> String {
@@ -511,6 +531,9 @@ impl App {
                     prob_r,
                 ]);
                 lines.push(Line::from(line_spans));
+                if !model.axis_provenance.is_empty() {
+                    lines.push(format_provenance_line(model));
+                }
             }
         }
 
@@ -1929,5 +1952,58 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
+    }
+
+    #[test]
+    fn model_strip_renders_provenance_labels_verbatim() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
+        model.axis_provenance = std::collections::BTreeMap::from([
+            ("correctness".to_string(), "suite:hourly".to_string()),
+            ("debugging".to_string(), "suite:deep".to_string()),
+            (
+                "contextwindow".to_string(),
+                "dropped:contextwindow".to_string(),
+            ),
+        ]);
+        app.set_models(vec![model]);
+        app.versions = build_version_index(&app.models);
+
+        let area = Rect::new(0, 0, 120, 6);
+        let mut buf = ratatui::buffer::Buffer::empty(area);
+        app.model_strip(area.width).render(area, &mut buf);
+
+        let all_text: String = (0..area.height)
+            .map(|y| full_buffer_line_text(&buf, y))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_text.contains("correctness: suite:hourly"),
+            "should display correctness provenance verbatim: {all_text}"
+        );
+        assert!(
+            all_text.contains("debugging: suite:deep"),
+            "should display debugging provenance verbatim: {all_text}"
+        );
+        assert!(
+            all_text.contains("contextwindow: dropped:contextwindow"),
+            "should display contextwindow drop label verbatim: {all_text}"
+        );
+    }
+
+    #[test]
+    fn model_strip_height_accounts_for_provenance_lines() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
+        model.axis_provenance = std::collections::BTreeMap::from([(
+            "correctness".to_string(),
+            "suite:hourly".to_string(),
+        )]);
+        app.set_models(vec![model]);
+        app.versions = build_version_index(&app.models);
+
+        // 1 model × 2 lines (model + provenance) + 2 borders = 4
+        assert_eq!(model_strip_height(&app.models, &app.versions), 4);
     }
 }

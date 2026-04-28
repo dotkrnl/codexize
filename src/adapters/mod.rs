@@ -93,4 +93,28 @@ mod tests {
         let name = window_name_with_model("[Coder r1]", "claude-sonnet-4.6", EffortLevel::Tough);
         assert_eq!(name, "[Coder r1] sonnet-4.6 [tough]");
     }
+
+    #[test]
+    fn adapter_for_vendor_dispatches_each_variant() {
+        // Each concrete adapter's `interactive_command` invokes a vendor-specific
+        // CLI binary; checking for that substring gives a vendor fingerprint
+        // without needing TypeId-based downcasting.
+        let pairs = [
+            (VendorKind::Claude, "claude "),
+            (VendorKind::Codex, "codex "),
+            (VendorKind::Gemini, "gemini "),
+            (VendorKind::Kimi, "kimi "),
+        ];
+        for (vendor, marker) in pairs {
+            let adapter = adapter_for_vendor(vendor);
+            let cmd = adapter.interactive_command("model-x", "/tmp/p", EffortLevel::Normal);
+            assert!(
+                cmd.contains(marker),
+                "{:?} adapter should produce a command containing {:?}, got: {}",
+                vendor,
+                marker,
+                cmd
+            );
+        }
+    }
 }

@@ -219,12 +219,12 @@ impl App {
             }
         } else {
             // Status line (optional)
-            if let Some(status) = status_line_content {
-                if y < area.y + area.height {
-                    let status_area = ratatui::layout::Rect::new(area.x, y, width, 1);
-                    frame.render_widget(Paragraph::new(vec![status]), status_area);
-                    y += 1;
-                }
+            if let Some(status) = status_line_content
+                && y < area.y + area.height
+            {
+                let status_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+                frame.render_widget(Paragraph::new(vec![status]), status_area);
+                y += 1;
             }
             // Keymap (always last)
             if y < area.y + area.height {
@@ -259,16 +259,16 @@ impl App {
     fn top_rule_right_text(&self) -> Option<String> {
         // When a run is active, show "<agent-name> · <live-summary-title>".
         // Otherwise show "<stage-label> · <state-label>".
-        if let Some(run_id) = self.current_run_id {
-            if let Some(run) = self.state.agent_runs.iter().find(|r| r.id == run_id) {
-                let agent = &run.window_name;
-                let summary = if self.live_summary_cached_text.is_empty() {
-                    self.state.current_phase.label()
-                } else {
-                    extract_short_title(&self.live_summary_cached_text)
-                };
-                return Some(format!("{} · {}", agent, summary));
-            }
+        if let Some(run_id) = self.current_run_id
+            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == run_id)
+        {
+            let agent = &run.window_name;
+            let summary = if self.live_summary_cached_text.is_empty() {
+                self.state.current_phase.label()
+            } else {
+                extract_short_title(&self.live_summary_cached_text)
+            };
+            return Some(format!("{} · {}", agent, summary));
         }
 
         let label = self.state.current_phase.label();

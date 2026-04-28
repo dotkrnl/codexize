@@ -1787,7 +1787,7 @@ mod tests {
         // name_budget_for(45, vendor_width=6, TopRank=3) = 45 - (6+1+1+1+4+1+1+3) = 27
         // 27 >= 8 (NAME_WIDTH_MIN), so TopRank should be chosen.
         assert!(
-            lines.len() > 0,
+            !lines.is_empty(),
             "models should render at width 45 with short name"
         );
     }

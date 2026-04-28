@@ -59,3 +59,44 @@ pub fn window_exists(name: &str) -> bool {
         })
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_context_errors_when_tmux_env_is_unset() {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let original = env::var_os("TMUX");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            env::remove_var("TMUX");
+        }
+        let result = current_context();
+        unsafe {
+            if let Some(value) = original {
+                env::set_var("TMUX", value);
+            }
+        }
+        let err = result.expect_err("missing TMUX must error");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("must be started inside tmux"),
+            "missing-tmux error context: {msg}"
+        );
+    }
+
+    #[test]
+    fn window_exists_returns_false_for_random_name() {
+        // Use a UUID-ish suffix so the lookup cannot accidentally match a
+        // real window on the developer's tmux server.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let name = format!("__codexize_test_window_does_not_exist_{nonce}__");
+        assert!(!window_exists(&name));
+    }
+}

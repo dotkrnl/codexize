@@ -336,10 +336,8 @@ impl App {
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default();
-        let left = format!("{} · {}", project, self.state.session_id);
-
         let right = self.top_rule_right_text();
-        top_rule(&left, right.as_deref(), width)
+        top_rule(&project, right.as_deref(), width)
     }
 
     fn top_rule_right_text(&self) -> Option<String> {
@@ -1746,7 +1744,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Idea Input · awaiting input",
+                "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Idea Input · awaiting input",
                 "",
                 "",
                 "",
@@ -1789,7 +1787,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Brainstorming · running",
+                "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Brainstorming · running",
                 "",
                 "",
                 "",
@@ -1991,7 +1989,7 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
+                "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
                 "▌▾ Implementation · running",
                 " └─▾ Builder · running",
                 "XX:XX:XX ⠋ Wiring full-screen tests",

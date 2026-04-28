@@ -2057,7 +2057,10 @@ interactive = false
                     && m.run_id == 1
                     && m.text.starts_with("failed-unverified in")),
                 "expected an End message with the failed-unverified duration prefix; got {:?}",
-                messages.iter().map(|m| (&m.kind, &m.text)).collect::<Vec<_>>()
+                messages
+                    .iter()
+                    .map(|m| (&m.kind, &m.text))
+                    .collect::<Vec<_>>()
             );
         });
     }

@@ -510,16 +510,18 @@ mod tests {
             interactive: None,
         });
 
-        let ids = builder.apply_revise_with_new_tasks(
-            2,
-            vec![("New".into(), "d".into(), "t".into(), 1000)],
-        );
+        let ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
 
         assert_eq!(ids.len(), 1);
-        let untyped_still_none = builder
-            .pipeline_items
-            .iter()
-            .any(|item| item.stage == "coder" && item.title.as_deref() == Some("draft") && item.task_id.is_none());
-        assert!(untyped_still_none, "no-task-id coder pending row must be left untouched");
+        let untyped_still_none = builder.pipeline_items.iter().any(|item| {
+            item.stage == "coder"
+                && item.title.as_deref() == Some("draft")
+                && item.task_id.is_none()
+        });
+        assert!(
+            untyped_still_none,
+            "no-task-id coder pending row must be left untouched"
+        );
     }
 }

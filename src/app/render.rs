@@ -2381,4 +2381,176 @@ mod tests {
         );
     }
 
+    /// Builds a Root → Child fixture and renders a buffer wide enough that the
+    /// child row's spans (focus glyph, indent, marker, label, separator, status
+    /// label) all land within columns 0..=20. Returns the buffer and the y-row
+    /// of the child line.
+    fn render_depth_1_child(child_status: NodeStatus) -> (Buffer, u16) {
+        let app = test_app(
+            vec![node(
+                "Root",
+                NodeKind::Stage,
+                NodeStatus::Done,
+                vec![node(
+                    "Child",
+                    NodeKind::Task,
+                    child_status,
+                    Vec::new(),
+                    None,
+                    None,
+                )],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        let lines = render_lines(&app, 5);
+        let child_line_idx = lines
+            .iter()
+            .position(|l| l.contains("Child"))
+            .expect("Child row should be present in rendered lines")
+            as u16;
+        let buf = render_pipeline_buf(&app, 80, 5);
+        (buf, child_line_idx)
+    }
+
+    /// At depth 1, the focus glyph (column 0) and indent (columns 1..=2) are
+    /// excluded from the underline; every text-bearing column at or after the
+    /// marker (column 3) must carry it.
+    fn assert_depth_1_text_only_underline(buf: &Buffer, row: u16) {
+        // Span 0: focus glyph at column 0 — never underlined.
+        let focus_style = buf[(0, row)].style();
+        assert!(
+            !focus_style.add_modifier.contains(Modifier::UNDERLINED),
+            "focus glyph cell at col 0 must not be underlined; style={focus_style:?}",
+        );
+        // Span 1: indent ("└─") at columns 1-2 — never underlined.
+        for col in 1u16..=2 {
+            let style = buf[(col, row)].style();
+            assert!(
+                !style.add_modifier.contains(Modifier::UNDERLINED),
+                "indent cell at col {col} must not be underlined; style={style:?}",
+            );
+        }
+        // Span 2 (marker "{glyph} ") and span 3 (label "Child") at columns
+        // 3..=9 — every cell underlined.
+        for col in 3u16..=9 {
+            let style = buf[(col, row)].style();
+            assert!(
+                style.add_modifier.contains(Modifier::UNDERLINED),
+                "text-span cell at col {col} should be underlined; style={style:?}",
+            );
+        }
+        // Span 4 (" · ") at columns 10..=12 and span 5 (status label) at column
+        // 13+ — both text-bearing, both underlined. Probe one cell from each.
+        for col in [10u16, 13u16] {
+            let style = buf[(col, row)].style();
+            assert!(
+                style.add_modifier.contains(Modifier::UNDERLINED),
+                "text-span cell at col {col} should be underlined; style={style:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn depth_1_running_row_underlines_text_spans_only() {
+        let (buf, row) = render_depth_1_child(NodeStatus::Running);
+        assert_depth_1_text_only_underline(&buf, row);
+    }
+
+    #[test]
+    fn depth_1_done_row_underlines_text_spans_only() {
+        let (buf, row) = render_depth_1_child(NodeStatus::Done);
+        assert_depth_1_text_only_underline(&buf, row);
+    }
+
+    #[test]
+    fn depth_1_failed_row_underlines_text_spans_only() {
+        let (buf, row) = render_depth_1_child(NodeStatus::Failed);
+        assert_depth_1_text_only_underline(&buf, row);
+    }
+
+    #[test]
+    fn depth_1_failed_unverified_row_underlines_text_spans_only() {
+        let (buf, row) = render_depth_1_child(NodeStatus::FailedUnverified);
+        assert_depth_1_text_only_underline(&buf, row);
+    }
+
+    #[test]
+    fn depth_1_pending_row_has_no_underline_anywhere() {
+        let (buf, row) = render_depth_1_child(NodeStatus::Pending);
+        // Pending rows must not carry the modifier on any cell — neither on
+        // structural spans nor on text spans.
+        for col in 0u16..20 {
+            let style = buf[(col, row)].style();
+            assert!(
+                !style.add_modifier.contains(Modifier::UNDERLINED),
+                "pending depth-1 row should not be underlined at col {col}; \
+                 style={style:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn depth_1_loop_summary_spans_underlined_when_present() {
+        // A child labelled "Loop" with non-empty summary appends spans 6
+        // (" · ") and 7 (summary text). Both must carry the modifier; the
+        // focus glyph and indent must not.
+        let app = test_app(
+            vec![node(
+                "Root",
+                NodeKind::Stage,
+                NodeStatus::Done,
+                vec![node(
+                    "Loop",
+                    NodeKind::Task,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    None,
+                    None,
+                )],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        let lines = render_lines(&app, 5);
+        let row = lines
+            .iter()
+            .position(|l| l.contains("Loop summary"))
+            .expect("Loop summary should appear on the child row") as u16;
+        let buf = render_pipeline_buf(&app, 80, 5);
+
+        // Spans 0 & 1 stay un-underlined regardless of the Loop summary.
+        for col in 0u16..=2 {
+            let style = buf[(col, row)].style();
+            assert!(
+                !style.add_modifier.contains(Modifier::UNDERLINED),
+                "structural cell at col {col} should not be underlined; \
+                 style={style:?}",
+            );
+        }
+
+        // Layout for "└─▸ Loop · running · Loop summary":
+        //   cols 0     focus glyph " "
+        //   cols 1-2   indent "└─"
+        //   cols 3-4   marker "▸ "
+        //   cols 5-8   label "Loop"
+        //   cols 9-11  " · "
+        //   cols 12-18 "running"
+        //   cols 19-21 " · "       ← span 6
+        //   cols 22-33 "Loop summary" ← span 7
+        //
+        // Probe a cell inside each Loop summary span.
+        for col in [20u16, 25u16] {
+            let style = buf[(col, row)].style();
+            assert!(
+                style.add_modifier.contains(Modifier::UNDERLINED),
+                "Loop summary cell at col {col} should be underlined; \
+                 style={style:?}",
+            );
+        }
+    }
 }

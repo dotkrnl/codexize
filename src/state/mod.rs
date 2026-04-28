@@ -889,10 +889,11 @@ impl SessionState {
                 ));
             }
             if let Some(reason) = mismatch_reason {
+                let ended_at = chrono::Utc::now();
                 run.status = RunStatus::FailedUnverified;
-                run.ended_at = Some(chrono::Utc::now());
+                run.ended_at = Some(ended_at);
                 run.error = Some(reason.clone());
-                let duration = run.ended_at.unwrap().signed_duration_since(run.started_at);
+                let duration = ended_at.signed_duration_since(run.started_at);
                 let msg = Message {
                     ts: chrono::Utc::now(),
                     run_id: run.id,
@@ -2045,6 +2046,18 @@ interactive = false
                     .as_ref()
                     .unwrap()
                     .contains("hostname mismatch")
+            );
+            assert!(
+                state.agent_runs[0].ended_at.is_some(),
+                "ended_at must be set when a Running run is finalized as FailedUnverified"
+            );
+            let messages = SessionState::load_messages(&state.session_id).unwrap();
+            assert!(
+                messages.iter().any(|m| m.kind == MessageKind::End
+                    && m.run_id == 1
+                    && m.text.starts_with("failed-unverified in")),
+                "expected an End message with the failed-unverified duration prefix; got {:?}",
+                messages.iter().map(|m| (&m.kind, &m.text)).collect::<Vec<_>>()
             );
         });
     }

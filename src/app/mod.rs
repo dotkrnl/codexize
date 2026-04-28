@@ -55,7 +55,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::Rc,
     sync::mpsc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 type RetryKey = (String, Option<u32>, u32);
@@ -64,6 +64,26 @@ const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
 const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 const DEFAULT_EVENT_POLL_MS: u64 = 250;
 const LIVE_SUMMARY_EVENT_POLL_MS: u64 = 50;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ObservedPathState {
+    exists: bool,
+    modified_at: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct YoloExitSnapshot {
+    live_summary: ObservedPathState,
+    run_status: ObservedPathState,
+    finish_stamp: ObservedPathState,
+    stage_artifacts: Vec<ObservedPathState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct YoloExitObservation {
+    snapshot: YoloExitSnapshot,
+    saw_new_update: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpansionOverride {
@@ -185,6 +205,7 @@ pub struct App {
     failed_models: HashMap<RetryKey, FailedModelSet>,
     pending_yolo_toggle_gate: Option<&'static str>,
     yolo_exit_issued: HashSet<u64>,
+    yolo_exit_observations: HashMap<u64, YoloExitObservation>,
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
@@ -282,6 +303,7 @@ impl App {
             failed_models,
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
+            yolo_exit_observations: HashMap::new(),
             #[cfg(test)]
             test_launch_harness: None,
             messages,
@@ -315,8 +337,9 @@ impl App {
                 app.current_run_id = run_id;
                 app.window_launched = run_id.is_some();
                 if let Some(rid) = run_id {
-                    if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid) {
-                        app.live_summary_path = Some(app.live_summary_path_for(run));
+                    if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid).cloned() {
+                        app.live_summary_path = Some(app.live_summary_path_for(&run));
+                        app.prime_yolo_exit_tracking(&run);
                     }
                     app.read_live_summary_pipeline();
                 }
@@ -1871,6 +1894,98 @@ impl App {
             .log_event(format!("yolo_auto_approved: gate={gate}"));
     }
 
+    fn queue_recovery_sharding_pipeline_item(&mut self, round: u32) {
+        self.state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "sharding".to_string(),
+            task_id: None,
+            round: Some(round),
+            status: PipelineItemStatus::Pending,
+            title: Some("Recovery sharding".to_string()),
+            mode: Some("recovery".to_string()),
+            trigger: None,
+            interactive: Some(false),
+        });
+    }
+
+    fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
+        match std::fs::metadata(path) {
+            Ok(meta) => ObservedPathState {
+                exists: true,
+                modified_at: meta.modified().ok(),
+            },
+            Err(_) => ObservedPathState {
+                exists: false,
+                modified_at: None,
+            },
+        }
+    }
+
+    fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let artifacts = session_dir.join("artifacts");
+        let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
+        match run.stage.as_str() {
+            "brainstorm" => vec![
+                artifacts.join("spec.md"),
+                artifacts.join(ArtifactKind::SessionSummary.filename()),
+            ],
+            "spec-review" => vec![artifacts.join(format!("spec-review-{}.md", run.round))],
+            "planning" => vec![artifacts.join("plan.md")],
+            "sharding" => vec![artifacts.join("tasks.toml")],
+            "coder" => vec![round_dir.join("coder_summary.toml")],
+            "reviewer" => vec![round_dir.join("review.toml")],
+            "recovery" => vec![round_dir.join("recovery.toml")],
+            _ => Vec::new(),
+        }
+    }
+
+    fn yolo_exit_snapshot(&self, run: &RunRecord) -> YoloExitSnapshot {
+        YoloExitSnapshot {
+            live_summary: Self::observed_path_state(&self.live_summary_path_for(run)),
+            run_status: Self::observed_path_state(&self.run_status_path(run)),
+            finish_stamp: Self::observed_path_state(&self.finish_stamp_path_for(run)),
+            stage_artifacts: self
+                .yolo_exit_stage_artifacts(run)
+                .into_iter()
+                .map(|path| Self::observed_path_state(&path))
+                .collect(),
+        }
+    }
+
+    fn prime_yolo_exit_tracking(&mut self, run: &RunRecord) {
+        self.yolo_exit_issued.remove(&run.id);
+        self.yolo_exit_observations.insert(
+            run.id,
+            YoloExitObservation {
+                snapshot: self.yolo_exit_snapshot(run),
+                saw_new_update: false,
+            },
+        );
+    }
+
+    fn yolo_exit_has_new_observable_update(&mut self, run: &RunRecord) -> bool {
+        let snapshot = self.yolo_exit_snapshot(run);
+        let observation = self
+            .yolo_exit_observations
+            .entry(run.id)
+            .or_insert_with(|| YoloExitObservation {
+                snapshot: snapshot.clone(),
+                saw_new_update: false,
+            });
+        if observation.snapshot != snapshot {
+            observation.snapshot = snapshot;
+            observation.saw_new_update = true;
+        }
+        observation.saw_new_update
+    }
+
+    fn yolo_exit_gate_name(stage: &str) -> String {
+        // The spec leaves per-stage `/exit` event names open; keep them aligned
+        // with the existing underscore-delimited yolo audit gates.
+        format!("{}_exit", stage.replace('-', "_"))
+    }
+
     fn maybe_yolo_auto_resolve(&mut self) {
         if !self.state.modes.yolo {
             return;
@@ -2002,9 +2117,16 @@ impl App {
             effort,
             modes,
         );
-        let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
+        let Some(run) = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .cloned()
+        else {
             return;
         };
+        self.prime_yolo_exit_tracking(&run);
         let effort_suffix = match run.effort {
             EffortLevel::Low => " [low]",
             EffortLevel::Tough => " [tough]",
@@ -2166,12 +2288,17 @@ impl App {
         if !run.modes.yolo || self.yolo_exit_issued.contains(&run.id) {
             return;
         }
+        if !self.yolo_exit_has_new_observable_update(run) {
+            return;
+        }
         if !self.yolo_exit_artifact_ready(run) {
             return;
         }
         self.yolo_exit_issued.insert(run.id);
-        // The public event name remains `brainstorm_exit` per the spec.
-        self.log_yolo_auto_approved("brainstorm_exit");
+        let gate = Self::yolo_exit_gate_name(&run.stage);
+        let _ = self
+            .state
+            .log_event(format!("yolo_auto_approved: gate={gate}"));
         #[cfg(not(test))]
         {
             let _ = std::process::Command::new("tmux")
@@ -2181,13 +2308,8 @@ impl App {
     }
 
     fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
-        let artifacts = session_state::session_dir(&self.state.session_id).join("artifacts");
-        match run.stage.as_str() {
-            "spec-review" => {
-                Self::artifact_present(&artifacts.join(format!("spec-review-{}.md", run.round)))
-            }
-            _ => false,
-        }
+        let paths = self.yolo_exit_stage_artifacts(run);
+        !paths.is_empty() && paths.iter().all(|path| Self::artifact_present(path))
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
@@ -2552,18 +2674,7 @@ impl App {
                         // Refine is treated as approval here — recovery has no
                         // "next implementation" to carry forward to.
                         self.state.builder.recovery_cycle_count = 0;
-                        // Insert recovery sharding pipeline item.
-                        self.state.builder.push_pipeline_item(PipelineItem {
-                            id: 0,
-                            stage: "sharding".to_string(),
-                            task_id: None,
-                            round: Some(round),
-                            status: PipelineItemStatus::Pending,
-                            title: Some("Recovery sharding".to_string()),
-                            mode: Some("recovery".to_string()),
-                            trigger: None,
-                            interactive: Some(false),
-                        });
+                        self.queue_recovery_sharding_pipeline_item(round);
                         self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
                     }
                     review::ReviewStatus::Revise
@@ -3311,7 +3422,12 @@ impl App {
             Phase::PlanningRunning => {
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
-                self.transition_to_phase(Phase::PlanReviewRunning)?;
+                if run.modes.yolo {
+                    self.log_yolo_auto_approved("plan_review_skipped");
+                    self.transition_to_phase(Phase::ShardingRunning)?;
+                } else {
+                    self.transition_to_phase(Phase::PlanReviewRunning)?;
+                }
             }
             Phase::PlanReviewRunning => {
                 self.finalize_run_record(run.id, true, None);
@@ -3553,20 +3669,28 @@ impl App {
                 Ok(()) => {
                     self.finalize_run_record(run.id, true, None);
                     self.state.agent_error = None;
-                    // Insert the recovery-mode plan review pipeline item before
-                    // transitioning so the UI shows it as the next pending stage.
-                    self.state.builder.push_pipeline_item(PipelineItem {
-                        id: 0,
-                        stage: "plan-review".to_string(),
-                        task_id: None,
-                        round: Some(round),
-                        status: PipelineItemStatus::Pending,
-                        title: Some("Recovery plan review".to_string()),
-                        mode: Some("recovery".to_string()),
-                        trigger: None,
-                        interactive: Some(false),
-                    });
-                    self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
+                    if run.modes.yolo {
+                        // Recovery has already validated `recovery.toml`/`tasks.toml`; yolo
+                        // delegates the review gate, not the artifact validation step.
+                        self.log_yolo_auto_approved("recovery_plan_review_skipped");
+                        self.queue_recovery_sharding_pipeline_item(round);
+                        self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+                    } else {
+                        // Insert the recovery-mode plan review pipeline item before
+                        // transitioning so the UI shows it as the next pending stage.
+                        self.state.builder.push_pipeline_item(PipelineItem {
+                            id: 0,
+                            stage: "plan-review".to_string(),
+                            task_id: None,
+                            round: Some(round),
+                            status: PipelineItemStatus::Pending,
+                            title: Some("Recovery plan review".to_string()),
+                            mode: Some("recovery".to_string()),
+                            trigger: None,
+                            interactive: Some(false),
+                        });
+                        self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
+                    }
                 }
                 Err(err) => {
                     let reason = format!("recovery_reconcile_failed: {err:#}");
@@ -6297,6 +6421,7 @@ mod tests {
             failed_models: HashMap::new(),
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
+            yolo_exit_observations: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
@@ -6339,6 +6464,28 @@ mod tests {
             model: "gpt-5".to_string(),
             vendor: "codex".to_string(),
             window_name: format!("[Planning a{attempt}]"),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> RunRecord {
+        RunRecord {
+            id,
+            stage: stage.to_string(),
+            task_id: None,
+            round,
+            attempt,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: format!("[{stage} r{round} a{attempt}]"),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -7023,6 +7170,7 @@ mod tests {
             failed_models: HashMap::new(),
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
+            yolo_exit_observations: HashMap::new(),
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
@@ -8456,43 +8604,90 @@ mod tests {
     }
 
     #[test]
-    fn yolo_exit_gate_only_audits_spec_review_after_yolo_prompt_shift() {
+    fn yolo_exit_artifact_readiness_covers_all_supported_stages() {
         with_temp_root(|| {
-            let session_id = "yolo-exit-cue";
+            let session_id = "yolo-exit-ready-stages";
             let session_dir = session_state::session_dir(session_id);
             let artifacts = session_dir.join("artifacts");
-            std::fs::create_dir_all(&artifacts).unwrap();
-            std::fs::write(artifacts.join("spec-review-1.md"), "# Review\n").unwrap();
+            let round_dir = session_dir.join("rounds").join("003");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::create_dir_all(&round_dir).expect("round dir");
+
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+            std::fs::write(
+                artifacts.join("session_summary.toml"),
+                "title = \"Session\"\nsummary = \"Ready\"\n",
+            )
+            .expect("session summary");
+            std::fs::write(artifacts.join("spec-review-3.md"), "# Review\n").expect("review");
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan");
+            std::fs::write(artifacts.join("tasks.toml"), "[[tasks]]\nid = 1\n").expect("tasks");
+            std::fs::write(
+                round_dir.join("coder_summary.toml"),
+                "status = \"done\"\nsummary = \"ok\"\ndirty_before = false\ndirty_after = false\n",
+            )
+            .expect("coder summary");
+            std::fs::write(
+                round_dir.join("review.toml"),
+                "status = \"approved\"\nsummary = \"ok\"\nfeedback = []\n",
+            )
+            .expect("review verdict");
+            std::fs::write(
+                round_dir.join("recovery.toml"),
+                "status = \"agent_pivot\"\nsummary = \"ok\"\nfeedback = []\n",
+            )
+            .expect("recovery summary");
+
+            let state = SessionState::new(session_id.to_string());
+            let app = idle_app(state);
+            for stage in [
+                "brainstorm",
+                "spec-review",
+                "planning",
+                "sharding",
+                "coder",
+                "reviewer",
+                "recovery",
+            ] {
+                let mut run = make_stage_run(7, stage, 3, 1);
+                if stage == "coder" {
+                    run.task_id = Some(1);
+                }
+                assert!(
+                    app.yolo_exit_artifact_ready(&run),
+                    "{stage} should be ready"
+                );
+            }
+
+            let _ = std::fs::remove_file(artifacts.join("session_summary.toml"));
+            let brainstorm = make_stage_run(8, "brainstorm", 3, 1);
+            assert!(
+                !app.yolo_exit_artifact_ready(&brainstorm),
+                "brainstorm needs both spec.md and session_summary.toml"
+            );
+        });
+    }
+
+    #[test]
+    fn yolo_exit_issues_once_per_invocation_after_new_observable_update() {
+        with_temp_root(|| {
+            let session_id = "yolo-exit-idempotent";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+
             let state = SessionState::new(session_id.to_string());
             state.save().expect("save session");
             let mut app = idle_app(state);
-            let mut run = RunRecord {
-                id: 42,
-                stage: "spec-review".to_string(),
-                task_id: None,
-                round: 1,
-                attempt: 1,
-                model: "gpt-5".to_string(),
-                vendor: "codex".to_string(),
-                window_name: "[Spec Review]".to_string(),
-                started_at: chrono::Utc::now(),
-                ended_at: None,
-                status: RunStatus::Running,
-                error: None,
-                effort: EffortLevel::Normal,
-                modes: crate::state::LaunchModes {
-                    yolo: true,
-                    cheap: false,
-                },
-                hostname: None,
-                mount_device_id: None,
+            let mut run = make_stage_run(42, "planning", 1, 1);
+            run.modes = crate::state::LaunchModes {
+                yolo: true,
+                cheap: false,
             };
 
             app.maybe_issue_yolo_exit(&run);
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan artifact");
             app.maybe_issue_yolo_exit(&run);
-            run.stage = "brainstorm".to_string();
-            app.maybe_issue_yolo_exit(&run);
-            run.stage = "planning".to_string();
             app.maybe_issue_yolo_exit(&run);
 
             let events =
@@ -8500,7 +8695,159 @@ mod tests {
                     .expect("events");
             assert_eq!(
                 events
-                    .matches("yolo_auto_approved: gate=brainstorm_exit")
+                    .matches("yolo_auto_approved: gate=planning_exit")
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn yolo_exit_resume_guard_waits_for_new_observable_update() {
+        with_temp_root(|| {
+            let session_id = "yolo-exit-resume-guard";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("stale plan artifact");
+
+            let state = SessionState::new(session_id.to_string());
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+            let mut run = make_stage_run(43, "planning", 1, 1);
+            run.modes = crate::state::LaunchModes {
+                yolo: true,
+                cheap: false,
+            };
+
+            app.maybe_issue_yolo_exit(&run);
+            assert!(
+                !app.yolo_exit_issued.contains(&run.id),
+                "stale artifacts alone must not exit a resumed invocation"
+            );
+
+            let status_path = app.run_status_path(&run);
+            std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
+            std::fs::write(&status_path, "0").expect("status artifact");
+
+            app.maybe_issue_yolo_exit(&run);
+            assert!(app.yolo_exit_issued.contains(&run.id));
+
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert_eq!(
+                events
+                    .matches("yolo_auto_approved: gate=planning_exit")
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn yolo_recovery_finalization_skips_recovery_plan_review_after_recovery_artifact_exists() {
+        with_temp_root(|| {
+            let session_id = "yolo-recovery-skip";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            let round_dir = session_dir.join("rounds").join("002");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::create_dir_all(&round_dir).expect("round dir");
+            std::fs::write(
+                artifacts.join("spec.md"),
+                "Spec\n\n## Recovery Notes\n- superseded task 2: split into 5\n",
+            )
+            .expect("spec");
+            std::fs::write(
+                artifacts.join("plan.md"),
+                "Plan\n\n## Recovery Notes\n- superseded task 2: split into 5\n",
+            )
+            .expect("plan");
+            std::fs::write(
+                artifacts.join("tasks.toml"),
+                r#"[[tasks]]
+id = 2
+title = "Finish task 2"
+description = "do it"
+test = "cargo test"
+estimated_tokens = 10
+
+[[tasks]]
+id = 5
+title = "New follow-up"
+description = "new work"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+            )
+            .expect("tasks");
+            std::fs::write(
+                round_dir.join("recovery.toml"),
+                r#"status = "agent_pivot"
+summary = "recovered queue"
+feedback = ["split task 2"]
+"#,
+            )
+            .expect("recovery");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BuilderRecovery(2);
+            state.builder.done = vec![1, 4];
+            state.builder.pending = vec![2, 3];
+            state.builder.current_task = Some(2);
+            state.builder.recovery_prev_max_task_id = Some(4);
+            state.builder.recovery_prev_task_ids = vec![1, 2, 3, 4];
+            state.agent_runs.push(RunRecord {
+                id: 7,
+                stage: "coder".to_string(),
+                task_id: Some(2),
+                round: 2,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Builder]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Done,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+            let mut run = make_stage_run(8, "recovery", 2, 1);
+            run.modes = crate::state::LaunchModes {
+                yolo: true,
+                cheap: false,
+            };
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            app.finalize_current_run(&run)
+                .expect("finalize yolo recovery");
+
+            assert_eq!(app.state.current_phase, Phase::BuilderRecoverySharding(2));
+            assert!(
+                app.state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .all(|item| item.stage != "plan-review"),
+                "yolo recovery should not queue a recovery plan-review item"
+            );
+            assert!(
+                app.state.builder.pipeline_items.iter().any(
+                    |item| item.stage == "sharding" && item.mode.as_deref() == Some("recovery")
+                )
+            );
+
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert_eq!(
+                events
+                    .matches("yolo_auto_approved: gate=recovery_plan_review_skipped")
                     .count(),
                 1
             );

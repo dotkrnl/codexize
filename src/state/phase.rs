@@ -80,6 +80,7 @@ impl Phase {
             (SkipToImplPending, BrainstormRunning) => true,      // decline nothing-to-do → retry
             // New forward transitions for Plan Review
             (PlanningRunning, PlanReviewRunning) => true,
+            (PlanningRunning, ShardingRunning) => true,
             (PlanReviewRunning, ShardingRunning) => true,
             (PlanReviewRunning, BlockedNeedsUser) => true,
             (PlanReviewPaused, PlanReviewRunning) => true,
@@ -98,6 +99,7 @@ impl Phase {
             (ReviewRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
             (BuilderRecovery(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
             (BuilderRecovery(r), BuilderRecoveryPlanReview(r2)) if *r == *r2 => true,
+            (BuilderRecovery(r), BuilderRecoverySharding(r2)) if *r == *r2 => true,
             (BuilderRecovery(_), BlockedNeedsUser) => true,
             (BuilderRecoveryPlanReview(r), BuilderRecoverySharding(r2)) if *r == *r2 => true,
             (BuilderRecoveryPlanReview(r), BuilderRecovery(r2)) if *r == *r2 => true,
@@ -208,6 +210,7 @@ mod tests {
     #[test]
     fn plan_review_forward_transitions() {
         assert!(Phase::PlanningRunning.can_transition_to(&Phase::PlanReviewRunning));
+        assert!(Phase::PlanningRunning.can_transition_to(&Phase::ShardingRunning));
         assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
         assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::ShardingRunning));
         assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::BlockedNeedsUser));
@@ -251,6 +254,7 @@ mod tests {
         assert!(Phase::ImplementationRound(3).can_transition_to(&Phase::BuilderRecovery(3)));
         assert!(Phase::ReviewRound(3).can_transition_to(&Phase::BuilderRecovery(3)));
         assert!(Phase::BuilderRecovery(3).can_transition_to(&Phase::ImplementationRound(4)));
+        assert!(Phase::BuilderRecovery(3).can_transition_to(&Phase::BuilderRecoverySharding(3)));
         assert!(Phase::BuilderRecovery(3).can_transition_to(&Phase::BlockedNeedsUser));
         assert_eq!(Phase::BuilderRecovery(1).label(), "Builder Recovery");
         assert_eq!(

@@ -1192,6 +1192,7 @@ mod tests {
             failed_models: HashMap::new(),
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: std::collections::HashSet::new(),
+            yolo_exit_observations: HashMap::new(),
             test_launch_harness: None,
             messages,
             status_line: std::rc::Rc::new(std::cell::RefCell::new(

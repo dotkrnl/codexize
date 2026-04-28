@@ -13,11 +13,11 @@ use chrono::Offset;
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans},
+    chrome::{UnreadBadge, bottom_rule, live_status_line, top_rule_with_left_spans},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
     footer::{
-        CachedSummaryFetcher, TranscriptLeafMarker, extract_short_title,
+        CachedSummaryFetcher, StaticFetcher, TranscriptLeafMarker, extract_short_title,
         format_running_transcript_leaf, keymap,
     },
     models_area,
@@ -200,7 +200,7 @@ impl App {
         };
 
         // --- Body height ---
-        let chrome_h = models_h + 1 + 1 + footer_h; // models + top rule + bottom rule + footer
+        let chrome_h = models_h + 1 + 1 + 1 + footer_h; // models + top rule + live status + bottom rule + footer
         let body_h = term_h.saturating_sub(chrome_h);
 
         self.body_inner_height = body_h as usize;
@@ -231,14 +231,27 @@ impl App {
             y += body_h;
         }
 
-        // 4. Bottom rule (with unread badge)
+        // 4. Always-on live-status chrome row.
+        let live_status_body = self.live_status_body();
+        let live_status_fetcher = StaticFetcher(live_status_body);
+        let live_status = live_status_line(
+            &WallClock::new(),
+            self.spinner_tick,
+            &live_status_fetcher,
+            width,
+        );
+        let live_status_area = ratatui::layout::Rect::new(area.x, y, width, 1);
+        frame.render_widget(Paragraph::new(vec![live_status]), live_status_area);
+        y += 1;
+
+        // 5. Bottom rule (with unread badge)
         let badge = self.unread_badge();
         let bottom_rule_line = bottom_rule(width, badge);
         let bottom_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![bottom_rule_line]), bottom_rule_area);
         y += 1;
 
-        // 5. Footer zone — three-way branch (see "Determine footer zone").
+        // 6. Footer zone — three-way branch (see "Determine footer zone").
         if let Some(m) = modal {
             let terminal_width = area.width;
             let terminal_height = area.height;
@@ -1860,7 +1873,7 @@ mod tests {
                 "",
                 "",
                 "",
-                "",
+                "XX:XX:XX ⠋ Awaiting idea",
                 &rule,
                 &keymap,
             ]
@@ -1903,7 +1916,7 @@ mod tests {
                 "",
                 "",
                 "",
-                "",
+                "XX:XX:XX ⠋ Brainstorming",
                 &rule,
                 &keymap,
             ]
@@ -2105,7 +2118,7 @@ mod tests {
                 "",
                 "",
                 "",
-                "",
+                "XX:XX:XX ⠋ wiring full-screen tests",
                 &rule,
                 &keymap,
             ]

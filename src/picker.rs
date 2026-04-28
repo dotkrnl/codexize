@@ -1,4 +1,4 @@
-use crate::state::{Phase, SessionState};
+use crate::state::{Modes, Phase, SessionState};
 use crate::tui::AppTerminal;
 use anyhow::Result;
 use chrono::{DateTime, Local};
@@ -18,8 +18,14 @@ pub struct SessionEntry {
     pub session_id: String,
     pub idea_summary: String,
     pub current_phase: Phase,
+    pub modes: Modes,
     pub last_modified: SystemTime,
     pub archived: bool,
+}
+
+pub struct PickerSelection {
+    pub session_id: String,
+    pub created: bool,
 }
 
 pub struct SessionPicker {
@@ -31,16 +37,21 @@ pub struct SessionPicker {
     show_archived: bool,
     confirm_delete_hard: bool,
     confirm_delete_soft: bool,
+    create_modes: Modes,
 }
 
 enum KeyAction {
     Continue,
-    SelectSession(String),
+    SelectSession(PickerSelection),
     Quit,
 }
 
 impl SessionPicker {
     pub fn new() -> Result<Self> {
+        Self::new_with_create_modes(Modes::default())
+    }
+
+    pub fn new_with_create_modes(create_modes: Modes) -> Result<Self> {
         let entries = scan_sessions()?;
         Ok(Self {
             entries,
@@ -51,6 +62,7 @@ impl SessionPicker {
             show_archived: false,
             confirm_delete_hard: false,
             confirm_delete_soft: false,
+            create_modes,
         })
     }
 
@@ -75,7 +87,7 @@ impl SessionPicker {
         visible.get(self.selected).copied()
     }
 
-    pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<Option<String>> {
+    pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<Option<PickerSelection>> {
         loop {
             terminal.draw(|frame| self.draw(frame))?;
 
@@ -87,7 +99,7 @@ impl SessionPicker {
                         }
                         match self.handle_key(key)? {
                             KeyAction::Continue => continue,
-                            KeyAction::SelectSession(id) => return Ok(Some(id)),
+                            KeyAction::SelectSession(selection) => return Ok(Some(selection)),
                             KeyAction::Quit => return Ok(None),
                         }
                     }
@@ -163,16 +175,30 @@ impl SessionPicker {
                 let (badge, color, prefix) = phase_badge(entry.current_phase);
                 let time = format_relative_time(entry.last_modified, now);
 
-                let line = Line::from(vec![
+                let mut spans = vec![
                     Span::raw(" "),
                     Span::styled(prefix, Style::default().fg(color)),
                     Span::raw(" "),
                     Span::styled(format!("{:<12}", badge), Style::default().fg(color)),
+                ];
+                for label in mode_badge_labels(entry.modes) {
+                    let style = match label {
+                        "[YOLO]" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        "[CHEAP]" => Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                        _ => Style::default().fg(Color::DarkGray),
+                    };
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(label, style));
+                }
+                spans.extend([
                     Span::raw("  "),
                     Span::styled(format!("{:<8}", time), Style::default().fg(Color::DarkGray)),
                     Span::raw("  "),
                     Span::raw(&entry.idea_summary),
                 ]);
+                let line = Line::from(spans);
 
                 ListItem::new(line)
             })
@@ -325,12 +351,19 @@ impl SessionPicker {
                     let idea_text = self.input_buffer.trim().to_string();
 
                     let mut state = SessionState::new(session_id.clone());
+                    state.modes = self.create_modes;
                     state.idea_text = Some(idea_text);
                     state.current_phase = Phase::BrainstormRunning;
                     state.save()?;
                     state.log_event("session created")?;
+                    if state.modes.cheap {
+                        state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
+                    }
 
-                    return Ok(KeyAction::SelectSession(session_id));
+                    return Ok(KeyAction::SelectSession(PickerSelection {
+                        session_id,
+                        created: true,
+                    }));
                 } else {
                     self.input_mode = false;
                     return Ok(KeyAction::Continue);
@@ -344,7 +377,10 @@ impl SessionPicker {
 
     fn handle_select(&self) -> Result<KeyAction> {
         if let Some(entry) = self.selected_entry() {
-            Ok(KeyAction::SelectSession(entry.session_id.clone()))
+            Ok(KeyAction::SelectSession(PickerSelection {
+                session_id: entry.session_id.clone(),
+                created: false,
+            }))
         } else {
             Ok(KeyAction::Continue)
         }
@@ -439,6 +475,7 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
                 .map(str::to_string)
                 .unwrap_or_else(|| truncate_idea(&state.idea_text)),
             current_phase: state.current_phase,
+            modes: state.modes,
             last_modified,
             archived: state.archived,
         });
@@ -505,6 +542,17 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
     }
 }
 
+fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if modes.yolo {
+        labels.push("[YOLO]");
+    }
+    if modes.cheap {
+        labels.push("[CHEAP]");
+    }
+    labels
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +567,7 @@ mod tests {
             show_archived: false,
             confirm_delete_hard: false,
             confirm_delete_soft: false,
+            create_modes: crate::state::Modes::default(),
         }
     }
 
@@ -659,6 +708,44 @@ mod tests {
             assert_eq!(entries[1].session_id, "alpha");
             assert_eq!(entries[0].idea_summary, "beta title");
         });
+    }
+
+    #[test]
+    fn new_session_seeds_create_modes() {
+        with_temp_codexize_root(|| {
+            let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes {
+                yolo: false,
+                cheap: true,
+            })
+            .unwrap();
+            picker.input_mode = true;
+            picker.input_buffer = "ship cheap mode".to_string();
+            picker.input_cursor = picker.input_buffer.chars().count();
+
+            let action = picker
+                .handle_input_key(KeyEvent::new(
+                    KeyCode::Enter,
+                    crossterm::event::KeyModifiers::NONE,
+                ))
+                .unwrap();
+            let KeyAction::SelectSession(selection) = action else {
+                panic!("expected new session selection");
+            };
+
+            assert!(selection.created);
+            let state = SessionState::load(&selection.session_id).expect("load new session");
+            assert!(state.modes.cheap);
+        });
+    }
+
+    #[test]
+    fn mode_badge_labels_include_cheap_marker() {
+        let labels = mode_badge_labels(crate::state::Modes {
+            yolo: false,
+            cheap: true,
+        });
+
+        assert_eq!(labels, vec!["[CHEAP]"]);
     }
 
     #[test]

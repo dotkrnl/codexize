@@ -9,6 +9,9 @@ use codexize::{
 #[command(name = "codexize")]
 #[command(about = "Agentic development orchestrator", long_about = None)]
 struct Cli {
+    /// Seed newly created sessions with Cheap mode.
+    #[arg(long)]
+    cheap: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -48,21 +51,64 @@ fn main() -> Result<()> {
 
             preflight::check(&mut terminal, &tmux)?;
 
-            let mut picker = picker::SessionPicker::new()?;
-            let session_id = match picker.run(&mut terminal)? {
-                Some(id) => id,
+            let create_modes = state::Modes {
+                yolo: false,
+                cheap: cli.cheap,
+            };
+            let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
+            let selection = match picker.run(&mut terminal)? {
+                Some(selection) => selection,
                 None => {
                     tui::stop(&mut terminal)?;
                     return Ok(());
                 }
             };
 
-            let mut state = state::SessionState::load(&session_id)?;
+            if !selection.created {
+                for warning in resume_ignored_mode_warnings(create_modes) {
+                    eprintln!("{warning}");
+                }
+            }
+
+            let mut state = state::SessionState::load(&selection.session_id)?;
             let _ = state::resume::resume_session(&mut state);
 
             let result = app::App::new(tmux, state).run(&mut terminal);
             tui::stop(&mut terminal)?;
             result
         }
+    }
+}
+
+fn resume_ignored_mode_warnings(modes: state::Modes) -> Vec<&'static str> {
+    let mut warnings = Vec::new();
+    if modes.cheap {
+        warnings.push("warning: --cheap ignored on resume; persisted modes win");
+    }
+    warnings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codexize::state::Modes;
+
+    #[test]
+    fn cheap_flag_parses_as_create_mode_seed() {
+        let cli = Cli::try_parse_from(["codexize", "--cheap"]).expect("parse --cheap");
+        assert!(cli.cheap);
+    }
+
+    #[test]
+    fn resume_warning_mentions_ignored_cheap_flag() {
+        let warnings = resume_ignored_mode_warnings(Modes {
+            yolo: false,
+            cheap: true,
+        });
+
+        assert_eq!(
+            warnings,
+            vec!["warning: --cheap ignored on resume; persisted modes win"]
+        );
     }
 }

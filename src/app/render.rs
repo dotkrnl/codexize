@@ -13,7 +13,7 @@ use chrono::Offset;
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    chrome::{UnreadBadge, bottom_rule, top_rule},
+    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
     footer::{
@@ -337,7 +337,31 @@ impl App {
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default();
         let right = self.top_rule_right_text();
-        top_rule(&project, right.as_deref(), width)
+        top_rule_with_left_spans(self.top_rule_left_spans(&project), right.as_deref(), width)
+    }
+
+    fn top_rule_left_spans(&self, project: &str) -> Vec<Span<'static>> {
+        let mut spans = vec![Span::styled(
+            project.to_string(),
+            Style::default().fg(Color::DarkGray),
+        )];
+        if self.state.modes.yolo {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                "[YOLO]".to_string(),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
+        if self.state.modes.cheap {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                "[CHEAP]".to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        spans
     }
 
     fn top_rule_right_text(&self) -> Option<String> {
@@ -1738,8 +1762,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            " ".repeat(116)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
+            " ".repeat(106)
         );
 
         assert_eq!(
@@ -1781,8 +1805,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            " ".repeat(116)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
+            " ".repeat(106)
         );
 
         assert_eq!(
@@ -1983,8 +2007,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            " ".repeat(116)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
+            " ".repeat(106)
         );
 
         assert_eq!(

@@ -83,6 +83,12 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
             is_primary: false,
             capability: Some(Capability::Back),
         },
+        KeyBinding {
+            glyph: "t",
+            action: "cheap",
+            is_primary: false,
+            capability: None,
+        },
     ];
     (nav, actions, system_bindings())
 }

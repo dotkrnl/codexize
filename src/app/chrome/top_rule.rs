@@ -4,7 +4,21 @@ use ratatui::text::{Line, Span};
 /// Renders a full-width horizontal rule with text overlaid at left and right edges.
 ///
 /// Left segment is the anchor (project name); right segment is truncated first.
-pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Line<'static> {
+#[cfg(test)]
+fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Line<'static> {
+    let text_style = Style::default().fg(Color::DarkGray);
+    top_rule_with_left_spans(
+        vec![Span::styled(left_text.to_string(), text_style)],
+        right_text_opt,
+        width,
+    )
+}
+
+pub fn top_rule_with_left_spans(
+    left_spans: Vec<Span<'static>>,
+    right_text_opt: Option<&str>,
+    width: u16,
+) -> Line<'static> {
     let width = width as usize;
     if width == 0 {
         return Line::from(vec![]);
@@ -16,30 +30,34 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
 
     let Some(right_text) = right_text_opt else {
         // No right segment: just fill with rule and overlay left
-        return overlay_left_on_rule(left_text, width, rule_glyph, rule_style);
+        return overlay_left_spans_on_rule(left_spans, width, rule_glyph, rule_style);
     };
 
-    let left_len = left_text.chars().count();
+    let left_len = spans_width(&left_spans);
     let right_len = right_text.chars().count();
 
     // If both fit with at least 4 cols of separator, render both
     if left_len + right_len + 4 <= width {
         let separator_len = width - left_len - right_len;
-        return Line::from(vec![
-            Span::styled(left_text.to_string(), text_style),
-            Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(right_text.to_string(), text_style),
-        ]);
+        let mut spans = left_spans;
+        spans.push(Span::styled(
+            rule_glyph.to_string().repeat(separator_len),
+            rule_style,
+        ));
+        spans.push(Span::styled(right_text.to_string(), text_style));
+        return Line::from(spans);
     }
 
     // Untruncated right segment always renders even if short
     if right_len + left_len < width {
         let separator_len = width - left_len - right_len;
-        return Line::from(vec![
-            Span::styled(left_text.to_string(), text_style),
-            Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(right_text.to_string(), text_style),
-        ]);
+        let mut spans = left_spans;
+        spans.push(Span::styled(
+            rule_glyph.to_string().repeat(separator_len),
+            rule_style,
+        ));
+        spans.push(Span::styled(right_text.to_string(), text_style));
+        return Line::from(spans);
     }
 
     // Try truncating right segment with ellipsis until it fits with 1 col separator
@@ -52,37 +70,54 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
         let truncated_len = truncated_right.chars().count();
         let separator_len = width - left_len - truncated_len;
 
-        return Line::from(vec![
-            Span::styled(left_text.to_string(), text_style),
-            Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(truncated_right, text_style),
-        ]);
+        let mut spans = left_spans;
+        spans.push(Span::styled(
+            rule_glyph.to_string().repeat(separator_len),
+            rule_style,
+        ));
+        spans.push(Span::styled(truncated_right, text_style));
+        return Line::from(spans);
     }
 
     // Right segment would be <8 cols after truncation, drop it
     // Now just render left, truncating if needed
-    overlay_left_on_rule(left_text, width, rule_glyph, rule_style)
+    overlay_left_spans_on_rule(left_spans, width, rule_glyph, rule_style)
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn spans_plain_text(spans: &[Span<'_>]) -> String {
+    spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Overlay left text on a full-width rule, truncating left if needed.
-fn overlay_left_on_rule(
-    left_text: &str,
+fn overlay_left_spans_on_rule(
+    left_spans: Vec<Span<'static>>,
     width: usize,
     rule_glyph: char,
     rule_style: Style,
 ) -> Line<'static> {
-    let left_len = left_text.chars().count();
+    let left_len = spans_width(&left_spans);
     let text_style = Style::default().fg(Color::DarkGray);
 
     if left_len <= width {
         let rule_len = width - left_len;
-        return Line::from(vec![
-            Span::styled(left_text.to_string(), text_style),
-            Span::styled(rule_glyph.to_string().repeat(rule_len), rule_style),
-        ]);
+        let mut spans = left_spans;
+        spans.push(Span::styled(
+            rule_glyph.to_string().repeat(rule_len),
+            rule_style,
+        ));
+        return Line::from(spans);
     }
 
-    let truncated = truncate_with_ellipsis(left_text, width);
+    let left_text = spans_plain_text(&left_spans);
+    let truncated = truncate_with_ellipsis(&left_text, width);
     let truncated_len = truncated.chars().count();
     let rule_len = width.saturating_sub(truncated_len);
 
@@ -184,6 +219,37 @@ mod tests {
         let text = line.to_string();
         assert!(text.contains("myproject"));
         assert!(text.contains('─'));
+    }
+
+    #[test]
+    fn styled_left_spans_preserve_badge_style() {
+        let line = top_rule_with_left_spans(
+            vec![
+                Span::styled("codexize".to_string(), Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled(
+                    "[CHEAP]".to_string(),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+            ],
+            Some("running"),
+            80,
+        );
+
+        let cheap = line
+            .spans
+            .iter()
+            .find(|span| span.content == "[CHEAP]")
+            .expect("cheap badge span");
+        assert_eq!(cheap.style.fg, Some(Color::Green));
+        assert!(
+            cheap
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
     }
 
     // Snapshot tests at representative widths

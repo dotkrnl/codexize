@@ -463,7 +463,11 @@ mod tests {
             save_dashboard(&sample_entries()).unwrap();
             save_quotas(&sample_quotas()).unwrap();
 
-            let path = dir.path().join(".codexize").join("cache").join("models.json");
+            let path = dir
+                .path()
+                .join(".codexize")
+                .join("cache")
+                .join("models.json");
             assert!(path.exists(), "expected default-dir cache file at {path:?}");
 
             // The public load wrapper reads through the same default dir
@@ -473,7 +477,12 @@ mod tests {
             assert_eq!(dash.data[0].name, "claude-sonnet");
             let quotas = loaded.quotas.expect("quota section round-trips");
             assert_eq!(
-                quotas.data.get("claude").unwrap().get("claude-sonnet").unwrap(),
+                quotas
+                    .data
+                    .get("claude")
+                    .unwrap()
+                    .get("claude-sonnet")
+                    .unwrap(),
                 &Some(75)
             );
         });

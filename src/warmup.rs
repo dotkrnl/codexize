@@ -111,7 +111,11 @@ mod tests {
             env: &[],
             settle_timeout: Duration::from_secs(2),
         });
-        assert!(result.is_ok(), "warmup with `true` should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "warmup with `true` should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]

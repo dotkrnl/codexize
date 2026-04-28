@@ -60,7 +60,11 @@ mod tests {
     #[test]
     fn build_http_client_returns_ok() {
         let client = build_http_client(5);
-        assert!(client.is_ok(), "client builder should succeed: {:?}", client.err());
+        assert!(
+            client.is_ok(),
+            "client builder should succeed: {:?}",
+            client.err()
+        );
     }
 
     #[test]

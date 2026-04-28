@@ -631,7 +631,10 @@ mod tests {
             fs::create_dir_all(&stray).unwrap();
             // No session.toml inside; the entry must be ignored.
             let entries = scan_sessions().unwrap();
-            assert!(entries.is_empty(), "stray dir without session.toml must be skipped");
+            assert!(
+                entries.is_empty(),
+                "stray dir without session.toml must be skipped"
+            );
         });
     }
 

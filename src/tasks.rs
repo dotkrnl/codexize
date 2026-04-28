@@ -180,10 +180,7 @@ estimated_tokens = 0
         );
         let err = validate(&path).expect_err("zero estimated_tokens must error");
         let msg = format!("{err:#}");
-        assert!(
-            msg.contains("estimated_tokens must be > 0"),
-            "msg: {msg}"
-        );
+        assert!(msg.contains("estimated_tokens must be > 0"), "msg: {msg}");
     }
 
     #[test]

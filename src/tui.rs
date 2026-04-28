@@ -173,7 +173,10 @@ mod tests {
 
     #[test]
     fn wrap_input_short_input_fits_one_line() {
-        assert_eq!(wrap_input("hello world", 80), vec!["hello world".to_string()]);
+        assert_eq!(
+            wrap_input("hello world", 80),
+            vec!["hello world".to_string()]
+        );
     }
 
     #[test]

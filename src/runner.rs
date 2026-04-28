@@ -1112,7 +1112,10 @@ head_state = "unstable"
 
     #[test]
     fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
-        let launch = ChildLaunch::new("true").stdin_null().stdout_null().stderr_null();
+        let launch = ChildLaunch::new("true")
+            .stdin_null()
+            .stdout_null()
+            .stderr_null();
         let outcome = run_child_with_timeout(&launch, Duration::from_secs(2)).unwrap();
         let status = outcome.expect("child should exit before timeout");
         assert!(status.success(), "expected zero exit");
@@ -1126,17 +1129,22 @@ head_state = "unstable"
             .stdout_null()
             .stderr_null();
         let outcome = run_child_with_timeout(&launch, Duration::from_millis(150)).unwrap();
-        assert!(outcome.is_none(), "expected timeout-killed result, got {outcome:?}");
+        assert!(
+            outcome.is_none(),
+            "expected timeout-killed result, got {outcome:?}"
+        );
     }
 
     #[test]
     fn run_child_with_timeout_propagates_spawn_failure() {
         let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
-        let err = run_child_with_timeout(&launch, Duration::from_millis(100)).expect_err(
-            "spawning a missing binary must error before any timeout work",
-        );
+        let err = run_child_with_timeout(&launch, Duration::from_millis(100))
+            .expect_err("spawning a missing binary must error before any timeout work");
         let msg = format!("{:#}", err);
-        assert!(msg.contains("failed to spawn"), "spawn error context: {msg}");
+        assert!(
+            msg.contains("failed to spawn"),
+            "spawn error context: {msg}"
+        );
     }
 
     struct DetectFailsAdapter;

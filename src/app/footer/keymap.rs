@@ -110,7 +110,7 @@ fn pause_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
             },
             KeyBinding {
                 glyph: "n",
-                action: "re-review",
+                action: "new reviewer",
                 is_primary: false,
                 capability: None,
             },
@@ -648,7 +648,7 @@ mod tests {
         );
         let text = line_text(&line);
         assert!(text.contains("Enter continue"));
-        assert!(text.contains("n re-review"));
+        assert!(text.contains("n new reviewer"));
         assert!(text.contains("q quit"));
     }
 
@@ -663,7 +663,7 @@ mod tests {
         );
         let text = line_text(&line);
         assert!(text.contains("Enter continue"));
-        assert!(text.contains("n re-review"));
+        assert!(text.contains("n new reviewer"));
         assert!(text.contains("q quit"));
     }
 

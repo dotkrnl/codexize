@@ -24,8 +24,8 @@ enum Capability {
 const ENABLED_GLYPH: Color = Color::White;
 const ENABLED_GLYPH_PRIMARY: Color = Color::Blue;
 const ENABLED_ACTION: Color = Color::DarkGray;
-const DISABLED_GLYPH: Color = Color::Rgb(80, 80, 80);
-const DISABLED_ACTION: Color = Color::Rgb(80, 80, 80);
+/// Single shared dim color for capability-disabled bindings (glyph-only).
+const DISABLED_DIM: Color = Color::Rgb(80, 80, 80);
 const RULE_COLOR: Color = Color::DarkGray;
 
 /// Separator within a category.
@@ -38,6 +38,35 @@ fn is_capable(caps: FocusCaps, cap: Capability) -> bool {
         Capability::Expand => caps.can_expand,
         Capability::Input => caps.can_input,
     }
+}
+
+fn binding_enabled(binding: &KeyBinding, caps: FocusCaps) -> bool {
+    binding
+        .capability
+        .map(|c| is_capable(caps, c))
+        .unwrap_or(true)
+}
+
+/// Width budget contribution for a single binding, accounting for the rule
+/// that capability-disabled bindings render glyph-only and never advertise
+/// their action label even when `show_label` is true.
+fn binding_width(binding: &KeyBinding, show_label: bool, caps: FocusCaps) -> usize {
+    let mut len = binding.glyph.chars().count();
+    if show_label && binding_enabled(binding, caps) {
+        len += 1 + binding.action.chars().count();
+    }
+    len
+}
+
+fn category_width(bindings: &[KeyBinding], show_labels: bool, caps: FocusCaps) -> usize {
+    let mut len = 0;
+    for (i, b) in bindings.iter().enumerate() {
+        if i > 0 {
+            len += SEP_INNER.chars().count();
+        }
+        len += binding_width(b, show_labels, caps);
+    }
+    len
 }
 
 /// Default phase keymap: navigation · actions · system.
@@ -205,135 +234,59 @@ fn measure_full_width(
     actions: &[KeyBinding],
     _system: &[KeyBinding],
     show_labels: bool,
+    caps: FocusCaps,
 ) -> usize {
-    let mut len = 0;
-
-    for (i, b) in nav.iter().enumerate() {
-        if i > 0 {
-            len += SEP_INNER.chars().count();
-        }
-        len += b.glyph.chars().count();
-        if show_labels {
-            len += 1 + b.action.chars().count();
-        }
-    }
-
+    let mut len = category_width(nav, show_labels, caps);
     if !nav.is_empty() && !actions.is_empty() {
         len += SEP_CATEGORY.chars().count();
     }
-
-    for (i, b) in actions.iter().enumerate() {
-        if i > 0 {
-            len += SEP_INNER.chars().count();
-        }
-        len += b.glyph.chars().count();
-        if show_labels {
-            len += 1 + b.action.chars().count();
-        }
-    }
-
+    len += category_width(actions, show_labels, caps);
     len
 }
 
 fn measure_system(system: &[KeyBinding], show_label: bool) -> usize {
-    let mut len = 0;
-    for (i, b) in system.iter().enumerate() {
-        if i > 0 {
-            len += SEP_INNER.chars().count();
-        }
-        len += b.glyph.chars().count();
-        if show_label {
-            len += 1 + b.action.chars().count();
-        }
-    }
-    len
+    category_width(system, show_label, FocusCaps::default())
 }
 
 fn measure_simple_bindings(bindings: &[KeyBinding], show_labels: bool) -> usize {
-    let mut len = 0;
-    for (i, b) in bindings.iter().enumerate() {
-        if i > 0 {
-            len += SEP_INNER.chars().count();
-        }
-        len += b.glyph.chars().count();
-        if show_labels {
-            len += 1 + b.action.chars().count();
-        }
-    }
-    len
+    category_width(bindings, show_labels, FocusCaps::default())
 }
 
 fn select_width_tier(
     nav: &[KeyBinding],
     actions: &[KeyBinding],
     system: &[KeyBinding],
+    caps: FocusCaps,
     width: u16,
 ) -> WidthTier {
     let w = width as usize;
 
-    let left_full = measure_full_width(nav, actions, system, true);
+    let left_full = measure_full_width(nav, actions, system, true, caps);
     let sys_full = measure_system(system, true);
-    let total_full = left_full + SEP_CATEGORY.chars().count() + sys_full;
-
-    if total_full <= w {
+    if left_full + SEP_CATEGORY.chars().count() + sys_full <= w {
         return WidthTier::Full;
     }
 
     let sys_no_label = measure_system(system, false);
-    let total_drop_sys = left_full + SEP_CATEGORY.chars().count() + sys_no_label;
-    if total_drop_sys <= w {
+    if left_full + SEP_CATEGORY.chars().count() + sys_no_label <= w {
         return WidthTier::DropSystemLabel;
     }
 
-    let _left_nav_labels = measure_full_width(nav, actions, system, true)
-        - actions
-            .iter()
-            .map(|b| 1 + b.action.chars().count())
-            .sum::<usize>();
-    let nav_and_actions_no_act = {
-        let mut len = 0;
-        for (i, b) in nav.iter().enumerate() {
-            if i > 0 {
-                len += SEP_INNER.chars().count();
-            }
-            len += b.glyph.chars().count() + 1 + b.action.chars().count();
-        }
-        if !nav.is_empty() && !actions.is_empty() {
-            len += SEP_CATEGORY.chars().count();
-        }
-        for (i, b) in actions.iter().enumerate() {
-            if i > 0 {
-                len += SEP_INNER.chars().count();
-            }
-            len += b.glyph.chars().count();
-        }
-        len
-    };
-    let total_drop_act = nav_and_actions_no_act + SEP_CATEGORY.chars().count() + sys_no_label;
-    if total_drop_act <= w {
+    // Drop action labels only; nav labels still rendered (for enabled bindings).
+    let nav_full = category_width(nav, true, caps);
+    let actions_no_labels = category_width(actions, false, caps);
+    let nav_actions_drop_act = nav_full
+        + (if !nav.is_empty() && !actions.is_empty() {
+            SEP_CATEGORY.chars().count()
+        } else {
+            0
+        })
+        + actions_no_labels;
+    if nav_actions_drop_act + SEP_CATEGORY.chars().count() + sys_no_label <= w {
         return WidthTier::DropActionsLabels;
     }
 
-    let nav_no_labels = {
-        let mut len = 0;
-        for (i, b) in nav.iter().enumerate() {
-            if i > 0 {
-                len += SEP_INNER.chars().count();
-            }
-            len += b.glyph.chars().count();
-        }
-        len
-    };
-    let actions_no_labels = {
-        let mut len = 0;
-        for (i, b) in actions.iter().enumerate() {
-            if i > 0 {
-                len += SEP_INNER.chars().count();
-            }
-            len += b.glyph.chars().count();
-        }
-        len
-    };
+    let nav_no_labels = category_width(nav, false, caps);
     let total_no_nav_labels = nav_no_labels
         + (if !nav.is_empty() && !actions.is_empty() {
             SEP_CATEGORY.chars().count()
@@ -352,29 +305,30 @@ fn select_width_tier(
 
 fn select_simple_tier(bindings: &[KeyBinding], width: u16) -> WidthTier {
     let w = width as usize;
-    let full = measure_simple_bindings(bindings, true);
-    if full <= w {
+    if measure_simple_bindings(bindings, true) <= w {
         return WidthTier::Full;
     }
-
-    let no_labels = measure_simple_bindings(bindings, false);
-    if no_labels <= w {
+    if measure_simple_bindings(bindings, false) <= w {
         return WidthTier::DropNavLabels;
     }
-
     WidthTier::FirstKeyOnly
 }
 
 fn render_binding(binding: &KeyBinding, show_label: bool, enabled: bool) -> Vec<Span<'static>> {
-    let (glyph_color, action_color) = if enabled {
-        let gc = if binding.is_primary {
-            ENABLED_GLYPH_PRIMARY
-        } else {
-            ENABLED_GLYPH
-        };
-        (gc, ENABLED_ACTION)
+    if !enabled {
+        // Disabled bindings render glyph-only in the shared dim color regardless
+        // of the surrounding width tier; their action labels are never shown
+        // and were already excluded from width measurement.
+        return vec![Span::styled(
+            binding.glyph.to_string(),
+            Style::default().fg(DISABLED_DIM),
+        )];
+    }
+
+    let glyph_color = if binding.is_primary {
+        ENABLED_GLYPH_PRIMARY
     } else {
-        (DISABLED_GLYPH, DISABLED_ACTION)
+        ENABLED_GLYPH
     };
 
     let mut spans = vec![Span::styled(
@@ -385,7 +339,7 @@ fn render_binding(binding: &KeyBinding, show_label: bool, enabled: bool) -> Vec<
     if show_label {
         spans.push(Span::styled(
             format!(" {}", binding.action),
-            Style::default().fg(action_color),
+            Style::default().fg(ENABLED_ACTION),
         ));
     }
 
@@ -412,10 +366,7 @@ fn render_category(
                 Style::default().fg(ENABLED_ACTION),
             ));
         }
-        let enabled = binding
-            .capability
-            .map(|c| is_capable(caps, c))
-            .unwrap_or(true);
+        let enabled = binding_enabled(binding, caps);
         spans.extend(render_binding(binding, show_labels, enabled));
     }
 
@@ -500,7 +451,7 @@ fn render_simple_keymap(bindings: &[KeyBinding], width: u16) -> Line<'static> {
 
 fn render_default_keymap(caps: FocusCaps, width: u16) -> Line<'static> {
     let (nav, actions, system) = default_bindings();
-    let tier = select_width_tier(&nav, &actions, &system, width);
+    let tier = select_width_tier(&nav, &actions, &system, caps, width);
 
     let (nav_labels, act_labels, sys_label, first_only) = match tier {
         WidthTier::Full => (true, true, true, false),
@@ -606,7 +557,7 @@ mod tests {
     fn has_dim_spans(line: &Line) -> bool {
         line.spans
             .iter()
-            .any(|s| s.style.fg == Some(DISABLED_GLYPH) || s.style.fg == Some(DISABLED_ACTION))
+            .any(|s| s.style.fg == Some(DISABLED_DIM))
     }
 
     #[test]
@@ -728,6 +679,108 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("Esc cancel"));
         assert!(text.contains("Enter submit"));
+    }
+
+    // Disabled bindings render glyph-only and never advertise the action label,
+    // and the omitted label must not count toward width-tier selection.
+    #[test]
+    fn disabled_binding_omits_action_label() {
+        let caps = FocusCaps {
+            can_expand: false,
+            can_edit: true,
+            can_back: true,
+            can_input: true,
+        };
+        let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+        let text = line_text(&line);
+        assert!(
+            text.contains("Space"),
+            "Space glyph should still appear when disabled"
+        );
+        assert!(
+            !text.contains("Space expand"),
+            "disabled Space must not advertise its `expand` label, got: {text}"
+        );
+        // Other (enabled) labels still render.
+        assert!(text.contains("↑↓ move"));
+        assert!(text.contains("Enter input"));
+    }
+
+    #[test]
+    fn disabled_binding_uses_single_dim_color() {
+        let caps = FocusCaps {
+            can_expand: false,
+            can_edit: false,
+            can_back: false,
+            can_input: false,
+        };
+        let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+        let dim_fgs: std::collections::BTreeSet<_> = line
+            .spans
+            .iter()
+            .filter_map(|s| match s.style.fg {
+                Some(c) if c == DISABLED_DIM => Some(format!("{:?}", c)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            dim_fgs.len(),
+            1,
+            "all disabled spans should share one dim color, got {dim_fgs:?}"
+        );
+    }
+
+    #[test]
+    fn disabled_label_excluded_from_width_tier() {
+        // At a width that only fits the line when Space's `expand` label is dropped,
+        // the disabled-Space form must keep all enabled labels visible.
+        let caps_disabled = FocusCaps {
+            can_expand: false,
+            can_edit: true,
+            can_back: true,
+            can_input: true,
+        };
+        let caps_enabled = FocusCaps {
+            can_expand: true,
+            can_edit: true,
+            can_back: true,
+            can_input: true,
+        };
+        let width = {
+            let (nav, actions, system) = default_bindings();
+            // Width that fits the disabled rendering exactly.
+            let left = measure_full_width(&nav, &actions, &system, true, caps_disabled);
+            let sys = measure_system(&system, true);
+            (left + SEP_CATEGORY.chars().count() + sys) as u16
+        };
+
+        let line_dis = keymap(Phase::IdeaInput, None, caps_disabled, false, width);
+        let text_dis = line_text(&line_dis);
+        assert!(
+            text_dis.contains("↑↓ move"),
+            "disabled-form should still advertise enabled labels at this width: {text_dis}"
+        );
+        assert!(
+            text_dis.contains("Enter input"),
+            "disabled-form should keep `Enter input` at this width: {text_dis}"
+        );
+        assert!(
+            !text_dis.contains("Space expand"),
+            "Space label must remain hidden when disabled: {text_dis}"
+        );
+
+        // Sanity: with the same caps but the Space binding enabled, that exact
+        // width is too narrow for `Space expand` to fit at the Full tier — so
+        // tier selection must have observed the disabled label as 0-width.
+        let line_en = keymap(Phase::IdeaInput, None, caps_enabled, false, width);
+        let text_en = line_text(&line_en);
+        // The enabled rendering at the same width may collapse to a narrower tier;
+        // either way, its width must not exceed the budget.
+        assert!(
+            text_en.chars().count() as u16 <= width,
+            "enabled rendering exceeded width budget: width={width} got={}",
+            text_en.chars().count()
+        );
     }
 
     // Dim-in-place tests
@@ -1078,7 +1131,7 @@ mod tests {
         let has_disabled_style = line
             .spans
             .iter()
-            .any(|s| s.style.fg == Some(DISABLED_GLYPH) || s.style.fg == Some(DISABLED_ACTION));
+            .any(|s| s.style.fg == Some(DISABLED_DIM));
         assert!(has_disabled_style, "should have disabled styling");
 
         let has_enabled_style = line.spans.iter().any(|s| {

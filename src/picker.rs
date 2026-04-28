@@ -178,12 +178,16 @@ impl SessionPicker {
         let now = SystemTime::now();
         let items: Vec<ListItem> = visible
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(idx, entry)| {
                 let (badge, color, prefix) = phase_badge(entry.current_phase);
                 let time = format_relative_time(entry.last_modified, now);
 
+                // Selected rows replace the leading spacer with `>`; unselected
+                // rows keep a blank space so column alignment stays stable.
+                let leading = if idx == self.selected { ">" } else { " " };
                 let mut spans = vec![
-                    Span::raw(" "),
+                    Span::raw(leading),
                     Span::styled(prefix, Style::default().fg(color)),
                     Span::raw(" "),
                     Span::styled(format!("{:<12}", badge), Style::default().fg(color)),
@@ -213,11 +217,7 @@ impl SessionPicker {
 
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("Sessions"))
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::REVERSED)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.selected));
@@ -1278,6 +1278,103 @@ mod tests {
             5,
             "five rapid session ids must be distinct, got {ids:?}"
         );
+    }
+
+    fn picker_with_entries(entries: Vec<SessionEntry>, selected: usize) -> SessionPicker {
+        SessionPicker {
+            entries,
+            selected,
+            input_mode: false,
+            input_buffer: String::new(),
+            input_cursor: 0,
+            show_archived: false,
+            confirm_delete_hard: false,
+            confirm_delete_soft: false,
+            create_modes: crate::state::Modes::default(),
+            palette: PaletteState::default(),
+            palette_status: None,
+        }
+    }
+
+    fn dummy_entry(id: &str, summary: &str) -> SessionEntry {
+        SessionEntry {
+            session_id: id.to_string(),
+            idea_summary: summary.to_string(),
+            current_phase: Phase::IdeaInput,
+            modes: crate::state::Modes::default(),
+            last_modified: SystemTime::now(),
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn selected_row_uses_marker_and_no_reversed_style() {
+        let picker = picker_with_entries(
+            vec![
+                dummy_entry("alpha", "first idea"),
+                dummy_entry("beta", "second idea"),
+            ],
+            1,
+        );
+
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+
+        // Locate the row carrying each idea and inspect its leading marker
+        // and style. Row index is independent of the surrounding border.
+        let mut alpha_row = None;
+        let mut beta_row = None;
+        for y in 0..8 {
+            let row: String = (0..80).map(|x| buf[(x, y)].symbol()).collect();
+            if row.contains("first idea") {
+                alpha_row = Some(y);
+            }
+            if row.contains("second idea") {
+                beta_row = Some(y);
+            }
+        }
+        let alpha_y = alpha_row.expect("alpha row rendered");
+        let beta_y = beta_row.expect("beta row rendered");
+
+        // The first text cell after the list border must be the focus marker
+        // for the selected row and a blank for unselected rows.
+        let cell_after_border = |y: u16| -> String { buf[(1, y)].symbol().to_string() };
+        assert_eq!(cell_after_border(alpha_y), " ", "unselected row stays blank");
+        assert_eq!(cell_after_border(beta_y), ">", "selected row shows > marker");
+
+        // Selected row must not rely on reversed background. Scan every cell
+        // on the selected row to confirm REVERSED is absent.
+        for x in 0..80 {
+            let style = buf[(x, beta_y)].style();
+            assert!(
+                !style.add_modifier.contains(Modifier::REVERSED),
+                "selected row must not use Modifier::REVERSED at col {x}"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_row_highlight_style_excludes_reversed() {
+        // Even outside of rendering, the highlight style itself must be free
+        // of REVERSED so any future render path inherits the same contract.
+        let picker = picker_with_entries(vec![dummy_entry("alpha", "only idea")], 0);
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        for y in 0..8 {
+            for x in 0..80 {
+                assert!(
+                    !buf[(x, y)]
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::REVERSED),
+                    "no cell may render with REVERSED at ({x},{y})"
+                );
+            }
+        }
     }
 
     #[test]

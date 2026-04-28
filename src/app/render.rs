@@ -1011,6 +1011,7 @@ mod tests {
                 super::super::status_line::StatusLine::new(),
             )),
             prev_models_mode: super::super::models_area::ModelsAreaMode::default(),
+            palette: super::super::palette::PaletteState::default(),
         }
     }
 
@@ -1762,8 +1763,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
-            " ".repeat(106)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}q quit",
+            " ".repeat(122)
         );
 
         assert_eq!(
@@ -1805,8 +1806,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
-            " ".repeat(106)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}q quit",
+            " ".repeat(122)
         );
 
         assert_eq!(
@@ -2007,8 +2008,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back · t cheap  ·  {}q quit",
-            " ".repeat(106)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}q quit",
+            " ".repeat(122)
         );
 
         assert_eq!(

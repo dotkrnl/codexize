@@ -1,6 +1,7 @@
 pub struct PaletteCommand {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
+    #[allow(dead_code)]
     pub help: &'static str,
 }
 
@@ -15,6 +16,7 @@ pub enum MatchResult<'a> {
     },
     Ambiguous {
         candidates: Vec<&'a str>,
+        #[allow(dead_code)]
         ghost: &'a str,
     },
     Unknown {
@@ -37,29 +39,19 @@ pub fn resolve<'a>(input: &str, commands: &'a [PaletteCommand]) -> MatchResult<'
 
     // 1. Exact name match
     if let Some(cmd) = commands.iter().find(|c| c.name == cmd_part) {
-        return MatchResult::Exact {
-            command: cmd,
-            args,
-        };
+        return MatchResult::Exact { command: cmd, args };
     }
 
     // 2. Exact alias match
-    if let Some(cmd) = commands
-        .iter()
-        .find(|c| c.aliases.iter().any(|a| *a == cmd_part))
-    {
-        return MatchResult::Exact {
-            command: cmd,
-            args,
-        };
+    if let Some(cmd) = commands.iter().find(|c| c.aliases.contains(&cmd_part)) {
+        return MatchResult::Exact { command: cmd, args };
     }
 
     // 3. Collect prefix matches on names and aliases
     let prefix_matches: Vec<&PaletteCommand> = commands
         .iter()
         .filter(|c| {
-            c.name.starts_with(cmd_part)
-                || c.aliases.iter().any(|a| a.starts_with(cmd_part))
+            c.name.starts_with(cmd_part) || c.aliases.iter().any(|a| a.starts_with(cmd_part))
         })
         .collect();
 
@@ -92,7 +84,7 @@ pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Opti
     // Don't show ghost for exact matches
     if commands
         .iter()
-        .any(|c| c.name == cmd_part || c.aliases.iter().any(|a| *a == cmd_part))
+        .any(|c| c.name == cmd_part || c.aliases.contains(&cmd_part))
     {
         return None;
     }
@@ -100,8 +92,7 @@ pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Opti
     let prefix_matches: Vec<&PaletteCommand> = commands
         .iter()
         .filter(|c| {
-            c.name.starts_with(cmd_part)
-                || c.aliases.iter().any(|a| a.starts_with(cmd_part))
+            c.name.starts_with(cmd_part) || c.aliases.iter().any(|a| a.starts_with(cmd_part))
         })
         .collect();
 

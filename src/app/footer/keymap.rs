@@ -17,8 +17,6 @@ struct KeyBinding {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Capability {
     Expand,
-    Edit,
-    Back,
 }
 
 /// Colors for keymap styling.
@@ -37,8 +35,6 @@ const SEP_CATEGORY: &str = "  ·  ";
 fn is_capable(caps: FocusCaps, cap: Capability) -> bool {
     match cap {
         Capability::Expand => caps.can_expand,
-        Capability::Edit => caps.can_edit,
-        Capability::Back => caps.can_back,
     }
 }
 
@@ -72,20 +68,8 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
             capability: None,
         },
         KeyBinding {
-            glyph: "e",
-            action: "edit",
-            is_primary: false,
-            capability: Some(Capability::Edit),
-        },
-        KeyBinding {
-            glyph: "b",
-            action: "back",
-            is_primary: false,
-            capability: Some(Capability::Back),
-        },
-        KeyBinding {
-            glyph: "t",
-            action: "cheap",
+            glyph: ":",
+            action: "palette",
             is_primary: false,
             capability: None,
         },
@@ -623,7 +607,6 @@ mod tests {
             .any(|s| s.style.fg == Some(DISABLED_GLYPH) || s.style.fg == Some(DISABLED_ACTION))
     }
 
-    // Default phase exact string test
     #[test]
     fn default_phase_exact_string_wide() {
         let caps = FocusCaps {
@@ -637,8 +620,7 @@ mod tests {
         assert!(text.contains("Space expand"));
         assert!(text.contains("PgUp/PgDn page"));
         assert!(text.contains("Enter input"));
-        assert!(text.contains("e edit"));
-        assert!(text.contains("b back"));
+        assert!(text.contains(": palette"));
         assert!(text.contains("q quit"));
     }
 
@@ -763,45 +745,23 @@ mod tests {
     }
 
     #[test]
-    fn dim_in_place_edit_disabled() {
+    fn dim_in_place_expand_disabled_palette_present() {
         let caps = FocusCaps {
-            can_expand: true,
-            can_edit: false,
+            can_expand: false,
+            can_edit: true,
             can_back: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         assert!(
             has_dim_spans(&line),
-            "should have dim spans for disabled edit"
+            "should have dim spans for disabled expand"
         );
         let text = line_text(&line);
-        assert!(
-            text.contains("e edit") || text.contains("e"),
-            "e should still appear"
-        );
+        assert!(text.contains(":"), "palette hint should appear");
     }
 
     #[test]
-    fn dim_in_place_back_disabled() {
-        let caps = FocusCaps {
-            can_expand: true,
-            can_edit: true,
-            can_back: false,
-        };
-        let line = keymap(Phase::IdeaInput, None, caps, false, 200);
-        assert!(
-            has_dim_spans(&line),
-            "should have dim spans for disabled back"
-        );
-        let text = line_text(&line);
-        assert!(
-            text.contains("b back") || text.contains("b"),
-            "b should still appear"
-        );
-    }
-
-    #[test]
-    fn dim_in_place_all_disabled_no_dropout() {
+    fn dim_in_place_all_disabled_palette_still_shows() {
         let caps = FocusCaps {
             can_expand: false,
             can_edit: false,
@@ -810,8 +770,7 @@ mod tests {
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text = line_text(&line);
         assert!(text.contains("Space"), "Space should not dropout");
-        assert!(text.contains("e"), "e should not dropout");
-        assert!(text.contains("b"), "b should not dropout");
+        assert!(text.contains(":"), "palette hint should not dropout");
     }
 
     // Right-anchor stability
@@ -879,7 +838,7 @@ mod tests {
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text = line_text(&line);
         assert!(text.contains("↑↓ move · Space expand · PgUp/PgDn page"));
-        assert!(text.contains("Enter input · e edit · b back"));
+        assert!(text.contains("Enter input · : palette"));
         assert!(text.ends_with("q quit"));
     }
 

@@ -184,6 +184,7 @@ pub struct App {
     messages: Vec<Message>,
     status_line: Rc<RefCell<status_line::StatusLine>>,
     prev_models_mode: models_area::ModelsAreaMode,
+    palette: palette::PaletteState,
 }
 
 fn default_expansion(
@@ -277,6 +278,7 @@ impl App {
             messages,
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
             prev_models_mode: models_area::ModelsAreaMode::default(),
+            palette: palette::PaletteState::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -1823,16 +1825,16 @@ impl App {
         }
         match self.state.current_phase {
             Phase::SpecReviewPaused => {
-                let _ = self.state.log_event(
-                    "yolo_auto_approved: gate=spec_approval".to_string(),
-                );
+                let _ = self
+                    .state
+                    .log_event("yolo_auto_approved: gate=spec_approval".to_string());
                 self.state.agent_error = None;
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::PlanReviewPaused => {
-                let _ = self.state.log_event(
-                    "yolo_auto_approved: gate=plan_approval".to_string(),
-                );
+                let _ = self
+                    .state
+                    .log_event("yolo_auto_approved: gate=plan_approval".to_string());
                 self.state.agent_error = None;
                 self.queue_view_of_current_artifact("plan.md");
                 let _ = self.transition_to_phase(Phase::ShardingRunning);
@@ -6066,6 +6068,7 @@ mod tests {
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
             prev_models_mode: models_area::ModelsAreaMode::default(),
+            palette: palette::PaletteState::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -6788,6 +6791,7 @@ mod tests {
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
             prev_models_mode: models_area::ModelsAreaMode::default(),
+            palette: palette::PaletteState::default(),
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -8045,10 +8049,12 @@ mod tests {
             state.save().expect("save session");
             let mut app = idle_app(state);
 
-            app.handle_key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Char('t'),
-                crossterm::event::KeyModifiers::NONE,
-            ));
+            // Toggle cheap via palette: `:` → type "cheap" → Enter
+            app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+            for c in "cheap".chars() {
+                app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+            }
+            app.handle_key(key(crossterm::event::KeyCode::Enter));
 
             assert!(app.state.modes.cheap);
             assert!(

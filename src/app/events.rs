@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::state::{NodeStatus, Phase};
 
+use super::palette::{self, PaletteCommand};
 use super::status_line::Severity;
 use super::{App, ExpansionOverride, ModalKind, StageId};
 
@@ -31,28 +32,21 @@ impl App {
             return self.handle_modal_key(modal, key);
         }
 
-        if self.confirm_back && key.code != KeyCode::Char('b') {
+        if self.palette.open {
+            return self.handle_palette_key(key);
+        }
+
+        if self.confirm_back && key.code != KeyCode::Char(':') {
             self.confirm_back = false;
             self.status_line.borrow_mut().clear();
             return false;
         }
 
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
-            KeyCode::Char('b') => {
-                if self.confirm_back {
-                    self.confirm_back = false;
-                    self.status_line.borrow_mut().clear();
-                    self.go_back();
-                } else if self.can_go_back() {
-                    self.confirm_back = true;
-                    self.push_status(
-                        "Press b again to go back — any other key to cancel".to_string(),
-                        Severity::Warn,
-                        Duration::from_secs(5),
-                    );
-                }
+            KeyCode::Char(':') => {
+                self.palette.open();
                 false
             }
             KeyCode::Up => {
@@ -71,17 +65,6 @@ impl App {
                 if self.can_focus_input() {
                     self.input_mode = true;
                 }
-                // Expand/collapse is Space only (spec § Navigation System); Enter no
-                // longer toggles the body.
-                false
-            }
-            KeyCode::Char('e') => {
-                self.open_editable_artifact();
-                false
-            }
-            KeyCode::Char('t') => {
-                // Interim keybinding; will be replaced by `:cheap` palette command.
-                self.toggle_cheap_mode("keymap");
                 false
             }
             KeyCode::PageUp => {
@@ -92,6 +75,169 @@ impl App {
             KeyCode::PageDown => {
                 let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
                 self.scroll_viewport(step, true);
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn palette_commands() -> Vec<PaletteCommand> {
+        vec![
+            PaletteCommand {
+                name: "quit",
+                aliases: &["q"],
+                help: "Exit the TUI",
+            },
+            PaletteCommand {
+                name: "back",
+                aliases: &["b"],
+                help: "Go back",
+            },
+            PaletteCommand {
+                name: "edit",
+                aliases: &["e"],
+                help: "Edit artifact",
+            },
+            PaletteCommand {
+                name: "cheap",
+                aliases: &[],
+                help: "Toggle cheap mode",
+            },
+            PaletteCommand {
+                name: "yolo",
+                aliases: &[],
+                help: "Toggle YOLO mode",
+            },
+        ]
+    }
+
+    fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc => {
+                self.palette.close();
+                false
+            }
+            KeyCode::Enter => {
+                let input = self.palette.buffer.clone();
+                self.palette.close();
+                self.execute_palette_input(&input)
+            }
+            KeyCode::Tab => {
+                let commands = Self::palette_commands();
+                if let Some(ghost) = palette::ghost_completion(&self.palette.buffer, &commands) {
+                    self.palette.accept_ghost(ghost);
+                }
+                false
+            }
+            KeyCode::Backspace => {
+                if self.palette.buffer.is_empty() {
+                    self.palette.close();
+                } else {
+                    let cursor = self.palette.cursor;
+                    if cursor > 0 {
+                        let byte = self
+                            .palette
+                            .buffer
+                            .char_indices()
+                            .nth(cursor - 1)
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        let end = self
+                            .palette
+                            .buffer
+                            .char_indices()
+                            .nth(cursor)
+                            .map(|(i, _)| i)
+                            .unwrap_or(self.palette.buffer.len());
+                        self.palette.buffer.replace_range(byte..end, "");
+                        self.palette.cursor -= 1;
+                    }
+                }
+                false
+            }
+            KeyCode::Char(c) => {
+                let byte = self
+                    .palette
+                    .buffer
+                    .char_indices()
+                    .nth(self.palette.cursor)
+                    .map(|(i, _)| i)
+                    .unwrap_or(self.palette.buffer.len());
+                self.palette.buffer.insert(byte, c);
+                self.palette.cursor += 1;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn execute_palette_input(&mut self, input: &str) -> bool {
+        let commands = Self::palette_commands();
+        match palette::resolve(input, &commands) {
+            palette::MatchResult::Exact { command, args }
+            | palette::MatchResult::UniquePrefix { command, args } => {
+                let _ = self.state.log_event(format!(
+                    "palette_invoked: command={} args={args}",
+                    command.name
+                ));
+                self.execute_palette_command(command.name, &args)
+            }
+            palette::MatchResult::Ambiguous { candidates, .. } => {
+                let names = candidates.join("|");
+                self.push_status(
+                    format!("palette: ambiguous ({names})"),
+                    Severity::Warn,
+                    Duration::from_secs(3),
+                );
+                false
+            }
+            palette::MatchResult::Unknown { input: cmd } => {
+                self.push_status(
+                    format!("palette: unknown command \"{cmd}\""),
+                    Severity::Warn,
+                    Duration::from_secs(3),
+                );
+                false
+            }
+        }
+    }
+
+    fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
+        match name {
+            "quit" => true,
+            "back" => {
+                if self.confirm_back {
+                    self.confirm_back = false;
+                    self.status_line.borrow_mut().clear();
+                    self.go_back();
+                } else if self.can_go_back() {
+                    self.confirm_back = true;
+                    self.push_status(
+                        "Press :back again to go back".to_string(),
+                        Severity::Warn,
+                        Duration::from_secs(5),
+                    );
+                }
+                false
+            }
+            "edit" => {
+                self.open_editable_artifact();
+                false
+            }
+            "cheap" => {
+                match args.trim() {
+                    "on" => self.set_cheap_mode(true, "palette"),
+                    "off" => self.set_cheap_mode(false, "palette"),
+                    _ => self.toggle_cheap_mode("palette"),
+                }
+                false
+            }
+            "yolo" => {
+                match args.trim() {
+                    "on" => self.set_yolo_mode(true, "palette"),
+                    "off" => self.set_yolo_mode(false, "palette"),
+                    _ => self.toggle_yolo_mode("palette"),
+                }
                 false
             }
             _ => false,

@@ -20,9 +20,20 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// `~/.codexize/` is assumed to reside on a local filesystem.
 pub fn with_lock<T>(path: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
     acquire(path)?;
-    let result = f();
-    release(path);
-    result
+    let work = f();
+    let release = release(path);
+    match (work, release) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(release_err)) => Err(release_err),
+        (Err(work_err), Ok(())) => Err(work_err),
+        (Err(work_err), Err(release_err)) => {
+            eprintln!(
+                "warning: failed to release lock at {} after closure error: {release_err:#}",
+                path.display()
+            );
+            Err(work_err)
+        }
+    }
 }
 
 fn acquire(path: &Path) -> Result<()> {
@@ -87,14 +98,16 @@ fn try_break_stale(path: &Path) -> bool {
     false
 }
 
-fn release(path: &Path) {
+fn release(path: &Path) -> Result<()> {
     if let Ok(contents) = fs::read_to_string(path)
         && let Some(pid_str) = contents.lines().next()
         && let Ok(pid) = pid_str.parse::<u32>()
         && pid == std::process::id()
     {
-        let _ = fs::remove_file(path);
+        fs::remove_file(path)
+            .with_context(|| format!("failed to release lock at {}", path.display()))?;
     }
+    Ok(())
 }
 
 fn is_process_alive(pid: i32) -> bool {
@@ -195,7 +208,36 @@ mod tests {
         let path = lock_path(&dir);
         // Write a lock for a different PID
         fs::write(&path, "999999\n0\n").unwrap();
-        release(&path);
+        release(&path).unwrap();
         assert!(path.exists(), "should not remove another process's lock");
+    }
+
+    #[test]
+    fn release_propagates_remove_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new().unwrap();
+        let path = lock_path(&dir);
+        // Stage a lock owned by us so the read+pid checks pass.
+        fs::write(&path, format!("{}\n{}\n", std::process::id(), now_secs())).unwrap();
+
+        // Lock the parent directory so `fs::remove_file` cannot unlink the
+        // lockfile, forcing the inner remove to fail.
+        let original = fs::metadata(dir.path()).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_mode(0o555);
+        fs::set_permissions(dir.path(), readonly).unwrap();
+
+        let result = release(&path);
+
+        // Restore so TempDir can clean up.
+        fs::set_permissions(dir.path(), original).unwrap();
+
+        let err = result.expect_err("release must surface remove_file errors");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("failed to release lock"),
+            "missing context in error: {msg}"
+        );
     }
 }

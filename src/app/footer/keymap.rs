@@ -793,7 +793,10 @@ mod tests {
             "should have dim spans for disabled input"
         );
         let text = line_text(&line);
-        assert!(text.contains("Enter"), "Enter should still appear when input is disabled");
+        assert!(
+            text.contains("Enter"),
+            "Enter should still appear when input is disabled"
+        );
     }
 
     // Right-anchor stability

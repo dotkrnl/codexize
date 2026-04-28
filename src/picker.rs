@@ -943,7 +943,10 @@ mod tests {
             KeyAction::Continue
         ));
         assert!(picker.input_mode, "bare n should enter input mode");
-        assert!(picker.input_buffer.is_empty(), "buffer should be empty on entry");
+        assert!(
+            picker.input_buffer.is_empty(),
+            "buffer should be empty on entry"
+        );
 
         // Esc exits without creating a session
         assert!(matches!(
@@ -1035,8 +1038,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(text.contains("n new"), "show-archived on bar should advertise n new");
-        assert!(text.contains(":new"), "show-archived on bar should advertise :new");
+        assert!(
+            text.contains("n new"),
+            "show-archived on bar should advertise n new"
+        );
+        assert!(
+            text.contains(":new"),
+            "show-archived on bar should advertise :new"
+        );
     }
 
     #[test]
@@ -1053,8 +1062,8 @@ mod tests {
     #[test]
     fn palette_new_with_args_creates_session_immediately() {
         with_temp_codexize_root(|| {
-            let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes::default())
-                .unwrap();
+            let mut picker =
+                SessionPicker::new_with_create_modes(crate::state::Modes::default()).unwrap();
             picker.input_mode = false;
 
             let action = picker.execute_palette_input("new ship cheap mode").unwrap();
@@ -1072,11 +1081,13 @@ mod tests {
     #[test]
     fn palette_idea_alias_creates_session_immediately() {
         with_temp_codexize_root(|| {
-            let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes::default())
-                .unwrap();
+            let mut picker =
+                SessionPicker::new_with_create_modes(crate::state::Modes::default()).unwrap();
             picker.input_mode = false;
 
-            let action = picker.execute_palette_input("idea ship cheap mode").unwrap();
+            let action = picker
+                .execute_palette_input("idea ship cheap mode")
+                .unwrap();
             let KeyAction::SelectSession(selection) = action else {
                 panic!("expected SelectSession action");
             };

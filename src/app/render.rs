@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
+use crate::state::{NodeKind, NodeStatus, Phase, RunRecord, RunStatus};
 use chrono::Offset;
 use std::collections::BTreeSet;
 
@@ -96,6 +96,13 @@ impl Widget for PipelineWidget<'_> {
 
 fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
+}
+
+fn is_background_section(node: &crate::state::Node) -> bool {
+    // The tree builder still calls this stage `Loop`; the spec names the
+    // user-facing section `background`, so keep the exception deliberately narrow.
+    node.kind == NodeKind::Stage
+        && (node.label == "Loop" || node.label.eq_ignore_ascii_case("background"))
 }
 
 fn strip_ansi_codes(s: &str) -> String {
@@ -632,6 +639,16 @@ impl App {
         expanded: bool,
         node: &crate::state::Node,
     ) -> Line<'static> {
+        if is_background_section(node) {
+            let marker = if expanded { "▾" } else { "▸" };
+            let style = if index == self.selected {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            return Line::from(Span::raw(format!("background {marker}"))).style(style);
+        }
+
         let marker = if node.status == NodeStatus::Pending {
             " "
         } else if expanded {
@@ -1279,6 +1296,13 @@ mod tests {
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    fn line_to_string(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect::<String>()
     }
 
     fn render_lines(app: &App, height: u16) -> Vec<String> {
@@ -2526,6 +2550,49 @@ mod tests {
             Vec::new(),
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn builder_loop_header_uses_background_title_exception() {
+        let app = test_app(
+            vec![node(
+                "Loop",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![node(
+                    "Task 1",
+                    NodeKind::Task,
+                    NodeStatus::Pending,
+                    Vec::new(),
+                    None,
+                    None,
+                )],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        let node = app.node_for_row(0).expect("loop row");
+
+        let expanded = app.node_header(0, true, node);
+        let collapsed = app.node_header(0, false, node);
+
+        assert_eq!(line_to_string(&expanded), "background ▾");
+        assert_eq!(line_to_string(&collapsed), "background ▸");
+    }
+
+    #[test]
+    fn non_background_headers_keep_status_format() {
+        let app = flat_stage_app(&[("Planning", NodeStatus::Running)]);
+        let node = app.node_for_row(0).expect("planning row");
+
+        let header = line_to_string(&app.node_header(0, true, node));
+
+        assert!(
+            header.contains("▾ Planning · running"),
+            "ordinary headers should keep marker, label, and status: {header:?}"
+        );
     }
 
     #[test]

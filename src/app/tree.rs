@@ -730,14 +730,17 @@ fn attempt_run_node(run: &RunRecord) -> Node {
 }
 
 fn agent_run_node(run: &RunRecord) -> Node {
-    let effort_suffix = if run.effort == crate::adapters::EffortLevel::Tough {
-        match run.vendor.as_str() {
+    let effort_suffix = match run.effort {
+        crate::adapters::EffortLevel::Low => match run.vendor.as_str() {
+            "codex" | "claude" => ":low",
+            _ => "",
+        },
+        crate::adapters::EffortLevel::Tough => match run.vendor.as_str() {
             "codex" => ":xhigh",
             "claude" => ":max",
             _ => "",
-        }
-    } else {
-        ""
+        },
+        crate::adapters::EffortLevel::Normal => "",
     };
     let label = format!(
         "{} · {}{}",
@@ -1059,6 +1062,7 @@ mod tests {
             status,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         }
@@ -1180,6 +1184,7 @@ mod tests {
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1197,6 +1202,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1233,6 +1239,7 @@ mod tests {
             status: RunStatus::Failed,
             error: Some("quota exceeded".to_string()),
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1250,6 +1257,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1278,6 +1286,7 @@ mod tests {
             status: RunStatus::Failed,
             error: Some("timeout".to_string()),
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1295,6 +1304,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1342,6 +1352,7 @@ mod tests {
                     .to_string(),
             ),
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1390,6 +1401,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1511,6 +1523,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1528,6 +1541,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1547,6 +1561,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1564,6 +1579,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1581,6 +1597,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1771,6 +1788,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1788,6 +1806,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1824,6 +1843,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1872,6 +1892,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1889,6 +1910,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1942,6 +1964,16 @@ mod tests {
             "Tough gemini run should have no effort suffix, got: {}",
             node.label
         );
+
+        let mut low_codex = run(5, "coder", RunStatus::Running);
+        low_codex.effort = crate::adapters::EffortLevel::Low;
+        low_codex.vendor = "codex".to_string();
+        let node = agent_run_node(&low_codex);
+        assert!(
+            node.label.ends_with(":low"),
+            "Low codex run should end with :low, got: {}",
+            node.label
+        );
     }
 
     #[test]
@@ -1965,6 +1997,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         };

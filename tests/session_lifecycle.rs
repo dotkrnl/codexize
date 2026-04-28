@@ -1,5 +1,6 @@
 use codexize::state::{
-    Message, MessageKind, MessageSender, RunRecord, RunStatus, SessionState, session_dir,
+    LaunchModes, Message, MessageKind, MessageSender, RunRecord, RunStatus, SessionState,
+    session_dir,
 };
 use std::sync::{Mutex, OnceLock};
 
@@ -18,6 +19,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         status,
         error: None,
         effort: codexize::adapters::EffortLevel::Normal,
+        modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
     }
@@ -50,7 +52,10 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 fn session_round_trips_schema_v2_runs_and_messages() {
     with_temp_root(|| {
         let mut state = SessionState::new("integration-session".to_string());
+        state.modes.yolo = true;
+        state.modes.cheap = true;
         state.agent_runs.push(sample_run(1, RunStatus::Done));
+        state.agent_runs[0].modes = state.launch_modes();
         state.save().expect("save session");
 
         state
@@ -80,8 +85,14 @@ fn session_round_trips_schema_v2_runs_and_messages() {
             SessionState::load_messages("integration-session").expect("load messages");
 
         assert_eq!(loaded_state.schema_version, 2);
+        assert!(loaded_state.modes.yolo);
+        assert!(loaded_state.modes.cheap);
         assert_eq!(loaded_state.agent_runs.len(), 1);
         assert_eq!(loaded_state.agent_runs[0].status, RunStatus::Done);
+        assert_eq!(
+            loaded_state.agent_runs[0].modes,
+            loaded_state.launch_modes()
+        );
         assert_eq!(loaded_messages.len(), 2);
         assert_eq!(loaded_messages[0].kind, MessageKind::Brief);
         assert_eq!(loaded_messages[1].kind, MessageKind::End);

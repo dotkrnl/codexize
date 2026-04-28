@@ -1175,6 +1175,7 @@ head_state = "unstable"
             model: "model-x".to_string(),
             prompt_path: PathBuf::from("/tmp/prompt.txt"),
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
         }
     }
 

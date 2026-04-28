@@ -26,6 +26,41 @@ pub enum RunStatus {
     FailedUnverified,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Modes {
+    #[serde(default)]
+    pub yolo: bool,
+    #[serde(default)]
+    pub cheap: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LaunchModes {
+    #[serde(default)]
+    pub yolo: bool,
+    #[serde(default)]
+    pub cheap: bool,
+}
+
+impl Modes {
+    pub fn launch_snapshot(self) -> LaunchModes {
+        LaunchModes {
+            yolo: self.yolo,
+            cheap: self.cheap,
+        }
+    }
+}
+
+impl LaunchModes {
+    pub fn effort_for(self, requested: EffortLevel) -> EffortLevel {
+        if self.cheap {
+            EffortLevel::Low
+        } else {
+            requested
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
     pub id: u64,
@@ -42,6 +77,8 @@ pub struct RunRecord {
     pub error: Option<String>,
     #[serde(default)]
     pub effort: EffortLevel,
+    #[serde(default)]
+    pub modes: LaunchModes,
     #[serde(default)]
     pub hostname: Option<String>,
     #[serde(default)]
@@ -636,6 +673,8 @@ pub struct SessionState {
     pub session_id: String,
     pub schema_version: u32,
     #[serde(default)]
+    pub modes: Modes,
+    #[serde(default)]
     pub agent_runs: Vec<RunRecord>,
     pub current_phase: Phase,
     #[serde(default)]
@@ -666,6 +705,7 @@ impl SessionState {
         Self {
             session_id,
             schema_version: 2,
+            modes: Modes::default(),
             agent_runs: Vec::new(),
             current_phase: Phase::IdeaInput,
             idea_text: None,
@@ -787,6 +827,7 @@ impl SessionState {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
+        modes: LaunchModes,
     ) -> u64 {
         let id = self.next_agent_run_id();
         let hostname = Self::capture_hostname();
@@ -805,6 +846,7 @@ impl SessionState {
             status: RunStatus::Running,
             error: None,
             effort,
+            modes,
             hostname,
             mount_device_id,
         };
@@ -849,6 +891,10 @@ impl SessionState {
     /// Return the next available agent_run_id (monotonic within session).
     pub fn next_agent_run_id(&self) -> u64 {
         self.agent_runs.iter().map(|r| r.id).max().unwrap_or(0) + 1
+    }
+
+    pub fn launch_modes(&self) -> LaunchModes {
+        self.modes.launch_snapshot()
     }
 
     /// Resume running runs on session load.
@@ -1023,6 +1069,39 @@ current_phase = "IdeaInput"
     }
 
     #[test]
+    fn session_modes_default_to_off_when_absent() {
+        let toml_text = r#"
+session_id = "abc"
+schema_version = 2
+current_phase = "IdeaInput"
+"#;
+        let state: SessionState =
+            toml::from_str(toml_text).expect("legacy v2 session state must deserialize");
+        assert_eq!(state.modes, Modes::default());
+        assert_eq!(state.launch_modes(), LaunchModes::default());
+    }
+
+    #[test]
+    fn session_modes_round_trip() {
+        let mut state = SessionState::new("s".to_string());
+        state.modes.yolo = true;
+        state.modes.cheap = true;
+
+        let text = toml::to_string(&state).expect("serialize");
+        assert!(text.contains("[modes]"));
+        let back: SessionState = toml::from_str(&text).expect("deserialize");
+
+        assert_eq!(back.modes, state.modes);
+        assert_eq!(
+            back.launch_modes(),
+            LaunchModes {
+                yolo: true,
+                cheap: true,
+            }
+        );
+    }
+
+    #[test]
     fn pending_guard_decision_round_trips() {
         let mut state = SessionState::new("s".to_string());
         state.pending_guard_decision = Some(PendingGuardDecision {
@@ -1077,6 +1156,7 @@ current_phase = "IdeaInput"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         };
@@ -1102,6 +1182,7 @@ current_phase = "IdeaInput"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         };
@@ -1130,6 +1211,7 @@ current_phase = "IdeaInput"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         };
@@ -1203,6 +1285,7 @@ current_phase = "IdeaInput"
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -1395,6 +1478,7 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1419,6 +1503,7 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1448,6 +1533,7 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1477,6 +1563,7 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1494,6 +1581,7 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -1541,6 +1629,10 @@ text = "agent started · gpt-5 (openai)"
             status: RunStatus::Done,
             error: None,
             effort: EffortLevel::Normal,
+            modes: LaunchModes {
+                yolo: true,
+                cheap: true,
+            },
             hostname: None,
             mount_device_id: None,
         });
@@ -1550,6 +1642,13 @@ text = "agent started · gpt-5 (openai)"
         assert_eq!(loaded.agent_runs[0].id, 1);
         assert_eq!(loaded.agent_runs[0].stage, "brainstorm");
         assert_eq!(loaded.agent_runs[0].status, RunStatus::Done);
+        assert_eq!(
+            loaded.agent_runs[0].modes,
+            LaunchModes {
+                yolo: true,
+                cheap: true,
+            }
+        );
     }
 
     #[test]
@@ -2025,6 +2124,7 @@ interactive = false
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: if current_hostname.is_some() {
                     different_hostname
                 } else {
@@ -2092,6 +2192,7 @@ interactive = false
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: different_device,
             });
@@ -2134,6 +2235,7 @@ interactive = false
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: current_hostname,
                 mount_device_id: current_device,
             });
@@ -2166,10 +2268,12 @@ interactive = false
         }"#;
         let record: RunRecord = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(record.effort, EffortLevel::Normal);
+        assert_eq!(record.modes, LaunchModes::default());
 
         let round_tripped = serde_json::to_string(&record).expect("should serialize");
         let record2: RunRecord = serde_json::from_str(&round_tripped).expect("should round-trip");
         assert_eq!(record2.effort, EffortLevel::Normal);
+        assert_eq!(record2.modes, LaunchModes::default());
         assert_eq!(record2.id, 42);
     }
 }

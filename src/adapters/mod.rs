@@ -1,5 +1,6 @@
 use crate::model_names;
 use crate::selection::VendorKind;
+use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -15,6 +16,7 @@ pub use kimi::KimiAdapter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EffortLevel {
+    Low,
     #[default]
     Normal,
     Tough,
@@ -24,6 +26,7 @@ pub struct AgentRun {
     pub model: String,
     pub prompt_path: PathBuf,
     pub effort: EffortLevel,
+    pub modes: LaunchModes,
 }
 
 pub trait AgentAdapter: Send + Sync {
@@ -48,10 +51,11 @@ pub fn short_model(model: &str) -> String {
 }
 
 /// Build a tmux window name that embeds the model, e.g. `[Coder r1] sonnet-4.6`.
-/// Appends `[tough]` when effort is `Tough`.
+/// Appends an effort suffix for non-normal effort.
 pub fn window_name_with_model(base: &str, model: &str, effort: EffortLevel) -> String {
     let short = short_model(model);
     match effort {
+        EffortLevel::Low => format!("{base} {short} [low]"),
         EffortLevel::Tough => format!("{base} {short} [tough]"),
         EffortLevel::Normal => format!("{base} {short}"),
     }
@@ -94,6 +98,12 @@ mod tests {
         let name =
             window_name_with_model("[Round 1 Coder]", "claude-sonnet-4.6", EffortLevel::Tough);
         assert_eq!(name, "[Round 1 Coder] sonnet-4.6 [tough]");
+    }
+
+    #[test]
+    fn window_name_with_model_low_appends_suffix() {
+        let name = window_name_with_model("[Round 1 Coder]", "claude-sonnet-4.6", EffortLevel::Low);
+        assert_eq!(name, "[Round 1 Coder] sonnet-4.6 [low]");
     }
 
     #[test]

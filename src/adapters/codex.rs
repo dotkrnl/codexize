@@ -14,6 +14,7 @@ impl AgentAdapter for CodexAdapter {
 
     fn interactive_command(&self, model: &str, prompt_path: &str, effort: EffortLevel) -> String {
         let effort_flag = match effort {
+            EffortLevel::Low => r#"-c model_reasoning_effort="low""#,
             EffortLevel::Normal => r#"-c model_reasoning_effort="medium""#,
             EffortLevel::Tough => r#"-c model_reasoning_effort="xhigh""#,
         };
@@ -35,6 +36,7 @@ impl AgentAdapter for CodexAdapter {
         // changes and again at turn end. JSON events let us keep progress
         // readable while summarising file changes as single-line entries.
         let effort_flag = match effort {
+            EffortLevel::Low => r#"-c model_reasoning_effort="low""#,
             EffortLevel::Normal => r#"-c model_reasoning_effort="medium""#,
             EffortLevel::Tough => r#"-c model_reasoning_effort="xhigh""#,
         };
@@ -57,9 +59,11 @@ mod tests {
     fn interactive_command_emits_reasoning_effort_config() {
         let adapter = CodexAdapter;
 
+        let low = adapter.interactive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Low);
         let normal = adapter.interactive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Normal);
         let tough = adapter.interactive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Tough);
 
+        assert!(low.contains(r#"-c model_reasoning_effort="low""#));
         assert!(normal.contains(r#"-c model_reasoning_effort="medium""#));
         assert!(tough.contains(r#"-c model_reasoning_effort="xhigh""#));
     }
@@ -68,11 +72,13 @@ mod tests {
     fn noninteractive_command_emits_reasoning_effort_config() {
         let adapter = CodexAdapter;
 
+        let low = adapter.noninteractive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Low);
         let normal =
             adapter.noninteractive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Normal);
         let tough =
             adapter.noninteractive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Tough);
 
+        assert!(low.contains(r#"-c model_reasoning_effort="low""#));
         assert!(normal.contains(r#"-c model_reasoning_effort="medium""#));
         assert!(tough.contains(r#"-c model_reasoning_effort="xhigh""#));
     }

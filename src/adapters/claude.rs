@@ -14,6 +14,7 @@ impl AgentAdapter for ClaudeAdapter {
 
     fn interactive_command(&self, model: &str, prompt_path: &str, effort: EffortLevel) -> String {
         let effort_flag = match effort {
+            EffortLevel::Low => "--effort low",
             EffortLevel::Normal => "--effort medium",
             EffortLevel::Tough => "--effort max",
         };
@@ -37,6 +38,7 @@ impl AgentAdapter for ClaudeAdapter {
         // filter formats each type with a coloured marker so text, thinking,
         // and tool use are visually distinct in the tmux pane.
         let effort_flag = match effort {
+            EffortLevel::Low => "--effort low",
             EffortLevel::Normal => "--effort medium",
             EffortLevel::Tough => "--effort max",
         };
@@ -59,6 +61,8 @@ mod tests {
     fn interactive_command_emits_effort_flag() {
         let adapter = ClaudeAdapter;
 
+        let low =
+            adapter.interactive_command("claude-sonnet-4.6", "/tmp/prompt.txt", EffortLevel::Low);
         let normal = adapter.interactive_command(
             "claude-sonnet-4.6",
             "/tmp/prompt.txt",
@@ -67,6 +71,7 @@ mod tests {
         let tough =
             adapter.interactive_command("claude-opus-4.6", "/tmp/prompt.txt", EffortLevel::Tough);
 
+        assert!(low.contains("--effort low"));
         assert!(normal.contains("--effort medium"));
         assert!(tough.contains("--effort max"));
     }
@@ -75,6 +80,11 @@ mod tests {
     fn noninteractive_command_emits_effort_flag() {
         let adapter = ClaudeAdapter;
 
+        let low = adapter.noninteractive_command(
+            "claude-sonnet-4.6",
+            "/tmp/prompt.txt",
+            EffortLevel::Low,
+        );
         let normal = adapter.noninteractive_command(
             "claude-sonnet-4.6",
             "/tmp/prompt.txt",
@@ -86,6 +96,7 @@ mod tests {
             EffortLevel::Tough,
         );
 
+        assert!(low.contains("--effort low"));
         assert!(normal.contains("--effort medium"));
         assert!(tough.contains("--effort max"));
     }

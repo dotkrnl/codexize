@@ -486,6 +486,7 @@ mod tests {
             status,
             error: None,
             effort: crate::adapters::EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         }

@@ -78,8 +78,8 @@ pub fn pick_for_phase<'a>(
 /// Falls back to the full unfiltered slice only when the subset selection
 /// returns `None`, so the run still launches if no eligible model has quota.
 ///
-/// For [`EffortLevel::Normal`], delegates straight to [`pick_for_phase`] so
-/// non-tough behavior is byte-identical.
+/// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight to
+/// [`pick_for_phase`] so non-tough behavior is byte-identical.
 pub fn pick_for_phase_with_effort<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
@@ -87,8 +87,11 @@ pub fn pick_for_phase_with_effort<'a>(
     version_index: &VersionIndex,
     effort: EffortLevel,
 ) -> Option<&'a CachedModel> {
-    if effort == EffortLevel::Normal {
-        return pick_for_phase(models, phase, vendor_filter, version_index);
+    match effort {
+        EffortLevel::Low | EffortLevel::Normal => {
+            return pick_for_phase(models, phase, vendor_filter, version_index);
+        }
+        EffortLevel::Tough => {}
     }
 
     let eligible: Vec<CachedModel> = models
@@ -166,7 +169,8 @@ pub fn select_for_review<'a>(
 /// used by the coder, the reviewer reuses it rather than picking a fresh
 /// sonnet or Kimi.
 ///
-/// For [`EffortLevel::Normal`], delegates to [`select_for_review`].
+/// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates to
+/// [`select_for_review`].
 pub fn select_for_review_with_effort<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
@@ -174,8 +178,11 @@ pub fn select_for_review_with_effort<'a>(
     version_index: &VersionIndex,
     effort: EffortLevel,
 ) -> Option<&'a CachedModel> {
-    if effort == EffortLevel::Normal {
-        return select_for_review(models, used_vendors, used_models, version_index);
+    match effort {
+        EffortLevel::Low | EffortLevel::Normal => {
+            return select_for_review(models, used_vendors, used_models, version_index);
+        }
+        EffortLevel::Tough => {}
     }
 
     let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_tough_eligible(m)).collect();
@@ -615,6 +622,28 @@ mod tests {
     }
 
     #[test]
+    fn pick_with_effort_low_does_not_use_tough_filter() {
+        let models = vec![
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        ];
+        let index = build_version_index(&models);
+
+        let chosen = pick_for_phase_with_effort(
+            &models,
+            SelectionPhase::Build,
+            None,
+            &index,
+            EffortLevel::Low,
+        )
+        .expect("Low effort must use the non-tough path until cheap filtering is wired");
+        assert!(matches!(
+            chosen.vendor,
+            VendorKind::Kimi | VendorKind::Gemini
+        ));
+    }
+
+    #[test]
     fn pick_with_effort_tough_only_picks_eligible() {
         let models = opus_sonnet_codex_kimi();
         let index = build_version_index(&models);
@@ -708,6 +737,29 @@ mod tests {
             EffortLevel::Normal,
         )
         .expect("Normal review picks fresh Kimi");
+        assert_eq!(chosen.vendor, VendorKind::Kimi);
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_low_can_pick_ineligible_vendor() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+            sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        ];
+        let index = build_version_index(&models);
+        let used_vendors = vec![VendorKind::Claude];
+        let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(
+            &models,
+            &used_vendors,
+            &used_models,
+            &index,
+            EffortLevel::Low,
+        )
+        .expect("Low review effort must use the non-tough path");
         assert_eq!(chosen.vendor, VendorKind::Kimi);
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }

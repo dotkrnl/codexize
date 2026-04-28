@@ -28,7 +28,7 @@ use crate::{
         },
     },
     state::{
-        self as session_state, Message, MessageKind, MessageSender, Node, NodeStatus,
+        self as session_state, LaunchModes, Message, MessageKind, MessageSender, Node, NodeStatus,
         PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RunStatus, SessionState,
     },
     tasks, tmux,
@@ -1768,6 +1768,7 @@ impl App {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
+        modes: LaunchModes,
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
         let run_id = self.state.create_run_record(
@@ -1779,14 +1780,15 @@ impl App {
             vendor,
             window_name,
             effort,
+            modes,
         );
         let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
             return;
         };
-        let tough_suffix = if run.effort == EffortLevel::Tough {
-            " [tough]"
-        } else {
-            ""
+        let effort_suffix = match run.effort {
+            EffortLevel::Low => " [low]",
+            EffortLevel::Tough => " [tough]",
+            EffortLevel::Normal => "",
         };
         let started = Message {
             ts: chrono::Utc::now(),
@@ -1795,7 +1797,7 @@ impl App {
             sender: MessageSender::System,
             text: format!(
                 "agent started · {} ({}){}",
-                run.model, run.vendor, tough_suffix
+                run.model, run.vendor, effort_suffix
             ),
         };
         if let Err(err) = self.state.append_message(&started) {
@@ -2524,6 +2526,7 @@ impl App {
             .join("prompts")
             .join(format!("recovery-plan-review-r{round}.md"));
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| pick_for_phase(&self.models, SelectionPhase::Review, None, &self.versions))
@@ -2566,10 +2569,12 @@ impl App {
             item.status = PipelineItemStatus::Running;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
@@ -2579,8 +2584,7 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name =
-            window_name_with_model("[Recovery Plan Review]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Recovery Plan Review]", &model, effort);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) = self.try_test_launch(
@@ -2610,7 +2614,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -2656,6 +2661,7 @@ impl App {
             .join("prompts")
             .join(format!("recovery-sharding-r{round}.md"));
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -2702,10 +2708,12 @@ impl App {
             item.status = PipelineItemStatus::Running;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
         let status_path = self.run_status_path_for("sharding", None, round, attempt);
         let dirty = self.capture_run_guard(
@@ -2715,8 +2723,7 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name =
-            window_name_with_model("[Recovery Sharding]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Recovery Sharding]", &model, effort);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -2743,7 +2750,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -3362,6 +3370,7 @@ impl App {
             return false;
         }
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| Self::select_brainstorm_model(&self.models, &self.versions))
@@ -3414,10 +3423,12 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
 
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
@@ -3429,7 +3440,7 @@ impl App {
             guard::GuardMode::AskOperator,
         );
         let adapter = adapter_for_vendor(vendor_kind);
-        let window_name = window_name_with_model("[Brainstorm]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Brainstorm]", &model, effort);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3459,7 +3470,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -3540,6 +3552,7 @@ impl App {
             .join("prompts")
             .join(format!("spec-review-{round}.md"));
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -3580,16 +3593,14 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
-        let window_name = window_name_with_model(
-            &format!("[Spec Review {round}]"),
-            &model,
-            EffortLevel::Normal,
-        );
+        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model, effort);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "spec-review",
@@ -3624,7 +3635,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -3675,6 +3687,7 @@ impl App {
             .filter(|path| path.exists())
             .collect();
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -3703,10 +3716,12 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
 
         let adapter = adapter_for_vendor(vendor_kind);
@@ -3717,7 +3732,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
-        let window_name = window_name_with_model("[Planning]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Planning]", &model, effort);
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3753,7 +3768,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -3797,6 +3813,7 @@ impl App {
             .join("prompts")
             .join(format!("plan-review-{round}.md"));
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -3839,16 +3856,14 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
-        let window_name = window_name_with_model(
-            &format!("[Plan Review {round}]"),
-            &model,
-            EffortLevel::Normal,
-        );
+        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model, effort);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
@@ -3883,7 +3898,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -3918,6 +3934,7 @@ impl App {
         let plan_path = session_dir.join("artifacts").join("plan.md");
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -3946,16 +3963,18 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
 
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         let dirty =
             self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
-        let window_name = window_name_with_model("[Sharding]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Sharding]", &model, effort);
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3982,7 +4001,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -4030,6 +4050,7 @@ impl App {
             .join("prompts")
             .join(format!("recovery-r{round}.md"));
 
+        let modes = self.state.launch_modes();
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -4083,10 +4104,12 @@ impl App {
             return false;
         }
 
+        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
-            effort: EffortLevel::Normal,
+            effort,
+            modes,
         };
         let status_path = self.run_status_path_for("recovery", None, round, attempt);
         let recovery_guard_mode = if is_human_blocked {
@@ -4095,7 +4118,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
-        let window_name = window_name_with_model("[Recovery]", &model, EffortLevel::Normal);
+        let window_name = window_name_with_model("[Recovery]", &model, effort);
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -4134,7 +4157,8 @@ impl App {
                     model,
                     vendor,
                     window_name,
-                    EffortLevel::Normal,
+                    effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -4186,10 +4210,12 @@ impl App {
         // Pin the base HEAD before the coder runs; preserves original base on resume.
         self.capture_round_base(&round_dir);
 
-        let effort = task_effort_for(&session_dir, task_id);
+        let modes = self.state.launch_modes();
+        let requested_effort = task_effort_for(&session_dir, task_id);
+        let effort = modes.effort_for(requested_effort);
         // Override-model bypass: an explicit operator pick wins over the
         // tough-eligibility filter (spec §3.7). The adapter still emits the
-        // correct effort flag derived from `task.tough`.
+        // launch-snapshot effort flag derived from `task.tough`.
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -4245,6 +4271,7 @@ impl App {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
+            modes,
         };
 
         let window_name = window_name_with_model(&format!("[Round {r} Coder]"), &model, effort);
@@ -4283,6 +4310,7 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    modes,
                 );
                 true
             }
@@ -4335,8 +4363,10 @@ impl App {
             })
             .cloned()
             .collect::<Vec<_>>();
-        let effort = task_effort_for(&session_dir, task_id);
-        // Override-model bypass: explicit operator pick beats tough filter.
+        let modes = self.state.launch_modes();
+        let requested_effort = task_effort_for(&session_dir, task_id);
+        let effort = modes.effort_for(requested_effort);
+        // Override-model bypass: explicit operator pick beats the effort filter.
         let Some(chosen) = override_model
             .as_ref()
             .or_else(|| {
@@ -4408,6 +4438,7 @@ impl App {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
+            modes,
         };
 
         let window_name = window_name_with_model(&format!("[Round {r} Reviewer]"), &model, effort);
@@ -4446,6 +4477,7 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    modes,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -5820,6 +5852,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -5837,6 +5870,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -5925,6 +5959,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         }
@@ -5945,6 +5980,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         }
@@ -5995,6 +6031,7 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6084,6 +6121,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6133,6 +6171,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6168,6 +6207,7 @@ mod tests {
                 },
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6286,6 +6326,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6340,6 +6381,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6357,6 +6399,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6388,6 +6431,7 @@ mod tests {
             status: RunStatus::Done,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6405,6 +6449,7 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         });
@@ -6444,6 +6489,7 @@ mod tests {
                 status,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6653,6 +6699,7 @@ mod tests {
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6670,6 +6717,7 @@ mod tests {
                 status: RunStatus::Failed,
                 error: Some("artifact_missing".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6687,6 +6735,7 @@ mod tests {
                 status: RunStatus::Failed,
                 error: Some("user_forced_retry".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -6733,6 +6782,7 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6778,6 +6828,7 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6820,6 +6871,7 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -6927,6 +6979,7 @@ mod tests {
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -7660,6 +7713,7 @@ mod tests {
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -7716,6 +7770,7 @@ mod tests {
                 status: RunStatus::Failed,
                 error: Some("recovery_sharding_failed: tasks.toml missing".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -7742,6 +7797,52 @@ mod tests {
                 new_run.window_name
             );
             assert_eq!(app.state.current_phase, Phase::BuilderRecoverySharding(6));
+        });
+    }
+
+    #[test]
+    fn coder_launch_records_modes_snapshot() {
+        with_temp_root(|| {
+            let session_id = "coder-launch-modes";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            state.modes.yolo = true;
+            state.modes.cheap = true;
+
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5",
+                10,
+                1,
+                10,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            assert!(app.launch_coder_with_model(None));
+
+            let run = app
+                .state
+                .agent_runs
+                .last()
+                .expect("launch should create a run record");
+            assert_eq!(
+                run.modes,
+                crate::state::LaunchModes {
+                    yolo: true,
+                    cheap: true,
+                }
+            );
+            assert_eq!(run.effort, EffortLevel::Low);
+            assert!(run.window_name.ends_with("[low]"));
         });
     }
 
@@ -7775,6 +7876,7 @@ mod tests {
             status: RunStatus::Failed,
             error: Some("artifact_invalid: x".to_string()),
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         };
@@ -7850,6 +7952,7 @@ feedback = ["task 2 is superseded"]
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -7951,6 +8054,7 @@ estimated_tokens = 12
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8014,6 +8118,7 @@ estimated_tokens = 10
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8095,6 +8200,7 @@ feedback = ["split task 2"]
                 status: RunStatus::Done,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8112,6 +8218,7 @@ feedback = ["split task 2"]
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8177,6 +8284,7 @@ estimated_tokens = 10
                 status: RunStatus::Done,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8209,6 +8317,7 @@ estimated_tokens = 10
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8226,6 +8335,7 @@ estimated_tokens = 10
                 status: RunStatus::Failed,
                 error: Some("exit(1)".to_string()),
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -8312,6 +8422,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -8452,6 +8563,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             };
@@ -8896,6 +9008,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9148,6 +9261,7 @@ estimated_tokens = 1
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
         }
@@ -9543,6 +9657,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9599,6 +9714,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9656,6 +9772,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9717,6 +9834,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9779,6 +9897,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });
@@ -9864,6 +9983,7 @@ estimated_tokens = 1
                 status: RunStatus::Running,
                 error: None,
                 effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
             });

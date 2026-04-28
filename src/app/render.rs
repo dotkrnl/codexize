@@ -1597,7 +1597,7 @@ mod tests {
         let rule = "─".repeat(200);
         let keymap = format!(
             "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            "─".repeat(116)
+            " ".repeat(116)
         );
 
         assert_eq!(
@@ -1640,7 +1640,7 @@ mod tests {
         let rule = "─".repeat(200);
         let keymap = format!(
             "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            "─".repeat(116)
+            " ".repeat(116)
         );
 
         assert_eq!(
@@ -1681,7 +1681,7 @@ mod tests {
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
-        let keymap = format!("Enter continue · n re-review  ·  {}q quit", "─".repeat(161));
+        let keymap = format!("Enter continue · n re-review  ·  {}q quit", " ".repeat(161));
 
         assert_eq!(
             lines,
@@ -1722,7 +1722,7 @@ mod tests {
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
-        let keymap = format!("r retry  ·  {}q quit", "─".repeat(182));
+        let keymap = format!("r retry  ·  {}q quit", " ".repeat(182));
 
         assert_eq!(
             lines,
@@ -1763,7 +1763,7 @@ mod tests {
         let rule = "─".repeat(200);
         let keymap = format!(
             "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · e edit · b back  ·  {}q quit",
-            "─".repeat(116)
+            " ".repeat(116)
         );
 
         assert_eq!(

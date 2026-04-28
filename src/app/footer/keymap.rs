@@ -474,16 +474,11 @@ fn render_modal_keymap(actions: &[KeyBinding], system: &[KeyBinding], width: u16
 
     let fill_needed = (width as usize).saturating_sub(left_len + sep_len + sys_len);
 
-    let rule_glyph = '─';
     let mut spans = left_spans;
 
     if fill_needed > 0 {
         spans.push(Span::styled(
-            format!(
-                "{}{}",
-                SEP_CATEGORY,
-                rule_glyph.to_string().repeat(fill_needed)
-            ),
+            format!("{}{}", SEP_CATEGORY, " ".repeat(fill_needed)),
             Style::default().fg(RULE_COLOR),
         ));
     } else {
@@ -548,16 +543,11 @@ fn render_default_keymap(caps: FocusCaps, width: u16) -> Line<'static> {
 
     let fill_needed = (width as usize).saturating_sub(left_len + sep_len + sys_len);
 
-    let rule_glyph = '─';
     let mut spans = left_spans;
 
     if fill_needed > 0 {
         spans.push(Span::styled(
-            format!(
-                "{}{}",
-                SEP_CATEGORY,
-                rule_glyph.to_string().repeat(fill_needed)
-            ),
+            format!("{}{}", SEP_CATEGORY, " ".repeat(fill_needed)),
             Style::default().fg(RULE_COLOR),
         ));
     } else {
@@ -1076,8 +1066,8 @@ mod tests {
         let text = line_text(&modal);
         assert!(text.ends_with("q quit"));
         assert!(
-            text.contains('─'),
-            "wide modal should have rule fill between actions and system"
+            !text.contains('─'),
+            "wide modal should use spaces between actions and system"
         );
     }
 

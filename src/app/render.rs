@@ -522,7 +522,7 @@ impl App {
 
         // Depth 0: underline the line style so `Buffer::set_line` extends the
         // underline across the trailing fill, producing a full-width rule.
-        if depth == 0 && underline_active {
+        if depth == 0 {
             style = style.add_modifier(Modifier::UNDERLINED);
         }
 
@@ -2402,8 +2402,8 @@ mod tests {
             style.bg
         );
         assert!(
-            !style.add_modifier.contains(Modifier::UNDERLINED),
-            "Pending depth-0 row should not be underlined"
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "Pending depth-0 row should be underlined"
         );
     }
 

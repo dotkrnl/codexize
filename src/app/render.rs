@@ -95,6 +95,19 @@ pub fn sanitize_live_summary(text: &str) -> String {
     collapsed.chars().take(500).collect()
 }
 
+/// Determines whether the row at `index` is the last sibling at its depth.
+///
+/// Scans forward from `index+1` until a row with depth <= current depth is found.
+/// Returns true if no such row exists or if the found row has depth < current depth.
+fn is_last_sibling(visible_rows: &[super::tree::VisibleNodeRow], index: usize) -> bool {
+    let cur_depth = visible_rows[index].depth;
+    visible_rows[index + 1..]
+        .iter()
+        .find(|r| r.depth <= cur_depth)
+        .map(|r| r.depth < cur_depth)
+        .unwrap_or(true)
+}
+
 impl App {
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
@@ -420,7 +433,12 @@ impl App {
 
         // Thin tree glyphs for indentation.
         let indent = if depth > 0 {
-            format!("{}├─", "│ ".repeat(depth.saturating_sub(1)))
+            let connector = if is_last_sibling(&self.visible_rows, index) {
+                "└─"
+            } else {
+                "├─"
+            };
+            format!("{}{}", "│ ".repeat(depth.saturating_sub(1)), connector)
         } else {
             String::new()
         };
@@ -432,6 +450,19 @@ impl App {
         };
         if node.status == NodeStatus::Pending {
             style = style.fg(Color::DarkGray);
+        }
+
+        // Depth-0 stage rows get full-line background highlights by status.
+        if depth == 0 {
+            let bg = match node.status {
+                NodeStatus::Running => Some(Color::Blue),
+                NodeStatus::Done => Some(Color::Green),
+                NodeStatus::Failed | NodeStatus::FailedUnverified => Some(Color::Red),
+                _ => None,
+            };
+            if let Some(bg_color) = bg {
+                style = style.bg(bg_color).fg(Color::White);
+            }
         }
 
         let dim = Style::default().fg(Color::DarkGray);
@@ -982,12 +1013,12 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("├─▾ Task A") && line.contains("running"))
+                .any(|line| line.contains("└─▾ Task A") && line.contains("running"))
         );
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("├─▾ Builder") && line.contains("running"))
+                .any(|line| line.contains("└─▾ Builder") && line.contains("running"))
         );
         assert!(
             lines
@@ -1760,7 +1791,7 @@ mod tests {
             vec![
                 "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
                 "▌▾ Implementation · running",
-                " ├─▾ Builder · running",
+                " └─▾ Builder · running",
                 "XX:XX:XX ⠋ wiring full-screen tests",
                 "",
                 "",
@@ -1905,5 +1936,233 @@ mod tests {
         );
         let still = app.status_line.borrow().render().unwrap();
         assert_eq!(still.to_string(), "info-msg");
+    }
+
+    /// Expanded penultimate sibling with visible children must render └─ for that
+    /// sibling (since it's the last at its depth), not ├─.
+    #[test]
+    fn expanded_penultimate_sibling_renders_last_child_connector() {
+        // Tree: Root (running) → Task A (first child), Task B (second/last child)
+        // When Task A is expanded and has children, Task B should render └─.
+        let nodes = vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![
+                node(
+                    "Task A",
+                    NodeKind::Task,
+                    NodeStatus::Running,
+                    vec![node(
+                        "Builder A",
+                        NodeKind::Mode,
+                        NodeStatus::Running,
+                        Vec::new(),
+                        Some(1),
+                        None,
+                    )],
+                    None,
+                    None,
+                ),
+                node(
+                    "Task B",
+                    NodeKind::Task,
+                    NodeStatus::Pending,
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+            ],
+            None,
+            None,
+        )];
+        let app = test_app(nodes, vec![run_record(1, RunStatus::Running)], Vec::new());
+
+        let lines = render_lines(&app, 10);
+
+        // Task A has a child below it, but Task B follows Task A at the same depth,
+        // so Task A should render ├─ (not last sibling).
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("├─") && l.contains("Task A")),
+            "Task A should render ├─ (not last at its depth)"
+        );
+        // Task B is the last child at depth 1, so it should render └─.
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("└─") && l.contains("Task B")),
+            "Task B should render └─ (last at its depth)"
+        );
+    }
+
+    fn render_pipeline_buf(app: &App, width: u16, height: u16) -> Buffer {
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        PipelineWidget { app }.render(area, &mut buf);
+        buf
+    }
+
+    #[test]
+    fn depth_0_running_row_has_blue_background() {
+        let app = test_app(
+            vec![node(
+                "Stage",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                Vec::new(),
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        // Row 0 is the Running stage header.
+        let bg = buf[(0, 0)].style().bg;
+        assert_eq!(
+            bg,
+            Some(Color::Blue),
+            "Running depth-0 row should have blue background"
+        );
+    }
+
+    #[test]
+    fn depth_0_done_row_has_green_background() {
+        let app = test_app(
+            vec![node(
+                "Stage",
+                NodeKind::Stage,
+                NodeStatus::Done,
+                Vec::new(),
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        let bg = buf[(0, 0)].style().bg;
+        assert_eq!(
+            bg,
+            Some(Color::Green),
+            "Done depth-0 row should have green background"
+        );
+    }
+
+    #[test]
+    fn depth_0_failed_row_has_red_background() {
+        let app = test_app(
+            vec![node(
+                "Stage",
+                NodeKind::Stage,
+                NodeStatus::Failed,
+                Vec::new(),
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        let bg = buf[(0, 0)].style().bg;
+        assert_eq!(
+            bg,
+            Some(Color::Red),
+            "Failed depth-0 row should have red background"
+        );
+    }
+
+    #[test]
+    fn depth_0_failed_unverified_row_has_red_background() {
+        let app = test_app(
+            vec![node(
+                "Stage",
+                NodeKind::Stage,
+                NodeStatus::FailedUnverified,
+                Vec::new(),
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        let bg = buf[(0, 0)].style().bg;
+        assert_eq!(
+            bg,
+            Some(Color::Red),
+            "FailedUnverified depth-0 row should have red background"
+        );
+    }
+
+    #[test]
+    fn depth_0_pending_row_has_no_background() {
+        let app = test_app(
+            vec![node(
+                "Stage",
+                NodeKind::Stage,
+                NodeStatus::Pending,
+                Vec::new(),
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        let bg = buf[(0, 0)].style().bg;
+        // Pending rows should not have a status-colored background.
+        assert!(
+            !matches!(
+                bg,
+                Some(Color::Blue) | Some(Color::Green) | Some(Color::Red)
+            ),
+            "Pending depth-0 row should not have status background, got: {bg:?}"
+        );
+    }
+
+    #[test]
+    fn depth_1_running_row_has_no_background_highlight() {
+        // Background highlights are only for depth-0 rows.
+        let app = test_app(
+            vec![node(
+                "Root",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![node(
+                    "Child",
+                    NodeKind::Task,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    None,
+                    None,
+                )],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let lines = render_lines(&app, 5);
+        let child_line_idx = lines
+            .iter()
+            .position(|l| l.contains("Child"))
+            .expect("Child row present");
+
+        let buf = render_pipeline_buf(&app, 80, 5);
+        let bg = buf[(0, child_line_idx as u16)].style().bg;
+        // Depth-1 rows should not have the stage background highlight.
+        assert!(
+            bg != Some(Color::Blue),
+            "Depth-1 Running row should not have blue background"
+        );
     }
 }

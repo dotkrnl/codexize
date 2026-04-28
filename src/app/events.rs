@@ -27,13 +27,23 @@ impl App {
             return self.handle_input_key(key);
         }
 
-        if let Some(modal) = self.active_modal() {
-            self.confirm_back = false;
-            return self.handle_modal_key(modal, key);
-        }
-
         if self.palette.open {
             return self.handle_palette_key(key);
+        }
+
+        if let Some(modal) = self.active_modal() {
+            if matches!(
+                modal,
+                ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused
+            ) && key.code == KeyCode::Char(':')
+            {
+                // Approval pauses render as modals, but YOLO must be toggleable
+                // while paused so the gate can resolve on the next loop tick.
+                self.palette.open();
+                return false;
+            }
+            self.confirm_back = false;
+            return self.handle_modal_key(modal, key);
         }
 
         if self.confirm_back && key.code != KeyCode::Char(':') {
@@ -81,22 +91,12 @@ impl App {
         }
     }
 
-    fn palette_commands() -> Vec<PaletteCommand> {
-        vec![
+    pub(super) fn palette_commands(&self) -> Vec<PaletteCommand> {
+        let mut commands = vec![
             PaletteCommand {
                 name: "quit",
                 aliases: &["q"],
                 help: "Exit the TUI",
-            },
-            PaletteCommand {
-                name: "back",
-                aliases: &["b"],
-                help: "Go back",
-            },
-            PaletteCommand {
-                name: "edit",
-                aliases: &["e"],
-                help: "Edit artifact",
             },
             PaletteCommand {
                 name: "cheap",
@@ -108,7 +108,22 @@ impl App {
                 aliases: &[],
                 help: "Toggle YOLO mode",
             },
-        ]
+        ];
+        if self.can_go_back() || self.confirm_back {
+            commands.push(PaletteCommand {
+                name: "back",
+                aliases: &["b"],
+                help: "Go back",
+            });
+        }
+        if self.editable_artifact().is_some() {
+            commands.push(PaletteCommand {
+                name: "edit",
+                aliases: &["e"],
+                help: "Edit artifact",
+            });
+        }
+        commands
     }
 
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
@@ -123,7 +138,7 @@ impl App {
                 self.execute_palette_input(&input)
             }
             KeyCode::Tab => {
-                let commands = Self::palette_commands();
+                let commands = self.palette_commands();
                 if let Some(ghost) = palette::ghost_completion(&self.palette.buffer, &commands) {
                     self.palette.accept_ghost(ghost);
                 }
@@ -172,7 +187,7 @@ impl App {
     }
 
     fn execute_palette_input(&mut self, input: &str) -> bool {
-        let commands = Self::palette_commands();
+        let commands = self.palette_commands();
         match palette::resolve(input, &commands) {
             palette::MatchResult::Exact { command, args }
             | palette::MatchResult::UniquePrefix { command, args } => {

@@ -318,6 +318,55 @@ impl App {
                 frame.render_widget(Paragraph::new(vec![keymap_line]), keymap_area);
             }
         }
+
+        if self.palette.open && area.height > 0 && area.width > 0 {
+            let overlay_h = area.height.min(2);
+            let overlay = ratatui::layout::Rect::new(
+                area.x,
+                area.y + area.height.saturating_sub(overlay_h),
+                area.width,
+                overlay_h,
+            );
+            frame.render_widget(Clear, overlay);
+            let lines = self.palette_overlay_lines(width);
+            let visible = lines
+                .into_iter()
+                .take(overlay_h as usize)
+                .collect::<Vec<_>>();
+            frame.render_widget(Paragraph::new(visible), overlay);
+        }
+    }
+
+    fn palette_overlay_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let commands = self.palette_commands();
+        let buffer = self.palette.buffer.clone();
+        let ghost = super::palette::ghost_completion(&buffer, &commands)
+            .filter(|candidate| !candidate.is_empty())
+            .unwrap_or("");
+        let suffix = ghost.strip_prefix(buffer.trim()).unwrap_or("");
+        let mut input_spans = vec![
+            Span::styled(
+                ":",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(buffer),
+        ];
+        if !suffix.is_empty() {
+            input_spans.push(Span::styled(
+                suffix.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        let mut help = "Esc close  Tab complete  Enter run".to_string();
+        if width < help.chars().count() as u16 {
+            help.truncate(width as usize);
+        }
+        vec![
+            Line::from(input_spans),
+            Line::from(Span::styled(help, Style::default().fg(Color::DarkGray))),
+        ]
     }
 
     fn focus_caps(&self) -> FocusCaps {
@@ -1005,6 +1054,8 @@ mod tests {
             pending_drain_deadline: None,
             current_run_id: None,
             failed_models: HashMap::new(),
+            pending_yolo_toggle_gate: None,
+            yolo_exit_issued: std::collections::HashSet::new(),
             test_launch_harness: None,
             messages,
             status_line: std::rc::Rc::new(std::cell::RefCell::new(
@@ -1692,6 +1743,23 @@ mod tests {
             dialog_w,
             dialog_h,
         )
+    }
+
+    #[test]
+    fn palette_overlay_renders_buffer_and_ghost_completion() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        app.palette.buffer = "qu".to_string();
+        app.palette.cursor = 2;
+
+        let lines = render_full_frame(&mut app, 80, 24);
+        let text = lines.join("\n");
+
+        assert!(text.contains(":qu"));
+        assert!(
+            text.contains("quit"),
+            "ghost completion should make the target command visible"
+        );
     }
 
     fn impl_round_2_running_app() -> App {

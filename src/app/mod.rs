@@ -30,7 +30,8 @@ use crate::{
     },
     state::{
         self as session_state, LaunchModes, Message, MessageKind, MessageSender, Node, NodeStatus,
-        PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RunStatus, SessionState,
+        PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RunRecord, RunStatus,
+        SessionState,
     },
     tasks, tmux,
     tmux::TmuxContext,
@@ -179,6 +180,8 @@ pub struct App {
     pending_drain_deadline: Option<Instant>,
     current_run_id: Option<u64>,
     failed_models: HashMap<RetryKey, FailedModelSet>,
+    pending_yolo_toggle_gate: Option<&'static str>,
+    yolo_exit_issued: HashSet<u64>,
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,
@@ -273,6 +276,8 @@ impl App {
             pending_drain_deadline: None,
             current_run_id: None,
             failed_models,
+            pending_yolo_toggle_gate: None,
+            yolo_exit_issued: HashSet::new(),
             #[cfg(test)]
             test_launch_harness: None,
             messages,
@@ -1721,13 +1726,23 @@ impl App {
         // real protocol violation; non-coder HEAD advances are hard errors).
         // PendingDecision here means artifact was missing/invalid — the run is
         // already a failure from the artifact check, so treat it as no guard error.
-        let (guard_reason, guard_warnings) = match self.enforce_run_guard(run) {
+        let (mut guard_reason, guard_warnings) = match self.enforce_run_guard(run) {
             guard::VerifyResult::Ok { warnings } => (None, warnings),
             guard::VerifyResult::HardError { reason, warnings } => (Some(reason), warnings),
             guard::VerifyResult::PendingDecision { warnings, .. } => (None, warnings),
         };
         for w in guard_warnings {
             self.append_system_message(run.id, MessageKind::SummaryWarn, w);
+        }
+        if run.stage == "coder"
+            && artifact_reason.is_none()
+            && run.modes.yolo
+            && guard_reason
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with("forbidden_control_edit"))
+        {
+            self.log_yolo_auto_approved("path_violation");
+            guard_reason = None;
         }
         Ok(guard_reason.or(artifact_reason))
     }
@@ -1807,6 +1822,11 @@ impl App {
         let _ = self.state.log_event(format!(
             "mode_toggled: mode=yolo value={value} source={source}"
         ));
+        self.pending_yolo_toggle_gate = if value {
+            self.live_yolo_paused_gate()
+        } else {
+            None
+        };
         let status = if value {
             "yolo: ON  (next agent launch will auto-approve gates)"
         } else {
@@ -1819,27 +1839,63 @@ impl App {
         );
     }
 
+    fn live_yolo_paused_gate(&self) -> Option<&'static str> {
+        match self.state.current_phase {
+            Phase::SpecReviewPaused => Some("spec_approval"),
+            Phase::PlanReviewPaused => Some("plan_approval"),
+            _ => None,
+        }
+    }
+
+    fn log_yolo_auto_approved(&mut self, gate: &'static str) {
+        let _ = self
+            .state
+            .log_event(format!("yolo_auto_approved: gate={gate}"));
+    }
+
     fn maybe_yolo_auto_resolve(&mut self) {
         if !self.state.modes.yolo {
             return;
         }
         match self.state.current_phase {
             Phase::SpecReviewPaused => {
-                let _ = self
-                    .state
-                    .log_event("yolo_auto_approved: gate=spec_approval".to_string());
-                self.state.agent_error = None;
-                let _ = self.transition_to_phase(Phase::PlanningRunning);
+                self.auto_approve_spec_review_pause("spec_approval");
             }
             Phase::PlanReviewPaused => {
-                let _ = self
-                    .state
-                    .log_event("yolo_auto_approved: gate=plan_approval".to_string());
-                self.state.agent_error = None;
-                self.queue_view_of_current_artifact("plan.md");
-                let _ = self.transition_to_phase(Phase::ShardingRunning);
+                self.auto_approve_plan_review_pause("plan_approval");
             }
             _ => {}
+        }
+    }
+
+    fn auto_approve_spec_review_pause(&mut self, gate: &'static str) {
+        self.log_yolo_auto_approved(gate);
+        if self.pending_yolo_toggle_gate == Some(gate) {
+            let _ = self
+                .state
+                .log_event(format!("yolo_toggled_resolved_gate={gate}"));
+            self.pending_yolo_toggle_gate = None;
+        }
+        self.state.agent_error = None;
+        let _ = self.transition_to_phase(Phase::PlanningRunning);
+    }
+
+    fn auto_approve_plan_review_pause(&mut self, gate: &'static str) {
+        self.log_yolo_auto_approved(gate);
+        if self.pending_yolo_toggle_gate == Some(gate) {
+            let _ = self
+                .state
+                .log_event(format!("yolo_toggled_resolved_gate={gate}"));
+            self.pending_yolo_toggle_gate = None;
+        }
+        self.state.agent_error = None;
+        self.queue_view_of_current_artifact("plan.md");
+        let _ = self.transition_to_phase(Phase::ShardingRunning);
+    }
+
+    fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
+        if dirty && modes.yolo {
+            self.log_yolo_auto_approved("dirty_worktree");
         }
     }
 
@@ -2047,6 +2103,7 @@ impl App {
             return;
         };
         if self.window_exists(&run.window_name) {
+            self.maybe_issue_yolo_exit(&run);
             self.pending_drain_deadline = None;
             return;
         }
@@ -2087,6 +2144,37 @@ impl App {
             ));
         }
         self.rebuild_tree_view(None);
+    }
+
+    fn maybe_issue_yolo_exit(&mut self, run: &RunRecord) {
+        if !run.modes.yolo || self.yolo_exit_issued.contains(&run.id) {
+            return;
+        }
+        if !self.yolo_exit_artifact_ready(run) {
+            return;
+        }
+        self.yolo_exit_issued.insert(run.id);
+        // The public event name remains `brainstorm_exit` per the spec even
+        // though the same completion cue is shared by planning today.
+        self.log_yolo_auto_approved("brainstorm_exit");
+        #[cfg(not(test))]
+        {
+            let _ = std::process::Command::new("tmux")
+                .args(["send-keys", "-t", &run.window_name, "/exit", "Enter"])
+                .status();
+        }
+    }
+
+    fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
+        let artifacts = session_state::session_dir(&self.state.session_id).join("artifacts");
+        match run.stage.as_str() {
+            "brainstorm" => Self::artifact_present(&artifacts.join("spec.md")),
+            "spec-review" => {
+                Self::artifact_present(&artifacts.join(format!("spec-review-{}.md", run.round)))
+            }
+            "planning" => Self::artifact_present(&artifacts.join("plan.md")),
+            _ => false,
+        }
     }
 
     fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
@@ -3207,6 +3295,9 @@ impl App {
                     MessageKind::Summary,
                     "Spec review complete.".to_string(),
                 );
+                if run.modes.yolo {
+                    self.auto_approve_spec_review_pause("spec_approval");
+                }
             }
             Phase::PlanningRunning => {
                 self.finalize_run_record(run.id, true, None);
@@ -3222,6 +3313,9 @@ impl App {
                     MessageKind::Summary,
                     "Plan review complete.".to_string(),
                 );
+                if run.modes.yolo {
+                    self.auto_approve_plan_review_pause("plan_approval");
+                }
             }
             Phase::ShardingRunning => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
@@ -4342,6 +4436,7 @@ impl App {
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let task_file = round_dir.join("task.toml");
+        let dirty_before_coder = guard::git_status_dirty();
 
         if !task_file.exists() {
             let body = task_toml_for(&session_dir, task_id).unwrap_or_else(|e| {
@@ -4354,6 +4449,7 @@ impl App {
         self.capture_round_base(&round_dir);
 
         let modes = self.state.launch_modes();
+        self.record_dirty_worktree_yolo_gate(dirty_before_coder, modes);
         let requested_effort = task_effort_for(&session_dir, task_id);
         let effort = modes.effort_for(requested_effort);
         // Override-model bypass: an explicit operator pick wins over the
@@ -6064,6 +6160,8 @@ mod tests {
             pending_drain_deadline: None,
             current_run_id: Some(2),
             failed_models: HashMap::new(),
+            pending_yolo_toggle_gate: None,
+            yolo_exit_issued: HashSet::new(),
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
@@ -6787,6 +6885,8 @@ mod tests {
             pending_drain_deadline: None,
             current_run_id: None,
             failed_models: HashMap::new(),
+            pending_yolo_toggle_gate: None,
+            yolo_exit_issued: HashSet::new(),
             test_launch_harness: None,
             messages: Vec::new(),
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
@@ -7247,6 +7347,52 @@ mod tests {
             assert_eq!(finalized.status, RunStatus::Done);
             assert_eq!(finalized.error, None);
             assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
+        });
+    }
+
+    #[test]
+    fn yolo_path_violation_is_audited_and_allows_reviewer_progression() {
+        with_temp_root(|| {
+            let session_id = "yolo-path-violation";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            std::fs::create_dir_all(&round_dir).unwrap();
+            std::fs::write(round_dir.join("task.toml"), "id = 1\n").unwrap();
+            write_review_scope(&round_dir, "base123", false);
+            let guard_dir = session_dir.join(".guards").join("coder-task-1-r1-a1");
+            guard::capture_coder(&guard_dir, &session_dir, 1).expect("capture coder guard");
+            std::fs::write(round_dir.join("task.toml"), "id = 1\n# changed by coder\n").unwrap();
+            write_finish_stamp(
+                &session_dir,
+                &App::run_key_for("coder", Some(1), 1, 1),
+                "head456",
+                "stable",
+            );
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            state.modes.yolo = true;
+            let mut run = make_coder_run(1, 1, 1);
+            run.modes.yolo = true;
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            app.finalize_current_run(&run).expect("finalize coder");
+
+            let finalized = app
+                .state
+                .agent_runs
+                .iter()
+                .find(|r| r.id == 1)
+                .expect("run");
+            assert_eq!(finalized.status, RunStatus::Done);
+            assert_eq!(finalized.error, None);
+            assert_eq!(app.state.current_phase, Phase::ReviewRound(1));
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("yolo_auto_approved: gate=path_violation"));
         });
     }
 
@@ -8068,6 +8214,133 @@ mod tests {
             assert!(events.contains("mode_toggled: mode=cheap value=true source=palette"));
             let status = app.status_line.borrow().render().expect("status flash");
             assert!(status.to_string().contains("cheap: ON"));
+        });
+    }
+
+    #[test]
+    fn palette_invocation_is_audited_with_command_and_args() {
+        with_temp_root(|| {
+            let session_id = "palette-invoked";
+            let state = SessionState::new(session_id.to_string());
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+
+            app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+            for c in "cheap on".chars() {
+                app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+            }
+            app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("palette_invoked: command=cheap args=on"));
+            assert!(events.contains("mode_toggled: mode=cheap value=true source=palette"));
+        });
+    }
+
+    #[test]
+    fn yolo_toggle_resolves_paused_gate_on_next_tick() {
+        with_temp_root(|| {
+            let session_id = "yolo-next-tick";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::SpecReviewPaused;
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+
+            app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+            for c in "yolo on".chars() {
+                app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+            }
+            app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+            assert_eq!(
+                app.state.current_phase,
+                Phase::SpecReviewPaused,
+                "palette toggle arms resolution, but the gate advances on the next loop tick"
+            );
+
+            app.maybe_yolo_auto_resolve();
+
+            assert_eq!(app.state.current_phase, Phase::PlanningRunning);
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("yolo_auto_approved: gate=spec_approval"));
+            assert!(events.contains("yolo_toggled_resolved_gate=spec_approval"));
+        });
+    }
+
+    #[test]
+    fn yolo_dirty_worktree_gate_is_audited_from_launch_snapshot() {
+        with_temp_root(|| {
+            let session_id = "yolo-dirty-worktree";
+            let state = SessionState::new(session_id.to_string());
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+
+            app.record_dirty_worktree_yolo_gate(
+                true,
+                crate::state::LaunchModes {
+                    yolo: true,
+                    cheap: false,
+                },
+            );
+
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("yolo_auto_approved: gate=dirty_worktree"));
+        });
+    }
+
+    #[test]
+    fn yolo_exit_gate_is_audited_once_when_interactive_artifact_is_ready() {
+        with_temp_root(|| {
+            let session_id = "yolo-exit-cue";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).unwrap();
+            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            let state = SessionState::new(session_id.to_string());
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+            let mut run = RunRecord {
+                id: 42,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes {
+                    yolo: true,
+                    cheap: false,
+                },
+                hostname: None,
+                mount_device_id: None,
+            };
+
+            app.maybe_issue_yolo_exit(&run);
+            app.maybe_issue_yolo_exit(&run);
+            run.stage = "planning".to_string();
+            app.maybe_issue_yolo_exit(&run);
+
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert_eq!(
+                events
+                    .matches("yolo_auto_approved: gate=brainstorm_exit")
+                    .count(),
+                1
+            );
         });
     }
 

@@ -1030,4 +1030,184 @@ head_state = "unstable"
             "unexpected error message: {msg}"
         );
     }
+
+    fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("CODEXIZE_ROOT");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
+        outcome.unwrap()
+    }
+
+    #[test]
+    fn run_succeeds_on_zero_exit_with_no_required_artifacts() {
+        with_temp_codexize_root(|| {
+            // `true` is a POSIX no-op that exits 0 with no output.
+            let result = run(
+                "test-runner-true".to_string(),
+                "audit".to_string(),
+                "auditor".to_string(),
+                vec![],
+                vec!["true".to_string()],
+            );
+            assert!(result.is_ok(), "true should succeed: {:?}", result.err());
+            // The runner writes a per-role log alongside the session dir.
+            let log_path = state::session_dir("test-runner-true").join("auditor.log");
+            assert!(log_path.exists(), "expected log at {log_path:?}");
+        });
+    }
+
+    #[test]
+    fn run_returns_err_when_required_artifact_missing() {
+        with_temp_codexize_root(|| {
+            let dir = tempfile::TempDir::new().unwrap();
+            let missing = dir.path().join("never-created.toml");
+            let result = run(
+                "test-runner-missing".to_string(),
+                "audit".to_string(),
+                "auditor".to_string(),
+                vec![missing.to_string_lossy().into_owned()],
+                vec!["true".to_string()],
+            );
+            let err = result.expect_err("missing artifact must error");
+            let msg = format!("{:#}", err);
+            assert!(
+                msg.contains("required artifacts are missing"),
+                "missing-artifact error context: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn run_returns_err_when_command_exits_nonzero() {
+        with_temp_codexize_root(|| {
+            // `false` exits with status 1.
+            let result = run(
+                "test-runner-false".to_string(),
+                "audit".to_string(),
+                "auditor".to_string(),
+                vec![],
+                vec!["false".to_string()],
+            );
+            let err = result.expect_err("nonzero exit must error");
+            let msg = format!("{:#}", err);
+            assert!(
+                msg.contains("agent command failed"),
+                "exit-status error context: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn run_child_with_timeout_returns_status_when_child_exits_quickly() {
+        let launch = ChildLaunch::new("true").stdin_null().stdout_null().stderr_null();
+        let outcome = run_child_with_timeout(&launch, Duration::from_secs(2)).unwrap();
+        let status = outcome.expect("child should exit before timeout");
+        assert!(status.success(), "expected zero exit");
+    }
+
+    #[test]
+    fn run_child_with_timeout_returns_none_when_child_outruns_deadline() {
+        let launch = ChildLaunch::new("sleep")
+            .args(["10"])
+            .stdin_null()
+            .stdout_null()
+            .stderr_null();
+        let outcome = run_child_with_timeout(&launch, Duration::from_millis(150)).unwrap();
+        assert!(outcome.is_none(), "expected timeout-killed result, got {outcome:?}");
+    }
+
+    #[test]
+    fn run_child_with_timeout_propagates_spawn_failure() {
+        let launch = ChildLaunch::new("/this/program/definitely/does/not/exist-xyz");
+        let err = run_child_with_timeout(&launch, Duration::from_millis(100)).expect_err(
+            "spawning a missing binary must error before any timeout work",
+        );
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("failed to spawn"), "spawn error context: {msg}");
+    }
+
+    struct DetectFailsAdapter;
+    impl AgentAdapter for DetectFailsAdapter {
+        fn detect(&self) -> bool {
+            false
+        }
+        fn interactive_command(
+            &self,
+            _model: &str,
+            _prompt_path: &str,
+            _effort: crate::adapters::EffortLevel,
+        ) -> String {
+            String::new()
+        }
+        fn noninteractive_command(
+            &self,
+            _model: &str,
+            _prompt_path: &str,
+            _effort: crate::adapters::EffortLevel,
+        ) -> String {
+            String::new()
+        }
+    }
+
+    fn launch_test_run() -> AgentRun {
+        AgentRun {
+            model: "model-x".to_string(),
+            prompt_path: PathBuf::from("/tmp/prompt.txt"),
+            effort: crate::adapters::EffortLevel::Normal,
+        }
+    }
+
+    #[test]
+    fn launch_interactive_bails_when_adapter_detect_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let run = launch_test_run();
+        let result = launch_interactive(
+            "[Coder]",
+            &run,
+            &DetectFailsAdapter,
+            false,
+            &dir.path().join("status.toml"),
+            "run-1",
+            dir.path(),
+        );
+        let err = result.expect_err("missing CLI must bail before tmux");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("agent CLI not found"),
+            "expected adapter-detect bail: {msg}"
+        );
+    }
+
+    #[test]
+    fn launch_noninteractive_bails_when_adapter_detect_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let run = launch_test_run();
+        let result = launch_noninteractive(
+            "[Coder]",
+            &run,
+            &DetectFailsAdapter,
+            &dir.path().join("status.toml"),
+            "run-2",
+            dir.path(),
+        );
+        let err = result.expect_err("missing CLI must bail before tmux");
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("agent CLI not found"),
+            "expected adapter-detect bail: {msg}"
+        );
+    }
 }

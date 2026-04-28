@@ -11,13 +11,32 @@ pub type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
 pub fn start() -> Result<AppTerminal> {
     enable_raw_mode()?;
+
+    let result = (|| -> Result<AppTerminal> {
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = Terminal::new(backend)?;
+        Ok(terminal)
+    })();
+
+    match result {
+        Ok(terminal) => Ok(terminal),
+        Err(err) => {
+            restore_terminal_after_failed_start();
+            Err(err)
+        }
+    }
+}
+
+/// Best-effort restoration after `start()` partially succeeds and then
+/// fails (e.g. Terminal::new returns Err once raw mode + alternate screen
+/// + bracketed paste are already armed). Any individual step that fails
+/// is swallowed because we are already on the error path.
+fn restore_terminal_after_failed_start() {
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let terminal = Terminal::new(backend)?;
-
-    Ok(terminal)
+    let _ = execute!(stdout, DisableBracketedPaste, LeaveAlternateScreen);
+    let _ = disable_raw_mode();
 }
 
 pub fn stop(terminal: &mut AppTerminal) -> Result<()> {
@@ -107,4 +126,23 @@ pub fn wrap_input(text: &str, width: usize) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_terminal_after_failed_start_is_idempotent() {
+        // Cleanup must complete without panicking even when raw mode is not
+        // engaged and no alternate screen has been entered, so the failure
+        // path of `start()` cannot make a bad situation worse.
+        restore_terminal_after_failed_start();
+        restore_terminal_after_failed_start();
+        // After cleanup, raw mode must not be left engaged.
+        assert!(
+            !crossterm::terminal::is_raw_mode_enabled().unwrap_or(false),
+            "raw mode must be disabled after the cleanup helper runs"
+        );
+    }
 }

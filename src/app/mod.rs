@@ -3422,7 +3422,14 @@ impl App {
             Phase::PlanningRunning => {
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
-                if run.modes.yolo {
+                // Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md` existing.
+                // The successful-finalization context already implies the artifact, but the
+                // explicit guard protects against a planning agent that reports success
+                // without writing the file.
+                let plan_path = session_state::session_dir(&self.state.session_id)
+                    .join("artifacts")
+                    .join("plan.md");
+                if run.modes.yolo && Self::artifact_present(&plan_path) {
                     self.log_yolo_auto_approved("plan_review_skipped");
                     self.transition_to_phase(Phase::ShardingRunning)?;
                 } else {
@@ -6475,7 +6482,6 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
     fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> RunRecord {
         RunRecord {
             id,

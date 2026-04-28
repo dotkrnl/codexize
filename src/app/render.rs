@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, Widget},
 };
 
-use crate::state::{NodeKind, NodeStatus, Phase, RunRecord, RunStatus};
+use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
 use chrono::Offset;
 use std::collections::BTreeSet;
 
@@ -98,11 +98,14 @@ fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 
-fn is_background_section(node: &crate::state::Node) -> bool {
-    // The tree builder still calls this stage `Loop`; the spec names the
-    // user-facing section `background`, so keep the exception deliberately narrow.
-    node.kind == NodeKind::Stage
-        && (node.label == "Loop" || node.label.eq_ignore_ascii_case("background"))
+fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
+    match status {
+        NodeStatus::Running => Some(Color::Cyan),
+        NodeStatus::Done => Some(Color::Green),
+        NodeStatus::Failed => Some(Color::Red),
+        NodeStatus::FailedUnverified => Some(Color::LightYellow),
+        NodeStatus::Pending | NodeStatus::WaitingUser | NodeStatus::Skipped => None,
+    }
 }
 
 fn strip_ansi_codes(s: &str) -> String {
@@ -690,16 +693,6 @@ impl App {
         expanded: bool,
         node: &crate::state::Node,
     ) -> Line<'static> {
-        if is_background_section(node) {
-            let marker = if expanded { "▾" } else { "▸" };
-            let style = if index == self.selected {
-                Style::default().add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            return Line::from(Span::raw(format!("background {marker}"))).style(style);
-        }
-
         let marker = if node.status == NodeStatus::Pending {
             " "
         } else if expanded {
@@ -734,43 +727,30 @@ impl App {
             style = style.fg(Color::DarkGray);
         }
 
-        let underline_active = matches!(
-            node.status,
-            NodeStatus::Running
-                | NodeStatus::Done
-                | NodeStatus::Failed
-                | NodeStatus::FailedUnverified,
-        );
-
-        // Depth 0: underline the line style so `Buffer::set_line` extends the
-        // underline across the trailing fill, producing a full-width rule.
-        if depth == 0 {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
-
         let dim = Style::default().fg(Color::DarkGray);
+        let highlight_bg = status_highlight_bg(node.status);
+        let highlight = |bg: Color| Style::default().bg(bg).fg(Color::Black);
+        let (marker_style, gap_style, label_style) = match (highlight_bg, is_focused) {
+            // Focused with a status: chevron + gap + label form one block.
+            (Some(bg), true) => (highlight(bg), highlight(bg), highlight(bg)),
+            // Unfocused with a status: chevron-only highlight.
+            (Some(bg), false) => (highlight(bg), Style::default(), Style::default()),
+            // No status highlight (Pending / WaitingUser / Skipped).
+            (None, _) => (Style::default(), Style::default(), Style::default()),
+        };
 
         let mut spans = vec![
             Span::styled(focus_glyph, Style::default()),
             Span::styled(indent, dim),
-            Span::raw(format!("{} ", marker)),
-            Span::raw(node.label.clone()),
+            Span::styled(marker.to_string(), marker_style),
+            Span::styled(" ", gap_style),
+            Span::styled(node.label.clone(), label_style),
             Span::styled(" · ", dim),
             Span::styled(node.status.label(), node.status.style()),
         ];
         if node.label == "Loop" && !node.summary.is_empty() {
             spans.push(Span::styled(" · ", dim));
             spans.push(Span::styled(node.summary.clone(), dim));
-        }
-
-        // Depth 1+: underline only the text-bearing spans so the focus glyph
-        // and tree indent stay un-underlined. Spans 0 (focus glyph) and 1
-        // (indent) are skipped; everything else carries the modifier when the
-        // status calls for it.
-        if depth > 0 && underline_active {
-            for span in &mut spans[2..] {
-                span.style = span.style.add_modifier(Modifier::UNDERLINED);
-            }
         }
 
         Line::from(spans).style(style)
@@ -2719,7 +2699,7 @@ mod tests {
     }
 
     #[test]
-    fn builder_loop_header_uses_background_title_exception() {
+    fn loop_header_uses_standard_status_format() {
         let app = test_app(
             vec![node(
                 "Loop",
@@ -2741,11 +2721,17 @@ mod tests {
         );
         let node = app.node_for_row(0).expect("loop row");
 
-        let expanded = app.node_header(0, true, node);
-        let collapsed = app.node_header(0, false, node);
+        let expanded = line_to_string(&app.node_header(0, true, node));
+        let collapsed = line_to_string(&app.node_header(0, false, node));
 
-        assert_eq!(line_to_string(&expanded), "background ▾");
-        assert_eq!(line_to_string(&collapsed), "background ▸");
+        assert!(
+            expanded.contains("▾ Loop · running"),
+            "expanded loop header should keep standard format: {expanded:?}"
+        );
+        assert!(
+            collapsed.contains("▸ Loop · running"),
+            "collapsed loop header should keep standard format: {collapsed:?}"
+        );
     }
 
     #[test]
@@ -2801,14 +2787,16 @@ mod tests {
             "running stage header should pin to row 0"
         );
         let pinned_style = buf[(0, 0)].style();
-        assert_eq!(
-            pinned_style.bg,
-            Some(Color::Reset),
-            "pinned running stage header should not have a background fill"
-        );
         assert!(
-            pinned_style.add_modifier.contains(Modifier::UNDERLINED),
-            "pinned running stage header should be underlined"
+            !pinned_style.add_modifier.contains(Modifier::UNDERLINED),
+            "pinned running stage header should not be underlined"
+        );
+        // Chevron lives at col 1 and should carry the running highlight bg.
+        let chevron_style = buf[(1, 0)].style();
+        assert_eq!(
+            chevron_style.bg,
+            Some(Color::Cyan),
+            "running chevron should carry the status highlight bg"
         );
         assert!(
             line_text(&buf, 1, 80).contains("Task B"),
@@ -2910,121 +2898,107 @@ mod tests {
         assert!(lines[4].contains("Tail"));
     }
 
-    #[test]
-    fn depth_0_running_row_has_blue_background() {
+    /// Focused depth-0 row: chevron (col 1), gap (col 2), and label (cols 3..=7
+    /// for "Stage") form one contiguous highlight block. Focus glyph and the
+    /// trailing separator stay unhighlighted.
+    fn assert_focused_depth_0_block(status: NodeStatus, expected_bg: Color) {
         let app = test_app(
-            vec![node(
-                "Stage",
-                NodeKind::Stage,
-                NodeStatus::Running,
-                Vec::new(),
-                None,
-                None,
-            )],
+            vec![node("Stage", NodeKind::Stage, status, Vec::new(), None, None)],
             Vec::new(),
             Vec::new(),
         );
-
+        // test_app sets selected=0, so row 0 is focused.
         let buf = render_pipeline_buf(&app, 80, 5);
-        // Row 0 is the Running stage header.
-        let style = buf[(0, 0)].style();
-        assert_eq!(
-            style.bg,
-            Some(Color::Reset),
-            "Running depth-0 row should not have a background fill"
-        );
+        for col in 0u16..80 {
+            let style = buf[(col, 0)].style();
+            assert!(
+                !style.add_modifier.contains(Modifier::UNDERLINED),
+                "no cell on a depth-0 row should be underlined; col={col}"
+            );
+        }
         assert!(
-            style.add_modifier.contains(Modifier::UNDERLINED),
-            "Running depth-0 row should be underlined"
+            buf[(0, 0)].style().bg != Some(expected_bg),
+            "focus glyph cell must not carry the status highlight bg"
+        );
+        for col in 1u16..=7 {
+            assert_eq!(
+                buf[(col, 0)].style().bg,
+                Some(expected_bg),
+                "focused chevron+gap+label cell at col {col} should carry the status highlight bg"
+            );
+        }
+        assert!(
+            buf[(8, 0)].style().bg != Some(expected_bg),
+            "trailing separator after label should not be highlighted"
         );
     }
 
-    #[test]
-    fn depth_0_done_row_has_green_background() {
-        let app = test_app(
-            vec![node(
-                "Stage",
-                NodeKind::Stage,
-                NodeStatus::Done,
-                Vec::new(),
-                None,
-                None,
-            )],
+    /// Unfocused depth-0 row: only the chevron (col 1) carries the highlight
+    /// bg; the gap, label, and surrounding cells do not.
+    fn assert_unfocused_depth_0_chevron_only(status: NodeStatus, expected_bg: Color) {
+        let mut app = test_app(
+            vec![
+                node("Stage", NodeKind::Stage, status, Vec::new(), None, None),
+                node(
+                    "Other",
+                    NodeKind::Stage,
+                    NodeStatus::Pending,
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+            ],
             Vec::new(),
             Vec::new(),
         );
+        // Move focus off of row 0 so the highlight rule for unfocused rows applies.
+        app.selected = 1;
+        app.selected_key = Some(app.visible_rows[1].key.clone());
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let style = buf[(0, 0)].style();
+        // Chevron (col 1) is highlighted.
         assert_eq!(
-            style.bg,
-            Some(Color::Reset),
-            "Done depth-0 row should not have a background fill"
+            buf[(1, 0)].style().bg,
+            Some(expected_bg),
+            "unfocused chevron should carry the status highlight bg"
         );
-        assert!(
-            style.add_modifier.contains(Modifier::UNDERLINED),
-            "Done depth-0 row should be underlined"
-        );
+        // Gap (col 2) and label (cols 3..=7) are NOT highlighted.
+        for col in [2u16, 3, 4, 5, 6, 7] {
+            assert!(
+                buf[(col, 0)].style().bg != Some(expected_bg),
+                "unfocused gap/label cell at col {col} should not be highlighted; \
+                 got {:?}",
+                buf[(col, 0)].style().bg
+            );
+        }
     }
 
     #[test]
-    fn depth_0_failed_row_has_red_background() {
-        let app = test_app(
-            vec![node(
-                "Stage",
-                NodeKind::Stage,
-                NodeStatus::Failed,
-                Vec::new(),
-                None,
-                None,
-            )],
-            Vec::new(),
-            Vec::new(),
-        );
-
-        let buf = render_pipeline_buf(&app, 80, 5);
-        let style = buf[(0, 0)].style();
-        assert_eq!(
-            style.bg,
-            Some(Color::Reset),
-            "Failed depth-0 row should not have a background fill"
-        );
-        assert!(
-            style.add_modifier.contains(Modifier::UNDERLINED),
-            "Failed depth-0 row should be underlined"
-        );
+    fn depth_0_running_focused_block_unfocused_chevron() {
+        assert_focused_depth_0_block(NodeStatus::Running, Color::Cyan);
+        assert_unfocused_depth_0_chevron_only(NodeStatus::Running, Color::Cyan);
     }
 
     #[test]
-    fn depth_0_failed_unverified_row_has_red_background() {
-        let app = test_app(
-            vec![node(
-                "Stage",
-                NodeKind::Stage,
-                NodeStatus::FailedUnverified,
-                Vec::new(),
-                None,
-                None,
-            )],
-            Vec::new(),
-            Vec::new(),
-        );
-
-        let buf = render_pipeline_buf(&app, 80, 5);
-        let style = buf[(0, 0)].style();
-        assert_eq!(
-            style.bg,
-            Some(Color::Reset),
-            "FailedUnverified depth-0 row should not have a background fill"
-        );
-        assert!(
-            style.add_modifier.contains(Modifier::UNDERLINED),
-            "FailedUnverified depth-0 row should be underlined"
-        );
+    fn depth_0_done_focused_block_unfocused_chevron() {
+        assert_focused_depth_0_block(NodeStatus::Done, Color::Green);
+        assert_unfocused_depth_0_chevron_only(NodeStatus::Done, Color::Green);
     }
 
     #[test]
-    fn depth_0_pending_row_has_no_background() {
+    fn depth_0_failed_focused_block_unfocused_chevron() {
+        assert_focused_depth_0_block(NodeStatus::Failed, Color::Red);
+        assert_unfocused_depth_0_chevron_only(NodeStatus::Failed, Color::Red);
+    }
+
+    #[test]
+    fn depth_0_failed_unverified_focused_block_unfocused_chevron() {
+        assert_focused_depth_0_block(NodeStatus::FailedUnverified, Color::LightYellow);
+        assert_unfocused_depth_0_chevron_only(NodeStatus::FailedUnverified, Color::LightYellow);
+    }
+
+    #[test]
+    fn depth_0_pending_row_has_no_highlight_or_underline() {
         let app = test_app(
             vec![node(
                 "Stage",
@@ -3039,20 +3013,24 @@ mod tests {
         );
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let style = buf[(0, 0)].style();
-        // Pending rows should not have a status-colored background.
-        assert!(
-            !matches!(
-                style.bg,
-                Some(Color::Blue) | Some(Color::Green) | Some(Color::Red)
-            ),
-            "Pending depth-0 row should not have status background, got: {:?}",
-            style.bg
-        );
-        assert!(
-            style.add_modifier.contains(Modifier::UNDERLINED),
-            "Pending depth-0 row should be underlined"
-        );
+        for col in 0u16..20 {
+            let style = buf[(col, 0)].style();
+            assert!(
+                !matches!(
+                    style.bg,
+                    Some(Color::Cyan)
+                        | Some(Color::Green)
+                        | Some(Color::Red)
+                        | Some(Color::LightYellow)
+                ),
+                "Pending row should not carry a status highlight bg at col {col}; got {:?}",
+                style.bg
+            );
+            assert!(
+                !style.add_modifier.contains(Modifier::UNDERLINED),
+                "Pending row should not be underlined at col {col}"
+            );
+        }
     }
 
     #[test]
@@ -3127,142 +3105,27 @@ mod tests {
         (buf, child_line_idx)
     }
 
-    /// At depth 1, the focus glyph (column 0) and indent (columns 1..=2) are
-    /// excluded from the underline; every text-bearing column at or after the
-    /// marker (column 3) must carry it.
-    fn assert_depth_1_text_only_underline(buf: &Buffer, row: u16) {
-        // Span 0: focus glyph at column 0 — never underlined.
-        let focus_style = buf[(0, row)].style();
-        assert!(
-            !focus_style.add_modifier.contains(Modifier::UNDERLINED),
-            "focus glyph cell at col 0 must not be underlined; style={focus_style:?}",
-        );
-        // Span 1: indent ("└─") at columns 1-2 — never underlined.
-        for col in 1u16..=2 {
-            let style = buf[(col, row)].style();
-            assert!(
-                !style.add_modifier.contains(Modifier::UNDERLINED),
-                "indent cell at col {col} must not be underlined; style={style:?}",
-            );
-        }
-        // Span 2 (marker "{glyph} ") and span 3 (label "Child") at columns
-        // 3..=9 — every cell underlined.
-        for col in 3u16..=9 {
-            let style = buf[(col, row)].style();
-            assert!(
-                style.add_modifier.contains(Modifier::UNDERLINED),
-                "text-span cell at col {col} should be underlined; style={style:?}",
-            );
-        }
-        // Span 4 (" · ") at columns 10..=12 and span 5 (status label) at column
-        // 13+ — both text-bearing, both underlined. Probe one cell from each.
-        for col in [10u16, 13u16] {
-            let style = buf[(col, row)].style();
-            assert!(
-                style.add_modifier.contains(Modifier::UNDERLINED),
-                "text-span cell at col {col} should be underlined; style={style:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn depth_1_running_row_underlines_text_spans_only() {
-        let (buf, row) = render_depth_1_child(NodeStatus::Running);
-        assert_depth_1_text_only_underline(&buf, row);
-    }
-
-    #[test]
-    fn depth_1_done_row_underlines_text_spans_only() {
-        let (buf, row) = render_depth_1_child(NodeStatus::Done);
-        assert_depth_1_text_only_underline(&buf, row);
-    }
-
-    #[test]
-    fn depth_1_failed_row_underlines_text_spans_only() {
-        let (buf, row) = render_depth_1_child(NodeStatus::Failed);
-        assert_depth_1_text_only_underline(&buf, row);
-    }
-
-    #[test]
-    fn depth_1_failed_unverified_row_underlines_text_spans_only() {
-        let (buf, row) = render_depth_1_child(NodeStatus::FailedUnverified);
-        assert_depth_1_text_only_underline(&buf, row);
-    }
-
-    #[test]
-    fn depth_1_pending_row_has_no_underline_anywhere() {
-        let (buf, row) = render_depth_1_child(NodeStatus::Pending);
-        // Pending rows must not carry the modifier on any cell — neither on
-        // structural spans nor on text spans.
+    fn assert_depth_1_no_underline(status: NodeStatus) {
+        let (buf, row) = render_depth_1_child(status);
         for col in 0u16..20 {
             let style = buf[(col, row)].style();
             assert!(
                 !style.add_modifier.contains(Modifier::UNDERLINED),
-                "pending depth-1 row should not be underlined at col {col}; \
-                 style={style:?}",
+                "depth-1 row should not be underlined at col {col}; style={style:?}",
             );
         }
     }
 
     #[test]
-    fn depth_1_loop_summary_spans_underlined_when_present() {
-        // A child labelled "Loop" with non-empty summary appends spans 6
-        // (" · ") and 7 (summary text). Both must carry the modifier; the
-        // focus glyph and indent must not.
-        let app = test_app(
-            vec![node(
-                "Root",
-                NodeKind::Stage,
-                NodeStatus::Done,
-                vec![node(
-                    "Loop",
-                    NodeKind::Task,
-                    NodeStatus::Running,
-                    Vec::new(),
-                    None,
-                    None,
-                )],
-                None,
-                None,
-            )],
-            Vec::new(),
-            Vec::new(),
-        );
-        let lines = render_lines(&app, 5);
-        let row = lines
-            .iter()
-            .position(|l| l.contains("Loop summary"))
-            .expect("Loop summary should appear on the child row") as u16;
-        let buf = render_pipeline_buf(&app, 80, 5);
-
-        // Spans 0 & 1 stay un-underlined regardless of the Loop summary.
-        for col in 0u16..=2 {
-            let style = buf[(col, row)].style();
-            assert!(
-                !style.add_modifier.contains(Modifier::UNDERLINED),
-                "structural cell at col {col} should not be underlined; \
-                 style={style:?}",
-            );
-        }
-
-        // Layout for "└─▸ Loop · running · Loop summary":
-        //   cols 0     focus glyph " "
-        //   cols 1-2   indent "└─"
-        //   cols 3-4   marker "▸ "
-        //   cols 5-8   label "Loop"
-        //   cols 9-11  " · "
-        //   cols 12-18 "running"
-        //   cols 19-21 " · "       ← span 6
-        //   cols 22-33 "Loop summary" ← span 7
-        //
-        // Probe a cell inside each Loop summary span.
-        for col in [20u16, 25u16] {
-            let style = buf[(col, row)].style();
-            assert!(
-                style.add_modifier.contains(Modifier::UNDERLINED),
-                "Loop summary cell at col {col} should be underlined; \
-                 style={style:?}",
-            );
+    fn depth_1_rows_are_never_underlined() {
+        for status in [
+            NodeStatus::Running,
+            NodeStatus::Done,
+            NodeStatus::Failed,
+            NodeStatus::FailedUnverified,
+            NodeStatus::Pending,
+        ] {
+            assert_depth_1_no_underline(status);
         }
     }
 }

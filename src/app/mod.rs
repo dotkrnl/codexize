@@ -2154,8 +2154,7 @@ impl App {
             return;
         }
         self.yolo_exit_issued.insert(run.id);
-        // The public event name remains `brainstorm_exit` per the spec even
-        // though the same completion cue is shared by planning today.
+        // The public event name remains `brainstorm_exit` per the spec.
         self.log_yolo_auto_approved("brainstorm_exit");
         #[cfg(not(test))]
         {
@@ -2168,11 +2167,9 @@ impl App {
     fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
         let artifacts = session_state::session_dir(&self.state.session_id).join("artifacts");
         match run.stage.as_str() {
-            "brainstorm" => Self::artifact_present(&artifacts.join("spec.md")),
             "spec-review" => {
                 Self::artifact_present(&artifacts.join(format!("spec-review-{}.md", run.round)))
             }
-            "planning" => Self::artifact_present(&artifacts.join("plan.md")),
             _ => false,
         }
     }
@@ -2761,13 +2758,11 @@ impl App {
             .join(format!("recovery-plan-review-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Review,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("plan-review");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -2897,13 +2892,11 @@ impl App {
             .join(format!("recovery-sharding-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Planning,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("sharding");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -3611,13 +3604,11 @@ impl App {
         }
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Idea,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("brainstorm");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error =
                 Some("no model available with quota — check model strip".to_string());
             let _ = self.state.save();
@@ -3659,6 +3650,7 @@ impl App {
             &spec_path.display().to_string(),
             &summary_path.display().to_string(),
             &live_summary_path.display().to_string(),
+            modes.yolo,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.state.agent_error = Some(format!("error writing prompt: {e}"));
@@ -3673,13 +3665,12 @@ impl App {
         };
 
         let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
-        let dirty = self.capture_run_guard(
-            "brainstorm",
-            None,
-            1,
-            attempt,
-            guard::GuardMode::AskOperator,
-        );
+        let guard_mode = if modes.yolo {
+            guard::GuardMode::AutoReset
+        } else {
+            guard::GuardMode::AskOperator
+        };
+        let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard_mode);
         let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model, effort);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
@@ -3688,6 +3679,15 @@ impl App {
             self.try_test_launch(&status_path, Some(&spec_path), &run_key, &artifacts_dir)
         {
             result
+        } else if modes.yolo {
+            launch_noninteractive(
+                &window_name,
+                &run,
+                adapter.as_ref(),
+                &status_path,
+                &run_key,
+                &artifacts_dir,
+            )
         } else {
             launch_interactive(
                 &window_name,
@@ -3795,7 +3795,8 @@ impl App {
             .join(format!("spec-review-{round}.md"));
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
+        let phase = Self::phase_for_stage("spec-review");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
         let runs: Vec<_> = self
             .state
             .agent_runs
@@ -3929,13 +3930,11 @@ impl App {
             .collect();
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Planning,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("planning");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -3951,7 +3950,13 @@ impl App {
         }
         let attempt = self.attempt_for("planning", None, 1);
         let live_summary_path = self.live_summary_path_for_run("planning", None, 1, attempt);
-        let prompt = planning_prompt(&spec_path, &review_paths, &plan_path, &live_summary_path);
+        let prompt = planning_prompt(
+            &spec_path,
+            &review_paths,
+            &plan_path,
+            &live_summary_path,
+            modes.yolo,
+        );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
             return false;
@@ -3964,6 +3969,8 @@ impl App {
             modes,
         };
 
+        // YOLO planning must take the existing non-interactive runner path.
+        let interactive = interactive && !modes.yolo;
         let adapter = adapter_for_vendor(vendor_kind);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
         let guard_mode = if interactive {
@@ -4054,7 +4061,8 @@ impl App {
             .join(format!("plan-review-{round}.md"));
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
+        let phase = Self::phase_for_stage("plan-review");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
         let runs: Vec<_> = self
             .state
             .agent_runs
@@ -4174,13 +4182,11 @@ impl App {
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Planning,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("sharding");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -4289,13 +4295,11 @@ impl App {
             .join(format!("recovery-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let effort = modes.effort_for(EffortLevel::Normal);
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Planning,
-            effort,
-            modes.cheap,
-        ) else {
+        let phase = Self::phase_for_stage("recovery");
+        let effort = modes.effort_for(EffortLevel::Normal, phase);
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -4451,16 +4455,14 @@ impl App {
         let modes = self.state.launch_modes();
         self.record_dirty_worktree_yolo_gate(dirty_before_coder, modes);
         let requested_effort = task_effort_for(&session_dir, task_id);
-        let effort = modes.effort_for(requested_effort);
+        let phase = Self::phase_for_stage("coder");
+        let effort = modes.effort_for(requested_effort, phase);
         // Override-model bypass: an explicit operator pick wins over the
         // tough-eligibility filter (spec §3.7). The adapter still emits the
         // launch-snapshot effort flag derived from `task.tough`.
-        let Some(chosen) = self.choose_primary_model(
-            override_model.as_ref(),
-            SelectionPhase::Build,
-            effort,
-            modes.cheap,
-        ) else {
+        let Some(chosen) =
+            self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
+        else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             return false;
@@ -4597,7 +4599,7 @@ impl App {
             .collect::<Vec<_>>();
         let modes = self.state.launch_modes();
         let requested_effort = task_effort_for(&session_dir, task_id);
-        let effort = modes.effort_for(requested_effort);
+        let effort = modes.effort_for(requested_effort, Self::phase_for_stage("reviewer"));
         // Override-model bypass: explicit operator pick beats the effort filter.
         let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
         let Some(chosen) = self.choose_review_model(
@@ -5170,11 +5172,13 @@ fn brainstorm_prompt(
     spec_path: &str,
     summary_path: &str,
     live_summary_path: &str,
+    yolo: bool,
 ) -> String {
-    let instr = live_summary_instruction_interactive(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
-    format!(
-        r#"{project_doc_instr}Invoke your brainstorming skill now.
+    if !yolo {
+        let instr = live_summary_instruction_interactive(std::path::Path::new(live_summary_path));
+        return format!(
+            r#"{project_doc_instr}Invoke your brainstorming skill now.
 
 Idea:
 ---
@@ -5228,6 +5232,62 @@ your output files are written: end that final message with a line asking the
 operator to enter `/exit` if they have no further comments. While you are
 still waiting for the operator's input, never include this cue.
 {instr}"#
+        );
+    }
+
+    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    format!(
+        r#"{project_doc_instr}You have the operator's full trust. Make very good decisions — be bold and
+decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
+your best judgement and move forward.
+
+Invoke your brainstorming skill now.
+
+Idea:
+---
+{idea}
+---
+
+Operator is unavailable; resolve ambiguities, scope, and trade-offs yourself per the trust preamble above.
+
+Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
+  1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy
+     reader can skim in 30 sec), then the full spec.
+  2. {summary_path} — TOML with `title = "<≤80 chars naming the actual
+     change, e.g. 'Add Kimi adapter min-quota fallback'>"`. Avoid generic
+     labels ("Refactor", "New feature", "Update files in src/"). Required,
+     even when proposing one of the escape hatches below.
+
+Optional escape hatches (RARE — when in doubt, omit and let the normal
+spec-review → planning → sharding pipeline run):
+
+  • Skip-to-impl: write artifacts/skip_proposal.toml as TOML:
+        proposed  = true
+        status    = "skip_to_impl"
+        rationale = "<≤500 chars why>"
+    Hard gates (ALL must hold): one coherent change landable in a single
+    commit, small enough to review in one sitting, no new modules /
+    cross-cutting refactors / migrations / multi-file rewrites.
+    "Simple but long" tasks (mechanical edits across many files) DO NOT
+    qualify — sharding adds value via parallelisation. When skipping, keep
+    the spec concise (goal, edit sites, acceptance check).
+
+  • Nothing-to-do: when there is genuinely nothing to implement (already in
+    place, invalid premise, pure question). Still required:
+      - {spec_path} — one short paragraph explaining why nothing is needed.
+      - artifacts/skip_proposal.toml as TOML:
+            proposed  = true
+            status    = "nothing_to_do"
+            rationale = "<≤500 chars why>"
+
+Hard rules (override the skill where it conflicts):
+  - No `git add`/`commit`/`stash` or any version-control mutation — files
+    stay untracked; a later phase commits.
+  - Don't ask the operator whether to continue, proceed, or run follow-up
+    skills (including any "continue to next stage" inline prompt). When
+    your output files are written, STOP and exit; the orchestrator drives
+    stage transitions.
+{instr}"#
     )
 }
 
@@ -5236,8 +5296,8 @@ fn planning_prompt(
     review_paths: &[std::path::PathBuf],
     plan_path: &std::path::Path,
     live_summary_path: &std::path::Path,
+    yolo: bool,
 ) -> String {
-    let instr = live_summary_instruction_interactive(live_summary_path);
     let reviews_block = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
     } else {
@@ -5249,8 +5309,10 @@ fn planning_prompt(
             .join("\n")
     };
     let project_doc_instr = project_doc_instr();
-    format!(
-        r#"{project_doc_instr}Invoke your superpowers:writing-plans skill now.
+    if !yolo {
+        let instr = live_summary_instruction_interactive(live_summary_path);
+        return format!(
+            r#"{project_doc_instr}Invoke your superpowers:writing-plans skill now.
 
 Turn the approved spec + spec reviews into an implementation plan.
 
@@ -5296,6 +5358,62 @@ Stage completion — ONLY once all pending trade-off decisions are resolved and
 both files are written: end that final message with a line asking the operator
 to enter `/exit` if they have no further comments. While you are still waiting
 for the operator's input, never include this cue.
+{instr}"#,
+            spec = spec_path.display(),
+            reviews = reviews_block,
+            plan = plan_path.display(),
+            instr = instr,
+        );
+    }
+
+    let instr = live_summary_instruction(live_summary_path);
+    format!(
+        r#"{project_doc_instr}You have the operator's full trust. Make very good decisions — be bold and
+decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
+your best judgement and move forward.
+
+Invoke your superpowers:writing-plans skill now.
+
+Turn the approved spec + spec reviews into an implementation plan.
+
+Inputs:
+  Spec:    {spec}
+  Reviews:
+{reviews}
+
+Triage reviews first. They may contradict each other AND are written by AI
+agents — be skeptical, accept only what genuinely improves the spec or plan,
+reject the rest with a brief reason. If a real trade-off exceeds your
+confidence, resolve it yourself per the trust preamble above and choose the
+approach that best satisfies the spec.
+
+Once trade-offs are resolved, do TWO things IN THIS ORDER:
+  1. UPDATE {spec} in place to reflect every accepted decision. If you change
+     the body, also update its TL;DR so the two stay consistent — an agent
+     reading ONLY the spec must not be surprised by anything in the plan.
+  2. Write {plan} starting with a TL;DR (3–6 bullets summarising key
+     sequencing/interface decisions, skimmable in 30 sec), then the body.
+
+Plan shape: an execution map for coordination — sequencing & dependencies
+(what order matters and why), interfaces / integration points / execution
+seams to honor, spec constraints that narrow the solution space, and (only
+as orientation) likely file/module touchpoints. Do NOT write a patch recipe:
+no checkbox to-dos, no function-by-function edit sequences, no "change line
+X then Y", no mandated code shape (struct fields, method signatures, class
+layout) unless the spec or an explicit interface commitment requires it.
+
+Authority: spec is the design contract and wins any conflict; the plan is
+authoritative ONLY for sequencing and the explicit interfaces it names —
+everything else in the plan is advisory. Don't promote advisory detail into
+an implementation contract.
+
+Hard rules (override the skill where it conflicts):
+  - No code/config/build-script edits, no `git add`/`commit`/`stash`, no test
+    runs. You may only edit the spec and write the plan; both files stay
+    untracked. Refuse if the skill offers to commit, push, or test.
+  - Don't ask whether to continue, proceed, or run follow-up skills — when
+    both files are written, STOP and exit. The orchestrator drives stage
+    transitions.
 {instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,
@@ -8295,25 +8413,25 @@ mod tests {
     }
 
     #[test]
-    fn yolo_exit_gate_is_audited_once_when_interactive_artifact_is_ready() {
+    fn yolo_exit_gate_only_audits_spec_review_after_yolo_prompt_shift() {
         with_temp_root(|| {
             let session_id = "yolo-exit-cue";
             let session_dir = session_state::session_dir(session_id);
             let artifacts = session_dir.join("artifacts");
             std::fs::create_dir_all(&artifacts).unwrap();
-            std::fs::write(artifacts.join("spec.md"), "# Spec\n").unwrap();
+            std::fs::write(artifacts.join("spec-review-1.md"), "# Review\n").unwrap();
             let state = SessionState::new(session_id.to_string());
             state.save().expect("save session");
             let mut app = idle_app(state);
             let mut run = RunRecord {
                 id: 42,
-                stage: "brainstorm".to_string(),
+                stage: "spec-review".to_string(),
                 task_id: None,
                 round: 1,
                 attempt: 1,
                 model: "gpt-5".to_string(),
                 vendor: "codex".to_string(),
-                window_name: "[Brainstorm]".to_string(),
+                window_name: "[Spec Review]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: None,
                 status: RunStatus::Running,
@@ -8328,6 +8446,8 @@ mod tests {
             };
 
             app.maybe_issue_yolo_exit(&run);
+            app.maybe_issue_yolo_exit(&run);
+            run.stage = "brainstorm".to_string();
             app.maybe_issue_yolo_exit(&run);
             run.stage = "planning".to_string();
             app.maybe_issue_yolo_exit(&run);
@@ -10677,7 +10797,8 @@ dirty_after = false
             std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
             std::fs::write(&review_path, "review").unwrap();
 
-            let prompt = planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary);
+            let prompt =
+                planning_prompt(&spec_path, &[review_path], &plan_path, &live_summary, false);
 
             assert!(prompt.contains("written by AI"));
             assert!(prompt.contains("be skeptical"));
@@ -10687,7 +10808,7 @@ dirty_after = false
     }
 
     #[test]
-    fn interactive_prompts_gate_exit_cue_until_stage_completion() {
+    fn non_yolo_prompts_keep_interactive_operator_cues() {
         with_temp_root(|| {
             let session_dir = session_state::session_dir("stage-completion-prompts");
             let artifacts = session_dir.join("artifacts");
@@ -10704,7 +10825,10 @@ dirty_after = false
                 &spec_path.display().to_string(),
                 &summary_path.display().to_string(),
                 &live_summary.display().to_string(),
+                false,
             );
+            assert!(!brainstorm.contains("You have the operator's full trust."));
+            assert!(brainstorm.contains("Operator IS available for design questions"));
             assert!(brainstorm.contains(
                 "Stage completion — ONLY once all pending design questions are resolved"
             ));
@@ -10713,7 +10837,9 @@ dirty_after = false
             ));
             assert!(!brainstorm.contains("End your final message"));
 
-            let planning = planning_prompt(&spec_path, &[], &plan_path, &live_summary);
+            let planning = planning_prompt(&spec_path, &[], &plan_path, &live_summary, false);
+            assert!(!planning.contains("You have the operator's full trust."));
+            assert!(planning.contains("ASK the operator (this is interactive)."));
             assert!(planning.contains(
                 "Stage completion — ONLY once all pending trade-off decisions are resolved"
             ));
@@ -10741,6 +10867,47 @@ dirty_after = false
                 "While you are\nstill waiting for the operator's confirmation, never include this cue."
             ));
             assert!(!recovery.contains("End your final message"));
+        });
+    }
+
+    #[test]
+    fn yolo_prompts_insert_trust_preamble_and_drop_interactive_exit_cues() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("yolo-prompts");
+            let artifacts = session_dir.join("artifacts");
+            let spec_path = artifacts.join("spec.md");
+            let plan_path = artifacts.join("plan.md");
+            let summary_path = artifacts.join("session_summary.toml");
+            let live_summary = artifacts.join("live_summary.txt");
+            std::fs::create_dir_all(&artifacts).unwrap();
+
+            let trust_preamble = "You have the operator's full trust. Make very good decisions — be bold and\ndecisive. Do not hedge or ask for confirmation. Resolve every ambiguity using\nyour best judgement and move forward.";
+
+            let brainstorm = brainstorm_prompt(
+                "add a feature",
+                &spec_path.display().to_string(),
+                &summary_path.display().to_string(),
+                &live_summary.display().to_string(),
+                true,
+            );
+            assert_eq!(brainstorm.matches(trust_preamble).count(), 1);
+            assert!(!brainstorm.contains("Operator IS available for design questions"));
+            assert!(!brainstorm.contains(
+                "Stage completion — ONLY once all pending design questions are resolved"
+            ));
+            assert!(!brainstorm.contains("`/exit`"));
+            assert!(brainstorm.contains("and on each sub-goal change"));
+            assert!(!brainstorm.contains("so the operator can follow along"));
+
+            let planning = planning_prompt(&spec_path, &[], &plan_path, &live_summary, true);
+            assert_eq!(planning.matches(trust_preamble).count(), 1);
+            assert!(!planning.contains("ASK the operator (this is interactive)."));
+            assert!(!planning.contains(
+                "Stage completion — ONLY once all pending trade-off decisions are resolved"
+            ));
+            assert!(!planning.contains("`/exit`"));
+            assert!(planning.contains("and on each sub-goal change"));
+            assert!(!planning.contains("so the operator can follow along"));
         });
     }
 

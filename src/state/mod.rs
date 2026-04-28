@@ -5,7 +5,7 @@ pub mod transitions;
 pub use phase::Phase;
 pub use transitions::execute_transition;
 
-use crate::adapters::EffortLevel;
+use crate::{adapters::EffortLevel, selection::SelectionPhase};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -52,9 +52,11 @@ impl Modes {
 }
 
 impl LaunchModes {
-    pub fn effort_for(self, requested: EffortLevel) -> EffortLevel {
+    pub fn effort_for(self, requested: EffortLevel, phase: SelectionPhase) -> EffortLevel {
         if self.cheap {
             EffortLevel::Low
+        } else if self.yolo && matches!(phase, SelectionPhase::Idea | SelectionPhase::Planning) {
+            EffortLevel::Tough
         } else {
             requested
         }
@@ -1099,6 +1101,61 @@ current_phase = "IdeaInput"
                 cheap: true,
             }
         );
+    }
+
+    #[test]
+    fn effort_for_uses_tough_only_for_yolo_idea_and_planning() {
+        let modes = LaunchModes {
+            yolo: true,
+            cheap: false,
+        };
+
+        assert_eq!(
+            modes.effort_for(EffortLevel::Normal, crate::selection::SelectionPhase::Idea),
+            EffortLevel::Tough
+        );
+        assert_eq!(
+            modes.effort_for(EffortLevel::Low, crate::selection::SelectionPhase::Planning),
+            EffortLevel::Tough
+        );
+    }
+
+    #[test]
+    fn effort_for_preserves_requested_effort_for_build_and_review_under_yolo() {
+        let modes = LaunchModes {
+            yolo: true,
+            cheap: false,
+        };
+
+        for requested in [EffortLevel::Low, EffortLevel::Normal, EffortLevel::Tough] {
+            assert_eq!(
+                modes.effort_for(requested, crate::selection::SelectionPhase::Build),
+                requested
+            );
+            assert_eq!(
+                modes.effort_for(requested, crate::selection::SelectionPhase::Review),
+                requested
+            );
+        }
+    }
+
+    #[test]
+    fn effort_for_cheap_mode_wins_over_yolo_for_all_phases() {
+        let modes = LaunchModes {
+            yolo: true,
+            cheap: true,
+        };
+
+        for phase in crate::selection::SelectionPhase::ALL {
+            assert_eq!(
+                modes.effort_for(EffortLevel::Tough, phase),
+                EffortLevel::Low
+            );
+            assert_eq!(
+                modes.effort_for(EffortLevel::Normal, phase),
+                EffortLevel::Low
+            );
+        }
     }
 
     #[test]

@@ -583,11 +583,20 @@ fn build_builder_stage(state: &SessionState) -> Node {
                 }
             }
         };
-        let label = match state.builder.task_titles.get(&task_id) {
+        let is_tough = task_coder
+            .iter()
+            .chain(task_reviewer.iter())
+            .any(|r| r.effort == crate::adapters::EffortLevel::Tough);
+        let base_label = match state.builder.task_titles.get(&task_id) {
             Some(title) if !title.trim().is_empty() => {
                 format!("Task {}: {}", task_id, title.trim())
             }
             _ => format!("Task {}", task_id),
+        };
+        let label = if is_tough {
+            format!("{base_label} [tough]")
+        } else {
+            base_label
         };
         children.push(Node {
             label,
@@ -721,12 +730,21 @@ fn attempt_run_node(run: &RunRecord) -> Node {
 }
 
 fn agent_run_node(run: &RunRecord) -> Node {
-    let base_label = format!("{} · {}", role_label(&run.stage), run.model);
-    let label = if run.effort == crate::adapters::EffortLevel::Tough {
-        format!("{base_label} [tough]")
+    let effort_suffix = if run.effort == crate::adapters::EffortLevel::Tough {
+        match run.vendor.as_str() {
+            "codex" => ":xhigh",
+            "claude" => ":max",
+            _ => "",
+        }
     } else {
-        base_label
+        ""
     };
+    let label = format!(
+        "{} · {}{}",
+        role_label(&run.stage),
+        run.model,
+        effort_suffix
+    );
     Node {
         label,
         kind: NodeKind::AgentRun,
@@ -1890,18 +1908,95 @@ mod tests {
         normal_run.effort = crate::adapters::EffortLevel::Normal;
         let node = agent_run_node(&normal_run);
         assert!(
-            !node.label.contains("[tough]"),
-            "Normal run should not have [tough] suffix, got: {}",
+            !node.label.contains(":xhigh") && !node.label.contains(":max"),
+            "Normal run should not have effort suffix, got: {}",
             node.label
         );
 
-        let mut tough_run = run(2, "coder", RunStatus::Running);
-        tough_run.effort = crate::adapters::EffortLevel::Tough;
-        let node = agent_run_node(&tough_run);
+        let mut tough_codex = run(2, "coder", RunStatus::Running);
+        tough_codex.effort = crate::adapters::EffortLevel::Tough;
+        tough_codex.vendor = "codex".to_string();
+        let node = agent_run_node(&tough_codex);
         assert!(
-            node.label.ends_with("[tough]"),
-            "Tough run should end with [tough], got: {}",
+            node.label.ends_with(":xhigh"),
+            "Tough codex run should end with :xhigh, got: {}",
             node.label
+        );
+
+        let mut tough_claude = run(3, "coder", RunStatus::Running);
+        tough_claude.effort = crate::adapters::EffortLevel::Tough;
+        tough_claude.vendor = "claude".to_string();
+        let node = agent_run_node(&tough_claude);
+        assert!(
+            node.label.ends_with(":max"),
+            "Tough claude run should end with :max, got: {}",
+            node.label
+        );
+
+        let mut tough_gemini = run(4, "coder", RunStatus::Running);
+        tough_gemini.effort = crate::adapters::EffortLevel::Tough;
+        tough_gemini.vendor = "gemini".to_string();
+        let node = agent_run_node(&tough_gemini);
+        assert!(
+            !node.label.contains(":xhigh") && !node.label.contains(":max"),
+            "Tough gemini run should have no effort suffix, got: {}",
+            node.label
+        );
+    }
+
+    #[test]
+    fn test_task_node_tough_badge() {
+        let mut state = SessionState::new("test".to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.builder.pending = vec![2];
+
+        let normal_run = RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5.2".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: crate::adapters::EffortLevel::Normal,
+            hostname: None,
+            mount_device_id: None,
+        };
+        state.agent_runs.push(normal_run.clone());
+
+        let mut tough_run = normal_run.clone();
+        tough_run.id = 2;
+        tough_run.task_id = Some(2);
+        tough_run.effort = crate::adapters::EffortLevel::Tough;
+        state.agent_runs.push(tough_run);
+
+        let nodes = build_tree(&state);
+        let loop_node = nodes.iter().find(|n| n.label == "Loop").unwrap();
+        let task1 = loop_node
+            .children
+            .iter()
+            .find(|n| n.label.starts_with("Task 1"))
+            .unwrap();
+        assert!(
+            !task1.label.contains("[tough]"),
+            "Normal task should not have [tough], got: {}",
+            task1.label
+        );
+        let task2 = loop_node
+            .children
+            .iter()
+            .find(|n| n.label.starts_with("Task 2"))
+            .unwrap();
+        assert!(
+            task2.label.ends_with("[tough]"),
+            "Tough task should end with [tough], got: {}",
+            task2.label
         );
     }
 }

@@ -15,7 +15,7 @@ impl AgentAdapter for CodexAdapter {
     fn interactive_command(&self, model: &str, prompt_path: &str, effort: EffortLevel) -> String {
         let effort_flag = match effort {
             EffortLevel::Normal => r#"-c model_reasoning_effort="medium""#,
-            EffortLevel::Tough => r#"-c model_reasoning_effort="high""#,
+            EffortLevel::Tough => r#"-c model_reasoning_effort="xhigh""#,
         };
         format!(
             r#"codex --yolo -c 'disable_warnings=["model_migrations"]' {effort_flag} -m {model} "$(cat {prompt_path})""#,
@@ -36,7 +36,7 @@ impl AgentAdapter for CodexAdapter {
         // readable while summarising file changes as single-line entries.
         let effort_flag = match effort {
             EffortLevel::Normal => r#"-c model_reasoning_effort="medium""#,
-            EffortLevel::Tough => r#"-c model_reasoning_effort="high""#,
+            EffortLevel::Tough => r#"-c model_reasoning_effort="xhigh""#,
         };
         let filter = r##"if .type=="item.completed" and .item.type=="agent_message" then "\n[0m" + (.item.text // "") + "\n" elif .type=="item.started" and .item.type=="command_execution" then "\n[1;33m$ [0m" + ((.item.command // "") | gsub("\n"; " ")) + "\n" elif .type=="item.completed" and .item.type=="command_execution" then (if ((.item.aggregated_output // "") | length) > 0 then (.item.aggregated_output // "") + (if ((.item.aggregated_output // "") | endswith("\n")) then "" else "\n" end) else "" end) + "[2;" + (if .item.exit_code==0 then "32" else "31" end) + "m↳ exit " + ((.item.exit_code // "?") | tostring) + "[0m\n" elif .type=="item.completed" and .item.type=="file_change" then ((.item.changes // []) | map("[1;32m✎[0m " + (.path // "<unknown>") + " [2m" + (.kind // "changed") + "[0m") | join("\n")) + "\n" elif .type=="turn.completed" then "\n[2mTokens: " + ((.usage.input_tokens // 0) | tostring) + " in, " + ((.usage.output_tokens // 0) | tostring) + " out[0m\n" else empty end"##;
         format!(
@@ -61,7 +61,7 @@ mod tests {
         let tough = adapter.interactive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Tough);
 
         assert!(normal.contains(r#"-c model_reasoning_effort="medium""#));
-        assert!(tough.contains(r#"-c model_reasoning_effort="high""#));
+        assert!(tough.contains(r#"-c model_reasoning_effort="xhigh""#));
     }
 
     #[test]
@@ -74,6 +74,6 @@ mod tests {
             adapter.noninteractive_command("gpt-5.2", "/tmp/prompt.txt", EffortLevel::Tough);
 
         assert!(normal.contains(r#"-c model_reasoning_effort="medium""#));
-        assert!(tough.contains(r#"-c model_reasoning_effort="high""#));
+        assert!(tough.contains(r#"-c model_reasoning_effort="xhigh""#));
     }
 }

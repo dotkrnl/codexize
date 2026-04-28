@@ -356,6 +356,9 @@ impl SessionPicker {
                     state.current_phase = Phase::BrainstormRunning;
                     state.save()?;
                     state.log_event("session created")?;
+                    if state.modes.yolo {
+                        state.log_event("mode_toggled: mode=yolo value=true source=cli")?;
+                    }
                     if state.modes.cheap {
                         state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
                     }

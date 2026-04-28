@@ -9,6 +9,9 @@ use codexize::{
 #[command(name = "codexize")]
 #[command(about = "Agentic development orchestrator", long_about = None)]
 struct Cli {
+    /// Seed newly created sessions with YOLO mode.
+    #[arg(long)]
+    yolo: bool,
     /// Seed newly created sessions with Cheap mode.
     #[arg(long)]
     cheap: bool,
@@ -52,7 +55,7 @@ fn main() -> Result<()> {
             preflight::check(&mut terminal, &tmux)?;
 
             let create_modes = state::Modes {
-                yolo: false,
+                yolo: cli.yolo,
                 cheap: cli.cheap,
             };
             let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
@@ -82,6 +85,9 @@ fn main() -> Result<()> {
 
 fn resume_ignored_mode_warnings(modes: state::Modes) -> Vec<&'static str> {
     let mut warnings = Vec::new();
+    if modes.yolo {
+        warnings.push("warning: --yolo ignored on resume; persisted modes win");
+    }
     if modes.cheap {
         warnings.push("warning: --cheap ignored on resume; persisted modes win");
     }
@@ -97,6 +103,22 @@ mod tests {
     fn cheap_flag_parses_as_create_mode_seed() {
         let cli = Cli::try_parse_from(["codexize", "--cheap"]).expect("parse --cheap");
         assert!(cli.cheap);
+        assert!(!cli.yolo);
+    }
+
+    #[test]
+    fn yolo_flag_parses_as_create_mode_seed() {
+        let cli = Cli::try_parse_from(["codexize", "--yolo"]).expect("parse --yolo");
+        assert!(cli.yolo);
+        assert!(!cli.cheap);
+    }
+
+    #[test]
+    fn yolo_and_cheap_flags_combine() {
+        let cli =
+            Cli::try_parse_from(["codexize", "--yolo", "--cheap"]).expect("parse --yolo --cheap");
+        assert!(cli.yolo);
+        assert!(cli.cheap);
     }
 
     #[test]
@@ -105,10 +127,36 @@ mod tests {
             yolo: false,
             cheap: true,
         });
-
         assert_eq!(
             warnings,
             vec!["warning: --cheap ignored on resume; persisted modes win"]
+        );
+    }
+
+    #[test]
+    fn resume_warning_mentions_ignored_yolo_flag() {
+        let warnings = resume_ignored_mode_warnings(Modes {
+            yolo: true,
+            cheap: false,
+        });
+        assert_eq!(
+            warnings,
+            vec!["warning: --yolo ignored on resume; persisted modes win"]
+        );
+    }
+
+    #[test]
+    fn resume_warning_mentions_both_ignored_flags() {
+        let warnings = resume_ignored_mode_warnings(Modes {
+            yolo: true,
+            cheap: true,
+        });
+        assert_eq!(
+            warnings,
+            vec![
+                "warning: --yolo ignored on resume; persisted modes win",
+                "warning: --cheap ignored on resume; persisted modes win",
+            ]
         );
     }
 }

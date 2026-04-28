@@ -7,6 +7,15 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 
 /// Running-state color per spec.
 const RUNNING_COLOR: Color = Color::Blue;
+const GRADIENT_STOPS: &[(u8, u8, u8)] = &[
+    (0xFF, 0x6B, 0x6B),
+    (0xFF, 0xD1, 0x66),
+    (0x06, 0xD6, 0xA0),
+    (0x4C, 0xC9, 0xF0),
+    (0x7B, 0x5B, 0xE0),
+    (0xF0, 0x72, 0xB6),
+];
+const GRADIENT_STEP: usize = 4;
 
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
@@ -14,6 +23,47 @@ fn capitalize_first(s: &str) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
+}
+
+fn interpolate_rgb(from: (u8, u8, u8), to: (u8, u8, u8), step: usize, max_step: usize) -> Color {
+    let interpolate_channel = |start: u8, end: u8| {
+        let delta = end as i16 - start as i16;
+        (start as i16 + (delta * step as i16) / max_step as i16) as u8
+    };
+
+    Color::Rgb(
+        interpolate_channel(from.0, to.0),
+        interpolate_channel(from.1, to.1),
+        interpolate_channel(from.2, to.2),
+    )
+}
+
+/// Paint a string as one colored span per char using a phased horizontal gradient.
+pub fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let cycle = GRADIENT_STOPS.len() * GRADIENT_STEP;
+    let mut spans = Vec::with_capacity(text.chars().count());
+
+    // Spec leaves exact drift math open; this keeps a one-stop shift every
+    // ~1 second at the current 250ms frame tick (`GRADIENT_STEP = 4`).
+    for (index, ch) in text.chars().enumerate() {
+        let offset = (phase + index) % cycle;
+        let start_index = offset / GRADIENT_STEP;
+        let step = offset % GRADIENT_STEP;
+        let end_index = (start_index + 1) % GRADIENT_STOPS.len();
+        let color = interpolate_rgb(
+            GRADIENT_STOPS[start_index],
+            GRADIENT_STOPS[end_index],
+            step,
+            GRADIENT_STEP,
+        );
+        spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+    }
+
+    spans
 }
 
 /// Style hints for historical message rendering.
@@ -119,6 +169,15 @@ impl LiveSummaryFetcher for CachedSummaryFetcher<'_> {
         } else {
             extract_short_title(self.cached_text)
         }
+    }
+}
+
+/// Render-time fetcher that always returns the provided text.
+pub struct StaticFetcher(pub String);
+
+impl LiveSummaryFetcher for StaticFetcher {
+    fn fetch(&self) -> String {
+        self.0.clone()
     }
 }
 
@@ -496,5 +555,48 @@ mod tests {
                 pos
             );
         }
+    }
+
+    #[test]
+    fn gradient_spans_empty_input_returns_empty_vec() {
+        assert!(gradient_spans("", 0).is_empty());
+    }
+
+    #[test]
+    fn gradient_spans_round_trip_ascii_text() {
+        let text = "Awaiting idea";
+        let spans = gradient_spans(text, 0);
+        let rebuilt = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert_eq!(rebuilt, text);
+    }
+
+    #[test]
+    fn gradient_spans_phase_shift_changes_at_least_one_pigment() {
+        let a = gradient_spans("gradient", 0);
+        let b = gradient_spans("gradient", 4);
+        assert_eq!(a.len(), b.len());
+        assert!(
+            a.iter()
+                .zip(b.iter())
+                .any(|(left, right)| left.style.fg != right.style.fg),
+            "phase shift should change at least one foreground color"
+        );
+    }
+
+    #[test]
+    fn gradient_spans_count_scales_with_char_count() {
+        let text = "abcdefghijklmnopqrstuvwxyz".repeat(12);
+        let spans = gradient_spans(&text, 11);
+        assert_eq!(spans.len(), text.chars().count());
+    }
+
+    #[test]
+    fn gradient_spans_non_ascii_still_allocates_per_char() {
+        let text = "A語🙂B";
+        let spans = gradient_spans(text, 7);
+        assert_eq!(spans.len(), text.chars().count());
     }
 }

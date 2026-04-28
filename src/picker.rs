@@ -1234,6 +1234,49 @@ mod tests {
     }
 
     #[test]
+    fn create_session_helper_persists_brainstorm_running_with_modes() {
+        with_temp_codexize_root(|| {
+            let session_id = create_session(
+                "ship the dashboard",
+                crate::state::Modes {
+                    yolo: true,
+                    cheap: true,
+                },
+            )
+            .expect("create_session succeeds");
+
+            let state = SessionState::load(&session_id).expect("load new session");
+            assert_eq!(state.idea_text.as_deref(), Some("ship the dashboard"));
+            assert_eq!(state.current_phase, Phase::BrainstormRunning);
+            assert!(state.modes.yolo);
+            assert!(state.modes.cheap);
+        });
+    }
+
+    #[test]
+    fn create_session_helper_logs_session_created_and_mode_events() {
+        with_temp_codexize_root(|| {
+            let session_id = create_session(
+                "log it",
+                crate::state::Modes {
+                    yolo: true,
+                    cheap: false,
+                },
+            )
+            .expect("create_session succeeds");
+
+            // The events audit trail is a TOML file next to session.toml.
+            // Reading the raw file keeps the test independent of any
+            // structured-log accessor.
+            let events_path = crate::state::session_dir(&session_id).join("events.toml");
+            let log = std::fs::read_to_string(&events_path).expect("events.toml exists");
+            assert!(log.contains("session created"), "log: {log}");
+            assert!(log.contains("mode=yolo"), "yolo logged: {log}");
+            assert!(!log.contains("mode=cheap"), "cheap not logged: {log}");
+        });
+    }
+
+    #[test]
     fn palette_idea_alias_creates_session_immediately() {
         with_temp_codexize_root(|| {
             let mut picker =
@@ -1341,8 +1384,16 @@ mod tests {
         // The first text cell after the list border must be the focus marker
         // for the selected row and a blank for unselected rows.
         let cell_after_border = |y: u16| -> String { buf[(1, y)].symbol().to_string() };
-        assert_eq!(cell_after_border(alpha_y), " ", "unselected row stays blank");
-        assert_eq!(cell_after_border(beta_y), ">", "selected row shows > marker");
+        assert_eq!(
+            cell_after_border(alpha_y),
+            " ",
+            "unselected row stays blank"
+        );
+        assert_eq!(
+            cell_after_border(beta_y),
+            ">",
+            "selected row shows > marker"
+        );
 
         // Selected row must not rely on reversed background. Scan every cell
         // on the selected row to confirm REVERSED is absent.

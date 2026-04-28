@@ -30,9 +30,9 @@ pub fn start() -> Result<AppTerminal> {
 }
 
 /// Best-effort restoration after `start()` partially succeeds and then
-/// fails (e.g. Terminal::new returns Err once raw mode + alternate screen
-/// + bracketed paste are already armed). Any individual step that fails
-/// is swallowed because we are already on the error path.
+/// fails (e.g. `Terminal::new` returns `Err` once raw mode, the alternate
+/// screen, and bracketed paste are already armed). Any individual step
+/// that fails is swallowed because we are already on the error path.
 fn restore_terminal_after_failed_start() {
     let mut stdout = io::stdout();
     let _ = execute!(stdout, DisableBracketedPaste, LeaveAlternateScreen);

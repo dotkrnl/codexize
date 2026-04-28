@@ -593,6 +593,71 @@ mod tests {
         assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
     }
 
+    fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("CODEXIZE_ROOT");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
+        outcome.unwrap()
+    }
+
+    #[test]
+    fn scan_sessions_returns_empty_when_root_is_brand_new() {
+        with_temp_codexize_root(|| {
+            // First call creates the sessions dir on demand and returns no entries.
+            let entries = scan_sessions().unwrap();
+            assert!(entries.is_empty());
+            assert!(crate::state::codexize_root().join("sessions").exists());
+        });
+    }
+
+    #[test]
+    fn scan_sessions_skips_directories_without_session_toml() {
+        with_temp_codexize_root(|| {
+            let _ = scan_sessions().unwrap();
+            let stray = crate::state::codexize_root().join("sessions").join("stray");
+            fs::create_dir_all(&stray).unwrap();
+            // No session.toml inside; the entry must be ignored.
+            let entries = scan_sessions().unwrap();
+            assert!(entries.is_empty(), "stray dir without session.toml must be skipped");
+        });
+    }
+
+    #[test]
+    fn scan_sessions_returns_entries_sorted_by_recency() {
+        with_temp_codexize_root(|| {
+            // Stage two sessions; touching their session.toml gives the
+            // newer one a more recent mtime so it sorts first.
+            let mut older = SessionState::new("alpha".to_string());
+            older.title = Some("alpha title".to_string());
+            older.save().unwrap();
+            // Sleep enough to ensure the next save's mtime strictly exceeds
+            // alpha's (mtime resolution is filesystem-dependent).
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            let mut newer = SessionState::new("beta".to_string());
+            newer.title = Some("beta title".to_string());
+            newer.save().unwrap();
+
+            let entries = scan_sessions().unwrap();
+            assert_eq!(entries.len(), 2, "both sessions must be discovered");
+            assert_eq!(entries[0].session_id, "beta", "newest first");
+            assert_eq!(entries[1].session_id, "alpha");
+            assert_eq!(entries[0].idea_summary, "beta title");
+        });
+    }
+
     #[test]
     fn generate_session_id_distinguishes_rapid_calls() {
         // Two sessions kicked off back-to-back in the same wall-clock

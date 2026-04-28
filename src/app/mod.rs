@@ -8581,6 +8581,41 @@ mod tests {
     }
 
     #[test]
+    fn yolo_planning_finalization_skips_plan_review_after_plan_artifact_exists() {
+        with_temp_root(|| {
+            let session_id = "yolo-planning-skip";
+            let session_dir = session_state::session_dir(session_id);
+            let artifacts = session_dir.join("artifacts");
+            std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+            std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan artifact");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::PlanningRunning;
+            let mut run = make_planning_run(1, 1);
+            run.modes = crate::state::LaunchModes {
+                yolo: true,
+                cheap: false,
+            };
+            state.agent_runs.push(run.clone());
+            let mut app = idle_app(state);
+
+            app.finalize_current_run(&run)
+                .expect("finalize yolo planning");
+
+            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert_eq!(
+                events
+                    .matches("yolo_auto_approved: gate=plan_review_skipped")
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[test]
     fn yolo_dirty_worktree_gate_is_audited_from_launch_snapshot() {
         with_temp_root(|| {
             let session_id = "yolo-dirty-worktree";

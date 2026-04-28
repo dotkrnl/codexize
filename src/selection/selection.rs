@@ -293,7 +293,7 @@ fn select_for_review_from_eligible<'a>(
     used_models: &[(VendorKind, String)],
     version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
-    // Tier 1: tough-eligible AND fresh-vendor AND fresh-model.
+    // Tier 1: eligible AND fresh-vendor AND fresh-model.
     let fresh_vendor: Vec<(&CachedModel, f64)> = eligible
         .iter()
         .filter(|m| {
@@ -311,7 +311,7 @@ fn select_for_review_from_eligible<'a>(
         return Some(model);
     }
 
-    // Tier 2: tough-eligible AND fresh-model (any vendor).
+    // Tier 2: eligible AND fresh-model (any vendor).
     let fresh_model: Vec<(&CachedModel, f64)> = eligible
         .iter()
         .filter(|m| !used_models.contains(&(m.vendor, m.name.clone())))
@@ -327,7 +327,7 @@ fn select_for_review_from_eligible<'a>(
         return Some(model);
     }
 
-    // Tier 3: any tough-eligible model, even if used by the coder.
+    // Tier 3: any eligible model, even if used by the coder.
     // This is "eligibility dominates diversity": prefer reusing Claude-opus
     // over a fresh sonnet/Kimi when no fresh eligible model is available.
     let any_eligible: Vec<(&CachedModel, f64)> = eligible

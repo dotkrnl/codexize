@@ -1,3 +1,4 @@
+use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::state::{Modes, Phase, SessionState};
 use crate::tui::AppTerminal;
 use anyhow::Result;
@@ -38,6 +39,8 @@ pub struct SessionPicker {
     confirm_delete_hard: bool,
     confirm_delete_soft: bool,
     create_modes: Modes,
+    palette: PaletteState,
+    palette_status: Option<String>,
 }
 
 enum KeyAction {
@@ -63,6 +66,8 @@ impl SessionPicker {
             confirm_delete_hard: false,
             confirm_delete_soft: false,
             create_modes,
+            palette: PaletteState::default(),
+            palette_status: None,
         })
     }
 
@@ -161,7 +166,7 @@ impl SessionPicker {
         let visible = self.visible_entries();
 
         if visible.is_empty() {
-            let message = Paragraph::new("No sessions yet — press [n] to create one")
+            let message = Paragraph::new("No sessions yet — run :new to create one")
                 .style(Style::default().fg(Color::DarkGray))
                 .block(Block::default().borders(Borders::ALL).title("Sessions"));
             frame.render_widget(message, area);
@@ -218,23 +223,63 @@ impl SessionPicker {
     }
 
     fn draw_action_bar(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        let text = if self.confirm_delete_hard {
-            "Press [D] again to permanently delete, or any other key to cancel"
-        } else if self.confirm_delete_soft {
-            "Press [d] again to archive, or any other key to cancel"
-        } else if self.show_archived && self.selected_entry().map(|e| e.archived).unwrap_or(false) {
-            "[Enter] Continue  [n] New  [d] Delete  [r] Restore  [a] Hide archived  [q] Quit"
-        } else if self.show_archived {
-            "[Enter] Continue  [n] New  [d] Delete  [a] Hide archived  [q] Quit"
+        let paragraph = if self.palette.open {
+            Paragraph::new(self.palette_lines())
+                .style(Style::default().fg(Color::Gray))
+                .block(Block::default().borders(Borders::ALL).title("Command"))
         } else {
-            "[Enter] Continue  [n] New  [d] Delete  [a] Show archived  [q] Quit"
+            let text = if let Some(status) = &self.palette_status {
+                status.as_str()
+            } else if self.confirm_delete_hard {
+                "Run :delete again to permanently delete, or any other key to cancel"
+            } else if self.confirm_delete_soft {
+                "Run :archive again to archive, or any other key to cancel"
+            } else if self.show_archived
+                && self.selected_entry().map(|e| e.archived).unwrap_or(false)
+            {
+                "Enter continue  :new  :archive  :restore  :show-archived off  :quit"
+            } else if self.show_archived {
+                "Enter continue  :new  :archive  :show-archived off  :quit"
+            } else {
+                "Enter continue  :new  :archive  :show-archived on  :quit"
+            };
+
+            Paragraph::new(text)
+                .style(Style::default().fg(Color::Gray))
+                .block(Block::default().borders(Borders::ALL))
         };
 
-        let paragraph = Paragraph::new(text)
-            .style(Style::default().fg(Color::Gray))
-            .block(Block::default().borders(Borders::ALL));
-
         frame.render_widget(paragraph, area);
+    }
+
+    fn palette_lines(&self) -> Vec<Line<'static>> {
+        let commands = self.palette_commands();
+        let buffer = self.palette.buffer.clone();
+        let ghost = palette::ghost_completion(&buffer, &commands).unwrap_or("");
+        let suffix = ghost.strip_prefix(buffer.trim()).unwrap_or("");
+        let mut input = vec![
+            Span::styled(
+                ":",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(buffer),
+        ];
+        if !suffix.is_empty() {
+            input.push(Span::styled(
+                suffix.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        let help = self
+            .palette_status
+            .clone()
+            .unwrap_or_else(|| "Esc close  Tab complete  Enter run".to_string());
+        vec![
+            Line::from(input),
+            Line::from(Span::styled(help, Style::default().fg(Color::DarkGray))),
+        ]
     }
 
     fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
@@ -271,16 +316,15 @@ impl SessionPicker {
             return self.handle_input_key(key);
         }
 
+        if self.palette.open {
+            return self.handle_palette_key(key);
+        }
+
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => Ok(KeyAction::Quit),
-            KeyCode::Char('n') => {
-                if was_confirming {
-                    self.confirm_delete_hard = false;
-                    self.confirm_delete_soft = false;
-                }
-                self.input_mode = true;
-                self.input_buffer.clear();
-                self.input_cursor = 0;
+            KeyCode::Esc => Ok(KeyAction::Quit),
+            KeyCode::Char(':') => {
+                self.palette.open();
+                self.palette_status = None;
                 Ok(KeyAction::Continue)
             }
             KeyCode::Up => {
@@ -311,24 +355,6 @@ impl SessionPicker {
                 }
                 self.handle_select()
             }
-            KeyCode::Char('a') => {
-                if was_confirming {
-                    self.confirm_delete_hard = false;
-                    self.confirm_delete_soft = false;
-                }
-                self.show_archived = !self.show_archived;
-                self.selected = 0;
-                Ok(KeyAction::Continue)
-            }
-            KeyCode::Char('d') => self.handle_soft_delete(was_confirming),
-            KeyCode::Char('D') => self.handle_hard_delete(was_confirming),
-            KeyCode::Char('r') => {
-                if was_confirming {
-                    self.confirm_delete_hard = false;
-                    self.confirm_delete_soft = false;
-                }
-                self.handle_restore()
-            }
             _ => {
                 if was_confirming {
                     self.confirm_delete_hard = false;
@@ -336,6 +362,142 @@ impl SessionPicker {
                 }
                 Ok(KeyAction::Continue)
             }
+        }
+    }
+
+    fn palette_commands(&self) -> Vec<PaletteCommand> {
+        let mut commands = vec![
+            PaletteCommand {
+                name: "quit",
+                aliases: &["q"],
+                help: "Exit picker",
+            },
+            PaletteCommand {
+                name: "new",
+                aliases: &["n"],
+                help: "Create a session",
+            },
+            PaletteCommand {
+                name: "show-archived",
+                aliases: &["a"],
+                help: "Toggle archived sessions",
+            },
+            PaletteCommand {
+                name: "archive",
+                aliases: &["d"],
+                help: "Archive selected session",
+            },
+            PaletteCommand {
+                name: "delete",
+                aliases: &["D"],
+                help: "Permanently delete selected session",
+            },
+        ];
+        if self
+            .selected_entry()
+            .map(|entry| entry.archived)
+            .unwrap_or(false)
+        {
+            commands.push(PaletteCommand {
+                name: "restore",
+                aliases: &["r"],
+                help: "Restore selected archived session",
+            });
+        }
+        commands
+    }
+
+    fn handle_palette_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
+        match key.code {
+            KeyCode::Esc => {
+                self.palette.close();
+                self.palette_status = None;
+                Ok(KeyAction::Continue)
+            }
+            KeyCode::Enter => {
+                let input = self.palette.buffer.clone();
+                self.palette.close();
+                self.execute_palette_input(&input)
+            }
+            KeyCode::Tab => {
+                let commands = self.palette_commands();
+                if let Some(ghost) = palette::ghost_completion(&self.palette.buffer, &commands) {
+                    self.palette.accept_ghost(ghost);
+                    self.palette_status = None;
+                }
+                Ok(KeyAction::Continue)
+            }
+            KeyCode::Backspace => {
+                if self.palette.buffer.is_empty() {
+                    self.palette.close();
+                    self.palette_status = None;
+                } else {
+                    self.palette.buffer.pop();
+                    self.palette.cursor = self.palette.buffer.chars().count();
+                }
+                Ok(KeyAction::Continue)
+            }
+            KeyCode::Char(c) => {
+                self.palette.buffer.push(c);
+                self.palette.cursor = self.palette.buffer.chars().count();
+                self.palette_status = None;
+                Ok(KeyAction::Continue)
+            }
+            _ => Ok(KeyAction::Continue),
+        }
+    }
+
+    fn execute_palette_input(&mut self, input: &str) -> Result<KeyAction> {
+        let commands = self.palette_commands();
+        match palette::resolve(input, &commands) {
+            palette::MatchResult::Exact { command, args }
+            | palette::MatchResult::UniquePrefix { command, args } => {
+                self.palette_status = None;
+                self.execute_palette_command(command.name, &args)
+            }
+            palette::MatchResult::Ambiguous { candidates, .. } => {
+                self.palette_status =
+                    Some(format!("palette: ambiguous ({})", candidates.join("|")));
+                Ok(KeyAction::Continue)
+            }
+            palette::MatchResult::Unknown { input } => {
+                self.palette_status = Some(format!("palette: unknown command \"{input}\""));
+                Ok(KeyAction::Continue)
+            }
+        }
+    }
+
+    fn execute_palette_command(&mut self, name: &str, args: &str) -> Result<KeyAction> {
+        let was_confirming = self.confirm_delete_hard || self.confirm_delete_soft;
+        match name {
+            "quit" => Ok(KeyAction::Quit),
+            "new" => {
+                self.confirm_delete_hard = false;
+                self.confirm_delete_soft = false;
+                self.input_mode = true;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                Ok(KeyAction::Continue)
+            }
+            "show-archived" => {
+                self.confirm_delete_hard = false;
+                self.confirm_delete_soft = false;
+                match args.trim() {
+                    "on" => self.show_archived = true,
+                    "off" => self.show_archived = false,
+                    _ => self.show_archived = !self.show_archived,
+                }
+                self.selected = 0;
+                Ok(KeyAction::Continue)
+            }
+            "archive" => self.handle_soft_delete(was_confirming),
+            "delete" => self.handle_hard_delete(was_confirming),
+            "restore" => {
+                self.confirm_delete_hard = false;
+                self.confirm_delete_soft = false;
+                self.handle_restore()
+            }
+            _ => Ok(KeyAction::Continue),
         }
     }
 
@@ -571,6 +733,8 @@ mod tests {
             confirm_delete_hard: false,
             confirm_delete_soft: false,
             create_modes: crate::state::Modes::default(),
+            palette: PaletteState::default(),
+            palette_status: None,
         }
     }
 
@@ -739,6 +903,81 @@ mod tests {
             let state = SessionState::load(&selection.session_id).expect("load new session");
             assert!(state.modes.cheap);
         });
+    }
+
+    #[test]
+    fn direct_single_letter_actions_do_not_fire_outside_palette() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
+
+        assert!(matches!(
+            picker
+                .handle_key(KeyEvent::new(
+                    KeyCode::Char('n'),
+                    crossterm::event::KeyModifiers::NONE,
+                ))
+                .unwrap(),
+            KeyAction::Continue
+        ));
+        assert!(
+            !picker.input_mode,
+            "new-session action must be routed through the palette"
+        );
+
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char('a'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert!(
+            !picker.show_archived,
+            "archive visibility action must be routed through the palette"
+        );
+
+        assert!(matches!(
+            picker
+                .handle_key(KeyEvent::new(
+                    KeyCode::Char('q'),
+                    crossterm::event::KeyModifiers::NONE,
+                ))
+                .unwrap(),
+            KeyAction::Continue
+        ));
+    }
+
+    #[test]
+    fn input_mode_keeps_colon_literal() {
+        let mut picker = test_picker("", 0);
+
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(':'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+
+        assert_eq!(picker.input_buffer, ":");
+    }
+
+    #[test]
+    fn action_bar_advertises_palette_commands() {
+        let picker = test_picker("", 0);
+
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut picker = picker;
+        picker.input_mode = false;
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..8)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains(":new"));
+        assert!(text.contains(":quit"));
+        assert!(!text.contains("[n] New"));
     }
 
     #[test]

@@ -1570,17 +1570,6 @@ mod tests {
                     && line.as_bytes()[8] == b' '
                 {
                     format!("XX:XX:XX{}", &line[8..])
-                }
-                // Historical message: "HH:MM ✓ ..." or "HH:MM ○ ..."
-                else if line.len() >= 6
-                    && line.as_bytes()[0].is_ascii_digit()
-                    && line.as_bytes()[1].is_ascii_digit()
-                    && line.as_bytes()[2] == b':'
-                    && line.as_bytes()[3].is_ascii_digit()
-                    && line.as_bytes()[4].is_ascii_digit()
-                    && line.as_bytes()[5] == b' '
-                {
-                    format!("XX:XX{}", &line[5..])
                 } else {
                     line
                 }

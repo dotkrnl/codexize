@@ -4967,8 +4967,10 @@ Hard rules (override the skill where it conflicts):
     your output files are written, STOP and exit; the orchestrator drives
     stage transitions.
 
-End your final message with a line asking the operator to enter `/exit` if
-they have no further comments.
+Stage completion — ONLY once all pending design questions are resolved and
+your output files are written: end that final message with a line asking the
+operator to enter `/exit` if they have no further comments. While you are
+still waiting for the operator's input, never include this cue.
 {instr}"#
     )
 }
@@ -5034,8 +5036,10 @@ Hard rules (override the skill where it conflicts):
     both files are written, STOP and exit. The orchestrator drives stage
     transitions.
 
-End your final message with a line asking the operator to enter `/exit` if
-they have no further comments.
+Stage completion — ONLY once all pending trade-off decisions are resolved and
+both files are written: end that final message with a line asking the operator
+to enter `/exit` if they have no further comments. While you are still waiting
+for the operator's input, never include this cue.
 {instr}"#,
         spec = spec_path.display(),
         reviews = reviews_block,
@@ -5184,7 +5188,7 @@ fn recovery_prompt(
         "  - Keep changes minimal and deterministic — no operator to consult.\n"
     };
     let exit_instruction = if interactive {
-        "\n\nEnd your final message with a line asking the operator to enter `/exit` if\nthey have no further comments."
+        "\n\nStage completion — ONLY once all pending confirmation decisions are resolved\nand your output files are written: end that final message with a line asking\nthe operator to enter `/exit` if they have no further comments. While you are\nstill waiting for the operator's confirmation, never include this cue."
     } else {
         ""
     };
@@ -10060,6 +10064,64 @@ dirty_after = false
             assert!(prompt.contains("be skeptical"));
             assert!(prompt.contains("genuinely improves the spec or plan"));
             assert!(prompt.contains("reject the rest with a brief reason"));
+        });
+    }
+
+    #[test]
+    fn interactive_prompts_gate_exit_cue_until_stage_completion() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("stage-completion-prompts");
+            let artifacts = session_dir.join("artifacts");
+            let spec_path = artifacts.join("spec.md");
+            let plan_path = artifacts.join("plan.md");
+            let tasks_path = artifacts.join("tasks.toml");
+            let recovery_path = artifacts.join("recovery.toml");
+            let summary_path = artifacts.join("session_summary.toml");
+            let live_summary = artifacts.join("live_summary.txt");
+            std::fs::create_dir_all(&artifacts).unwrap();
+
+            let brainstorm = brainstorm_prompt(
+                "add a feature",
+                &spec_path.display().to_string(),
+                &summary_path.display().to_string(),
+                &live_summary.display().to_string(),
+            );
+            assert!(brainstorm.contains(
+                "Stage completion — ONLY once all pending design questions are resolved"
+            ));
+            assert!(brainstorm.contains(
+                "While you are\nstill waiting for the operator's input, never include this cue."
+            ));
+            assert!(!brainstorm.contains("End your final message"));
+
+            let planning = planning_prompt(&spec_path, &[], &plan_path, &live_summary);
+            assert!(planning.contains(
+                "Stage completion — ONLY once all pending trade-off decisions are resolved"
+            ));
+            assert!(planning.contains(
+                "While you are still waiting\nfor the operator's input, never include this cue."
+            ));
+            assert!(!planning.contains("End your final message"));
+
+            let recovery = recovery_prompt(
+                &spec_path,
+                &plan_path,
+                &tasks_path,
+                Some(1),
+                Some("needs confirmation"),
+                &[],
+                &[1],
+                &live_summary,
+                &recovery_path,
+                true,
+            );
+            assert!(recovery.contains(
+                "Stage completion — ONLY once all pending confirmation decisions are resolved"
+            ));
+            assert!(recovery.contains(
+                "While you are\nstill waiting for the operator's confirmation, never include this cue."
+            ));
+            assert!(!recovery.contains("End your final message"));
         });
     }
 

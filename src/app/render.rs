@@ -2102,7 +2102,10 @@ mod tests {
         // collapses to the bottom 2 rows or fewer.
         let lines = render_full_frame(&mut app, 80, 4);
         let text = lines.join("\n");
-        assert!(text.contains(":qu"), "input row must remain visible: {text}");
+        assert!(
+            text.contains(":qu"),
+            "input row must remain visible: {text}"
+        );
     }
 
     #[test]

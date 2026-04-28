@@ -555,9 +555,7 @@ mod tests {
     }
 
     fn has_dim_spans(line: &Line) -> bool {
-        line.spans
-            .iter()
-            .any(|s| s.style.fg == Some(DISABLED_DIM))
+        line.spans.iter().any(|s| s.style.fg == Some(DISABLED_DIM))
     }
 
     #[test]
@@ -1128,10 +1126,7 @@ mod tests {
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
 
-        let has_disabled_style = line
-            .spans
-            .iter()
-            .any(|s| s.style.fg == Some(DISABLED_DIM));
+        let has_disabled_style = line.spans.iter().any(|s| s.style.fg == Some(DISABLED_DIM));
         assert!(has_disabled_style, "should have disabled styling");
 
         let has_enabled_style = line.spans.iter().any(|s| {

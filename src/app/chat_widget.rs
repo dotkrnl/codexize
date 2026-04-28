@@ -105,7 +105,12 @@ fn format_timestamp(
     let local_dt = local_offset.from_utc_datetime(&ts.naive_utc());
     let msg_date = local_dt.date_naive();
     if msg_date == today_local {
-        format!("{:02}:{:02}", local_dt.hour(), local_dt.minute())
+        format!(
+            "{:02}:{:02}:{:02}",
+            local_dt.hour(),
+            local_dt.minute(),
+            local_dt.second()
+        )
     } else {
         format!(
             "{:02}-{:02} {:02}:{:02}",
@@ -489,9 +494,9 @@ mod tests {
     #[test]
     fn timestamp_same_day() {
         let offset = FixedOffset::east_opt(0).unwrap();
-        let ts = Utc.with_ymd_and_hms(2026, 4, 24, 14, 5, 0).unwrap();
+        let ts = Utc.with_ymd_and_hms(2026, 4, 24, 14, 5, 9).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 4, 24).unwrap();
-        assert_eq!(format_timestamp(&ts, &offset, today), "14:05");
+        assert_eq!(format_timestamp(&ts, &offset, today), "14:05:09");
     }
 
     #[test]
@@ -508,7 +513,7 @@ mod tests {
         let ts = Utc.with_ymd_and_hms(2026, 4, 23, 23, 0, 0).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 4, 24).unwrap();
         // UTC 23:00 + 8h = next day 07:00, same local date as today
-        assert_eq!(format_timestamp(&ts, &offset, today), "07:00");
+        assert_eq!(format_timestamp(&ts, &offset, today), "07:00:00");
     }
 
     #[test]

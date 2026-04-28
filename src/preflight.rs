@@ -160,10 +160,9 @@ where
         filtered.push((short_status.to_string(), path.to_string()));
     }
 
-    if filtered.len() != 1 {
+    let [(status, path)] = filtered.as_slice() else {
         return;
-    }
-    let (status, path) = &filtered[0];
+    };
     if path != ".gitignore" || !accepted_gitignore_status(status) {
         return;
     }
@@ -816,6 +815,19 @@ mod tests {
             assert_eq!(git_output(&["rev-parse", "HEAD"]), previous_head);
             let status = git_output(&["status", "--porcelain"]);
             assert!(status.contains(".gitignore"));
+        });
+    }
+
+    #[test]
+    fn gitignore_modal_only_codexize_changes_skips_auto_commit() {
+        with_temp_dir(|| {
+            init_repo_with_head();
+            let previous_head = git_output(&["rev-parse", "HEAD"]);
+            fs::create_dir(".codexize").unwrap();
+            fs::write(".codexize/note.txt", "internal").unwrap();
+            maybe_auto_commit_gitignore(|_| {});
+
+            assert_eq!(git_output(&["rev-parse", "HEAD"]), previous_head);
         });
     }
 

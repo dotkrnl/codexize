@@ -17,6 +17,7 @@ struct KeyBinding {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Capability {
     Expand,
+    Input,
 }
 
 /// Colors for keymap styling.
@@ -35,6 +36,7 @@ const SEP_CATEGORY: &str = "  ·  ";
 fn is_capable(caps: FocusCaps, cap: Capability) -> bool {
     match cap {
         Capability::Expand => caps.can_expand,
+        Capability::Input => caps.can_input,
     }
 }
 
@@ -65,7 +67,7 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
             glyph: "Enter",
             action: "input",
             is_primary: true,
-            capability: None,
+            capability: Some(Capability::Input),
         },
         KeyBinding {
             glyph: ":",
@@ -78,7 +80,7 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
 }
 
 const SYSTEM_QUIT: KeyBinding = KeyBinding {
-    glyph: "q",
+    glyph: "Esc",
     action: "quit",
     is_primary: false,
     capability: None,
@@ -622,7 +624,7 @@ mod tests {
         assert!(text.contains("PgUp/PgDn page"));
         assert!(text.contains("Enter input"));
         assert!(text.contains(": palette"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     // Pause modal exact strings
@@ -638,7 +640,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("Enter continue"));
         assert!(text.contains("n new reviewer"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     #[test]
@@ -653,7 +655,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("Enter continue"));
         assert!(text.contains("n new reviewer"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     // Stage error modal
@@ -669,7 +671,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("r retry"));
         assert!(text.contains("e edit idea"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     #[test]
@@ -684,7 +686,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("r retry"));
         assert!(!text.contains("edit idea"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     // Skip-to-impl modal
@@ -700,7 +702,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("y accept"));
         assert!(text.contains("n decline"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     // Guard modal
@@ -716,7 +718,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("r reset"));
         assert!(text.contains("k keep"));
-        assert!(text.contains("q quit"));
+        assert!(text.contains("Esc quit"));
     }
 
     // Input mode
@@ -777,9 +779,26 @@ mod tests {
         assert!(text.contains(":"), "palette hint should not dropout");
     }
 
+    #[test]
+    fn dim_in_place_input_disabled() {
+        let caps = FocusCaps {
+            can_expand: true,
+            can_edit: true,
+            can_back: true,
+            can_input: false,
+        };
+        let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+        assert!(
+            has_dim_spans(&line),
+            "should have dim spans for disabled input"
+        );
+        let text = line_text(&line);
+        assert!(text.contains("Enter"), "Enter should still appear when input is disabled");
+    }
+
     // Right-anchor stability
     #[test]
-    fn q_quit_right_anchored_stable_across_phases() {
+    fn esc_quit_right_anchored_stable_across_phases() {
         let caps = FocusCaps::default();
         let width = 120u16;
 
@@ -789,8 +808,8 @@ mod tests {
         let text1 = line_text(&line1);
         let text2 = line_text(&line2);
 
-        assert!(text1.ends_with("q quit"));
-        assert!(text2.ends_with("q quit"));
+        assert!(text1.ends_with("Esc quit"));
+        assert!(text2.ends_with("Esc quit"));
 
         let len1 = text1.chars().count();
         let len2 = text2.chars().count();
@@ -803,14 +822,14 @@ mod tests {
         let caps = FocusCaps::default();
         let line_wide = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text_wide = line_text(&line_wide);
-        assert!(text_wide.contains("q quit"), "wide should have 'q quit'");
+        assert!(text_wide.contains("Esc quit"), "wide should have 'q quit'");
 
         let line_narrow = keymap(Phase::IdeaInput, None, caps, false, 80);
         let text_narrow = line_text(&line_narrow);
-        let ends_with_q = text_narrow.trim_end().ends_with("q");
+        let ends_with_esc = text_narrow.trim_end().ends_with("Esc");
         assert!(
-            text_narrow.contains("q quit") || ends_with_q,
-            "narrow should have 'q' or 'q quit'"
+            text_narrow.contains("Esc quit") || ends_with_esc,
+            "narrow should have 'Esc' or 'Esc quit'"
         );
     }
 
@@ -844,7 +863,7 @@ mod tests {
         let text = line_text(&line);
         assert!(text.contains("↑↓ move · Space expand · PgUp/PgDn page"));
         assert!(text.contains("Enter input · : palette"));
-        assert!(text.ends_with("q quit"));
+        assert!(text.ends_with("Esc quit"));
     }
 
     #[test]
@@ -857,7 +876,7 @@ mod tests {
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 120);
         let text = line_text(&line);
-        assert!(text.ends_with("q quit") || text.ends_with("q"));
+        assert!(text.ends_with("Esc quit") || text.ends_with("Esc"));
     }
 
     #[test]
@@ -865,7 +884,7 @@ mod tests {
         let caps = FocusCaps::default();
         let line = keymap(Phase::IdeaInput, None, caps, false, 80);
         let text = line_text(&line);
-        assert!(text.contains("q"), "should contain q");
+        assert!(text.contains("Esc"), "should contain Esc");
     }
 
     #[test]
@@ -933,7 +952,7 @@ mod tests {
 
     // Right-anchor stability across default/modal transitions
     #[test]
-    fn q_quit_right_anchored_stable_default_vs_pause_modal() {
+    fn esc_quit_right_anchored_stable_default_vs_pause_modal() {
         let width = 120u16;
         let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
         let modal = keymap(
@@ -946,8 +965,8 @@ mod tests {
         let default_text = line_text(&default);
         let modal_text = line_text(&modal);
 
-        assert!(default_text.ends_with("q quit"));
-        assert!(modal_text.ends_with("q quit"));
+        assert!(default_text.ends_with("Esc quit"));
+        assert!(modal_text.ends_with("Esc quit"));
         assert_eq!(
             default_text.chars().count(),
             modal_text.chars().count(),
@@ -956,7 +975,7 @@ mod tests {
     }
 
     #[test]
-    fn q_quit_right_anchored_stable_default_vs_guard_modal() {
+    fn esc_quit_right_anchored_stable_default_vs_guard_modal() {
         let width = 120u16;
         let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
         let modal = keymap(
@@ -969,8 +988,8 @@ mod tests {
         let default_text = line_text(&default);
         let modal_text = line_text(&modal);
 
-        assert!(default_text.ends_with("q quit"));
-        assert!(modal_text.ends_with("q quit"));
+        assert!(default_text.ends_with("Esc quit"));
+        assert!(modal_text.ends_with("Esc quit"));
         assert_eq!(
             default_text.chars().count(),
             modal_text.chars().count(),
@@ -979,7 +998,7 @@ mod tests {
     }
 
     #[test]
-    fn q_quit_right_anchored_stable_default_vs_skip_to_impl() {
+    fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
         let width = 120u16;
         let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
         let modal = keymap(
@@ -992,8 +1011,8 @@ mod tests {
         let default_text = line_text(&default);
         let modal_text = line_text(&modal);
 
-        assert!(default_text.ends_with("q quit"));
-        assert!(modal_text.ends_with("q quit"));
+        assert!(default_text.ends_with("Esc quit"));
+        assert!(modal_text.ends_with("Esc quit"));
         assert_eq!(
             default_text.chars().count(),
             modal_text.chars().count(),
@@ -1002,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn q_quit_right_anchored_stable_default_vs_stage_error() {
+    fn esc_quit_right_anchored_stable_default_vs_stage_error() {
         let width = 120u16;
         let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
         let modal = keymap(
@@ -1015,8 +1034,8 @@ mod tests {
         let default_text = line_text(&default);
         let modal_text = line_text(&modal);
 
-        assert!(default_text.ends_with("q quit"));
-        assert!(modal_text.ends_with("q quit"));
+        assert!(default_text.ends_with("Esc quit"));
+        assert!(modal_text.ends_with("Esc quit"));
         assert_eq!(
             default_text.chars().count(),
             modal_text.chars().count(),
@@ -1025,7 +1044,7 @@ mod tests {
     }
 
     #[test]
-    fn modal_q_quit_right_anchor_with_fill() {
+    fn modal_esc_quit_right_anchor_with_fill() {
         let width = 200u16;
         let modal = keymap(
             Phase::SpecReviewPaused,
@@ -1035,7 +1054,7 @@ mod tests {
             width,
         );
         let text = line_text(&modal);
-        assert!(text.ends_with("q quit"));
+        assert!(text.ends_with("Esc quit"));
         assert!(
             !text.contains('─'),
             "wide modal should use spaces between actions and system"

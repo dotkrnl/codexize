@@ -1832,8 +1832,8 @@ mod tests {
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}q quit",
-            " ".repeat(122)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}Esc quit",
+            " ".repeat(120)
         );
 
         assert_eq!(

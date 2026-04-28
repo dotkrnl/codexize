@@ -435,7 +435,7 @@ impl App {
         let desired = 1 + suggestions + 1; // input + suggestions + help
 
         let cap = area_height.saturating_sub(BODY_RESERVE).max(1);
-        desired.min(cap).min(MAX_OVERLAY).max(1)
+        desired.min(cap).clamp(1, MAX_OVERLAY)
     }
 
     fn palette_overlay_lines(&self, width: u16, max_h: u16) -> Vec<Line<'static>> {
@@ -2203,9 +2203,12 @@ mod tests {
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
+        // Default `FocusCaps` has all capabilities disabled, so per the
+        // glyph-only-disabled rule `Space` and `Enter` render without their
+        // action labels and the omitted width is reclaimed by the fill.
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}Esc quit",
-            " ".repeat(120)
+            "↑↓ move · Space · PgUp/PgDn page  ·  Enter · : palette  ·  {}Esc quit",
+            " ".repeat(133)
         );
 
         assert_eq!(
@@ -2246,9 +2249,12 @@ mod tests {
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
+        // Default `FocusCaps` has all capabilities disabled, so per the
+        // glyph-only-disabled rule `Space` and `Enter` render without their
+        // action labels and the omitted width is reclaimed by the fill.
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}Esc quit",
-            " ".repeat(120)
+            "↑↓ move · Space · PgUp/PgDn page  ·  Enter · : palette  ·  {}Esc quit",
+            " ".repeat(133)
         );
 
         assert_eq!(
@@ -2467,9 +2473,11 @@ mod tests {
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
         let rule = "─".repeat(200);
+        // The Builder row is expandable, so `Space expand` keeps its label;
+        // `Enter input` is disabled outside the Idea row and renders glyph-only.
         let keymap = format!(
-            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  {}Esc quit",
-            " ".repeat(120)
+            "↑↓ move · Space expand · PgUp/PgDn page  ·  Enter · : palette  ·  {}Esc quit",
+            " ".repeat(126)
         );
 
         assert_eq!(

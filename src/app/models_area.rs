@@ -192,23 +192,18 @@ const STATUS_DOT: &str = "●";
 
 const NAME_WIDTH_MIN: usize = 8;
 
-fn vendor_label(vendor: VendorKind, abbreviated: bool) -> &'static str {
-    match (vendor, abbreviated) {
-        (VendorKind::Claude, false) => "claude",
-        (VendorKind::Codex, false) => "codex",
-        (VendorKind::Gemini, false) => "gemini",
-        (VendorKind::Kimi, false) => "kimi",
-        (VendorKind::Claude, true) => "cl",
-        (VendorKind::Codex, true) => "cd",
-        (VendorKind::Gemini, true) => "ge",
-        (VendorKind::Kimi, true) => "ki",
+fn vendor_label(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Claude => "claude",
+        VendorKind::Codex => "codex",
+        VendorKind::Gemini => "gemini",
+        VendorKind::Kimi => "kimi",
     }
 }
 
-/// Width of the vendor-tag column (padded). 6 cols at default, 2 cols when
-/// abbreviated.
-fn vendor_column_width(abbreviated: bool) -> usize {
-    if abbreviated { 2 } else { 6 }
+/// Width of the vendor-tag column (padded).
+fn vendor_column_width() -> usize {
+    6
 }
 
 /// Width consumed by everything except the model-name column.
@@ -241,21 +236,8 @@ fn render_full_table(
     quota_errors: &[QuotaError],
     width: u16,
 ) -> Vec<Line<'static>> {
-    // Empirical selection: try full vendor width first, fall back to abbreviated.
-    let (abbreviated, vendor_width, prob_col) = {
-        let full_vendor_width = vendor_column_width(false);
-        let prob_col_full = choose_prob_column(width, full_vendor_width);
-        let name_budget_full = name_budget_for(width, full_vendor_width, prob_col_full);
-
-        if name_budget_full >= NAME_WIDTH_MIN {
-            (false, full_vendor_width, prob_col_full)
-        } else {
-            // Fall back to abbreviated vendor and re-choose prob column.
-            let abbrev_vendor_width = vendor_column_width(true);
-            let prob_col_abbrev = choose_prob_column(width, abbrev_vendor_width);
-            (true, abbrev_vendor_width, prob_col_abbrev)
-        }
-    };
+    let vendor_width = vendor_column_width();
+    let prob_col = choose_prob_column(width, vendor_width);
     let name_width = name_budget(width, vendor_width, prob_col);
 
     let visible_set = visible_models(models, versions);
@@ -306,7 +288,7 @@ fn render_full_table(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     for vendor in &vendor_order {
-        let label = vendor_label(*vendor, abbreviated);
+        let label = vendor_label(*vendor);
         let color = vendor_color(*vendor);
         let prefix = vendor_prefix(*vendor);
         let group = &by_vendor[vendor];
@@ -678,10 +660,6 @@ fn render_compact_quota(
         return Vec::new();
     }
 
-    // Compact mode doesn't render probabilities, so check if full vendor width
-    // fits with no prob column.
-    let abbreviated = width < 60;
-
     // One entry per vendor, ordered Claude · Codex · Gemini · Kimi (fixed
     // identity ordering — the spec sample uses this order).
     // We render only vendors that appear in the model set so the line tracks
@@ -713,7 +691,7 @@ fn render_compact_quota(
         }
         first = false;
 
-        let label = vendor_label(vendor, abbreviated);
+        let label = vendor_label(vendor);
         spans.push(Span::styled(
             label.to_string(),
             Style::default().fg(vendor_color(vendor)),
@@ -1347,7 +1325,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_quota_uses_two_letter_vendor_below_60() {
+    fn compact_quota_keeps_full_vendor_names_below_60() {
         let models = vec![
             vendor_model_with_axis_score(VendorKind::Kimi, "kimi-1", 50.0, 0),
             vendor_model_with_axis_score(VendorKind::Claude, "claude-1", 50.0, 0),
@@ -1363,9 +1341,8 @@ mod tests {
             ModelsAreaMode::CompactQuota,
         );
         let row = full_buffer_line(&lines, 0, 50);
-        assert!(row.contains("ki"), "2-letter kimi: {row:?}");
-        assert!(row.contains("cl"), "2-letter claude: {row:?}");
-        assert!(!row.contains("kimi"), "no full vendor name: {row:?}");
+        assert!(row.contains("kimi"), "full kimi label: {row:?}");
+        assert!(row.contains("claude"), "full claude label: {row:?}");
     }
 
     #[test]

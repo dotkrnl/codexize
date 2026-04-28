@@ -3,7 +3,7 @@ use ratatui::{
     buffer::Buffer,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Widget},
+    widgets::{Block, Clear, Paragraph, Widget},
 };
 
 use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
@@ -156,7 +156,10 @@ impl App {
         let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
 
         // --- Determine footer zone ---
-        // The footer is either: (modal/input) bottom sheet, or (status + keymap).
+        // Three-way branch: modal → full-screen overlay (drawn over the body
+        // after the bottom rule); input mode → bottom sheet; otherwise →
+        // status + keymap. The modal arm is an overlay, not a footer sheet,
+        // so it does not consume footer rows.
         let modal = self.active_modal();
 
         let caps = self.focus_caps();
@@ -168,15 +171,17 @@ impl App {
             width,
         );
 
-        // Compute sheet content if modal or input is active.
+        // Sheet content is owned by the input-mode path only. Modal content
+        // is computed independently inside the overlay branch below.
         let sheet_content: Option<Vec<Line<'static>>> = if self.input_mode {
             Some(self.input_sheet_content(width))
         } else {
-            modal.map(|m| self.modal_content_lines(m, width))
+            None
         };
 
-        // Footer height: sheet replaces status + keymap.
-        // Without a sheet: keymap (1) + status (0 or 1).
+        // Footer height: only the input-mode sheet (when active) plus the
+        // always-present keymap+status lines contribute. Modal state is
+        // overlaid and does not change body height.
         let footer_h = if let Some(ref content) = sheet_content {
             // Sheet = rule + content + controls. Min: rule + controls = 2.
             let desired = (content.len() as u16).saturating_add(2);
@@ -233,8 +238,49 @@ impl App {
         frame.render_widget(Paragraph::new(vec![bottom_rule_line]), bottom_rule_area);
         y += 1;
 
-        // 5. Footer zone
-        if let Some(content) = sheet_content {
+        // 5. Footer zone — three-way branch (see "Determine footer zone").
+        if let Some(m) = modal {
+            // Full-screen modal overlay: Clear wipes the area (including the
+            // body and rules drawn above), then a bordered block frames the
+            // modal content with the keymap pinned to the inner bottom row.
+            let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
+            let inner = block.inner(area);
+            frame.render_widget(Clear, area);
+            frame.render_widget(block, area);
+
+            if inner.height > 0 && inner.width > 0 {
+                let modal_keymap =
+                    keymap(self.state.current_phase, Some(m), caps, false, inner.width);
+                let content = self.modal_content_lines(m, inner.width);
+                let inner_h = inner.height as usize;
+
+                // The keymap occupies the last inner row, so content can use
+                // up to `inner_h - 1` rows. If content overflows, truncate
+                // and append a single `…` row in default style — the spec
+                // requires the keymap to remain reachable.
+                let content_capacity = inner_h.saturating_sub(1);
+                let lines_to_write: Vec<Line<'static>> = if content.len() <= content_capacity {
+                    content
+                } else {
+                    let keep = content_capacity.saturating_sub(1);
+                    let mut truncated: Vec<Line<'static>> =
+                        content.into_iter().take(keep).collect();
+                    truncated.push(Line::from("…"));
+                    truncated
+                };
+
+                let buf = frame.buffer_mut();
+                for (offset, line) in lines_to_write.iter().enumerate() {
+                    buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
+                }
+                buf.set_line(
+                    inner.x,
+                    inner.y + inner.height - 1,
+                    &modal_keymap,
+                    inner.width,
+                );
+            }
+        } else if let Some(content) = sheet_content {
             let sheet_lines = bottom_sheet(content, keymap_line, footer_h, width);
             for line in sheet_lines {
                 if y >= area.y + area.height {
@@ -1719,45 +1765,58 @@ mod tests {
         );
     }
 
+    /// Pads a modal content string to fit the inner width and wraps it with
+    /// the bordered block's vertical bars. `inner_width = FULL_FRAME_WIDTH - 2`
+    /// because the bordered block consumes one column on each side.
+    fn modal_row(text: &str) -> String {
+        let inner_width = (FULL_FRAME_WIDTH as usize) - 2;
+        let pad = inner_width.saturating_sub(text.chars().count());
+        format!("│{}{}│", text, " ".repeat(pad))
+    }
+
     #[test]
     fn full_screen_spec_review_paused_shows_sheet_above_keymap() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::SpecReviewPaused;
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
-        let rule = "─".repeat(200);
-        let keymap = format!(
+        let top = format!("┌{}┐", "─".repeat(198));
+        let bottom = format!("└{}┘", "─".repeat(198));
+        let blank = modal_row("");
+        let title = modal_row("Spec review complete");
+        let keymap_inner = format!(
             "Enter continue · n new reviewer  ·  {}q quit",
-            " ".repeat(158)
+            " ".repeat(156)
         );
+        let keymap = format!("│{keymap_inner}│");
 
         assert_eq!(
             lines,
             vec![
-                "codexize · render-test──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Spec Review · paused",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                &rule.clone(),
-                &rule,
-                "Spec review complete",
-                &keymap,
+                top,
+                title,
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank,
+                keymap,
+                bottom,
             ]
         );
     }
@@ -1769,36 +1828,41 @@ mod tests {
         app.state.agent_error = Some("model timeout fetching response".to_string());
 
         let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
-        let rule = "─".repeat(200);
-        let keymap = format!("r retry  ·  {}q quit", " ".repeat(182));
+        let top = format!("┌{}┐", "─".repeat(198));
+        let bottom = format!("└{}┘", "─".repeat(198));
+        let blank = modal_row("");
+        let title = modal_row("Spec review failed");
+        let body = modal_row("model timeout fetching response");
+        let keymap_inner = format!("r retry  ·  {}q quit", " ".repeat(180));
+        let keymap = format!("│{keymap_inner}│");
 
         assert_eq!(
             lines,
             vec![
-                "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────Spec Review · error",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                &rule.clone(),
-                &rule,
-                "Spec review failed",
-                "",
-                "model timeout fetching response",
-                &keymap,
+                top,
+                title,
+                blank.clone(),
+                body,
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank.clone(),
+                blank,
+                keymap,
+                bottom,
             ]
         );
     }

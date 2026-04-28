@@ -80,7 +80,8 @@ impl App {
                 false
             }
             KeyCode::Char('t') => {
-                self.toggle_cheap_mode();
+                // Interim keybinding; will be replaced by `:cheap` palette command.
+                self.toggle_cheap_mode("keymap");
                 false
             }
             KeyCode::PageUp => {

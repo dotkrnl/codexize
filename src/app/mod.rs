@@ -452,6 +452,7 @@ impl App {
             }
             self.refresh_models_if_due();
             self.poll_agent_window();
+            self.maybe_yolo_auto_resolve();
             self.maybe_auto_launch();
             self.update_agent_progress();
             self.process_live_summary_changes();
@@ -1766,20 +1767,18 @@ impl App {
         self.push_status(message, status_line::Severity::Warn, Duration::from_secs(8));
     }
 
-    fn toggle_cheap_mode(&mut self) {
-        self.set_cheap_mode(!self.state.modes.cheap);
+    fn toggle_cheap_mode(&mut self, source: &str) {
+        self.set_cheap_mode(!self.state.modes.cheap, source);
     }
 
-    fn set_cheap_mode(&mut self, value: bool) {
+    fn set_cheap_mode(&mut self, value: bool, source: &str) {
         self.state.modes.cheap = value;
         if let Err(err) = self.state.save() {
             self.state.agent_error = Some(format!("failed to save cheap mode: {err:#}"));
             return;
         }
-        // Ambiguous until the full command palette lands: this temporary TUI hook
-        // records the same source the eventual `:cheap` palette command will use.
         let _ = self.state.log_event(format!(
-            "mode_toggled: mode=cheap value={value} source=palette"
+            "mode_toggled: mode=cheap value={value} source={source}"
         ));
         let status = if value {
             "cheap: ON  (next agent launch limited to sonnet/kimi/codex-low/flash)"
@@ -1791,6 +1790,55 @@ impl App {
             status_line::Severity::Info,
             Duration::from_secs(5),
         );
+    }
+
+    fn toggle_yolo_mode(&mut self, source: &str) {
+        self.set_yolo_mode(!self.state.modes.yolo, source);
+    }
+
+    fn set_yolo_mode(&mut self, value: bool, source: &str) {
+        self.state.modes.yolo = value;
+        if let Err(err) = self.state.save() {
+            self.state.agent_error = Some(format!("failed to save yolo mode: {err:#}"));
+            return;
+        }
+        let _ = self.state.log_event(format!(
+            "mode_toggled: mode=yolo value={value} source={source}"
+        ));
+        let status = if value {
+            "yolo: ON  (next agent launch will auto-approve gates)"
+        } else {
+            "yolo: OFF"
+        };
+        self.push_status(
+            status.to_string(),
+            status_line::Severity::Info,
+            Duration::from_secs(5),
+        );
+    }
+
+    fn maybe_yolo_auto_resolve(&mut self) {
+        if !self.state.modes.yolo {
+            return;
+        }
+        match self.state.current_phase {
+            Phase::SpecReviewPaused => {
+                let _ = self.state.log_event(
+                    "yolo_auto_approved: gate=spec_approval".to_string(),
+                );
+                self.state.agent_error = None;
+                let _ = self.transition_to_phase(Phase::PlanningRunning);
+            }
+            Phase::PlanReviewPaused => {
+                let _ = self.state.log_event(
+                    "yolo_auto_approved: gate=plan_approval".to_string(),
+                );
+                self.state.agent_error = None;
+                self.queue_view_of_current_artifact("plan.md");
+                let _ = self.transition_to_phase(Phase::ShardingRunning);
+            }
+            _ => {}
+        }
     }
 
     fn choose_primary_model(

@@ -395,24 +395,53 @@ impl App {
         }
 
         if self.palette.open && area.height > 0 && area.width > 0 {
-            let overlay_h = area.height.min(2);
-            let overlay = ratatui::layout::Rect::new(
-                area.x,
-                area.y + area.height.saturating_sub(overlay_h),
-                area.width,
-                overlay_h,
-            );
-            frame.render_widget(Clear, overlay);
-            let lines = self.palette_overlay_lines(width);
-            let visible = lines
-                .into_iter()
-                .take(overlay_h as usize)
-                .collect::<Vec<_>>();
-            frame.render_widget(Paragraph::new(visible), overlay);
+            let overlay_h = self.palette_overlay_height(area.height, modal.is_some());
+            if overlay_h > 0 {
+                let overlay = ratatui::layout::Rect::new(
+                    area.x,
+                    area.y + area.height.saturating_sub(overlay_h),
+                    area.width,
+                    overlay_h,
+                );
+                frame.render_widget(Clear, overlay);
+                let lines = self.palette_overlay_lines(width, overlay_h);
+                frame.render_widget(Paragraph::new(lines), overlay);
+            }
         }
     }
 
-    fn palette_overlay_lines(&self, width: u16) -> Vec<Line<'static>> {
+    /// Compute the bottom-aligned palette overlay height.
+    ///
+    /// The input row is mandatory; suggestion rows clamp before reaching
+    /// the body floor so modal and bottom-sheet controls remain reachable
+    /// on short terminals (per spec). When a modal is active, conservatively
+    /// stick to a 2-row overlay so the centered modal keymap is not covered.
+    fn palette_overlay_height(&self, area_height: u16, modal_active: bool) -> u16 {
+        if area_height == 0 {
+            return 0;
+        }
+        if modal_active {
+            return area_height.min(2);
+        }
+        // Reserve a body floor above the overlay so the body/top chrome stays
+        // visible. The floor must remain low enough that very short terminals
+        // still get at least the input row.
+        const BODY_RESERVE: u16 = 4;
+        const MAX_OVERLAY: u16 = 12; // input + up to 10 suggestions + help
+
+        let commands = self.palette_commands();
+        let filtered = super::palette::filter(&self.palette.buffer, &commands);
+        let suggestions = filtered.len().min(10) as u16;
+        let desired = 1 + suggestions + 1; // input + suggestions + help
+
+        let cap = area_height.saturating_sub(BODY_RESERVE).max(1);
+        desired.min(cap).min(MAX_OVERLAY).max(1)
+    }
+
+    fn palette_overlay_lines(&self, width: u16, max_h: u16) -> Vec<Line<'static>> {
+        if max_h == 0 || width == 0 {
+            return Vec::new();
+        }
         let commands = self.palette_commands();
         let buffer = self.palette.buffer.clone();
         let ghost = super::palette::ghost_completion(&buffer, &commands)
@@ -426,7 +455,7 @@ impl App {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(buffer),
+            Span::raw(buffer.clone()),
         ];
         if !suffix.is_empty() {
             input_spans.push(Span::styled(
@@ -434,14 +463,36 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ));
         }
-        let mut help = "Esc close  Tab complete  Enter run".to_string();
-        if width < help.chars().count() as u16 {
-            help.truncate(width as usize);
+
+        let mut lines: Vec<Line<'static>> = vec![Line::from(input_spans)];
+        let max = max_h as usize;
+
+        let help_text = "Esc close  Tab complete  Enter run";
+        let help_fits = max >= 2 && (width as usize) >= help_text.chars().count();
+        let help_reserve = if help_fits { 1 } else { 0 };
+        let suggestion_capacity = max.saturating_sub(1).saturating_sub(help_reserve);
+
+        let filtered = super::palette::filter(&buffer, &commands);
+        for cmd in filtered.iter().take(suggestion_capacity) {
+            let text = super::palette::suggestion_text(cmd, width);
+            lines.push(Line::from(Span::styled(
+                text,
+                Style::default().fg(Color::Gray),
+            )));
         }
-        vec![
-            Line::from(input_spans),
-            Line::from(Span::styled(help, Style::default().fg(Color::DarkGray))),
-        ]
+
+        if help_fits && lines.len() < max {
+            let mut help = help_text.to_string();
+            if width < help.chars().count() as u16 {
+                help.truncate(width as usize);
+            }
+            lines.push(Line::from(Span::styled(
+                help,
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        lines
     }
 
     fn focus_caps(&self) -> FocusCaps {
@@ -1979,6 +2030,109 @@ mod tests {
             text.contains("quit"),
             "ghost completion should make the target command visible"
         );
+    }
+
+    #[test]
+    fn palette_overlay_empty_buffer_lists_available_commands() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        let lines = render_full_frame(&mut app, 80, 24);
+        let text = lines.join("\n");
+        // Every always-available command is listed in the empty browser, with
+        // its help text. `quit` carries an `Esc` shortcut hint; palette-only
+        // commands `cheap` and `yolo` advertise no shortcut.
+        assert!(text.contains("quit"), "empty browser shows quit");
+        assert!(text.contains("Exit the TUI"), "shows quit help");
+        assert!(text.contains("Esc"), "shows quit shortcut");
+        assert!(text.contains("cheap"), "empty browser shows cheap");
+        assert!(text.contains("Toggle cheap mode"));
+        assert!(text.contains("yolo"), "empty browser shows yolo");
+        assert!(text.contains("Toggle YOLO mode"));
+    }
+
+    #[test]
+    fn palette_overlay_filters_by_typed_input() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        app.palette.buffer = "yol".to_string();
+        app.palette.cursor = 3;
+        let lines = render_full_frame(&mut app, 80, 24);
+        let text = lines.join("\n");
+        assert!(text.contains("yolo"), "filtered list keeps the match");
+        assert!(
+            !text.contains("Toggle cheap mode"),
+            "non-matching commands drop out: {text}"
+        );
+    }
+
+    #[test]
+    fn palette_overlay_palette_only_commands_show_no_shortcut_text() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        app.palette.buffer = "che".to_string();
+        app.palette.cursor = 3;
+        let lines = render_full_frame(&mut app, 80, 24);
+        // The cheap row is the suggestion line; it must not append a shortcut
+        // glyph because cheap has no real direct keybinding in the running app.
+        let cheap_row = lines
+            .iter()
+            .find(|l| l.contains("Toggle cheap mode"))
+            .expect("cheap suggestion present");
+        // No leading colon or `:cheap` annotation; the shortcut column is empty.
+        // We assert there is no trailing single-letter shortcut by scanning for
+        // common direct-key glyphs the app uses elsewhere.
+        for hint in ["Esc", "Tab", "Enter"] {
+            let trimmed = cheap_row.trim_end();
+            assert!(
+                !trimmed.ends_with(hint),
+                "cheap suggestion must not end with shortcut hint {hint}: {trimmed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn palette_overlay_clamp_preserves_input_row_on_short_terminal() {
+        // Very short terminal: the overlay must still render the input row even
+        // if the suggestion list and help row have to drop out entirely.
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        app.palette.buffer = "qu".to_string();
+        app.palette.cursor = 2;
+        // 4 rows total — top chrome and body floor consume most rows; overlay
+        // collapses to the bottom 2 rows or fewer.
+        let lines = render_full_frame(&mut app, 80, 4);
+        let text = lines.join("\n");
+        assert!(text.contains(":qu"), "input row must remain visible: {text}");
+    }
+
+    #[test]
+    fn palette_overlay_does_not_exceed_width() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        let width: u16 = 32;
+        let lines = render_full_frame(&mut app, width, 24);
+        for (idx, l) in lines.iter().enumerate() {
+            assert!(
+                l.chars().count() as u16 <= width,
+                "line {idx} exceeded width {width}: len={} got={l:?}",
+                l.chars().count()
+            );
+        }
+    }
+
+    #[test]
+    fn palette_overlay_grows_beyond_two_rows_when_room() {
+        // With a roomy terminal and an empty buffer, the overlay should grow
+        // past the legacy 2-row shape and surface multiple suggestions.
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.palette.open();
+        let lines = render_full_frame(&mut app, 80, 30);
+        let text = lines.join("\n");
+        // At least quit, cheap, and yolo all visible at once — that's 3+
+        // suggestion rows in addition to the input row.
+        assert!(text.contains("quit"));
+        assert!(text.contains("cheap"));
+        assert!(text.contains("yolo"));
     }
 
     fn impl_round_2_running_app() -> App {

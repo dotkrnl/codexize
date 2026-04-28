@@ -14,6 +14,7 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
 
     let rule_glyph = '─';
     let rule_style = Style::default().fg(Color::DarkGray);
+    let text_style = Style::default().fg(Color::DarkGray);
 
     let Some(right_text) = right_text_opt else {
         // No right segment: just fill with rule and overlay left
@@ -27,9 +28,9 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
     if left_len + right_len + 4 <= width {
         let separator_len = width - left_len - right_len;
         return Line::from(vec![
-            Span::styled(left_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(left_text.to_string(), text_style),
             Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(right_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(right_text.to_string(), text_style),
         ]);
     }
 
@@ -37,9 +38,9 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
     if right_len + left_len < width {
         let separator_len = width - left_len - right_len;
         return Line::from(vec![
-            Span::styled(left_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(left_text.to_string(), text_style),
             Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(right_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(right_text.to_string(), text_style),
         ]);
     }
 
@@ -54,9 +55,9 @@ pub fn top_rule(left_text: &str, right_text_opt: Option<&str>, width: u16) -> Li
         let separator_len = width - left_len - truncated_len;
 
         return Line::from(vec![
-            Span::styled(left_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(left_text.to_string(), text_style),
             Span::styled(rule_glyph.to_string().repeat(separator_len), rule_style),
-            Span::styled(truncated_right, Style::default().fg(Color::White)),
+            Span::styled(truncated_right, text_style),
         ]);
     }
 
@@ -75,11 +76,12 @@ fn overlay_left_on_rule(
     rule_style: Style,
 ) -> Line<'static> {
     let left_len = left_text.chars().count();
+    let text_style = Style::default().fg(Color::DarkGray);
 
     if left_len <= width {
         let rule_len = width - left_len;
         return Line::from(vec![
-            Span::styled(left_text.to_string(), Style::default().fg(Color::White)),
+            Span::styled(left_text.to_string(), text_style),
             Span::styled(rule_glyph.to_string().repeat(rule_len), rule_style),
         ]);
     }
@@ -105,7 +107,7 @@ fn overlay_left_on_rule(
             let rule_len = width.saturating_sub(truncated_len);
 
             return Line::from(vec![
-                Span::styled(truncated_left, Style::default().fg(Color::White)),
+                Span::styled(truncated_left, text_style),
                 Span::styled(rule_glyph.to_string().repeat(rule_len), rule_style),
             ]);
         }
@@ -126,7 +128,7 @@ fn overlay_left_on_rule(
                     let rule_len = width.saturating_sub(truncated_len);
 
                     return Line::from(vec![
-                        Span::styled(truncated_left, Style::default().fg(Color::White)),
+                        Span::styled(truncated_left, text_style),
                         Span::styled(rule_glyph.to_string().repeat(rule_len), rule_style),
                     ]);
                 }
@@ -141,7 +143,7 @@ fn overlay_left_on_rule(
                 };
 
                 return Line::from(vec![
-                    Span::styled(final_left.clone(), Style::default().fg(Color::White)),
+                    Span::styled(final_left.clone(), text_style),
                     Span::styled(
                         rule_glyph
                             .to_string()
@@ -159,7 +161,7 @@ fn overlay_left_on_rule(
     let rule_len = width.saturating_sub(truncated_len);
 
     Line::from(vec![
-        Span::styled(truncated, Style::default().fg(Color::White)),
+        Span::styled(truncated, text_style),
         Span::styled(rule_glyph.to_string().repeat(rule_len), rule_style),
     ])
 }
@@ -198,6 +200,14 @@ mod tests {
         let text = line.to_string();
         assert!(text.contains("myproject · 20260427-101009"));
         assert!(text.contains("Agent · Processing"));
+    }
+
+    #[test]
+    fn text_segments_are_dimmed() {
+        let line = top_rule("myproject · 20260427-101009", Some("Agent"), 80);
+        for span in line.spans.iter().filter(|span| !span.content.contains('─')) {
+            assert_eq!(span.style.fg, Some(Color::DarkGray));
+        }
     }
 
     #[test]

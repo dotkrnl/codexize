@@ -451,7 +451,9 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
 
 pub fn generate_session_id() -> String {
     let now: DateTime<Local> = SystemTime::now().into();
-    now.format("%Y%m%d-%H%M%S").to_string()
+    // Include nanosecond precision so two sessions created in the same
+    // wall-clock second cannot collide on the session directory name.
+    now.format("%Y%m%d-%H%M%S-%9f").to_string()
 }
 
 fn truncate_idea(idea: &Option<String>) -> String {
@@ -582,12 +584,29 @@ mod tests {
     #[test]
     fn test_generate_session_id() {
         let id = generate_session_id();
-        assert_eq!(id.len(), 15); // YYYYMMDD-HHMMSS
-        assert!(id.contains('-'));
+        assert_eq!(id.len(), 25); // YYYYMMDD-HHMMSS-NNNNNNNNN
         let parts: Vec<&str> = id.split('-').collect();
-        assert_eq!(parts.len(), 2);
+        assert_eq!(parts.len(), 3);
         assert_eq!(parts[0].len(), 8);
         assert_eq!(parts[1].len(), 6);
+        assert_eq!(parts[2].len(), 9);
+        assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn generate_session_id_distinguishes_rapid_calls() {
+        // Two sessions kicked off back-to-back in the same wall-clock
+        // second must produce distinct session-directory names — this used
+        // to collide because the format only had second precision.
+        let mut ids = std::collections::HashSet::new();
+        for _ in 0..5 {
+            ids.insert(generate_session_id());
+        }
+        assert_eq!(
+            ids.len(),
+            5,
+            "five rapid session ids must be distinct, got {ids:?}"
+        );
     }
 
     #[test]

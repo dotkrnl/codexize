@@ -7,6 +7,7 @@ mod footer;
 mod guard;
 mod models;
 mod models_area;
+pub(crate) mod palette;
 mod render;
 mod sheet;
 mod state;

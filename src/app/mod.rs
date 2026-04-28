@@ -41,7 +41,6 @@ use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
 
 use self::{
-    footer::{CachedSummaryFetcher, LiveSummaryFetcher},
     models::{spawn_refresh, vendor_tag},
     state::ModelRefreshState,
     tree::{
@@ -63,6 +62,8 @@ type RetryKey = (String, Option<u32>, u32);
 type FailedModelSet = HashSet<(VendorKind, String)>;
 const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
 const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
+const DEFAULT_EVENT_POLL_MS: u64 = 250;
+const LIVE_SUMMARY_EVENT_POLL_MS: u64 = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExpansionOverride {
@@ -173,6 +174,7 @@ pub struct App {
     agent_content_hash: u64,
     agent_last_change: Option<Instant>,
     spinner_tick: usize,
+    live_summary_spinner_visible: bool,
     live_summary_watcher: Option<notify::RecommendedWatcher>,
     live_summary_change_rx: Option<mpsc::Receiver<()>>,
     live_summary_path: Option<std::path::PathBuf>,
@@ -269,6 +271,7 @@ impl App {
             agent_content_hash: 0,
             agent_last_change: None,
             spinner_tick: 0,
+            live_summary_spinner_visible: false,
             live_summary_path: None,
             live_summary_watcher: None,
             live_summary_change_rx: None,
@@ -467,7 +470,7 @@ impl App {
             terminal.draw(|frame| self.draw(frame))?;
             self.on_frame_drawn();
 
-            if event::poll(Duration::from_millis(250))?
+            if event::poll(self.event_poll_duration())?
                 && let Event::Key(key) = event::read()?
                 && self.handle_key(key)
             {
@@ -479,6 +482,14 @@ impl App {
     /// Called once per successful frame draw to advance spinner-driven UI state.
     pub(crate) fn on_frame_drawn(&mut self) {
         self.spinner_tick = self.spinner_tick.wrapping_add(1);
+    }
+
+    pub(crate) fn event_poll_duration(&self) -> Duration {
+        if self.live_summary_spinner_visible {
+            Duration::from_millis(LIVE_SUMMARY_EVENT_POLL_MS)
+        } else {
+            Duration::from_millis(DEFAULT_EVENT_POLL_MS)
+        }
     }
 
     /// Returns a clone of the shared `StatusLine` handle so non-render call
@@ -569,22 +580,6 @@ impl App {
             && self
                 .node_for_row(self.selected)
                 .is_some_and(|node| node.label == "Idea")
-    }
-
-    fn live_status_body(&self) -> String {
-        match self.state.current_phase {
-            Phase::IdeaInput => "Awaiting idea".to_string(),
-            Phase::BlockedNeedsUser => "Needs your input".to_string(),
-            Phase::Done => "Session complete".to_string(),
-            _ => {
-                if self.running_run().is_some() {
-                    let phase_label = self.state.current_phase.label();
-                    return CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label)
-                        .fetch();
-                }
-                self.state.current_phase.label()
-            }
-        }
     }
 
     pub(super) fn is_expanded(&self, index: usize) -> bool {
@@ -6291,6 +6286,7 @@ mod tests {
             agent_content_hash: 0,
             agent_last_change: None,
             spinner_tick: 0,
+            live_summary_spinner_visible: false,
             live_summary_watcher: None,
             live_summary_change_rx: None,
             live_summary_path: None,
@@ -7016,6 +7012,7 @@ mod tests {
             agent_content_hash: 0,
             agent_last_change: None,
             spinner_tick: 0,
+            live_summary_spinner_visible: false,
             live_summary_watcher: None,
             live_summary_change_rx: None,
             live_summary_path: None,
@@ -7052,34 +7049,14 @@ mod tests {
     }
 
     #[test]
-    fn live_status_body_precedence_short_circuits_special_phases() {
-        let mut app = mk_app(mk_state_with_runs());
-        app.live_summary_cached_text = "ship parser | running checks".to_string();
+    fn event_poll_duration_uses_fast_cadence_only_for_visible_live_summary_spinner() {
+        let mut app = idle_app(SessionState::new("frame-poll-duration".to_string()));
 
-        app.state.current_phase = Phase::IdeaInput;
-        assert_eq!(app.live_status_body(), "Awaiting idea");
+        app.live_summary_spinner_visible = false;
+        assert_eq!(app.event_poll_duration(), Duration::from_millis(250));
 
-        app.state.current_phase = Phase::BlockedNeedsUser;
-        assert_eq!(app.live_status_body(), "Needs your input");
-
-        app.state.current_phase = Phase::Done;
-        assert_eq!(app.live_status_body(), "Session complete");
-    }
-
-    #[test]
-    fn live_status_body_uses_running_summary_then_phase_fallback() {
-        let mut app = mk_app(mk_state_with_runs());
-        app.state.current_phase = Phase::SpecReviewRunning;
-
-        app.live_summary_cached_text = "ship parser | running checks".to_string();
-        assert_eq!(app.live_status_body(), "ship parser");
-
-        app.live_summary_cached_text.clear();
-        assert_eq!(app.live_status_body(), "Spec Review");
-
-        app.current_run_id = None;
-        app.state.current_phase = Phase::PlanningRunning;
-        assert_eq!(app.live_status_body(), "Planning");
+        app.live_summary_spinner_visible = true;
+        assert_eq!(app.event_poll_duration(), Duration::from_millis(50));
     }
 
     #[test]

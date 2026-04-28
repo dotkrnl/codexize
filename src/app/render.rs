@@ -8,16 +8,17 @@ use ratatui::{
 
 use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
 use chrono::Offset;
+use std::collections::BTreeSet;
 
 #[cfg(test)]
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    chrome::{UnreadBadge, bottom_rule, live_status_line, top_rule_with_left_spans},
+    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
     footer::{
-        CachedSummaryFetcher, StaticFetcher, TranscriptLeafMarker, extract_short_title,
+        CachedSummaryFetcher, TranscriptLeafMarker, extract_short_title,
         format_running_transcript_leaf, keymap,
     },
     models_area,
@@ -34,22 +35,27 @@ struct PipelineWidget<'a> {
     app: &'a App,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PipelineLineKind {
+    Other,
+    RunningLeafTail { run_id: u64 },
+    RunningContainerPlaceholder { run_id: u64 },
+}
+
+struct PipelineLine {
+    line: Line<'static>,
+    kind: PipelineLineKind,
+}
+
+struct RunningTailLine {
+    line: Line<'static>,
+    kind: PipelineLineKind,
+}
+
 impl Widget for PipelineWidget<'_> {
     fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
             return;
-        }
-
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        for index in 0..self.app.visible_rows.len() {
-            let Some(node) = self.app.node_for_row(index) else {
-                continue;
-            };
-            let expanded = self.app.is_expanded(index);
-            lines.push(self.app.node_header(index, expanded, node));
-            if expanded && self.app.is_expanded_body(index) {
-                lines.extend(self.app.node_body(index));
-            }
         }
 
         let area_h = area.height as usize;
@@ -58,6 +64,11 @@ impl Widget for PipelineWidget<'_> {
             .viewport_top
             .min(self.app.max_viewport_top_for_height(area_h));
         let pinned_header = self.app.pinned_running_header(viewport_top);
+
+        let visible_tail_runs = self
+            .app
+            .visible_live_summary_tail_runs(area_h, viewport_top);
+        let lines = self.app.pipeline_render_lines(&visible_tail_runs);
         let (content_y, content_h) = if let Some((index, _)) = pinned_header {
             if let Some(node) = self.app.node_for_row(index) {
                 let expanded = self.app.is_expanded(index);
@@ -72,8 +83,13 @@ impl Widget for PipelineWidget<'_> {
         };
 
         let end = (viewport_top + content_h).min(lines.len());
-        for (offset, line) in lines[viewport_top..end].iter().enumerate() {
-            buf.set_line(area.x, content_y + offset as u16, line, area.width);
+        for (offset, rendered) in lines[viewport_top..end].iter().enumerate() {
+            buf.set_line(
+                area.x,
+                content_y + offset as u16,
+                &rendered.line,
+                area.width,
+            );
         }
     }
 }
@@ -123,6 +139,56 @@ fn is_last_sibling(visible_rows: &[super::tree::VisibleNodeRow], index: usize) -
 }
 
 impl App {
+    fn pipeline_render_lines(
+        &self,
+        suppressed_container_runs: &BTreeSet<u64>,
+    ) -> Vec<PipelineLine> {
+        let mut lines = Vec::new();
+        for index in 0..self.visible_rows.len() {
+            let Some(node) = self.node_for_row(index) else {
+                continue;
+            };
+            let expanded = self.is_expanded(index);
+            lines.push(PipelineLine {
+                line: self.node_header(index, expanded, node),
+                kind: PipelineLineKind::Other,
+            });
+            if expanded && self.is_expanded_body(index) {
+                lines.extend(self.node_body_for_render(index, suppressed_container_runs));
+            }
+        }
+        lines
+    }
+
+    fn visible_live_summary_tail_runs(&self, area_h: usize, viewport_top: usize) -> BTreeSet<u64> {
+        if area_h == 0 {
+            return BTreeSet::new();
+        }
+        let candidate_lines = self.pipeline_render_lines(&BTreeSet::new());
+        let content_h = if self.pinned_running_header(viewport_top).is_some() {
+            area_h.saturating_sub(1)
+        } else {
+            area_h
+        };
+        let end = (viewport_top + content_h).min(candidate_lines.len());
+        candidate_lines[viewport_top..end]
+            .iter()
+            .filter_map(|line| match line.kind {
+                PipelineLineKind::RunningLeafTail { run_id } => Some(run_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(super) fn live_summary_spinner_visible_for_height(&self, area_h: usize) -> bool {
+        let viewport_top = self
+            .viewport_top
+            .min(self.max_viewport_top_for_height(area_h));
+        !self
+            .visible_live_summary_tail_runs(area_h, viewport_top)
+            .is_empty()
+    }
+
     pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let term_h = area.height;
@@ -200,13 +266,15 @@ impl App {
         };
 
         // --- Body height ---
-        let chrome_h = models_h + 1 + 1 + 1 + footer_h; // models + top rule + live status + bottom rule + footer
+        let chrome_h = models_h + 1 + 1 + footer_h; // models + top rule + bottom rule + footer
         let body_h = term_h.saturating_sub(chrome_h);
 
         self.body_inner_height = body_h as usize;
         self.body_inner_width = width as usize;
         self.latch_visible_expansions();
         self.clamp_viewport();
+        self.live_summary_spinner_visible =
+            self.live_summary_spinner_visible_for_height(body_h as usize);
 
         // --- Render top-down ---
         let mut y = area.y;
@@ -231,27 +299,14 @@ impl App {
             y += body_h;
         }
 
-        // 4. Always-on live-status chrome row.
-        let live_status_body = self.live_status_body();
-        let live_status_fetcher = StaticFetcher(live_status_body);
-        let live_status = live_status_line(
-            &WallClock::new(),
-            self.spinner_tick,
-            &live_status_fetcher,
-            width,
-        );
-        let live_status_area = ratatui::layout::Rect::new(area.x, y, width, 1);
-        frame.render_widget(Paragraph::new(vec![live_status]), live_status_area);
-        y += 1;
-
-        // 5. Bottom rule (with unread badge)
+        // 4. Bottom rule (with unread badge)
         let badge = self.unread_badge();
         let bottom_rule_line = bottom_rule(width, badge);
         let bottom_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![bottom_rule_line]), bottom_rule_area);
         y += 1;
 
-        // 6. Footer zone — three-way branch (see "Determine footer zone").
+        // 5. Footer zone — three-way branch (see "Determine footer zone").
         if let Some(m) = modal {
             let terminal_width = area.width;
             let terminal_height = area.height;
@@ -656,15 +711,29 @@ impl App {
     pub(super) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
         let width = self.body_inner_width.max(1);
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        self.node_body_with_offset(index, width, &local_offset)
+        self.node_body_lines_with_offset(index, width, &local_offset, &BTreeSet::new())
+            .into_iter()
+            .map(|rendered| rendered.line)
+            .collect()
     }
 
-    fn node_body_with_offset(
+    fn node_body_for_render(
+        &self,
+        index: usize,
+        suppressed_container_runs: &BTreeSet<u64>,
+    ) -> Vec<PipelineLine> {
+        let width = self.body_inner_width.max(1);
+        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
+        self.node_body_lines_with_offset(index, width, &local_offset, suppressed_container_runs)
+    }
+
+    fn node_body_lines_with_offset(
         &self,
         index: usize,
         available_width: usize,
         local_offset: &chrono::FixedOffset,
-    ) -> Vec<Line<'static>> {
+        suppressed_container_runs: &BTreeSet<u64>,
+    ) -> Vec<PipelineLine> {
         let Some(node) = self.node_for_row(index) else {
             return Vec::new();
         };
@@ -678,57 +747,92 @@ impl App {
                 .filter(|m| m.run_id == id)
                 .cloned()
                 .collect();
-            let running_tail = self.running_tail_for_row(index, run, &WallClock::new());
-            return chat_widget::message_lines(
+            let running_tail =
+                self.running_tail_for_row(index, run, &WallClock::new(), suppressed_container_runs);
+            let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
+            let has_end = msgs
+                .iter()
+                .any(|m| m.kind == crate::state::MessageKind::End);
+            let mut lines: Vec<_> = chat_widget::message_lines(
                 &msgs,
                 run,
                 local_offset,
-                running_tail,
+                running_tail.map(|tail| tail.line),
                 available_width,
-            );
+            )
+            .into_iter()
+            .map(|line| PipelineLine {
+                line,
+                kind: PipelineLineKind::Other,
+            })
+            .collect();
+            if run.status == RunStatus::Running
+                && !has_end
+                && let Some(kind) = tail_kind
+                && let Some(last) = lines.last_mut()
+            {
+                last.kind = kind;
+            }
+            return lines;
         }
         self.render_compact_node(node, index)
+            .into_iter()
+            .map(|line| PipelineLine {
+                line,
+                kind: PipelineLineKind::Other,
+            })
+            .collect()
     }
 
     /// Choose the trailing line that closes a still-running transcript body.
     ///
     /// Per spec, leaf transcript rows render the tail as a "live agent
-    /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows whose
-    /// children list visibly extends below them keep the legacy tree-shape
-    /// spinner with a state label so the tree topology is preserved.
+    /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows use the
+    /// tree-shape placeholder only when a visible child transcript tail for the
+    /// same run is not already representing progress.
     fn running_tail_for_row<C: Clock>(
         &self,
         index: usize,
         run: &RunRecord,
         clock: &C,
-    ) -> Option<Line<'static>> {
+        suppressed_container_runs: &BTreeSet<u64>,
+    ) -> Option<RunningTailLine> {
         if run.status != RunStatus::Running {
             return None;
         }
         let row = self.visible_rows.get(index)?;
         if row.has_children {
+            if suppressed_container_runs.contains(&run.id) {
+                return None;
+            }
             let spin = spinner_frame(self.spinner_tick);
             let dim = Style::default().fg(Color::DarkGray);
             let gutter = "│ ".repeat(row.depth);
-            return Some(Line::from(vec![
-                Span::styled(format!(" {gutter}  "), dim),
-                Span::styled(
-                    spin,
-                    Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  running".to_string(), dim),
-            ]));
+            return Some(RunningTailLine {
+                line: Line::from(vec![
+                    Span::styled(format!(" {gutter}  "), dim),
+                    Span::styled(
+                        spin,
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  running".to_string(), dim),
+                ]),
+                kind: PipelineLineKind::RunningContainerPlaceholder { run_id: run.id },
+            });
         }
         let phase_label = self.state.current_phase.label();
         let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
-        Some(format_running_transcript_leaf(
-            TranscriptLeafMarker::new(),
-            clock,
-            self.spinner_tick,
-            &fetcher,
-        ))
+        Some(RunningTailLine {
+            line: format_running_transcript_leaf(
+                TranscriptLeafMarker::new(),
+                clock,
+                self.spinner_tick,
+                &fetcher,
+            ),
+            kind: PipelineLineKind::RunningLeafTail { run_id: run.id },
+        })
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
@@ -1060,6 +1164,7 @@ mod tests {
             agent_content_hash: 0,
             agent_last_change: None,
             spinner_tick: 0,
+            live_summary_spinner_visible: false,
             live_summary_watcher: None,
             live_summary_change_rx: None,
             live_summary_path: None,
@@ -1647,6 +1752,76 @@ mod tests {
     }
 
     #[test]
+    fn expanded_child_transcript_suppresses_matching_container_placeholder() {
+        let mut app = test_app(
+            vec![node(
+                "Root",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![node(
+                    "Builder",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(1),
+                    None,
+                )],
+                None,
+                Some(1),
+            )],
+            vec![run_record(1, RunStatus::Running)],
+            Vec::new(),
+        );
+        app.spinner_tick = 0;
+        app.live_summary_cached_text = "drafting patch | details".to_string();
+
+        let lines = render_lines(&app, 8);
+        let spinner_rows = lines.iter().filter(|line| line.contains("⠋")).count();
+
+        assert_eq!(
+            spinner_rows, 1,
+            "visible child transcript tail should be the only spinner row: {lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("Drafting patch")),
+            "child transcript tail should remain visible"
+        );
+    }
+
+    #[test]
+    fn container_placeholder_remains_when_child_transcript_is_not_visible() {
+        let mut app = test_app(
+            vec![node(
+                "Root",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![node(
+                    "Builder",
+                    NodeKind::Mode,
+                    NodeStatus::Running,
+                    Vec::new(),
+                    Some(1),
+                    None,
+                )],
+                None,
+                Some(1),
+            )],
+            vec![run_record(1, RunStatus::Running)],
+            Vec::new(),
+        );
+        app.spinner_tick = 0;
+
+        let lines = render_lines(&app, 2);
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("⠋") && line.contains("running")),
+            "container placeholder should remain when no child tail is visible: {lines:#?}"
+        );
+    }
+
+    #[test]
     fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
         let mut app = test_app(
             leaf_only_tree(),
@@ -1710,10 +1885,15 @@ mod tests {
         let run = &app.state.agent_runs[0];
         let clock = super::super::clock::WallClock::new();
         let tail = app
-            .running_tail_for_row(0, run, &clock)
+            .running_tail_for_row(0, run, &clock, &BTreeSet::new())
             .expect("running container should produce a tail line");
 
-        let text: String = tail.spans.iter().map(|s| s.content.to_string()).collect();
+        let text: String = tail
+            .line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
         assert!(
             row.has_children,
             "container precondition: has visible children"
@@ -1873,7 +2053,7 @@ mod tests {
                 "",
                 "",
                 "",
-                "XX:XX:XX ⠋ Awaiting idea",
+                "",
                 &rule,
                 &keymap,
             ]
@@ -1916,11 +2096,30 @@ mod tests {
                 "",
                 "",
                 "",
-                "XX:XX:XX ⠋ Brainstorming",
+                "",
                 &rule,
                 &keymap,
             ]
         );
+    }
+
+    #[test]
+    fn full_screen_render_does_not_reserve_or_draw_chrome_live_status_row() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::IdeaInput;
+
+        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
+        let rule = "─".repeat(FULL_FRAME_WIDTH as usize);
+
+        assert_eq!(
+            app.body_inner_height, 21,
+            "body should receive the row formerly reserved for chrome live status"
+        );
+        assert!(
+            !lines.iter().any(|line| line.starts_with("XX:XX:XX")),
+            "normal chrome should not draw a standalone live-status row: {lines:#?}"
+        );
+        assert_eq!(lines[22], rule);
     }
 
     /// Pads a modal content string to fit the dialog inner width and wraps it
@@ -2118,7 +2317,7 @@ mod tests {
                 "",
                 "",
                 "",
-                "XX:XX:XX ⠋ wiring full-screen tests",
+                "",
                 &rule,
                 &keymap,
             ]

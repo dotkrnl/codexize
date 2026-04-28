@@ -47,8 +47,8 @@ pub fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
     let cycle = GRADIENT_STOPS.len() * GRADIENT_STEP;
     let mut spans = Vec::with_capacity(text.chars().count());
 
-    // Spec leaves exact drift math open; this keeps a one-stop shift every
-    // ~1 second at the current 250ms frame tick (`GRADIENT_STEP = 4`).
+    // Spec leaves exact drift math open; this keeps each 50ms visible frame moving
+    // while the spinner glyph cadence remains independently readable.
     for (index, ch) in text.chars().enumerate() {
         let offset = (phase + index) % cycle;
         let start_index = offset / GRADIENT_STEP;
@@ -172,15 +172,6 @@ impl LiveSummaryFetcher for CachedSummaryFetcher<'_> {
     }
 }
 
-/// Render-time fetcher that always returns the provided text.
-pub struct StaticFetcher(pub String);
-
-impl LiveSummaryFetcher for StaticFetcher {
-    fn fetch(&self) -> String {
-        self.0.clone()
-    }
-}
-
 /// Test fetcher that returns a fixed value.
 #[cfg(test)]
 pub struct FixedFetcher(pub String);
@@ -235,7 +226,7 @@ pub fn format_running_transcript_leaf<C: Clock>(
     let spinner = SPINNER[spinner_tick % SPINNER.len()];
     let body = capitalize_first(&fetcher.fetch());
 
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             format!("{} ", timestamp),
             Style::default().fg(RUNNING_COLOR),
@@ -246,8 +237,10 @@ pub fn format_running_transcript_leaf<C: Clock>(
                 .fg(RUNNING_COLOR)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(body, Style::default().fg(Color::White)),
-    ])
+    ];
+    spans.extend(gradient_spans(&body, spinner_tick));
+
+    Line::from(spans)
 }
 
 #[cfg(test)]
@@ -428,6 +421,24 @@ mod tests {
     }
 
     #[test]
+    fn running_message_body_gradient_moves_between_50ms_frames() {
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let clock = TestClock::at(base);
+        let fetcher = FixedFetcher("gradient".to_string());
+        let marker = TranscriptLeafMarker::new();
+
+        let line_0 = format_running_transcript_leaf(marker, &clock, 0, &fetcher);
+        let line_1 = format_running_transcript_leaf(marker, &clock, 1, &fetcher);
+        let body_colors_0: Vec<_> = line_0.spans[2..].iter().map(|span| span.style.fg).collect();
+        let body_colors_1: Vec<_> = line_1.spans[2..].iter().map(|span| span.style.fg).collect();
+
+        assert_ne!(
+            body_colors_0, body_colors_1,
+            "50ms frame steps should move the live-summary body gradient"
+        );
+    }
+
+    #[test]
     fn running_message_fallback_when_empty() {
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let clock = TestClock::at(base);
@@ -490,15 +501,23 @@ mod tests {
         let marker = TranscriptLeafMarker::new();
         let running = format_running_transcript_leaf(marker, &clock, 0, &fetcher);
 
-        assert_eq!(
-            historical.spans.len(),
-            running.spans.len(),
-            "same number of spans"
-        );
-
         let hist_ts_len = historical.spans[0].content.chars().count();
         let run_ts_len = running.spans[0].content.chars().count();
         assert_eq!(hist_ts_len, run_ts_len, "timestamp field same width");
+        assert_eq!(
+            historical.spans[1].content.chars().count(),
+            running.spans[1].content.chars().count(),
+            "symbol field same width"
+        );
+        let historical_body: String = historical.spans[2..]
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        let running_body: String = running.spans[2..]
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect();
+        assert_eq!(historical_body, running_body);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::model_names;
 use crate::selection::{
@@ -277,7 +278,7 @@ fn render_full_table(
         .map(|model| {
             let prefix = vendor_prefix(model.vendor);
             let short_name = model_names::display_name_for_vendor(&model.name, prefix);
-            let mut w = short_name.chars().count();
+            let mut w = short_name.width();
             if model.fallback_from.is_some() {
                 w += 6; // " (new)"
             }
@@ -642,14 +643,14 @@ fn format_name_with_freshness(short_name: &str, is_new: bool, budget: usize) -> 
     if budget == 0 {
         return Vec::new();
     }
-    let name_len = short_name.chars().count();
+    let name_len = short_name.width();
 
     if is_new {
         // 1. " (new)" suffix
-        if name_len + " (new)".chars().count() <= budget {
+        if name_len + " (new)".width() <= budget {
             let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
             spans.push(Span::styled(" (new)", freshness_style()));
-            let pad = budget - name_len - " (new)".chars().count();
+            let pad = budget - name_len - " (new)".width();
             if pad > 0 {
                 spans.push(Span::raw(" ".repeat(pad)));
             }
@@ -678,19 +679,36 @@ fn format_name_with_freshness(short_name: &str, is_new: bool, budget: usize) -> 
         return spans;
     }
 
-    let ellipsis_len = ELLIPSIS.chars().count();
+    let ellipsis_len = ELLIPSIS.width();
     if budget > ellipsis_len {
-        let visible_chars = budget - ellipsis_len;
-        let truncated: String = short_name.chars().take(visible_chars).collect();
+        let visible_width = budget - ellipsis_len;
+        let mut truncated = String::new();
+        let mut w = 0;
+        for c in short_name.chars() {
+            let cw = c.width().unwrap_or(0);
+            if w + cw > visible_width {
+                break;
+            }
+            w += cw;
+            truncated.push(c);
+        }
         return vec![
             Span::styled(truncated, name_style()),
             Span::styled(ELLIPSIS, ellipsis_style()),
         ];
     }
-    vec![Span::styled(
-        ELLIPSIS.chars().take(budget).collect::<String>(),
-        ellipsis_style(),
-    )]
+
+    let mut truncated = String::new();
+    let mut w = 0;
+    for c in ELLIPSIS.chars() {
+        let cw = c.width().unwrap_or(0);
+        if w + cw > budget {
+            break;
+        }
+        w += cw;
+        truncated.push(c);
+    }
+    vec![Span::styled(truncated, ellipsis_style())]
 }
 
 // ---------------------------------------------------------------------------
@@ -737,11 +755,11 @@ fn render_compact_quota(
             2 // "--"
         } else {
             match model.quota_percent {
-                Some(v) => format!("{v}%").chars().count(),
+                Some(v) => format!("{v}%").width(),
                 None => 2,
             }
         };
-        expanded_width += label.chars().count() + 1 + 6 + quota_str_len; // label + sp + "Quota " + quota
+        expanded_width += label.width() + 1 + 6 + quota_str_len; // label + sp + "Quota " + quota
     }
 
     let use_expanded_quota = expanded_width <= width as usize;
@@ -1319,12 +1337,12 @@ mod tests {
     fn format_name_with_freshness_exact_width() {
         // Full name fits — padded to target width.
         let spans = format_name_with_freshness("short", false, 10);
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 10);
 
         // Name + " (new)" fits.
         let spans = format_name_with_freshness("short", true, 15);
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 15);
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "short (new)    ");
@@ -1332,7 +1350,7 @@ mod tests {
         // Freshness degrades to "*" when " (new)" no longer fits.
         let spans = format_name_with_freshness("gpt-4-turbo", true, 13);
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 13);
         assert!(
             text.starts_with("gpt-4-turbo*"),
@@ -1342,13 +1360,13 @@ mod tests {
         // Freshness omitted entirely when even "*" no longer fits.
         let spans = format_name_with_freshness("gpt-4-turbo", true, 11);
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 11);
         assert_eq!(text, "gpt-4-turbo", "freshness omitted, name fits exactly");
 
         // Name truncated with ellipsis (no marker since we are in plain mode).
         let spans = format_name_with_freshness("verylongname", false, 10);
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 10);
         assert!(spans.iter().any(|s| s.content.contains("...")));
         let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
@@ -1356,8 +1374,25 @@ mod tests {
 
         // Very narrow — only ellipsis fits.
         let spans = format_name_with_freshness("x", false, 2);
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
         assert_eq!(width, 2);
+    }
+
+    #[test]
+    fn format_name_with_freshness_wide_display() {
+        // "あ" is 2 wide.
+        let spans = format_name_with_freshness("あああ", false, 5); // Total width 6, needs truncation.
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
+        assert_eq!(width, 5);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "あ...");
+
+        // Budget 4: visible width 1. "あ" cannot fit, so truncated string is empty. Total width is 3 (just ellipsis).
+        let spans = format_name_with_freshness("あああ", false, 4);
+        let width: usize = spans.iter().map(|s| s.content.width()).sum();
+        assert!(width <= 4);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "...");
     }
 
     // ----- compact-quota mode -----
@@ -1604,7 +1639,7 @@ mod tests {
             );
 
             for (i, line) in lines.iter().enumerate() {
-                let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+                let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
                 assert!(
                     total <= width as usize,
                     "width {width}: row {i} exceeds budget ({total})"
@@ -1788,7 +1823,7 @@ mod tests {
 
         // Check that the row's total visible width equals 120.
         for (i, line) in lines.iter().enumerate() {
-            let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
             assert_eq!(
                 total, 120,
                 "row {i} total span width must equal 120 (scores right-anchored)"

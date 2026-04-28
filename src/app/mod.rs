@@ -4249,7 +4249,7 @@ impl App {
             effort,
         };
 
-        let window_name = window_name_with_model(&format!("[Builder r{r}]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Round {r} Coder]"), &model, effort);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard(
             "coder",
@@ -4412,7 +4412,7 @@ impl App {
             effort,
         };
 
-        let window_name = window_name_with_model(&format!("[Review r{r}]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Round {r} Reviewer]"), &model, effort);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard(
             "reviewer",

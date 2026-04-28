@@ -84,14 +84,16 @@ mod tests {
 
     #[test]
     fn window_name_with_model_normal_omits_suffix() {
-        let name = window_name_with_model("[Coder r1]", "claude-sonnet-4.6", EffortLevel::Normal);
-        assert_eq!(name, "[Coder r1] sonnet-4.6");
+        let name =
+            window_name_with_model("[Round 1 Coder]", "claude-sonnet-4.6", EffortLevel::Normal);
+        assert_eq!(name, "[Round 1 Coder] sonnet-4.6");
     }
 
     #[test]
     fn window_name_with_model_tough_appends_suffix() {
-        let name = window_name_with_model("[Coder r1]", "claude-sonnet-4.6", EffortLevel::Tough);
-        assert_eq!(name, "[Coder r1] sonnet-4.6 [tough]");
+        let name =
+            window_name_with_model("[Round 1 Coder]", "claude-sonnet-4.6", EffortLevel::Tough);
+        assert_eq!(name, "[Round 1 Coder] sonnet-4.6 [tough]");
     }
 
     #[test]

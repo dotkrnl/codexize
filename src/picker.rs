@@ -182,7 +182,7 @@ impl SessionPicker {
             .block(Block::default().borders(Borders::ALL).title("Sessions"))
             .highlight_style(
                 Style::default()
-                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::REVERSED)
                     .add_modifier(Modifier::BOLD),
             );
 

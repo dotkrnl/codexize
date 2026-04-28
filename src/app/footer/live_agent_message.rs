@@ -8,6 +8,14 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 /// Running-state color per spec.
 const RUNNING_COLOR: Color = Color::Blue;
 
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
 /// Style hints for historical message rendering.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HistoricalStyleHints {
@@ -41,10 +49,11 @@ pub fn format_historical_message(
         Style::default().fg(Color::White)
     };
 
+    let capitalized_body = capitalize_first(body);
     Line::from(vec![
         Span::styled(format!("{} ", timestamp), Style::default().fg(symbol_color)),
         Span::styled(format!("{} ", symbol), Style::default().fg(symbol_color)),
-        Span::styled(body.to_string(), body_style),
+        Span::styled(capitalized_body, body_style),
     ])
 }
 
@@ -165,7 +174,7 @@ pub fn format_running_transcript_leaf<C: Clock>(
 ) -> Line<'static> {
     let timestamp = clock.timestamp_string();
     let spinner = SPINNER[spinner_tick % SPINNER.len()];
-    let body = fetcher.fetch();
+    let body = capitalize_first(&fetcher.fetch());
 
     Line::from(vec![
         Span::styled(
@@ -205,7 +214,7 @@ mod tests {
             HistoricalStyleHints::default(),
         );
         let text = line_text(&line);
-        assert_eq!(text, "14:30:25 ○ agent started");
+        assert_eq!(text, "14:30:25 ○ Agent started");
     }
 
     #[test]

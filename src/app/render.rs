@@ -1094,7 +1094,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("coder transcript body"))
+                .any(|line| line.contains("Coder transcript body"))
         );
     }
 
@@ -1137,7 +1137,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("absorbed transcript body"))
+                .any(|line| line.contains("Absorbed transcript body"))
         );
     }
 
@@ -1183,7 +1183,7 @@ mod tests {
         let lines = render_lines(&app, 9);
         let first_body = lines
             .iter()
-            .position(|line| line.contains("first transcript"))
+            .position(|line| line.contains("First transcript"))
             .expect("first body rendered");
         let second_header = lines
             .iter()
@@ -1191,7 +1191,7 @@ mod tests {
             .expect("second header rendered");
         let second_body = lines
             .iter()
-            .position(|line| line.contains("second transcript"))
+            .position(|line| line.contains("Second transcript"))
             .expect("second body rendered");
 
         assert!(first_body < second_header);
@@ -1362,7 +1362,7 @@ mod tests {
         app.scroll_viewport(2, true);
 
         let lines = render_lines(&app, app.body_inner_height as u16 + 2);
-        assert!(lines.iter().any(|line| line.contains("new unread")));
+        assert!(lines.iter().any(|line| line.contains("New unread")));
         assert!(
             app.unread_badge().is_none(),
             "badge should be hidden when unread is visible"
@@ -1519,11 +1519,11 @@ mod tests {
             "running leaf must not emit the legacy 'working...' line"
         );
         assert!(
-            lines.iter().any(|l| l.contains("drafting plan")),
+            lines.iter().any(|l| l.contains("Drafting plan")),
             "running leaf tail should surface the live-summary short title"
         );
         assert!(
-            lines.iter().any(|l| l.contains("earlier transcript line")),
+            lines.iter().any(|l| l.contains("Earlier transcript line")),
             "historical messages must still render"
         );
     }
@@ -1556,7 +1556,7 @@ mod tests {
 
         let lines = render_lines(&app, 8);
 
-        assert!(lines.iter().any(|l| l.contains("final summary")));
+        assert!(lines.iter().any(|l| l.contains("Final summary")));
         assert!(!lines.iter().any(|l| l.contains("working...")));
     }
 
@@ -1884,7 +1884,7 @@ mod tests {
                 "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
                 "▌▾ Implementation · running",
                 " └─▾ Builder · running",
-                "XX:XX:XX ⠋ wiring full-screen tests",
+                "XX:XX:XX ⠋ Wiring full-screen tests",
                 "",
                 "",
                 "",

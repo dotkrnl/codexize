@@ -457,4 +457,145 @@ git_status = ""
         let back: Snapshot = toml::from_str(&text).expect("deserialize");
         assert_eq!(back.mode, GuardMode::AskOperator);
     }
+
+    fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::current_dir().unwrap();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::env::set_current_dir(dir).unwrap();
+            f()
+        }));
+        std::env::set_current_dir(&prev).unwrap();
+        outcome.unwrap()
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("git command should run");
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+
+    fn init_repo(dir: &Path) {
+        run_git(dir, &["init", "-q"]);
+        run_git(dir, &["config", "user.email", "test@example.com"]);
+        run_git(dir, &["config", "user.name", "Test User"]);
+        std::fs::write(dir.join("README.md"), "seed\n").unwrap();
+        run_git(dir, &["add", "README.md"]);
+        run_git(dir, &["commit", "-q", "-m", "seed"]);
+    }
+
+    #[test]
+    fn git_status_dirty_reports_clean_then_dirty() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+        with_cwd(temp.path(), || {
+            assert!(!git_status_dirty(), "fresh repo must report clean");
+            std::fs::write(temp.path().join("README.md"), "dirty\n").unwrap();
+            assert!(git_status_dirty(), "modified README must report dirty");
+        });
+    }
+
+    #[test]
+    fn capture_non_coder_writes_snapshot_with_head_and_status() {
+        let repo = tempfile::TempDir::new().unwrap();
+        init_repo(repo.path());
+        let snapshot_dir = tempfile::TempDir::new().unwrap();
+        with_cwd(repo.path(), || {
+            capture_non_coder(snapshot_dir.path(), "auditor", GuardMode::AutoReset, false)
+                .unwrap();
+        });
+        let snap = read_snapshot(snapshot_dir.path()).expect("snapshot must exist");
+        assert!(!snap.head.is_empty(), "head must be captured");
+        assert_eq!(snap.mode, GuardMode::AutoReset);
+        assert!(snap.working_tree_baseline.is_none());
+    }
+
+    #[test]
+    fn capture_coder_records_round_control_files() {
+        let repo = tempfile::TempDir::new().unwrap();
+        init_repo(repo.path());
+        let session_dir = repo.path().join("session");
+        let round_dir = session_dir.join("rounds").join("003");
+        std::fs::create_dir_all(&round_dir).unwrap();
+        std::fs::write(round_dir.join("task.toml"), "id = 1\n").unwrap();
+        let snapshot_dir = tempfile::TempDir::new().unwrap();
+        with_cwd(repo.path(), || {
+            capture_coder(snapshot_dir.path(), &session_dir, 3).unwrap();
+        });
+        let snap = read_snapshot(snapshot_dir.path()).expect("snapshot must exist");
+        assert!(
+            snap.control_files
+                .keys()
+                .any(|k| k.ends_with("task.toml")),
+            "task.toml must be captured under control_files: {:?}",
+            snap.control_files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn verify_returns_ok_when_snapshot_file_is_missing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // No snapshot file written here.
+        let result = verify(dir.path(), "auditor");
+        assert!(matches!(result, VerifyResult::Ok { warnings } if warnings.is_empty()));
+    }
+
+    #[test]
+    fn verify_dispatches_to_coder_path_when_stage_is_coder() {
+        let snapshot_dir = tempfile::TempDir::new().unwrap();
+        let mut control = BTreeMap::new();
+        control.insert(
+            snapshot_dir
+                .path()
+                .join("nonexistent.toml")
+                .display()
+                .to_string(),
+            "expected".to_string(),
+        );
+        let snap = Snapshot {
+            head: String::new(),
+            git_status: String::new(),
+            control_files: control,
+            baseline_stash: None,
+            mode: GuardMode::AutoReset,
+            working_tree_baseline: None,
+        };
+        write_snapshot(snapshot_dir.path(), &snap).unwrap();
+        // Dispatch via the public `verify` and expect the coder path's
+        // forbidden_control_edit hard error (file is missing -> mismatched).
+        let result = verify(snapshot_dir.path(), "coder");
+        match result {
+            VerifyResult::HardError { reason, .. } => {
+                assert!(
+                    reason.starts_with("forbidden_control_edit"),
+                    "expected coder-path violation, got: {reason}"
+                );
+            }
+            other => panic!("expected HardError from coder dispatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_hard_to_returns_false_for_empty_head() {
+        // Empty string short-circuits before any git invocation, so the
+        // function returns false without touching the working tree.
+        assert!(!reset_hard_to(""));
+    }
+
+    #[test]
+    fn reset_hard_to_returns_false_when_head_does_not_resolve() {
+        let temp = tempfile::TempDir::new().unwrap();
+        init_repo(temp.path());
+        with_cwd(temp.path(), || {
+            // SHA that cannot exist in this fresh repo.
+            assert!(!reset_hard_to("0000000000000000000000000000000000000000"));
+        });
+    }
 }

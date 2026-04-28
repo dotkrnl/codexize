@@ -113,6 +113,12 @@ fn choose_mode(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuotaColumn {
+    Expanded, // "Quota 100%" — 10 cols
+    Narrow,   // "100%"       —  4 cols
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProbColumn {
     IpbrVerbose, // "Idea XX   Plan XX   Build XX   Review XX" — 40 cols
     Ipbr,        // full "Ixx Pxx Bxx Rxx"                      — 15 cols
@@ -120,26 +126,49 @@ enum ProbColumn {
     None,
 }
 
-/// Compute the name budget if we selected `prob_col` and `vendor_width`.
-fn name_budget_for(width: u16, vendor_width: usize, prob_col: ProbColumn) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, prob_col);
+/// Compute the name budget if we selected `quota`, `prob_col` and `vendor_width`.
+fn name_budget_for(
+    width: u16,
+    vendor_width: usize,
+    quota: QuotaColumn,
+    prob_col: ProbColumn,
+) -> usize {
+    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
     (width as usize).saturating_sub(fixed)
 }
 
-/// Empirically choose a prob column tier: try each from widest to narrowest,
-/// pick the first where name_budget >= NAME_WIDTH_MIN.
-fn choose_prob_column(width: u16, vendor_width: usize) -> ProbColumn {
-    for candidate in [
-        ProbColumn::IpbrVerbose,
-        ProbColumn::Ipbr,
-        ProbColumn::TopRank,
-        ProbColumn::None,
-    ] {
-        if name_budget_for(width, vendor_width, candidate) >= NAME_WIDTH_MIN {
-            return candidate;
+/// Empirically choose a layout: try each from widest to narrowest.
+/// First pass: try to fit without truncating the full name (`max_req_name_width`).
+/// Second pass: if must truncate, pick the first layout leaving >= `NAME_WIDTH_MIN`.
+fn choose_layout(
+    width: u16,
+    vendor_width: usize,
+    max_req_name_width: usize,
+) -> (QuotaColumn, ProbColumn) {
+    let layouts = [
+        (QuotaColumn::Expanded, ProbColumn::IpbrVerbose),
+        (QuotaColumn::Narrow, ProbColumn::IpbrVerbose),
+        (QuotaColumn::Expanded, ProbColumn::Ipbr),
+        (QuotaColumn::Narrow, ProbColumn::Ipbr),
+        (QuotaColumn::Expanded, ProbColumn::TopRank),
+        (QuotaColumn::Narrow, ProbColumn::TopRank),
+        (QuotaColumn::Expanded, ProbColumn::None),
+        (QuotaColumn::Narrow, ProbColumn::None),
+    ];
+
+    for &(quota, prob) in &layouts {
+        if name_budget_for(width, vendor_width, quota, prob) >= max_req_name_width {
+            return (quota, prob);
         }
     }
-    ProbColumn::None
+
+    for &(quota, prob) in &layouts {
+        if name_budget_for(width, vendor_width, quota, prob) >= NAME_WIDTH_MIN {
+            return (quota, prob);
+        }
+    }
+
+    (QuotaColumn::Narrow, ProbColumn::None)
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +241,7 @@ fn vendor_column_width() -> usize {
 ///
 /// Counting separators (one space between each visible column):
 ///   vw + 1 + 1 + 1 + 4 + 1 + probs_width + (1 if probs)
-fn full_row_fixed_width(vendor_width: usize, prob_col: ProbColumn) -> usize {
+fn full_row_fixed_width(vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
     let probs = match prob_col {
         ProbColumn::IpbrVerbose => 40,
         ProbColumn::Ipbr => 15,
@@ -220,12 +249,16 @@ fn full_row_fixed_width(vendor_width: usize, prob_col: ProbColumn) -> usize {
         ProbColumn::None => 0,
     };
     let prob_separator = if probs == 0 { 0 } else { 1 };
+    let quota_width = match quota {
+        QuotaColumn::Expanded => 10,
+        QuotaColumn::Narrow => 4,
+    };
     // vendor + sp + dot + sp + quota + sp + name (variable) + prob_sep + probs
-    vendor_width + 1 + 1 + 1 + 4 + 1 + prob_separator + probs
+    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs
 }
 
-fn name_budget(width: u16, vendor_width: usize, prob_col: ProbColumn) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, prob_col);
+fn name_budget(width: u16, vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
+    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
     let raw = (width as usize).saturating_sub(fixed);
     raw.max(NAME_WIDTH_MIN) // no upper clamp; fills remaining space
 }
@@ -236,11 +269,26 @@ fn render_full_table(
     quota_errors: &[QuotaError],
     width: u16,
 ) -> Vec<Line<'static>> {
-    let vendor_width = vendor_column_width();
-    let prob_col = choose_prob_column(width, vendor_width);
-    let name_width = name_budget(width, vendor_width, prob_col);
-
     let visible_set = visible_models(models, versions);
+
+    let max_req_name_width = models
+        .iter()
+        .filter(|m| visible_set.contains(&m.name))
+        .map(|model| {
+            let prefix = vendor_prefix(model.vendor);
+            let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+            let mut w = short_name.chars().count();
+            if model.fallback_from.is_some() {
+                w += 6; // " (new)"
+            }
+            w
+        })
+        .max()
+        .unwrap_or(0);
+
+    let vendor_width = vendor_column_width();
+    let (quota_col, prob_col) = choose_layout(width, vendor_width, max_req_name_width);
+    let name_width = name_budget(width, vendor_width, quota_col, prob_col);
 
     // Probabilities are normalised against the global total over every
     // assembled model (not just the visible subset) so that filtering does
@@ -273,223 +321,223 @@ fn render_full_table(
     let max_build = max_for(total_build, SelectionPhase::Build);
     let max_review = max_for(total_review, SelectionPhase::Review);
 
-    let mut vendor_order: Vec<VendorKind> = Vec::new();
-    let mut by_vendor: std::collections::BTreeMap<VendorKind, Vec<&CachedModel>> =
-        std::collections::BTreeMap::new();
-    for model in models.iter().filter(|m| visible_set.contains(&m.name)) {
-        if !vendor_order.contains(&model.vendor) {
-            vendor_order.push(model.vendor);
-        }
-        by_vendor.entry(model.vendor).or_default().push(model);
-    }
-    for group in by_vendor.values_mut() {
-        group.sort_by_key(|m| m.display_order);
-    }
+    let mut visible_models_list: Vec<&CachedModel> = models
+        .iter()
+        .filter(|m| visible_set.contains(&m.name))
+        .collect();
+
+    // Sort globally by Build score descending, tie-break vendor then name
+    visible_models_list.sort_by(|a, b| {
+        let prob_a = prob_for(SelectionPhase::Build, a);
+        let prob_b = prob_for(SelectionPhase::Build, b);
+        prob_b
+            .partial_cmp(&prob_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.vendor.cmp(&b.vendor))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for vendor in &vendor_order {
-        let label = vendor_label(*vendor);
-        let color = vendor_color(*vendor);
-        let prefix = vendor_prefix(*vendor);
-        let group = &by_vendor[vendor];
+    for model in visible_models_list {
+        let label = vendor_label(model.vendor);
+        let color = vendor_color(model.vendor);
+        let prefix = vendor_prefix(model.vendor);
 
-        for (i, model) in group.iter().enumerate() {
-            let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+        let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+        let vendor_failed = quota_errors.iter().any(|err| err.vendor == model.vendor);
 
-            let vendor_failed = quota_errors.iter().any(|err| err.vendor == model.vendor);
+        let vendor_span = Span::styled(
+            format!("{label:<vendor_width$}"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        );
 
-            // First row in a vendor group prints the label; subsequent rows
-            // pad with blanks to keep the column visually aligned.
-            let vendor_span = if i == 0 {
-                Span::styled(
-                    format!("{label:<vendor_width$}"),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                )
-            } else {
-                Span::raw(" ".repeat(vendor_width))
-            };
-
-            let dot_color = if vendor_failed {
-                Color::Red
-            } else {
-                match model.quota_percent {
-                    Some(v) if v >= 80 => probability_color(v, 100),
-                    Some(v) if v >= 40 => Color::Yellow,
-                    Some(0) => Color::Red,
-                    Some(v) => probability_color(v, 100),
-                    None => Color::DarkGray,
-                }
-            };
-            let dot_span = Span::styled(STATUS_DOT, Style::default().fg(dot_color));
-
-            let (quota_text, quota_color) = if vendor_failed {
-                (" --%".to_string(), Color::Red)
-            } else {
-                match model.quota_percent {
-                    Some(v) => (format!("{v:>3}%"), probability_color(v, 100)),
-                    None => (" --%".to_string(), Color::DarkGray),
-                }
-            };
-            let quota_span = Span::styled(quota_text, Style::default().fg(quota_color));
-
-            let mut spans: Vec<Span<'static>> = vec![
-                vendor_span,
-                Span::raw(" "),
-                dot_span,
-                Span::raw(" "),
-                quota_span,
-                Span::raw(" "),
-            ];
-
-            spans.extend(format_name_with_freshness(
-                &short_name,
-                model.fallback_from.is_some(),
-                name_width,
-            ));
-
-            match prob_col {
-                ProbColumn::IpbrVerbose => {
-                    let idea_pct =
-                        probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                    let planning_pct = probability_percent(
-                        prob_for(SelectionPhase::Planning, model),
-                        total_planning,
-                    );
-                    let build_pct =
-                        probability_percent(prob_for(SelectionPhase::Build, model), total_build);
-                    let review_pct =
-                        probability_percent(prob_for(SelectionPhase::Review, model), total_review);
-
-                    spans.push(Span::raw(" "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("Idea ")
-                    } else {
-                        probability_span(
-                            "Idea ",
-                            idea_pct,
-                            max_idea,
-                            idea_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw("   "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("Plan ")
-                    } else {
-                        probability_span(
-                            "Plan ",
-                            planning_pct,
-                            max_planning,
-                            planning_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw("   "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("Build ")
-                    } else {
-                        probability_span(
-                            "Build ",
-                            build_pct,
-                            max_build,
-                            build_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw("   "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("Review ")
-                    } else {
-                        probability_span(
-                            "Review ",
-                            review_pct,
-                            max_review,
-                            review_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                }
-                ProbColumn::Ipbr => {
-                    let idea_pct =
-                        probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                    let planning_pct = probability_percent(
-                        prob_for(SelectionPhase::Planning, model),
-                        total_planning,
-                    );
-                    let build_pct =
-                        probability_percent(prob_for(SelectionPhase::Build, model), total_build);
-                    let review_pct =
-                        probability_percent(prob_for(SelectionPhase::Review, model), total_review);
-
-                    spans.push(Span::raw(" "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("I")
-                    } else {
-                        probability_span(
-                            "I",
-                            idea_pct,
-                            max_idea,
-                            idea_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw(" "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("P")
-                    } else {
-                        probability_span(
-                            "P",
-                            planning_pct,
-                            max_planning,
-                            planning_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw(" "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("B")
-                    } else {
-                        probability_span(
-                            "B",
-                            build_pct,
-                            max_build,
-                            build_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                    spans.push(Span::raw(" "));
-                    spans.push(if vendor_failed {
-                        probability_unavailable_span("R")
-                    } else {
-                        probability_span(
-                            "R",
-                            review_pct,
-                            max_review,
-                            review_ranks.get(&model.name) == Some(&1),
-                        )
-                    });
-                }
-                ProbColumn::TopRank => {
-                    spans.push(Span::raw(" "));
-                    spans.push(top_rank_prob_span(
-                        model,
-                        vendor_failed,
-                        prob_for(SelectionPhase::Idea, model),
-                        prob_for(SelectionPhase::Planning, model),
-                        prob_for(SelectionPhase::Build, model),
-                        prob_for(SelectionPhase::Review, model),
-                        total_idea,
-                        total_planning,
-                        total_build,
-                        total_review,
-                        max_idea,
-                        max_planning,
-                        max_build,
-                        max_review,
-                        idea_ranks.get(&model.name) == Some(&1),
-                        planning_ranks.get(&model.name) == Some(&1),
-                        build_ranks.get(&model.name) == Some(&1),
-                        review_ranks.get(&model.name) == Some(&1),
-                    ));
-                }
-                ProbColumn::None => {}
+        let dot_color = if vendor_failed {
+            Color::Red
+        } else {
+            match model.quota_percent {
+                Some(v) if v >= 80 => probability_color(v, 100),
+                Some(v) if v >= 40 => Color::Yellow,
+                Some(0) => Color::Red,
+                Some(v) => probability_color(v, 100),
+                None => Color::DarkGray,
             }
+        };
+        let dot_span = Span::styled(STATUS_DOT, Style::default().fg(dot_color));
 
-            lines.push(Line::from(spans));
+        let (quota_text, quota_color) = if vendor_failed {
+            match quota_col {
+                QuotaColumn::Expanded => ("Quota --% ".to_string(), Color::Red),
+                QuotaColumn::Narrow => (" --%".to_string(), Color::Red),
+            }
+        } else {
+            match model.quota_percent {
+                Some(v) => match quota_col {
+                    QuotaColumn::Expanded => {
+                        (format!("Quota {:>3}%", v), probability_color(v, 100))
+                    }
+                    QuotaColumn::Narrow => (format!("{:>3}%", v), probability_color(v, 100)),
+                },
+                None => match quota_col {
+                    QuotaColumn::Expanded => ("Quota --% ".to_string(), Color::DarkGray),
+                    QuotaColumn::Narrow => (" --%".to_string(), Color::DarkGray),
+                },
+            }
+        };
+        let quota_span = Span::styled(quota_text, Style::default().fg(quota_color));
+
+        let mut spans: Vec<Span<'static>> = vec![
+            vendor_span,
+            Span::raw(" "),
+            dot_span,
+            Span::raw(" "),
+            quota_span,
+            Span::raw(" "),
+        ];
+
+        spans.extend(format_name_with_freshness(
+            &short_name,
+            model.fallback_from.is_some(),
+            name_width,
+        ));
+
+        match prob_col {
+            ProbColumn::IpbrVerbose => {
+                let idea_pct =
+                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
+                let planning_pct =
+                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
+                let build_pct =
+                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                let review_pct =
+                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
+
+                spans.push(Span::raw(" "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("Idea ")
+                } else {
+                    probability_span(
+                        "Idea ",
+                        idea_pct,
+                        max_idea,
+                        idea_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw("   "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("Plan ")
+                } else {
+                    probability_span(
+                        "Plan ",
+                        planning_pct,
+                        max_planning,
+                        planning_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw("   "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("Build ")
+                } else {
+                    probability_span(
+                        "Build ",
+                        build_pct,
+                        max_build,
+                        build_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw("   "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("Review ")
+                } else {
+                    probability_span(
+                        "Review ",
+                        review_pct,
+                        max_review,
+                        review_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+            }
+            ProbColumn::Ipbr => {
+                let idea_pct =
+                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
+                let planning_pct =
+                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
+                let build_pct =
+                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                let review_pct =
+                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
+
+                spans.push(Span::raw(" "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("I")
+                } else {
+                    probability_span(
+                        "I",
+                        idea_pct,
+                        max_idea,
+                        idea_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw(" "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("P")
+                } else {
+                    probability_span(
+                        "P",
+                        planning_pct,
+                        max_planning,
+                        planning_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw(" "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("B")
+                } else {
+                    probability_span(
+                        "B",
+                        build_pct,
+                        max_build,
+                        build_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+                spans.push(Span::raw(" "));
+                spans.push(if vendor_failed {
+                    probability_unavailable_span("R")
+                } else {
+                    probability_span(
+                        "R",
+                        review_pct,
+                        max_review,
+                        review_ranks.get(&model.name) == Some(&1),
+                    )
+                });
+            }
+            ProbColumn::TopRank => {
+                spans.push(Span::raw(" "));
+                spans.push(top_rank_prob_span(
+                    model,
+                    vendor_failed,
+                    prob_for(SelectionPhase::Idea, model),
+                    prob_for(SelectionPhase::Planning, model),
+                    prob_for(SelectionPhase::Build, model),
+                    prob_for(SelectionPhase::Review, model),
+                    total_idea,
+                    total_planning,
+                    total_build,
+                    total_review,
+                    max_idea,
+                    max_planning,
+                    max_build,
+                    max_review,
+                    idea_ranks.get(&model.name) == Some(&1),
+                    planning_ranks.get(&model.name) == Some(&1),
+                    build_ranks.get(&model.name) == Some(&1),
+                    review_ranks.get(&model.name) == Some(&1),
+                ));
+            }
+            ProbColumn::None => {}
         }
+
+        lines.push(Line::from(spans));
     }
 
     lines
@@ -660,12 +708,6 @@ fn render_compact_quota(
         return Vec::new();
     }
 
-    // One entry per vendor, ordered Claude · Codex · Gemini · Kimi (fixed
-    // identity ordering — the spec sample uses this order).
-    // We render only vendors that appear in the model set so the line tracks
-    // the configured selection. For each vendor, pick the model with the
-    // best `current_score` to source the quota — this matches the
-    // per-vendor "headline" semantics of the compact line.
     let order = [
         VendorKind::Kimi,
         VendorKind::Claude,
@@ -673,17 +715,40 @@ fn render_compact_quota(
         VendorKind::Gemini,
     ];
 
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut first = true;
+    let mut vendors_to_render = Vec::new();
     for vendor in order {
-        let Some(model) = models.iter().filter(|m| m.vendor == vendor).max_by(|a, b| {
+        if let Some(model) = models.iter().filter(|m| m.vendor == vendor).max_by(|a, b| {
             a.current_score
                 .partial_cmp(&b.current_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
-        }) else {
-            continue;
-        };
+        }) {
+            vendors_to_render.push((vendor, model));
+        }
+    }
 
+    let mut expanded_width = 0;
+    for (i, (vendor, model)) in vendors_to_render.iter().enumerate() {
+        if i > 0 {
+            expanded_width += 3; // " · "
+        }
+        let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
+        let label = vendor_label(*vendor);
+        let quota_str_len = if vendor_failed {
+            2 // "--"
+        } else {
+            match model.quota_percent {
+                Some(v) => format!("{v}%").chars().count(),
+                None => 2,
+            }
+        };
+        expanded_width += label.chars().count() + 1 + 6 + quota_str_len; // label + sp + "Quota " + quota
+    }
+
+    let use_expanded_quota = expanded_width <= width as usize;
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut first = true;
+    for (vendor, model) in vendors_to_render {
         let vendor_failed = quota_errors.iter().any(|err| err.vendor == vendor);
 
         if !first {
@@ -697,6 +762,9 @@ fn render_compact_quota(
             Style::default().fg(vendor_color(vendor)),
         ));
         spans.push(Span::raw(" "));
+        if use_expanded_quota {
+            spans.push(Span::styled("Quota ", Style::default().fg(Color::DarkGray)));
+        }
 
         if vendor_failed {
             spans.push(Span::styled("--", Style::default().fg(Color::Red)));
@@ -1008,11 +1076,11 @@ mod tests {
 
         // Width 60 → Ipbr tier (compact single-letter format).
         let (lines, mode) =
-            responsive_models_area(&models, &versions, &[], 60, 50, ModelsAreaMode::FullTable);
+            responsive_models_area(&models, &versions, &[], 50, 50, ModelsAreaMode::FullTable);
         assert_eq!(mode, ModelsAreaMode::FullTable);
 
         // Render to a buffer so we can inspect cell modifiers.
-        let area = Rect::new(0, 0, 60, lines.len() as u16);
+        let area = Rect::new(0, 0, 50, lines.len() as u16);
         let mut buf = Buffer::empty(area);
         Paragraph::new(lines.clone()).render(area, &mut buf);
 
@@ -1792,5 +1860,104 @@ mod tests {
             ModelsAreaMode::FullTable,
             "term_h=50 follows normal hysteresis"
         );
+    }
+    #[test]
+    fn full_table_orders_by_build_score_descending() {
+        let m1 = vendor_model_with_axis_score(VendorKind::Codex, "gpt-alpha", 0.5, 0);
+        let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 0.75, 0);
+        let m3 = vendor_model_with_axis_score(VendorKind::Gemini, "gemini-gamma", 1.0, 0);
+        let models = vec![m1, m2, m3];
+        let versions = build_version_index(&models);
+
+        let (lines, _) =
+            responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+        let rows = render_to_text(&lines, 120);
+        println!("ROWS 3: {:?}", rows);
+
+        assert!(rows[0].contains("gemini"));
+        assert!(rows[1].contains("claude"));
+        assert!(rows[2].contains("codex"));
+    }
+
+    #[test]
+    fn full_table_renders_vendor_label_on_every_row() {
+        let m1 = vendor_model_with_axis_score(VendorKind::Claude, "claude-alpha", 100.0, 0);
+        let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 50.0, 0);
+        let models = vec![m1, m2];
+        let versions = build_version_index(&models);
+
+        let (lines, _) =
+            responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+        let rows = render_to_text(&lines, 120);
+
+        assert!(rows[0].contains("claude"));
+        assert!(rows[1].contains("claude"));
+    }
+
+    #[test]
+    fn compact_quota_renders_expanded_quota_when_space_permits() {
+        let models = vec![vendor_model_with_axis_score(
+            VendorKind::Claude,
+            "claude-alpha",
+            100.0,
+            0,
+        )];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(1),
+            ModelsAreaMode::CompactQuota,
+        );
+        let row = full_buffer_line(&lines, 0, 120);
+        println!("ROW 2: {:?}", row);
+
+        assert!(row.contains("Quota 100%"));
+    }
+
+    #[test]
+    fn compact_quota_renders_narrow_quota_when_tight() {
+        let models = vec![
+            vendor_model_with_axis_score(VendorKind::Kimi, "kimi-1", 50.0, 0),
+            vendor_model_with_axis_score(VendorKind::Claude, "claude-1", 50.0, 0),
+            vendor_model_with_axis_score(VendorKind::Codex, "gpt-1", 50.0, 0),
+            vendor_model_with_axis_score(VendorKind::Gemini, "gemini-1", 50.0, 0),
+        ];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            50,
+            term_h_for_budget(1),
+            ModelsAreaMode::CompactQuota,
+        );
+        let row = full_buffer_line(&lines, 0, 50);
+        println!("ROW: {:?}", row);
+
+        assert!(!row.contains("Quota"));
+        assert!(row.contains("100%"));
+    }
+
+    #[test]
+    fn full_table_expands_quota_and_phase_labels_when_space_permits() {
+        let models = vec![vendor_model_with_axis_score(
+            VendorKind::Claude,
+            "claude",
+            100.0,
+            0,
+        )];
+        let versions = build_version_index(&models);
+
+        let (lines, _) =
+            responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+        let row = full_buffer_line(&lines, 0, 120);
+
+        assert!(row.contains("Quota"));
+        assert!(row.contains("Idea"));
     }
 }

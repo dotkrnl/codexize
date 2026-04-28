@@ -270,6 +270,10 @@ pub fn run(
         .spawn()
         .with_context(|| format!("failed to spawn: {:?}", command))?;
 
+    // SAFETY: `Command::stdout(Stdio::piped())` at :268 guarantees
+    // `child.stdout` is `Some` per std's documented invariant; same for
+    // `child.stderr` via :269. Taking each pipe once here is therefore
+    // unconditionally safe.
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 

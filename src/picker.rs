@@ -237,11 +237,11 @@ impl SessionPicker {
             } else if self.show_archived
                 && self.selected_entry().map(|e| e.archived).unwrap_or(false)
             {
-                "Enter continue  :new  :archive  :restore  :show-archived off  :quit"
+                "Enter continue  n new  :new  :archive  :restore  :show-archived off  :quit"
             } else if self.show_archived {
-                "Enter continue  :new  :archive  :show-archived off  :quit"
+                "Enter continue  n new  :new  :archive  :show-archived off  :quit"
             } else {
-                "Enter continue  :new  :archive  :show-archived on  :quit"
+                "Enter continue  n new  :new  :archive  :show-archived on  :quit"
             };
 
             Paragraph::new(text)
@@ -355,6 +355,16 @@ impl SessionPicker {
                 }
                 self.handle_select()
             }
+            KeyCode::Char('n') => {
+                if was_confirming {
+                    self.confirm_delete_hard = false;
+                    self.confirm_delete_soft = false;
+                }
+                self.input_mode = true;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                Ok(KeyAction::Continue)
+            }
             _ => {
                 if was_confirming {
                     self.confirm_delete_hard = false;
@@ -376,6 +386,11 @@ impl SessionPicker {
                 name: "new",
                 aliases: &["n"],
                 help: "Create a session",
+            },
+            PaletteCommand {
+                name: "idea",
+                aliases: &["i"],
+                help: "Create a session with the given idea text",
             },
             PaletteCommand {
                 name: "show-archived",
@@ -471,9 +486,13 @@ impl SessionPicker {
         let was_confirming = self.confirm_delete_hard || self.confirm_delete_soft;
         match name {
             "quit" => Ok(KeyAction::Quit),
-            "new" => {
+            "new" | "idea" => {
                 self.confirm_delete_hard = false;
                 self.confirm_delete_soft = false;
+                let trimmed = args.trim();
+                if !trimmed.is_empty() {
+                    return self.create_session_now(trimmed);
+                }
                 self.input_mode = true;
                 self.input_buffer.clear();
                 self.input_cursor = 0;
@@ -501,6 +520,29 @@ impl SessionPicker {
         }
     }
 
+    fn create_session_now(&mut self, idea: &str) -> Result<KeyAction> {
+        let session_id = generate_session_id();
+        let idea_text = idea.to_string();
+
+        let mut state = SessionState::new(session_id.clone());
+        state.modes = self.create_modes;
+        state.idea_text = Some(idea_text);
+        state.current_phase = Phase::BrainstormRunning;
+        state.save()?;
+        state.log_event("session created")?;
+        if state.modes.yolo {
+            state.log_event("mode_toggled: mode=yolo value=true source=cli")?;
+        }
+        if state.modes.cheap {
+            state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
+        }
+
+        Ok(KeyAction::SelectSession(PickerSelection {
+            session_id,
+            created: true,
+        }))
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
         match key.code {
             KeyCode::Esc => {
@@ -508,31 +550,12 @@ impl SessionPicker {
                 return Ok(KeyAction::Continue);
             }
             KeyCode::Enter => {
-                if !self.input_buffer.trim().is_empty() {
-                    let session_id = generate_session_id();
-                    let idea_text = self.input_buffer.trim().to_string();
-
-                    let mut state = SessionState::new(session_id.clone());
-                    state.modes = self.create_modes;
-                    state.idea_text = Some(idea_text);
-                    state.current_phase = Phase::BrainstormRunning;
-                    state.save()?;
-                    state.log_event("session created")?;
-                    if state.modes.yolo {
-                        state.log_event("mode_toggled: mode=yolo value=true source=cli")?;
-                    }
-                    if state.modes.cheap {
-                        state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
-                    }
-
-                    return Ok(KeyAction::SelectSession(PickerSelection {
-                        session_id,
-                        created: true,
-                    }));
-                } else {
-                    self.input_mode = false;
-                    return Ok(KeyAction::Continue);
+                let trimmed = self.input_buffer.trim().to_string();
+                if !trimmed.is_empty() {
+                    return self.create_session_now(&trimmed);
                 }
+                self.input_mode = false;
+                return Ok(KeyAction::Continue);
             }
             _ => {}
         }
@@ -906,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_single_letter_actions_do_not_fire_outside_palette() {
+    fn direct_n_key_enters_input_mode_outside_palette() {
         let mut picker = test_picker("", 0);
         picker.input_mode = false;
 
@@ -919,10 +942,26 @@ mod tests {
                 .unwrap(),
             KeyAction::Continue
         ));
-        assert!(
-            !picker.input_mode,
-            "new-session action must be routed through the palette"
-        );
+        assert!(picker.input_mode, "bare n should enter input mode");
+        assert!(picker.input_buffer.is_empty(), "buffer should be empty on entry");
+
+        // Esc exits without creating a session
+        assert!(matches!(
+            picker
+                .handle_key(KeyEvent::new(
+                    KeyCode::Esc,
+                    crossterm::event::KeyModifiers::NONE,
+                ))
+                .unwrap(),
+            KeyAction::Continue
+        ));
+        assert!(!picker.input_mode, "Esc should exit input mode");
+    }
+
+    #[test]
+    fn direct_a_q_keys_remain_palette_only() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
 
         picker
             .handle_key(KeyEvent::new(
@@ -975,9 +1014,78 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
+        assert!(text.contains("n new"));
         assert!(text.contains(":new"));
         assert!(text.contains(":quit"));
         assert!(!text.contains("[n] New"));
+    }
+
+    #[test]
+    fn action_bar_advertises_n_new_and_new_when_show_archived_on() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
+        picker.show_archived = true;
+
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..8)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("n new"), "show-archived on bar should advertise n new");
+        assert!(text.contains(":new"), "show-archived on bar should advertise :new");
+    }
+
+    #[test]
+    fn palette_new_without_args_opens_input_modal() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
+
+        let action = picker.execute_palette_input("new").unwrap();
+        assert!(matches!(action, KeyAction::Continue));
+        assert!(picker.input_mode, "empty-args :new should open input modal");
+        assert!(picker.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn palette_new_with_args_creates_session_immediately() {
+        with_temp_codexize_root(|| {
+            let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes::default())
+                .unwrap();
+            picker.input_mode = false;
+
+            let action = picker.execute_palette_input("new ship cheap mode").unwrap();
+            let KeyAction::SelectSession(selection) = action else {
+                panic!("expected SelectSession action");
+            };
+            assert!(selection.created);
+
+            let state = SessionState::load(&selection.session_id).expect("load new session");
+            assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
+            assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        });
+    }
+
+    #[test]
+    fn palette_idea_alias_creates_session_immediately() {
+        with_temp_codexize_root(|| {
+            let mut picker = SessionPicker::new_with_create_modes(crate::state::Modes::default())
+                .unwrap();
+            picker.input_mode = false;
+
+            let action = picker.execute_palette_input("idea ship cheap mode").unwrap();
+            let KeyAction::SelectSession(selection) = action else {
+                panic!("expected SelectSession action");
+            };
+            assert!(selection.created);
+
+            let state = SessionState::load(&selection.session_id).expect("load new session");
+            assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
+            assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        });
     }
 
     #[test]

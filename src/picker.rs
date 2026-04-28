@@ -127,6 +127,8 @@ impl SessionPicker {
         let area = frame.area();
         let bottom_height = if self.input_mode {
             self.input_height(area.width, area.height)
+        } else if self.palette.open {
+            self.palette_overlay_height(area.height)
         } else {
             3
         };
@@ -224,7 +226,10 @@ impl SessionPicker {
 
     fn draw_action_bar(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
         let paragraph = if self.palette.open {
-            Paragraph::new(self.palette_lines())
+            // Inner height excludes the 2 border rows. Suggestions clamp before
+            // the input row so very short terminals still show the buffer.
+            let inner_h = area.height.saturating_sub(2);
+            Paragraph::new(self.palette_lines(area.width, inner_h))
                 .style(Style::default().fg(Color::Gray))
                 .block(Block::default().borders(Borders::ALL).title("Command"))
         } else {
@@ -252,7 +257,27 @@ impl SessionPicker {
         frame.render_widget(paragraph, area);
     }
 
-    fn palette_lines(&self) -> Vec<Line<'static>> {
+    /// Inner-row count for the palette section (suggestions clamp before
+    /// the input row so very short terminals still show the buffer).
+    fn palette_inner_rows(&self) -> u16 {
+        const MAX_OVERLAY_INNER: u16 = 12; // input + up to 10 suggestions + help
+        let commands = self.palette_commands();
+        let filtered = palette::filter(&self.palette.buffer, &commands);
+        let suggestions = filtered.len().min(10) as u16;
+        // input + suggestions + help row
+        (1 + suggestions + 1).min(MAX_OVERLAY_INNER)
+    }
+
+    fn palette_overlay_height(&self, total_height: u16) -> u16 {
+        // Reserve at least one row for the session list above the overlay.
+        const LIST_RESERVE: u16 = 4;
+        let inner = self.palette_inner_rows();
+        let desired = inner + 2; // borders top/bottom
+        let cap = total_height.saturating_sub(LIST_RESERVE).max(3);
+        desired.min(cap).max(3)
+    }
+
+    fn palette_lines(&self, width: u16, inner_h: u16) -> Vec<Line<'static>> {
         let commands = self.palette_commands();
         let buffer = self.palette.buffer.clone();
         let ghost = palette::ghost_completion(&buffer, &commands).unwrap_or("");
@@ -264,7 +289,7 @@ impl SessionPicker {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(buffer),
+            Span::raw(buffer.clone()),
         ];
         if !suffix.is_empty() {
             input.push(Span::styled(
@@ -272,14 +297,41 @@ impl SessionPicker {
                 Style::default().fg(Color::DarkGray),
             ));
         }
+
+        let mut lines: Vec<Line<'static>> = vec![Line::from(input)];
+        let max = inner_h as usize;
+        if max == 0 {
+            return lines;
+        }
+
+        // Inner width for suggestion rows excludes the surrounding block borders.
+        let inner_width = width.saturating_sub(2);
+
         let help = self
             .palette_status
             .clone()
             .unwrap_or_else(|| "Esc close  Tab complete  Enter run".to_string());
-        vec![
-            Line::from(input),
-            Line::from(Span::styled(help, Style::default().fg(Color::DarkGray))),
-        ]
+        let help_fits = max >= 2 && (inner_width as usize) >= help.chars().count().min(1);
+        let help_reserve = if help_fits { 1 } else { 0 };
+        let suggestion_capacity = max.saturating_sub(1).saturating_sub(help_reserve);
+
+        let filtered = palette::filter(&buffer, &commands);
+        for cmd in filtered.iter().take(suggestion_capacity) {
+            let text = palette::suggestion_text(cmd, inner_width);
+            lines.push(Line::from(Span::styled(
+                text,
+                Style::default().fg(Color::Gray),
+            )));
+        }
+
+        if help_fits && lines.len() < max {
+            lines.push(Line::from(Span::styled(
+                help,
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        lines
     }
 
     fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
@@ -1009,6 +1061,92 @@ mod tests {
             .unwrap();
 
         assert_eq!(picker.input_buffer, ":");
+    }
+
+    #[test]
+    fn palette_overlay_empty_buffer_lists_commands_in_picker() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
+        picker.palette.open();
+
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..24)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Empty buffer lists every command with help text.
+        assert!(text.contains("quit"), "lists quit");
+        assert!(text.contains("Exit picker"));
+        assert!(text.contains("new"));
+        assert!(text.contains("Create a session"));
+        assert!(text.contains("idea"));
+        assert!(text.contains("show-archived"));
+
+        // The picker `new` has a real direct key (`n`), so its shortcut renders.
+        // `idea`/`archive`/`delete` are palette-only, no shortcut text.
+        // Strip the surrounding `│` border characters before inspecting trailers.
+        let strip_borders = |row: &str| -> String {
+            row.trim_matches(|c: char| c == '│' || c == ' ')
+                .trim_end()
+                .to_string()
+        };
+
+        let new_row = text
+            .lines()
+            .find(|l| l.contains("Create a session"))
+            .expect("new row present");
+        assert!(
+            strip_borders(new_row).ends_with('n'),
+            "new advertises shortcut n: {new_row:?}"
+        );
+
+        // Idea has no direct key in the picker; the suggestion text must omit
+        // the shortcut entirely. Inspect the rendered cell content directly to
+        // avoid coupling to padding inside the bordered overlay.
+        let commands = picker.palette_commands();
+        let idea = commands
+            .iter()
+            .find(|c| c.name == "idea")
+            .expect("idea command present");
+        let idea_text = palette::suggestion_text(idea, 78);
+        assert!(
+            !idea_text.contains(" i\u{0}") && !idea_text.trim_end().ends_with('i'),
+            "idea suggestion must not advertise a shortcut hint: {idea_text:?}"
+        );
+    }
+
+    #[test]
+    fn palette_overlay_filters_and_resolves_alias_in_picker() {
+        let mut picker = test_picker("", 0);
+        picker.input_mode = false;
+        picker.palette.open();
+        picker.palette.buffer = "ar".to_string();
+        picker.palette.cursor = 2;
+
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..24)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            text.contains("archive") || text.contains("show-archived"),
+            "ar prefix surfaces archive-related commands: {text}"
+        );
+        // Tab still resolves to the ghost completion via shared palette helpers.
+        let commands = picker.palette_commands();
+        let ghost = palette::ghost_completion(&picker.palette.buffer, &commands);
+        assert!(
+            ghost.is_some(),
+            "ghost autocomplete should still resolve from prefix"
+        );
     }
 
     #[test]

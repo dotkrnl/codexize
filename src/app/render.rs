@@ -240,18 +240,31 @@ impl App {
 
         // 5. Footer zone — three-way branch (see "Determine footer zone").
         if let Some(m) = modal {
-            // Full-screen modal overlay: Clear wipes the area (including the
-            // body and rules drawn above), then a bordered block frames the
-            // modal content with the keymap pinned to the inner bottom row.
+            let terminal_width = area.width;
+            let terminal_height = area.height;
+            let max_w = terminal_width.saturating_sub(4).max(1);
+            let dialog_w = max_w.min(80).max(max_w.min(40));
+            let inner_w = dialog_w.saturating_sub(2);
+            let content = self.modal_content_lines(m, inner_w);
+            let content_h = content.len();
+            let dialog_h = ((content_h + 3) as u16).min(terminal_height.saturating_sub(2));
+            let dialog = ratatui::layout::Rect::new(
+                (terminal_width.saturating_sub(dialog_w)) / 2,
+                (terminal_height.saturating_sub(dialog_h)) / 2,
+                dialog_w,
+                dialog_h,
+            );
+
+            // Clear only the dialog rect so the surrounding top/body chrome
+            // remains visible behind the centered overlay.
+            frame.render_widget(Clear, dialog);
             let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
-            let inner = block.inner(area);
-            frame.render_widget(Clear, area);
-            frame.render_widget(block, area);
+            frame.render_widget(block.clone(), dialog);
+            let inner = block.inner(dialog);
 
             if inner.height > 0 && inner.width > 0 {
                 let modal_keymap =
                     keymap(self.state.current_phase, Some(m), caps, false, inner.width);
-                let content = self.modal_content_lines(m, inner.width);
                 let inner_h = inner.height as usize;
 
                 // The keymap occupies the last inner row, so content can use
@@ -378,11 +391,12 @@ impl App {
         }
     }
 
-    fn modal_content_lines(&self, modal: ModalKind, _width: u16) -> Vec<Line<'static>> {
+    fn modal_content_lines(&self, modal: ModalKind, width: u16) -> Vec<Line<'static>> {
         match modal {
             ModalKind::SkipToImpl => skip_to_impl_content(
                 self.state.skip_to_impl_rationale.as_deref(),
                 self.state.skip_to_impl_kind,
+                width,
             ),
             ModalKind::GitGuard => guard_content(self.state.pending_guard_decision.as_ref()),
             ModalKind::SpecReviewPaused => vec![Line::from(Span::styled(
@@ -394,7 +408,7 @@ impl App {
                 Style::default().fg(Color::White),
             ))],
             ModalKind::StageError(stage_id) => {
-                stage_error_content(stage_id, self.state.agent_error.as_deref())
+                stage_error_content(stage_id, self.state.agent_error.as_deref(), width)
             }
         }
     }
@@ -803,6 +817,7 @@ impl App {
 fn skip_to_impl_content(
     rationale: Option<&str>,
     kind: Option<crate::artifacts::SkipToImplKind>,
+    width: u16,
 ) -> Vec<Line<'static>> {
     use crate::artifacts::SkipToImplKind;
 
@@ -817,18 +832,24 @@ fn skip_to_impl_content(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("(no rationale provided)");
+    let rationale_lines = wrap_input(rationale_text, width.max(1) as usize);
 
-    vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             header.to_string(),
             Style::default().fg(Color::White),
         )),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Rationale: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(rationale_text.to_string()),
-        ]),
-    ]
+        Line::from(Span::styled(
+            "Rationale: ".to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    for line in rationale_lines {
+        lines.push(Line::from(line));
+    }
+
+    lines
 }
 
 fn guard_content(decision: Option<&crate::state::PendingGuardDecision>) -> Vec<Line<'static>> {
@@ -868,22 +889,30 @@ fn stage_error_title(stage_id: StageId) -> &'static str {
     }
 }
 
-fn stage_error_content(stage_id: StageId, error: Option<&str>) -> Vec<Line<'static>> {
+fn stage_error_content(stage_id: StageId, error: Option<&str>, width: u16) -> Vec<Line<'static>> {
     let title = stage_error_title(stage_id);
     let error_text = error
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("(no error details)");
     let truncated: String = error_text.chars().take(300).collect();
+    let wrapped = wrap_input(&truncated, width.max(1) as usize);
 
-    vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             title.to_string(),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(truncated, Style::default().fg(Color::White))),
-    ]
+    ];
+    for line in wrapped {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(Color::White),
+        )));
+    }
+
+    lines
 }
 
 #[cfg(test)]
@@ -1618,6 +1647,29 @@ mod tests {
         (0..h).map(|y| line_text(&buf, y, w)).collect()
     }
 
+    fn render_full_frame_buf(app: &mut App, w: u16, h: u16) -> Buffer {
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn raw_line_text(buf: &Buffer, y: u16, width: u16) -> String {
+        (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>()
+    }
+
+    fn expected_dialog_rect(terminal_width: u16, terminal_height: u16, content_h: usize) -> Rect {
+        let max_w = terminal_width.saturating_sub(4).max(1);
+        let dialog_w = max_w.min(80).max(max_w.min(40));
+        let dialog_h = ((content_h + 3) as u16).min(terminal_height.saturating_sub(2));
+        Rect::new(
+            (terminal_width - dialog_w) / 2,
+            (terminal_height - dialog_h) / 2,
+            dialog_w,
+            dialog_h,
+        )
+    }
+
     fn impl_round_2_running_app() -> App {
         let nodes = vec![node(
             "Implementation",
@@ -1765,105 +1817,163 @@ mod tests {
         );
     }
 
-    /// Pads a modal content string to fit the inner width and wraps it with
-    /// the bordered block's vertical bars. `inner_width = FULL_FRAME_WIDTH - 2`
-    /// because the bordered block consumes one column on each side.
-    fn modal_row(text: &str) -> String {
-        let inner_width = (FULL_FRAME_WIDTH as usize) - 2;
+    /// Pads a modal content string to fit the dialog inner width and wraps it
+    /// with the bordered block's vertical bars.
+    fn modal_row(inner_width: u16, text: &str) -> String {
+        let inner_width = inner_width as usize;
         let pad = inner_width.saturating_sub(text.chars().count());
         format!("│{}{}│", text, " ".repeat(pad))
     }
 
     #[test]
-    fn full_screen_spec_review_paused_shows_sheet_above_keymap() {
+    fn spec_review_modal_is_centered_with_content_driven_height() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::SpecReviewPaused;
 
-        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
-        let top = format!("┌{}┐", "─".repeat(198));
-        let bottom = format!("└{}┘", "─".repeat(198));
-        let blank = modal_row("");
-        let title = modal_row("Spec review complete");
-        let keymap_inner = format!(
-            "Enter continue · n new reviewer  ·  {}q quit",
-            " ".repeat(156)
-        );
-        let keymap = format!("│{keymap_inner}│");
+        let width = 100;
+        let height = 30;
+        let buf = render_full_frame_buf(&mut app, width, height);
+        let dialog = expected_dialog_rect(width, height, 1);
+        let inner_width = dialog.width.saturating_sub(2);
 
+        assert_eq!(dialog, Rect::new(10, 13, 80, 4));
+        assert!(raw_line_text(&buf, 0, width).contains("Spec Review · paused"));
         assert_eq!(
-            lines,
-            vec![
-                top,
-                title,
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank,
-                keymap,
-                bottom,
-            ]
+            raw_line_text(&buf, dialog.y, width),
+            format!(
+                "{}┌{}┐{}",
+                " ".repeat(dialog.x as usize),
+                "─".repeat(inner_width as usize),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
+        );
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + 1, width),
+            format!(
+                "{}{}{}",
+                " ".repeat(dialog.x as usize),
+                modal_row(inner_width, "Spec review complete"),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
+        );
+        assert!(
+            raw_line_text(&buf, dialog.y + 2, width).contains("Enter continue"),
+            "keymap should occupy the last inner row"
+        );
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + dialog.height - 1, width),
+            format!(
+                "{}└{}┘{}",
+                " ".repeat(dialog.x as usize),
+                "─".repeat(inner_width as usize),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
         );
     }
 
     #[test]
-    fn full_screen_stage_error_shows_error_sheet() {
+    fn stage_error_modal_wraps_long_text_inside_centered_dialog() {
         let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
         app.state.current_phase = Phase::SpecReviewRunning;
-        app.state.agent_error = Some("model timeout fetching response".to_string());
+        app.state.agent_error = Some(
+            "model timeout while fetching a response from the remote reviewer after multiple retries"
+                .to_string(),
+        );
 
-        let lines = normalize_frame(render_full_frame(&mut app, FULL_FRAME_WIDTH, 24));
-        let top = format!("┌{}┐", "─".repeat(198));
-        let bottom = format!("└{}┘", "─".repeat(198));
-        let blank = modal_row("");
-        let title = modal_row("Spec review failed");
-        let body = modal_row("model timeout fetching response");
-        let keymap_inner = format!("r retry  ·  {}q quit", " ".repeat(180));
-        let keymap = format!("│{keymap_inner}│");
+        let width = 100;
+        let height = 30;
+        let buf = render_full_frame_buf(&mut app, width, height);
+        let dialog = expected_dialog_rect(width, height, 4);
 
+        assert_eq!(dialog, Rect::new(10, 11, 80, 7));
+        assert!(raw_line_text(&buf, dialog.y + 1, width).contains("Spec review failed"));
         assert_eq!(
-            lines,
-            vec![
-                top,
-                title,
-                blank.clone(),
-                body,
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank.clone(),
-                blank,
-                keymap,
-                bottom,
-            ]
+            raw_line_text(&buf, dialog.y + 3, width),
+            format!(
+                "{}{}{}",
+                " ".repeat(dialog.x as usize),
+                modal_row(
+                    dialog.width.saturating_sub(2),
+                    "model timeout while fetching a response from the remote reviewer after"
+                ),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
+        );
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + 4, width),
+            format!(
+                "{}{}{}",
+                " ".repeat(dialog.x as usize),
+                modal_row(dialog.width.saturating_sub(2), "multiple retries"),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
+        );
+        assert!(
+            raw_line_text(&buf, dialog.y + 5, width).contains("r retry"),
+            "keymap should remain visible after wrapped error content"
+        );
+    }
+
+    #[test]
+    fn skip_to_impl_modal_wraps_rationale_and_keeps_label_on_its_own_line() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SkipToImplPending;
+        app.state.skip_to_impl_rationale = Some(
+            "This change only touches the centered dialog rendering path and preserves the existing footer controls."
+                .to_string(),
+        );
+
+        let width = 100;
+        let height = 30;
+        let buf = render_full_frame_buf(&mut app, width, height);
+        let dialog = expected_dialog_rect(width, height, 5);
+
+        assert_eq!(dialog, Rect::new(10, 11, 80, 8));
+        assert!(raw_line_text(&buf, dialog.y + 1, width).contains("The brainstorm agent proposes"));
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + 3, width),
+            format!(
+                "{}{}{}",
+                " ".repeat(dialog.x as usize),
+                modal_row(dialog.width.saturating_sub(2), "Rationale: "),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
+        );
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + 4, width)
+                .trim()
+                .trim_matches('│')
+                .trim_end(),
+            "This change only touches the centered dialog rendering path and preserves the"
+        );
+        assert_eq!(
+            raw_line_text(&buf, dialog.y + 5, width)
+                .trim()
+                .trim_matches('│')
+                .trim_end(),
+            "existing footer controls."
+        );
+    }
+
+    #[test]
+    fn spec_review_modal_clamps_width_on_narrow_terminals() {
+        let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::SpecReviewPaused;
+
+        let width = 30;
+        let height = 20;
+        let buf = render_full_frame_buf(&mut app, width, height);
+        let dialog = expected_dialog_rect(width, height, 1);
+
+        assert_eq!(dialog, Rect::new(2, 8, 26, 4));
+        assert_eq!(
+            raw_line_text(&buf, dialog.y, width),
+            format!(
+                "{}┌{}┐{}",
+                " ".repeat(dialog.x as usize),
+                "─".repeat(dialog.width.saturating_sub(2) as usize),
+                " ".repeat((width - dialog.x - dialog.width) as usize)
+            )
         );
     }
 

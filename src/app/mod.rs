@@ -2887,7 +2887,6 @@ impl App {
             if failed_run.stage == "recovery" {
                 let summary = format!("builder recovery retry exhausted\n{summary}");
                 self.state.agent_error = Some(summary.clone());
-                self.clear_builder_recovery_context();
                 let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
                 self.append_system_message(failed_run.id, MessageKind::End, summary);
                 return true;
@@ -2943,7 +2942,6 @@ impl App {
         if failed_run.stage == "recovery" {
             let summary = format!("builder recovery retry exhausted\n{summary}");
             self.state.agent_error = Some(summary.clone());
-            self.clear_builder_recovery_context();
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             return true;
@@ -7790,10 +7788,13 @@ mod tests {
                 .unwrap_or_default()
                 .starts_with("builder recovery retry exhausted")
         );
-        assert_eq!(app.state.builder.recovery_trigger_task_id, None);
-        assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
-        assert!(app.state.builder.recovery_prev_task_ids.is_empty());
-        assert_eq!(app.state.builder.recovery_trigger_summary, None);
+        assert_eq!(app.state.builder.recovery_trigger_task_id, Some(7));
+        assert_eq!(app.state.builder.recovery_prev_max_task_id, Some(9));
+        assert_eq!(app.state.builder.recovery_prev_task_ids, vec![7, 8, 9]);
+        assert_eq!(
+            app.state.builder.recovery_trigger_summary.as_deref(),
+            Some("stale trigger")
+        );
     }
 
     #[test]

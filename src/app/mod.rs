@@ -2127,19 +2127,15 @@ impl App {
             return;
         };
         self.prime_yolo_exit_tracking(&run);
-        let effort_suffix = match run.effort {
-            EffortLevel::Low => " [low]",
-            EffortLevel::Tough => " [tough]",
-            EffortLevel::Normal => "",
-        };
+        let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
         let started = Message {
             ts: chrono::Utc::now(),
             run_id,
             kind: MessageKind::Started,
             sender: MessageSender::System,
             text: format!(
-                "agent started · {} ({}){}",
-                run.model, run.vendor, effort_suffix
+                "agent started · {}{} ({})",
+                run.model, effort_suffix, run.vendor
             ),
         };
         if let Err(err) = self.state.append_message(&started) {
@@ -2941,7 +2937,7 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Plan Review]", &model, effort);
+        let window_name = window_name_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) = self.try_test_launch(
@@ -3077,7 +3073,7 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Sharding]", &model, effort);
+        let window_name = window_name_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3819,7 +3815,7 @@ impl App {
         };
         let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard_mode);
         let adapter = adapter_for_vendor(vendor_kind);
-        let window_name = window_name_with_model("[Brainstorm]", &model, effort);
+        let window_name = window_name_with_model("[Brainstorm]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -3989,7 +3985,7 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model, vendor_kind, effort);
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "spec-review",
@@ -4126,7 +4122,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
-        let window_name = window_name_with_model("[Planning]", &model, effort);
+        let window_name = window_name_with_model("[Planning]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -4257,7 +4253,7 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model, vendor_kind, effort);
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
@@ -4365,7 +4361,7 @@ impl App {
         let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         let dirty =
             self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
-        let window_name = window_name_with_model("[Sharding]", &model, effort);
+        let window_name = window_name_with_model("[Sharding]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -4506,7 +4502,7 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
-        let window_name = window_name_with_model("[Recovery]", &model, effort);
+        let window_name = window_name_with_model("[Recovery]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -4655,7 +4651,7 @@ impl App {
             modes,
         };
 
-        let window_name = window_name_with_model(&format!("[Round {r} Coder]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard(
             "coder",
@@ -4816,7 +4812,7 @@ impl App {
             modes,
         };
 
-        let window_name = window_name_with_model(&format!("[Round {r} Reviewer]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Round {r} Reviewer]"), &model, vendor_kind, effort);
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard(
             "reviewer",
@@ -8439,7 +8435,7 @@ mod tests {
             );
             assert_eq!(run.model, "claude-sonnet-4-6");
             assert_eq!(run.effort, EffortLevel::Low);
-            assert!(run.window_name.ends_with("[low]"));
+            assert!(run.window_name.ends_with(":low"));
         });
     }
 

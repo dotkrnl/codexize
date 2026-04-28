@@ -730,18 +730,8 @@ fn attempt_run_node(run: &RunRecord) -> Node {
 }
 
 fn agent_run_node(run: &RunRecord) -> Node {
-    let effort_suffix = match run.effort {
-        crate::adapters::EffortLevel::Low => match run.vendor.as_str() {
-            "codex" | "claude" => ":low",
-            _ => "",
-        },
-        crate::adapters::EffortLevel::Tough => match run.vendor.as_str() {
-            "codex" => ":xhigh",
-            "claude" => ":max",
-            _ => "",
-        },
-        crate::adapters::EffortLevel::Normal => "",
-    };
+    let effort_suffix =
+        crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
     let label = format!(
         "{} · {}{}",
         role_label(&run.stage),

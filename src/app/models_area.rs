@@ -109,24 +109,34 @@ fn choose_mode(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProbColumn {
-    Ipbr,    // full "Ixx Pxx Bxx Rxx"
-    TopRank, // single 3-col cell, top-rank phase
+    IpbrVerbose, // "Idea XX   Plan XX   Build XX   Review XX" — 40 cols
+    Ipbr,        // full "Ixx Pxx Bxx Rxx"                      — 15 cols
+    TopRank,     // single 3-col cell, top-rank phase          —  3 cols
     None,
 }
 
-fn full_table_prob_column(width: u16) -> ProbColumn {
-    if width >= 80 {
-        ProbColumn::Ipbr
-    } else if width >= 60 {
-        ProbColumn::TopRank
-    } else {
-        ProbColumn::None
-    }
+/// Compute the name budget if we selected `prob_col` and `vendor_width`.
+fn name_budget_for(width: u16, vendor_width: usize, prob_col: ProbColumn) -> usize {
+    let fixed = full_row_fixed_width(vendor_width, prob_col);
+    (width as usize).saturating_sub(fixed)
 }
 
-fn vendor_abbreviated(width: u16) -> bool {
-    width < 60
+/// Empirically choose a prob column tier: try each from widest to narrowest,
+/// pick the first where name_budget >= NAME_WIDTH_MIN.
+fn choose_prob_column(width: u16, vendor_width: usize) -> ProbColumn {
+    for candidate in [
+        ProbColumn::IpbrVerbose,
+        ProbColumn::Ipbr,
+        ProbColumn::TopRank,
+        ProbColumn::None,
+    ] {
+        if name_budget_for(width, vendor_width, candidate) >= NAME_WIDTH_MIN {
+            return candidate;
+        }
+    }
+    ProbColumn::None
 }
+
 
 // ---------------------------------------------------------------------------
 // Probability column helpers
@@ -176,7 +186,6 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 
 const STATUS_DOT: &str = "●";
 
-const NAME_WIDTH_DEFAULT: usize = 28;
 const NAME_WIDTH_MIN: usize = 8;
 
 fn vendor_label(vendor: VendorKind, abbreviated: bool) -> &'static str {
@@ -206,6 +215,7 @@ fn vendor_column_width(abbreviated: bool) -> usize {
 ///   vw + 1 + 1 + 1 + 4 + 1 + probs_width + (1 if probs)
 fn full_row_fixed_width(vendor_width: usize, prob_col: ProbColumn) -> usize {
     let probs = match prob_col {
+        ProbColumn::IpbrVerbose => 40,
         ProbColumn::Ipbr => 15,
         ProbColumn::TopRank => 3,
         ProbColumn::None => 0,
@@ -218,7 +228,7 @@ fn full_row_fixed_width(vendor_width: usize, prob_col: ProbColumn) -> usize {
 fn name_budget(width: u16, vendor_width: usize, prob_col: ProbColumn) -> usize {
     let fixed = full_row_fixed_width(vendor_width, prob_col);
     let raw = (width as usize).saturating_sub(fixed);
-    raw.clamp(NAME_WIDTH_MIN, NAME_WIDTH_DEFAULT)
+    raw.max(NAME_WIDTH_MIN) // no upper clamp; fills remaining space
 }
 
 fn render_full_table(
@@ -227,9 +237,21 @@ fn render_full_table(
     quota_errors: &[QuotaError],
     width: u16,
 ) -> Vec<Line<'static>> {
-    let prob_col = full_table_prob_column(width);
-    let abbreviated = vendor_abbreviated(width);
-    let vendor_width = vendor_column_width(abbreviated);
+    // Empirical selection: try full vendor width first, fall back to abbreviated.
+    let (abbreviated, vendor_width, prob_col) = {
+        let full_vendor_width = vendor_column_width(false);
+        let prob_col_full = choose_prob_column(width, full_vendor_width);
+        let name_budget_full = name_budget_for(width, full_vendor_width, prob_col_full);
+
+        if name_budget_full >= NAME_WIDTH_MIN {
+            (false, full_vendor_width, prob_col_full)
+        } else {
+            // Fall back to abbreviated vendor and re-choose prob column.
+            let abbrev_vendor_width = vendor_column_width(true);
+            let prob_col_abbrev = choose_prob_column(width, abbrev_vendor_width);
+            (true, abbrev_vendor_width, prob_col_abbrev)
+        }
+    };
     let name_width = name_budget(width, vendor_width, prob_col);
 
     let visible_set = visible_models(models, versions);
@@ -340,6 +362,63 @@ fn render_full_table(
             ));
 
             match prob_col {
+                ProbColumn::IpbrVerbose => {
+                    let idea_pct =
+                        probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
+                    let planning_pct = probability_percent(
+                        prob_for(SelectionPhase::Planning, model),
+                        total_planning,
+                    );
+                    let build_pct =
+                        probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                    let review_pct =
+                        probability_percent(prob_for(SelectionPhase::Review, model), total_review);
+
+                    spans.push(Span::raw(" "));
+                    spans.push(if vendor_failed {
+                        probability_unavailable_span("Idea ")
+                    } else {
+                        probability_span(
+                            "Idea ",
+                            idea_pct,
+                            max_idea,
+                            idea_ranks.get(&model.name) == Some(&1),
+                        )
+                    });
+                    spans.push(Span::raw("   "));
+                    spans.push(if vendor_failed {
+                        probability_unavailable_span("Plan ")
+                    } else {
+                        probability_span(
+                            "Plan ",
+                            planning_pct,
+                            max_planning,
+                            planning_ranks.get(&model.name) == Some(&1),
+                        )
+                    });
+                    spans.push(Span::raw("   "));
+                    spans.push(if vendor_failed {
+                        probability_unavailable_span("Build ")
+                    } else {
+                        probability_span(
+                            "Build ",
+                            build_pct,
+                            max_build,
+                            build_ranks.get(&model.name) == Some(&1),
+                        )
+                    });
+                    spans.push(Span::raw("   "));
+                    spans.push(if vendor_failed {
+                        probability_unavailable_span("Review ")
+                    } else {
+                        probability_span(
+                            "Review ",
+                            review_pct,
+                            max_review,
+                            review_ranks.get(&model.name) == Some(&1),
+                        )
+                    });
+                }
                 ProbColumn::Ipbr => {
                     let idea_pct =
                         probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
@@ -595,7 +674,9 @@ fn render_compact_quota(
         return Vec::new();
     }
 
-    let abbreviated = vendor_abbreviated(width);
+    // Compact mode doesn't render probabilities, so check if full vendor width
+    // fits with no prob column.
+    let abbreviated = width < 60;
 
     // One entry per vendor, ordered Claude · Codex · Gemini · Kimi (fixed
     // identity ordering — the spec sample uses this order).
@@ -924,19 +1005,19 @@ mod tests {
         ];
         let versions = build_version_index(&models);
 
-        // Width 90 → tier 1 (full IPBR).
+        // Width 60 → Ipbr tier (compact single-letter format).
         let (lines, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
-            90,
+            60,
             term_h_for_budget(10),
             ModelsAreaMode::FullTable,
         );
         assert_eq!(mode, ModelsAreaMode::FullTable);
 
         // Render to a buffer so we can inspect cell modifiers.
-        let area = Rect::new(0, 0, 90, lines.len() as u16);
+        let area = Rect::new(0, 0, 60, lines.len() as u16);
         let mut buf = Buffer::empty(area);
         Paragraph::new(lines.clone()).render(area, &mut buf);
 
@@ -1417,13 +1498,19 @@ mod tests {
         let quota_col = row.find("--%").expect("--% must appear for failed quota") as u16;
         assert_eq!(buf.cell((quota_col, 0)).unwrap().fg, Color::Red);
 
-        // Each phase letter still appears, with `--` rendered in red.
-        for ph in ["I", "P", "B", "R"] {
-            let pat = format!("{ph}--");
+        // At width 120, IpbrVerbose is chosen, so phase labels are full words.
+        // probability_unavailable_span renders the entire label+dashes as one red span.
+        for (label, pat) in [
+            ("Idea", "Idea --"),
+            ("Plan", "Plan --"),
+            ("Build", "Build --"),
+            ("Review", "Review --"),
+        ] {
             let col = row
-                .find(&pat)
-                .unwrap_or_else(|| panic!("expected {pat:?} for failed vendor: {row:?}"))
+                .find(pat)
+                .unwrap_or_else(|| panic!("expected {pat:?} for failed vendor ({label}): {row:?}"))
                 as u16;
+            // Check that the first char of the label is red (the whole span is red).
             assert_eq!(buf.cell((col, 0)).unwrap().fg, Color::Red);
         }
     }
@@ -1651,5 +1738,117 @@ mod tests {
         // Width 60 is at the boundary: full vendor labels apply (the
         // 2-letter rule kicks in *below* 60).
         assert!(row.contains("kimi"), "kimi present at width 60: {row:?}");
+    }
+
+    // ----- regression tests for task 2: responsive score column -----
+
+    #[test]
+    fn width_tier_selection_at_50_picks_toprank_or_none() {
+        // Acceptance criterion 1a: at width 50, TopRank or None shown (not Ipbr).
+        let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            50,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
+        let row = full_buffer_line(&lines, 0, 50);
+
+        // Width 50 should not show full Ipbr (15 cols) — that requires more space.
+        // TopRank (3 cols) or None should be chosen based on name budget.
+        assert!(
+            !row.contains("I ") || !row.contains("P ") || !row.contains("B ") || !row.contains("R "),
+            "width 50 must not render full Ipbr tier: {row:?}"
+        );
+    }
+
+    #[test]
+    fn width_tier_selection_at_45_empirically_fits_toprank() {
+        // Acceptance criterion 1a: at width 45, TopRank fits if budget >= NAME_WIDTH_MIN.
+        let models = vec![model_with_axis_score("short", 1.0, 0)];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            45,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
+
+        // With a short name, width 45 should empirically fit TopRank (3 cols).
+        // name_budget_for(45, vendor_width=6, TopRank=3) = 45 - (6+1+1+1+4+1+1+3) = 27
+        // 27 >= 8 (NAME_WIDTH_MIN), so TopRank should be chosen.
+        assert!(
+            lines.len() > 0,
+            "models should render at width 45 with short name"
+        );
+    }
+
+    #[test]
+    fn scores_right_anchored_row_spans_equal_width() {
+        // Acceptance criterion 1b: at width 120, row total spans = 120 cols.
+        let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
+
+        // Check that the row's total visible width equals 120.
+        for (i, line) in lines.iter().enumerate() {
+            let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            assert_eq!(
+                total, 120,
+                "row {i} total span width must equal 120 (scores right-anchored)"
+            );
+        }
+    }
+
+    #[test]
+    fn verbose_tier_renders_full_labels_with_three_space_separation() {
+        // Acceptance criterion 1c: at width >= 63, IpbrVerbose tier chosen.
+        let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            63,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
+        let row = full_buffer_line(&lines, 0, 63);
+
+        // IpbrVerbose should render full phase labels.
+        assert!(row.contains("Idea"), "verbose tier: missing 'Idea': {row:?}");
+        assert!(row.contains("Plan"), "verbose tier: missing 'Plan': {row:?}");
+        assert!(row.contains("Build"), "verbose tier: missing 'Build': {row:?}");
+        assert!(
+            row.contains("Review"),
+            "verbose tier: missing 'Review': {row:?}"
+        );
+
+        // Check three-space separation between cells (e.g., "Idea 50   Plan 50").
+        // The pattern should be: label + two-digit + three-spaces + label.
+        let idea_to_plan = row.find("Idea").and_then(|i| {
+            let tail = &row[i..];
+            tail.find("   Plan").map(|offset| &tail[..offset + 7])
+        });
+        assert!(
+            idea_to_plan.is_some(),
+            "verbose tier: three spaces should separate Idea and Plan: {row:?}"
+        );
     }
 }

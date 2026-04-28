@@ -3205,6 +3205,9 @@ impl App {
                                     review::ReviewStatus::Approved
                                     | review::ReviewStatus::Refine
                                     | review::ReviewStatus::Revise => {
+                                        // SAFETY: the enclosing outer match arm at :3196 only matches
+                                        // `HumanBlocked | AgentPivot`, so the other ReviewStatus
+                                        // variants cannot reach this inner match.
                                         unreachable!("already handled")
                                     }
                                 };

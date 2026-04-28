@@ -508,8 +508,7 @@ git_status = ""
         init_repo(repo.path());
         let snapshot_dir = tempfile::TempDir::new().unwrap();
         with_cwd(repo.path(), || {
-            capture_non_coder(snapshot_dir.path(), "auditor", GuardMode::AutoReset, false)
-                .unwrap();
+            capture_non_coder(snapshot_dir.path(), "auditor", GuardMode::AutoReset, false).unwrap();
         });
         let snap = read_snapshot(snapshot_dir.path()).expect("snapshot must exist");
         assert!(!snap.head.is_empty(), "head must be captured");
@@ -531,9 +530,7 @@ git_status = ""
         });
         let snap = read_snapshot(snapshot_dir.path()).expect("snapshot must exist");
         assert!(
-            snap.control_files
-                .keys()
-                .any(|k| k.ends_with("task.toml")),
+            snap.control_files.keys().any(|k| k.ends_with("task.toml")),
             "task.toml must be captured under control_files: {:?}",
             snap.control_files.keys().collect::<Vec<_>>()
         );

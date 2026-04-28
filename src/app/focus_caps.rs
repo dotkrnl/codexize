@@ -8,4 +8,3 @@ pub struct FocusCaps {
     pub can_edit: bool,
     pub can_back: bool,
 }
-

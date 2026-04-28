@@ -137,7 +137,6 @@ fn choose_prob_column(width: u16, vendor_width: usize) -> ProbColumn {
     ProbColumn::None
 }
 
-
 // ---------------------------------------------------------------------------
 // Probability column helpers
 // ---------------------------------------------------------------------------
@@ -1761,7 +1760,10 @@ mod tests {
         // Width 50 should not show full Ipbr (15 cols) — that requires more space.
         // TopRank (3 cols) or None should be chosen based on name budget.
         assert!(
-            !row.contains("I ") || !row.contains("P ") || !row.contains("B ") || !row.contains("R "),
+            !row.contains("I ")
+                || !row.contains("P ")
+                || !row.contains("B ")
+                || !row.contains("R "),
             "width 50 must not render full Ipbr tier: {row:?}"
         );
     }
@@ -1832,9 +1834,18 @@ mod tests {
         let row = full_buffer_line(&lines, 0, 63);
 
         // IpbrVerbose should render full phase labels.
-        assert!(row.contains("Idea"), "verbose tier: missing 'Idea': {row:?}");
-        assert!(row.contains("Plan"), "verbose tier: missing 'Plan': {row:?}");
-        assert!(row.contains("Build"), "verbose tier: missing 'Build': {row:?}");
+        assert!(
+            row.contains("Idea"),
+            "verbose tier: missing 'Idea': {row:?}"
+        );
+        assert!(
+            row.contains("Plan"),
+            "verbose tier: missing 'Plan': {row:?}"
+        );
+        assert!(
+            row.contains("Build"),
+            "verbose tier: missing 'Build': {row:?}"
+        );
         assert!(
             row.contains("Review"),
             "verbose tier: missing 'Review': {row:?}"

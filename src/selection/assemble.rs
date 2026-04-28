@@ -533,4 +533,78 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].quota_percent, None);
     }
+
+    fn with_temp_home_cache<T>(
+        dashboard: Vec<DashboardEntry>,
+        quotas: QuotaPayload,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let original = std::env::var_os("HOME");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+        cache::save_dashboard(&dashboard).unwrap();
+        cache::save_quotas(&quotas).unwrap();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        outcome.unwrap()
+    }
+
+    #[test]
+    fn assemble_models_uses_default_cache_dir_when_fresh() {
+        let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+        let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+        with_temp_home_cache(dashboard, quotas, || {
+            // Cache was just written, so dashboard + quotas are fresh; the
+            // public wrapper should not need any network refresh.
+            let (models, errors) = assemble_models();
+            assert!(errors.is_empty(), "fresh cache should not trigger refresh errors");
+            assert_eq!(models.len(), 1);
+            assert_eq!(models[0].name, "claude-sonnet-4-6");
+            assert_eq!(models[0].quota_percent, Some(80));
+        });
+    }
+
+    #[test]
+    fn assemble_from_cached_only_returns_empty_when_no_cache() {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let original = std::env::var_os("HOME");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+        let models = assemble_from_cached_only();
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        assert!(models.is_empty(), "no cache should yield empty model list");
+    }
+
+    #[test]
+    fn assemble_from_cached_only_yields_models_when_cache_is_present() {
+        let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+        let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+        with_temp_home_cache(dashboard, quotas, || {
+            let models = assemble_from_cached_only();
+            assert_eq!(models.len(), 1);
+            assert_eq!(models[0].name, "claude-sonnet-4-6");
+            assert_eq!(models[0].quota_percent, Some(80));
+        });
+    }
 }

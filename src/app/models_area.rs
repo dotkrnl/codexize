@@ -84,8 +84,9 @@ fn choose_mode(
 ) -> ModelsAreaMode {
     match prev_mode {
         ModelsAreaMode::FullTable => {
-            // Full → Compact uses the strict threshold.
-            if models_budget >= visible_count {
+            // Full → Compact requires one extra row of headroom; Compact → Full below
+            // keeps the same threshold, creating the intended two-line hysteresis band.
+            if models_budget > visible_count {
                 ModelsAreaMode::FullTable
             } else {
                 ModelsAreaMode::CompactQuota
@@ -303,8 +304,13 @@ fn render_full_table(
             let dot_color = if vendor_failed {
                 Color::Red
             } else {
-                let score = model.current_score.round().clamp(0.0, 100.0) as u8;
-                probability_color(score, 100)
+                match model.quota_percent {
+                    Some(v) if v >= 80 => probability_color(v, 100),
+                    Some(v) if v >= 40 => Color::Yellow,
+                    Some(0) => Color::Red,
+                    Some(v) => probability_color(v, 100),
+                    None => Color::DarkGray,
+                }
             };
             let dot_span = Span::styled(STATUS_DOT, Style::default().fg(dot_color));
 
@@ -777,7 +783,7 @@ mod tests {
         // promotes the best-score representative when phases miss).
         let visible_count = visible_models(&models, &versions).len() as u16;
 
-        // Strict: models_budget == count keeps full.
+        // Full mode now needs one row of headroom before it stays full.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
@@ -786,18 +792,18 @@ mod tests {
             term_h_for_budget(visible_count),
             ModelsAreaMode::FullTable,
         );
-        assert_eq!(mode, ModelsAreaMode::FullTable);
+        assert_eq!(mode, ModelsAreaMode::CompactQuota);
 
-        // Strict: models_budget == count - 1 falls to compact.
+        // One extra row keeps full.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
             &[],
             120,
-            term_h_for_budget(visible_count - 1),
+            term_h_for_budget(visible_count + 1),
             ModelsAreaMode::FullTable,
         );
-        assert_eq!(mode, ModelsAreaMode::CompactQuota);
+        assert_eq!(mode, ModelsAreaMode::FullTable);
     }
 
     #[test]
@@ -847,20 +853,13 @@ mod tests {
         let term_at = term_h_for_budget(visible_count);
         let term_below = term_h_for_budget(visible_count - 1);
 
-        // Start on the strict boundary in full mode. With strict
-        // full→compact, the first frame at term_at keeps full and the
-        // second at term_below drops to compact. From compact the +1
-        // hysteresis means count alone never flips us back; oscillating
-        // between term_at and term_below stays *compact* every frame.
+        // Start on the boundary in full mode. Full→compact now requires
+        // one extra row of headroom, so budget == count drops immediately.
+        // From compact the +1 hysteresis means count alone never flips us back.
         let mut mode = ModelsAreaMode::FullTable;
 
-        // Frame 1: budget == count, prev=full → stays full.
+        // Frame 1: budget == count, prev=full → compact.
         let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_at, mode);
-        assert_eq!(m, ModelsAreaMode::FullTable);
-        mode = m;
-
-        // Frame 2: budget == count - 1, prev=full → strict drops to compact.
-        let (_, m) = responsive_models_area(&models, &versions, &[], 120, term_below, mode);
         assert_eq!(m, ModelsAreaMode::CompactQuota);
         mode = m;
 
@@ -1429,6 +1428,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn full_table_dot_color_tracks_quota_not_score() {
+        let mut high_score_no_quota = model_with_axis_score("gpt-alpha", 1.0, 0);
+        high_score_no_quota.current_score = 99.0;
+        high_score_no_quota.quota_percent = Some(0);
+        let mut low_score_full_quota = model_with_axis_score("gpt-beta", 1.0, 1);
+        low_score_full_quota.current_score = 1.0;
+        low_score_full_quota.quota_percent = Some(100);
+        let models = vec![high_score_no_quota, low_score_full_quota];
+        let versions = build_version_index(&models);
+
+        let (lines, _) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(10),
+            ModelsAreaMode::FullTable,
+        );
+
+        let area = Rect::new(0, 0, 120, lines.len() as u16);
+        let mut buf = Buffer::empty(area);
+        Paragraph::new(lines).render(area, &mut buf);
+        let rows: Vec<String> = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                    .collect()
+            })
+            .collect();
+
+        let red_row = rows
+            .iter()
+            .position(|row| row.contains("alpha"))
+            .expect("alpha row");
+        let red_col = rows[red_row].find(STATUS_DOT).expect("alpha dot") as u16;
+        assert_eq!(buf.cell((red_col, red_row as u16)).unwrap().fg, Color::Red);
+
+        let green_row = rows
+            .iter()
+            .position(|row| row.contains("beta"))
+            .expect("beta row");
+        let green_col = rows[green_row].find(STATUS_DOT).expect("beta dot") as u16;
+        assert_eq!(
+            buf.cell((green_col, green_row as u16)).unwrap().fg,
+            probability_color(100, 100)
+        );
+    }
+
     // ----- snapshot matrix (widths and heights from task) -----
 
     fn snapshot_models() -> Vec<CachedModel> {
@@ -1449,14 +1497,14 @@ mod tests {
         let visible_count = visible_models(&models, &versions).len() as u16;
 
         for &width in &[200u16, 120, 100, 80, 60, 40, 30] {
-            // Height always covers visible_count so we exercise full-mode
+            // Height includes one row above visible_count so we exercise full-mode
             // width tiers across the matrix.
             let (lines, mode) = responsive_models_area(
                 &models,
                 &versions,
                 &[],
                 width,
-                term_h_for_budget(visible_count),
+                term_h_for_budget(visible_count + 1),
                 ModelsAreaMode::FullTable,
             );
             assert_eq!(mode, ModelsAreaMode::FullTable, "width {width}: mode");
@@ -1483,7 +1531,7 @@ mod tests {
         // and visible_count = 4 these map to:
         //   term_h=30 → budget=19 → full
         //   term_h=20 → budget= 9 → full
-        //   term_h=15 → budget= 4 → full (strict boundary, prev=full holds)
+        //   term_h=15 → budget= 4 → compact (full now needs budget > visible_count)
         //   term_h=12 → budget= 1 → compact (1 < 4)
         //   term_h=10 → budget= 0 → omit (preserves prev_mode)
         let models = snapshot_models();
@@ -1512,8 +1560,8 @@ mod tests {
             },
             Case {
                 term_h: 15,
-                expect_mode: ModelsAreaMode::FullTable,
-                expect_line_count: visible_count as usize,
+                expect_mode: ModelsAreaMode::CompactQuota,
+                expect_line_count: 1,
             },
             Case {
                 term_h: 12,
@@ -1548,7 +1596,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_matrix_heights_omit_then_grow_back_to_full() {
+    fn snapshot_matrix_heights_omit_then_grow_back_requires_headroom() {
         // Same fixture as the height matrix above, but starting from
         // prev=FullTable: a transient drop into omit must not flip the
         // preserved mode, so when the terminal grows back to a full-table
@@ -1565,7 +1613,7 @@ mod tests {
         assert_eq!(mode, ModelsAreaMode::FullTable, "omit preserves prev_mode");
         prev = mode;
 
-        // Grow to exactly the strict boundary; prev=full means full again.
+        // Grow to exactly the boundary; full mode still requires headroom.
         let (_, mode) = responsive_models_area(
             &models,
             &versions,
@@ -1573,6 +1621,16 @@ mod tests {
             120,
             term_h_for_budget(visible_count),
             prev,
+        );
+        assert_eq!(mode, ModelsAreaMode::CompactQuota);
+
+        let (_, mode) = responsive_models_area(
+            &models,
+            &versions,
+            &[],
+            120,
+            term_h_for_budget(visible_count + 1),
+            ModelsAreaMode::FullTable,
         );
         assert_eq!(mode, ModelsAreaMode::FullTable);
     }

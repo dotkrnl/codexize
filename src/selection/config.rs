@@ -155,11 +155,7 @@ mod tests {
         // Non-opus Claude variants do not match the substring needle, so
         // the bias falls back to the neutral 1.0.
         assert_eq!(
-            cfg.vendor_bias(
-                VendorKind::Claude,
-                "claude-sonnet-4",
-                SelectionPhase::Idea
-            ),
+            cfg.vendor_bias(VendorKind::Claude, "claude-sonnet-4", SelectionPhase::Idea),
             1.0
         );
     }

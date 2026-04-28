@@ -568,7 +568,10 @@ mod tests {
             // Cache was just written, so dashboard + quotas are fresh; the
             // public wrapper should not need any network refresh.
             let (models, errors) = assemble_models();
-            assert!(errors.is_empty(), "fresh cache should not trigger refresh errors");
+            assert!(
+                errors.is_empty(),
+                "fresh cache should not trigger refresh errors"
+            );
             assert_eq!(models.len(), 1);
             assert_eq!(models[0].name, "claude-sonnet-4-6");
             assert_eq!(models[0].quota_percent, Some(80));

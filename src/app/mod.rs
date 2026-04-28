@@ -1028,7 +1028,7 @@ impl App {
                 let _ = self.transition_to_phase(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {
-                kill_window(&format!("[Coder r{r}]"));
+                kill_window(&format!("[Builder r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
                     if self.state.skip_to_impl_rationale.is_some() {
@@ -4188,7 +4188,7 @@ impl App {
             effort,
         };
 
-        let window_name = window_name_with_model(&format!("[Coder r{r}]"), &model, effort);
+        let window_name = window_name_with_model(&format!("[Builder r{r}]"), &model, effort);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard(
             "coder",
@@ -4580,7 +4580,7 @@ impl App {
 fn kill_window(base: &str) {
     // Windows are now named "[Base] <model>", so match by prefix: exact match
     // or the base followed by a space. The base ends with `]`, which prevents
-    // `[Coder r1]` from accidentally matching `[Coder r10]`, etc.
+    // `[Builder r1]` from accidentally matching `[Builder r10]`, etc.
     let prefix = format!("{base} ");
     let Ok(output) = std::process::Command::new("tmux")
         .args(["list-windows", "-F", "#{window_name}"])
@@ -5856,7 +5856,7 @@ mod tests {
             attempt,
             model: "gpt-5".to_string(),
             vendor: "codex".to_string(),
-            window_name: format!("[Coder t1 r{round}]"),
+            window_name: format!("[Builder t1 r{round}]"),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -6015,7 +6015,7 @@ mod tests {
             attempt: 1,
             model: "claude".to_string(),
             vendor: "anthropic".to_string(),
-            window_name: "[Coder]".to_string(),
+            window_name: "[Builder]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -6026,7 +6026,7 @@ mod tests {
         });
         let mut app = mk_app(state);
         let task_idx = row_index(&app, "Task 7");
-        let coder_idx = row_index(&app, "Coder");
+        let coder_idx = row_index(&app, "Builder");
         let task_key = app.visible_rows[task_idx].key.clone();
         let coder_key = app.visible_rows[coder_idx].key.clone();
         app.collapsed_overrides
@@ -6039,7 +6039,7 @@ mod tests {
         assert!(row_index_opt(&app, "Task 7").is_some());
         let task_idx = row_index(&app, "Task 7");
         assert!(!app.is_expanded(task_idx));
-        assert!(row_index_opt(&app, "Coder").is_none());
+        assert!(row_index_opt(&app, "Builder").is_none());
     }
 
     #[test]
@@ -6217,7 +6217,7 @@ mod tests {
             attempt: 1,
             model: "gpt-5".to_string(),
             vendor: "openai".to_string(),
-            window_name: "[Coder]".to_string(),
+            window_name: "[Builder]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -6227,7 +6227,7 @@ mod tests {
             mount_device_id: None,
         });
         let mut app = mk_app(state);
-        let coder_idx = row_index(&app, "Coder");
+        let coder_idx = row_index(&app, "Builder");
         let coder_key = app.visible_rows[coder_idx].key.clone();
         app.selected = coder_idx;
 
@@ -6237,7 +6237,7 @@ mod tests {
             app.collapsed_overrides.get(&coder_key),
             Some(&ExpansionOverride::Collapsed)
         );
-        let coder_idx = row_index(&app, "Coder");
+        let coder_idx = row_index(&app, "Builder");
         assert!(!app.is_expanded(coder_idx));
     }
 
@@ -6271,7 +6271,7 @@ mod tests {
             attempt: 1,
             model: "gpt-5".to_string(),
             vendor: "openai".to_string(),
-            window_name: "[Coder 7]".to_string(),
+            window_name: "[Builder 7]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
@@ -6288,7 +6288,7 @@ mod tests {
             attempt: 1,
             model: "gpt-5".to_string(),
             vendor: "openai".to_string(),
-            window_name: "[Coder 8]".to_string(),
+            window_name: "[Builder 8]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -6304,7 +6304,7 @@ mod tests {
         app.toggle_expand_focused();
 
         assert_eq!(row_label(&app, app.selected), "Task 7");
-        assert!(row_index_opt(&app, "Coder").is_some());
+        assert!(row_index_opt(&app, "Builder").is_some());
     }
 
     #[test]
@@ -6584,7 +6584,7 @@ mod tests {
                 attempt: 1,
                 model: "claude-sonnet".to_string(),
                 vendor: "claude".to_string(),
-                window_name: "[Coder r3]".to_string(),
+                window_name: "[Builder r3]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
@@ -6601,7 +6601,7 @@ mod tests {
                 attempt: 2,
                 model: "gemini-2.5-pro".to_string(),
                 vendor: "gemini".to_string(),
-                window_name: "[Coder r3]".to_string(),
+                window_name: "[Builder r3]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
@@ -6618,7 +6618,7 @@ mod tests {
                 attempt: 3,
                 model: "gpt-5".to_string(),
                 vendor: "codex".to_string(),
-                window_name: "[Coder r3]".to_string(),
+                window_name: "[Builder r3]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
@@ -8023,7 +8023,7 @@ feedback = ["split task 2"]
                 attempt: 1,
                 model: "gpt-5".to_string(),
                 vendor: "codex".to_string(),
-                window_name: "[Coder]".to_string(),
+                window_name: "[Builder]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
@@ -8105,7 +8105,7 @@ estimated_tokens = 10
                 attempt: 1,
                 model: "gpt-5".to_string(),
                 vendor: "codex".to_string(),
-                window_name: "[Coder]".to_string(),
+                window_name: "[Builder]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Done,
@@ -8137,7 +8137,7 @@ estimated_tokens = 10
                 attempt: 1,
                 model: "claude-sonnet".to_string(),
                 vendor: "claude".to_string(),
-                window_name: "[Coder]".to_string(),
+                window_name: "[Builder]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
@@ -8154,7 +8154,7 @@ estimated_tokens = 10
                 attempt: 2,
                 model: "gpt-5".to_string(),
                 vendor: "codex".to_string(),
-                window_name: "[Coder]".to_string(),
+                window_name: "[Builder]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Failed,
@@ -9527,7 +9527,7 @@ estimated_tokens = 1
                 attempt: 1,
                 model: "m".to_string(),
                 vendor: "v".to_string(),
-                window_name: "[Coder r1]".to_string(),
+                window_name: "[Builder r1]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: None,
                 status: RunStatus::Running,
@@ -9584,7 +9584,7 @@ estimated_tokens = 1
                 attempt: 1,
                 model: "m".to_string(),
                 vendor: "v".to_string(),
-                window_name: "[Coder r1]".to_string(),
+                window_name: "[Builder r1]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: None,
                 status: RunStatus::Running,
@@ -9707,7 +9707,7 @@ estimated_tokens = 1
                 attempt: 1,
                 model: "claude".to_string(),
                 vendor: "anthropic".to_string(),
-                window_name: "[Coder 1]".to_string(),
+                window_name: "[Builder 1]".to_string(),
                 started_at: recent_time,
                 ended_at: None,
                 status: RunStatus::Running,
@@ -9792,7 +9792,7 @@ estimated_tokens = 1
                 attempt: 1,
                 model: "claude".to_string(),
                 vendor: "anthropic".to_string(),
-                window_name: "[Coder]".to_string(),
+                window_name: "[Builder]".to_string(),
                 started_at: chrono::Utc::now(),
                 ended_at: Some(chrono::Utc::now()),
                 status: RunStatus::Running,

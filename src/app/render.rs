@@ -444,7 +444,7 @@ impl App {
             Span::styled(" · ", dim),
             Span::styled(node.status.label(), node.status.style()),
         ];
-        if node.label == "Builder Loop" && !node.summary.is_empty() {
+        if node.label == "Loop" && !node.summary.is_empty() {
             spans.push(Span::styled(" · ", dim));
             spans.push(Span::styled(node.summary.clone(), dim));
         }
@@ -933,7 +933,7 @@ mod tests {
                 NodeKind::Task,
                 NodeStatus::Running,
                 vec![node(
-                    "Coder",
+                    "Builder",
                     NodeKind::Mode,
                     NodeStatus::Running,
                     Vec::new(),
@@ -987,7 +987,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("├─▾ Coder") && line.contains("running"))
+                .any(|line| line.contains("├─▾ Builder") && line.contains("running"))
         );
         assert!(
             lines
@@ -1007,7 +1007,7 @@ mod tests {
         let lines = render_lines(&app, 12);
 
         assert!(!lines.iter().any(|line| line.contains("── Task A")));
-        assert!(!lines.iter().any(|line| line.contains("── Coder")));
+        assert!(!lines.iter().any(|line| line.contains("── Builder")));
     }
 
     #[test]
@@ -1100,7 +1100,7 @@ mod tests {
     fn failed_unverified_render_shows_distinct_status_and_stamp_hint() {
         let app = test_app(
             vec![node(
-                "Coder",
+                "Builder",
                 NodeKind::Mode,
                 NodeStatus::FailedUnverified,
                 Vec::new(),
@@ -1122,7 +1122,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("Coder") && line.contains("failed-unverified"))
+                .any(|line| line.contains("Builder") && line.contains("failed-unverified"))
         );
         assert!(lines.iter().any(|line| line.contains("run-finish")));
     }
@@ -1150,7 +1150,7 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("Coder") && line.contains("running"))
+                .any(|line| line.contains("Builder") && line.contains("running"))
         );
         assert!(
             !lines
@@ -1179,7 +1179,7 @@ mod tests {
             NodeStatus::Running,
             vec![
                 node(
-                    "Coder",
+                    "Builder",
                     NodeKind::Mode,
                     NodeStatus::Running,
                     Vec::new(),
@@ -1468,7 +1468,7 @@ mod tests {
             NodeKind::Stage,
             NodeStatus::Running,
             vec![node(
-                "Coder",
+                "Builder",
                 NodeKind::Mode,
                 NodeStatus::Running,
                 Vec::new(),
@@ -1476,7 +1476,7 @@ mod tests {
                 None,
             )],
             None,
-            // Root absorbs Coder's run via leaf_run_id so its body renders
+            // Root absorbs Builder's run via leaf_run_id so its body renders
             // the transcript inline.
             Some(1),
         )];
@@ -1522,7 +1522,7 @@ mod tests {
             NodeKind::Stage,
             NodeStatus::Running,
             vec![node(
-                "Coder",
+                "Builder",
                 NodeKind::Mode,
                 NodeStatus::Running,
                 Vec::new(),
@@ -1760,7 +1760,7 @@ mod tests {
             vec![
                 "codexize · render-test───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
                 "▌▾ Implementation · running",
-                " ├─▾ Coder · running",
+                " ├─▾ Builder · running",
                 "XX:XX:XX ⠋ wiring full-screen tests",
                 "",
                 "",

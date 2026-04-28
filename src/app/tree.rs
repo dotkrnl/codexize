@@ -526,7 +526,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
                     combined.push(*run);
                 }
                 mode_nodes.push(Node {
-                    label: "Coder".to_string(),
+                    label: "Builder".to_string(),
                     kind: NodeKind::Mode,
                     status: rollup_status(&c_runs),
                     summary: String::new(),
@@ -698,7 +698,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
         children.insert(insert_pos, recovery_node);
     }
     Node {
-        label: "Builder Loop".to_string(),
+        label: "Loop".to_string(),
         kind: NodeKind::Stage,
         status,
         summary,
@@ -746,7 +746,7 @@ fn role_label(stage: &str) -> &str {
         "plan-review" => "Reviewer",
         "sharding" => "Sharding",
         "recovery" => "Recovery",
-        "coder" => "Coder",
+        "coder" => "Builder",
         "reviewer" => "Reviewer",
         _ => stage,
     }
@@ -1070,7 +1070,7 @@ mod tests {
     fn test_collapse_preserves_task_node() {
         // Task nodes are never absorbed, ensuring they always remain visible
         let mut stage = Node {
-            label: "Builder Loop".to_string(),
+            label: "Loop".to_string(),
             kind: NodeKind::Stage,
             status: NodeStatus::Done,
             summary: "".to_string(),
@@ -1085,7 +1085,7 @@ mod tests {
                     status: NodeStatus::Done,
                     summary: "".to_string(),
                     children: vec![Node {
-                        label: "Coder".to_string(),
+                        label: "Builder".to_string(),
                         kind: NodeKind::AgentRun,
                         status: NodeStatus::Done,
                         summary: "".to_string(),
@@ -1254,7 +1254,7 @@ mod tests {
             attempt: 1,
             model: "claude-opus-4-7".to_string(),
             vendor: "anthropic".to_string(),
-            window_name: "[Coder t1 r1]".to_string(),
+            window_name: "[Builder t1 r1]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Failed,
@@ -1271,7 +1271,7 @@ mod tests {
             attempt: 2,
             model: "claude-opus-4-7".to_string(),
             vendor: "anthropic".to_string(),
-            window_name: "[Coder t1 r1]".to_string(),
+            window_name: "[Builder t1 r1]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
@@ -1281,7 +1281,7 @@ mod tests {
             mount_device_id: None,
         });
         let nodes = build_tree(&state);
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         // Walk into the task/round tree (collapsing may hoist children).
         let rollup_failed = |n: &Node| {
             fn walk(n: &Node, found: &mut bool) {
@@ -1315,7 +1315,7 @@ mod tests {
             attempt: 1,
             model: "gpt-5".to_string(),
             vendor: "openai".to_string(),
-            window_name: "[Coder t1 r1]".to_string(),
+            window_name: "[Builder t1 r1]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::FailedUnverified,
@@ -1335,7 +1335,7 @@ mod tests {
             }
             node.children.iter().find_map(find_run_node)
         }
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         let attempt = find_run_node(builder).expect("run node");
 
         assert_eq!(attempt.status, NodeStatus::FailedUnverified);
@@ -1376,7 +1376,7 @@ mod tests {
             mount_device_id: None,
         });
         let nodes = build_tree(&state);
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         let labels = builder
             .children
             .iter()
@@ -1410,7 +1410,7 @@ mod tests {
         state.agent_runs.push(recovery);
 
         let nodes = build_tree(&state);
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         let labels = builder
             .children
             .iter()
@@ -1446,7 +1446,7 @@ mod tests {
             "recovery sharding run leaked into top-level Sharding: {top_level_sharding_ids:?}"
         );
 
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         let recovery = builder
             .children
             .iter()
@@ -1612,7 +1612,7 @@ mod tests {
         );
 
         // Builder Recovery sub-tree must contain all three recovery runs.
-        let builder = nodes.iter().find(|n| n.label == "Builder Loop").unwrap();
+        let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
         let recovery = builder
             .children
             .iter()
@@ -1644,7 +1644,7 @@ mod tests {
                 summary: "".to_string(),
                 children: vec![
                     Node {
-                        label: "Coder".to_string(),
+                        label: "Builder".to_string(),
                         kind: NodeKind::Mode,
                         status: NodeStatus::Done,
                         summary: "".to_string(),
@@ -1688,7 +1688,7 @@ mod tests {
         // Task absorbs Round, but Round had 2 Mode children (multi-child preserved)
         // So Task now has the 2 Mode children; each Mode absorbed its single AgentRun
         assert_eq!(task.children.len(), 2);
-        assert_eq!(task.children[0].label, "Coder");
+        assert_eq!(task.children[0].label, "Builder");
         assert_eq!(task.children[0].kind, NodeKind::Mode);
         assert_eq!(task.children[0].leaf_run_id, Some(1));
         assert_eq!(task.children[1].label, "Reviewer");
@@ -1700,7 +1700,7 @@ mod tests {
     fn test_collapse_mode_multiple_attempts_preserved() {
         // Mode with multiple attempts preserves them as children
         let mut mode = Node {
-            label: "Coder".to_string(),
+            label: "Builder".to_string(),
             kind: NodeKind::Mode,
             status: NodeStatus::Done,
             summary: "".to_string(),
@@ -1747,7 +1747,7 @@ mod tests {
             attempt: 1,
             model: "claude".to_string(),
             vendor: "anthropic".to_string(),
-            window_name: "[Coder]".to_string(),
+            window_name: "[Builder]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: Some(chrono::Utc::now()),
             status: RunStatus::Done,
@@ -1764,7 +1764,7 @@ mod tests {
             attempt: 1,
             model: "gpt".to_string(),
             vendor: "openai".to_string(),
-            window_name: "[Coder 2]".to_string(),
+            window_name: "[Builder 2]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -1778,7 +1778,9 @@ mod tests {
         let rows = collect_all_rows(&nodes);
         let coder_rows = rows
             .into_iter()
-            .filter(|row| node_at_path(&nodes, &row.path).is_some_and(|node| node.label == "Coder"))
+            .filter(|row| {
+                node_at_path(&nodes, &row.path).is_some_and(|node| node.label == "Builder")
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(coder_rows.len(), 2);
@@ -1798,7 +1800,7 @@ mod tests {
             attempt: 1,
             model: "claude".to_string(),
             vendor: "anthropic".to_string(),
-            window_name: "[Coder]".to_string(),
+            window_name: "[Builder]".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,
             status: RunStatus::Running,
@@ -1827,7 +1829,8 @@ mod tests {
         assert!(
             visible
                 .iter()
-                .all(|row| node_at_path(&nodes, &row.path).is_none_or(|node| node.label != "Coder"))
+                .all(|row| node_at_path(&nodes, &row.path)
+                    .is_none_or(|node| node.label != "Builder"))
         );
     }
 

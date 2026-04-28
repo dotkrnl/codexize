@@ -434,4 +434,58 @@ mod tests {
         assert!(loaded.dashboard.is_some());
         assert!(loaded.quotas.is_some());
     }
+
+    fn with_home_override<R>(dir: &TempDir, f: impl FnOnce() -> R) -> R {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var_os("HOME");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        outcome.unwrap()
+    }
+
+    #[test]
+    fn public_load_save_wrappers_round_trip_via_home() {
+        let dir = TempDir::new().unwrap();
+        with_home_override(&dir, || {
+            // Both public save wrappers must persist under
+            // $HOME/.codexize/cache/models.json without any explicit path.
+            save_dashboard(&sample_entries()).unwrap();
+            save_quotas(&sample_quotas()).unwrap();
+
+            let path = dir.path().join(".codexize").join("cache").join("models.json");
+            assert!(path.exists(), "expected default-dir cache file at {path:?}");
+
+            // The public load wrapper reads through the same default dir
+            // and surfaces both sections written above.
+            let loaded = load();
+            let dash = loaded.dashboard.expect("dashboard section round-trips");
+            assert_eq!(dash.data[0].name, "claude-sonnet");
+            let quotas = loaded.quotas.expect("quota section round-trips");
+            assert_eq!(
+                quotas.data.get("claude").unwrap().get("claude-sonnet").unwrap(),
+                &Some(75)
+            );
+        });
+    }
+
+    #[test]
+    fn public_load_returns_empty_when_default_dir_is_missing() {
+        let dir = TempDir::new().unwrap();
+        with_home_override(&dir, || {
+            let loaded = load();
+            assert!(loaded.dashboard.is_none());
+            assert!(loaded.quotas.is_none());
+        });
+    }
 }

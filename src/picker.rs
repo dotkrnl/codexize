@@ -582,22 +582,7 @@ impl SessionPicker {
     }
 
     fn create_session_now(&mut self, idea: &str) -> Result<KeyAction> {
-        let session_id = generate_session_id();
-        let idea_text = idea.to_string();
-
-        let mut state = SessionState::new(session_id.clone());
-        state.modes = self.create_modes;
-        state.idea_text = Some(idea_text);
-        state.current_phase = Phase::BrainstormRunning;
-        state.save()?;
-        state.log_event("session created")?;
-        if state.modes.yolo {
-            state.log_event("mode_toggled: mode=yolo value=true source=cli")?;
-        }
-        if state.modes.cheap {
-            state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
-        }
-
+        let session_id = create_session(idea, self.create_modes)?;
         Ok(KeyAction::SelectSession(PickerSelection {
             session_id,
             created: true,
@@ -733,6 +718,29 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
     entries.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
     Ok(entries)
+}
+
+/// Create a new session on disk and emit the standard creation events.
+///
+/// `idea` is stored verbatim — the caller is responsible for trimming and
+/// rejecting empty input. Both the interactive picker and the direct-CLI
+/// `--yolo -m` route share this helper so creation semantics (id, phase,
+/// mode logging) cannot drift.
+pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
+    let session_id = generate_session_id();
+    let mut state = SessionState::new(session_id.clone());
+    state.modes = modes;
+    state.idea_text = Some(idea.to_string());
+    state.current_phase = Phase::BrainstormRunning;
+    state.save()?;
+    state.log_event("session created")?;
+    if state.modes.yolo {
+        state.log_event("mode_toggled: mode=yolo value=true source=cli")?;
+    }
+    if state.modes.cheap {
+        state.log_event("mode_toggled: mode=cheap value=true source=cli")?;
+    }
+    Ok(session_id)
 }
 
 pub fn generate_session_id() -> String {

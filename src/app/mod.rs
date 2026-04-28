@@ -41,6 +41,7 @@ use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
 
 use self::{
+    footer::{CachedSummaryFetcher, LiveSummaryFetcher},
     models::{spawn_refresh, vendor_tag},
     state::ModelRefreshState,
     tree::{
@@ -464,6 +465,7 @@ impl App {
             self.update_agent_progress();
             self.process_live_summary_changes();
             terminal.draw(|frame| self.draw(frame))?;
+            self.on_frame_drawn();
 
             if event::poll(Duration::from_millis(250))?
                 && let Event::Key(key) = event::read()?
@@ -472,6 +474,11 @@ impl App {
                 return Ok(());
             }
         }
+    }
+
+    /// Called once per successful frame draw to advance spinner-driven UI state.
+    pub(crate) fn on_frame_drawn(&mut self) {
+        self.spinner_tick = self.spinner_tick.wrapping_add(1);
     }
 
     /// Returns a clone of the shared `StatusLine` handle so non-render call
@@ -562,6 +569,22 @@ impl App {
             && self
                 .node_for_row(self.selected)
                 .is_some_and(|node| node.label == "Idea")
+    }
+
+    fn live_status_body(&self) -> String {
+        match self.state.current_phase {
+            Phase::IdeaInput => "Awaiting idea".to_string(),
+            Phase::BlockedNeedsUser => "Needs your input".to_string(),
+            Phase::Done => "Session complete".to_string(),
+            _ => {
+                if self.running_run().is_some() {
+                    let phase_label = self.state.current_phase.label();
+                    return CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label)
+                        .fetch();
+                }
+                self.state.current_phase.label()
+            }
+        }
     }
 
     pub(super) fn is_expanded(&self, index: usize) -> bool {
@@ -2049,15 +2072,13 @@ impl App {
         if self.agent_content_hash == 0 || hash != self.agent_content_hash {
             self.agent_content_hash = hash;
             self.agent_last_change = Some(now);
-            self.spinner_tick = self.spinner_tick.wrapping_add(1);
             return;
         }
-        // Keep spinning while the stall is under 30s; freeze after that.
-        if let Some(last) = self.agent_last_change
-            && now.duration_since(last) < Duration::from_secs(30)
-        {
-            self.spinner_tick = self.spinner_tick.wrapping_add(1);
-        }
+        // Preserve the 30s stall-detector probe; spinner progression is now
+        // frame-driven and no longer depends on this branch.
+        let _stalled = self
+            .agent_last_change
+            .map(|last| now.duration_since(last) >= Duration::from_secs(30));
     }
 
     /// Auto-launch the agent for the current phase if it's a non-interactive
@@ -7014,6 +7035,51 @@ mod tests {
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
         app
+    }
+
+    #[test]
+    fn on_frame_drawn_advances_spinner_tick_without_agent_changes() {
+        let mut app = idle_app(SessionState::new("on-frame-drawn".to_string()));
+        let before = app.spinner_tick;
+
+        for _ in 0..97 {
+            app.on_frame_drawn();
+        }
+
+        assert_eq!(app.spinner_tick, before.wrapping_add(97));
+        assert_eq!(app.agent_content_hash, 0);
+        assert!(app.agent_last_change.is_none());
+    }
+
+    #[test]
+    fn live_status_body_precedence_short_circuits_special_phases() {
+        let mut app = mk_app(mk_state_with_runs());
+        app.live_summary_cached_text = "ship parser | running checks".to_string();
+
+        app.state.current_phase = Phase::IdeaInput;
+        assert_eq!(app.live_status_body(), "Awaiting idea");
+
+        app.state.current_phase = Phase::BlockedNeedsUser;
+        assert_eq!(app.live_status_body(), "Needs your input");
+
+        app.state.current_phase = Phase::Done;
+        assert_eq!(app.live_status_body(), "Session complete");
+    }
+
+    #[test]
+    fn live_status_body_uses_running_summary_then_phase_fallback() {
+        let mut app = mk_app(mk_state_with_runs());
+        app.state.current_phase = Phase::SpecReviewRunning;
+
+        app.live_summary_cached_text = "ship parser | running checks".to_string();
+        assert_eq!(app.live_status_body(), "ship parser");
+
+        app.live_summary_cached_text.clear();
+        assert_eq!(app.live_status_body(), "Spec Review");
+
+        app.current_run_id = None;
+        app.state.current_phase = Phase::PlanningRunning;
+        assert_eq!(app.live_status_body(), "Planning");
     }
 
     #[test]

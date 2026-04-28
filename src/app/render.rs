@@ -466,17 +466,18 @@ impl App {
             style = style.fg(Color::DarkGray);
         }
 
-        // Depth-0 stage rows get full-line background highlights by status.
-        if depth == 0 {
-            let bg = match node.status {
-                NodeStatus::Running => Some(Color::Blue),
-                NodeStatus::Done => Some(Color::Green),
-                NodeStatus::Failed | NodeStatus::FailedUnverified => Some(Color::Red),
-                _ => None,
-            };
-            if let Some(bg_color) = bg {
-                style = style.bg(bg_color).fg(Color::White);
-            }
+        let underline_active = matches!(
+            node.status,
+            NodeStatus::Running
+                | NodeStatus::Done
+                | NodeStatus::Failed
+                | NodeStatus::FailedUnverified,
+        );
+
+        // Depth 0: underline the line style so `Buffer::set_line` extends the
+        // underline across the trailing fill, producing a full-width rule.
+        if depth == 0 && underline_active {
+            style = style.add_modifier(Modifier::UNDERLINED);
         }
 
         let dim = Style::default().fg(Color::DarkGray);
@@ -492,6 +493,16 @@ impl App {
         if node.label == "Loop" && !node.summary.is_empty() {
             spans.push(Span::styled(" · ", dim));
             spans.push(Span::styled(node.summary.clone(), dim));
+        }
+
+        // Depth 1+: underline only the text-bearing spans so the focus glyph
+        // and tree indent stay un-underlined. Spans 0 (focus glyph) and 1
+        // (indent) are skipped; everything else carries the modifier when the
+        // status calls for it.
+        if depth > 0 && underline_active {
+            for span in &mut spans[2..] {
+                span.style = span.style.add_modifier(Modifier::UNDERLINED);
+            }
         }
 
         Line::from(spans).style(style)
@@ -2077,10 +2088,15 @@ mod tests {
             line_text(&buf, 0, 80).contains("Running Stage"),
             "running stage header should pin to row 0"
         );
+        let pinned_style = buf[(0, 0)].style();
         assert_eq!(
-            buf[(0, 0)].style().bg,
-            Some(Color::Blue),
-            "pinned running stage header should keep the depth-0 background"
+            pinned_style.bg,
+            Some(Color::Reset),
+            "pinned running stage header should not have a background fill"
+        );
+        assert!(
+            pinned_style.add_modifier.contains(Modifier::UNDERLINED),
+            "pinned running stage header should be underlined"
         );
         assert!(
             line_text(&buf, 1, 80).contains("Task B"),
@@ -2199,11 +2215,15 @@ mod tests {
 
         let buf = render_pipeline_buf(&app, 80, 5);
         // Row 0 is the Running stage header.
-        let bg = buf[(0, 0)].style().bg;
+        let style = buf[(0, 0)].style();
         assert_eq!(
-            bg,
-            Some(Color::Blue),
-            "Running depth-0 row should have blue background"
+            style.bg,
+            Some(Color::Reset),
+            "Running depth-0 row should not have a background fill"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "Running depth-0 row should be underlined"
         );
     }
 
@@ -2223,11 +2243,15 @@ mod tests {
         );
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let bg = buf[(0, 0)].style().bg;
+        let style = buf[(0, 0)].style();
         assert_eq!(
-            bg,
-            Some(Color::Green),
-            "Done depth-0 row should have green background"
+            style.bg,
+            Some(Color::Reset),
+            "Done depth-0 row should not have a background fill"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "Done depth-0 row should be underlined"
         );
     }
 
@@ -2247,11 +2271,15 @@ mod tests {
         );
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let bg = buf[(0, 0)].style().bg;
+        let style = buf[(0, 0)].style();
         assert_eq!(
-            bg,
-            Some(Color::Red),
-            "Failed depth-0 row should have red background"
+            style.bg,
+            Some(Color::Reset),
+            "Failed depth-0 row should not have a background fill"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "Failed depth-0 row should be underlined"
         );
     }
 
@@ -2271,11 +2299,15 @@ mod tests {
         );
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let bg = buf[(0, 0)].style().bg;
+        let style = buf[(0, 0)].style();
         assert_eq!(
-            bg,
-            Some(Color::Red),
-            "FailedUnverified depth-0 row should have red background"
+            style.bg,
+            Some(Color::Reset),
+            "FailedUnverified depth-0 row should not have a background fill"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "FailedUnverified depth-0 row should be underlined"
         );
     }
 
@@ -2295,14 +2327,19 @@ mod tests {
         );
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        let bg = buf[(0, 0)].style().bg;
+        let style = buf[(0, 0)].style();
         // Pending rows should not have a status-colored background.
         assert!(
             !matches!(
-                bg,
+                style.bg,
                 Some(Color::Blue) | Some(Color::Green) | Some(Color::Red)
             ),
-            "Pending depth-0 row should not have status background, got: {bg:?}"
+            "Pending depth-0 row should not have status background, got: {:?}",
+            style.bg
+        );
+        assert!(
+            !style.add_modifier.contains(Modifier::UNDERLINED),
+            "Pending depth-0 row should not be underlined"
         );
     }
 
@@ -2343,4 +2380,5 @@ mod tests {
             "Depth-1 Running row should not have blue background"
         );
     }
+
 }

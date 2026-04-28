@@ -438,6 +438,7 @@ impl App {
 
     fn move_focus(&mut self, delta: isize) {
         self.explicit_viewport_scroll = false;
+        let before = self.selected;
         if delta < 0 {
             // Any upward focus action also breaks tail-follow so the user can
             // read history without the viewport yanking back to the latest.
@@ -450,6 +451,13 @@ impl App {
             .visible_rows
             .get(self.selected)
             .map(|row| row.key.clone());
+        // Manual focus movement opts out of progress-follow until the next
+        // phase transition or run launch resets the boundary. No-ops at the
+        // top/bottom row do not actually change focus, so they leave the
+        // follow flag alone.
+        if self.selected != before {
+            self.progress_follow_active = false;
+        }
     }
 
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {

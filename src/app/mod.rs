@@ -45,7 +45,7 @@ use self::{
     state::ModelRefreshState,
     tree::{
         NodeKey, VisibleNodeRow, active_path_keys, build_tree, current_node_index,
-        flatten_visible_rows, node_at_path, node_key_at_path,
+        deepest_path_for_run, flatten_visible_rows, node_at_path, node_key_at_path,
     },
 };
 
@@ -176,6 +176,11 @@ pub struct App {
     /// When true, the viewport was intentionally paged away from the focused
     /// row and clamp_viewport should not pull it back toward focus.
     explicit_viewport_scroll: bool,
+    /// While true, automatic progress events (startup, phase changes, run
+    /// launches/retries, live-summary updates) move the focus arrow to the
+    /// newest active run row. Manual focus moves and explicit viewport paging
+    /// flip this off; the next phase transition or run launch flips it back on.
+    progress_follow_active: bool,
     /// Snapshot of `messages.len()` taken when tail-follow was last
     /// disengaged. None while following. Used to count missed messages
     /// for the "↓ N new" badge.
@@ -277,6 +282,7 @@ impl App {
             viewport_top: 0,
             follow_tail: true,
             explicit_viewport_scroll: false,
+            progress_follow_active: true,
             tail_detach_baseline: None,
             body_inner_height: 0,
             body_inner_width: 0,
@@ -346,6 +352,7 @@ impl App {
                 app.messages =
                     SessionState::load_messages(&app.state.session_id).unwrap_or_default();
                 app.rebuild_tree_view(None);
+                app.maybe_refocus_to_progress();
             }
         }
         // Resume validation: if the session was interrupted mid-guard-decision,
@@ -597,6 +604,52 @@ impl App {
         self.restore_selection(preferred_key, previous_selected);
     }
 
+    /// Derive the preferred row for automatic progress follow.
+    ///
+    /// Resolution order: deepest node backing the current run id, then the
+    /// current top-level pipeline stage. Returns `None` only when the
+    /// pipeline has no live stage (everything `Done`/`Skipped`), which lets
+    /// callers leave `selected_key` alone on terminal phases.
+    fn progress_focus_key(&self) -> Option<NodeKey> {
+        if let Some(run_id) = self.current_run_id
+            && let Some(path) = deepest_path_for_run(&self.nodes, run_id)
+            && let Some(key) = node_key_at_path(&self.nodes, &path)
+        {
+            return Some(key);
+        }
+        let current = self.current_node();
+        let active = self
+            .nodes
+            .get(current)
+            .is_some_and(|node| !matches!(node.status, NodeStatus::Done | NodeStatus::Skipped));
+        if active {
+            return node_key_at_path(&self.nodes, &[current]);
+        }
+        None
+    }
+
+    /// Move focus to the row returned by `progress_focus_key` when progress
+    /// follow is active. Reuses `restore_selection` so the collapsed-ancestor
+    /// fallback matches normal selection recovery.
+    fn maybe_refocus_to_progress(&mut self) {
+        if !self.progress_follow_active {
+            return;
+        }
+        let Some(target) = self.progress_focus_key() else {
+            return;
+        };
+        let previous_selected = self.selected;
+        self.restore_selection(Some(target), previous_selected);
+    }
+
+    /// Re-enable progress-follow focus and immediately refocus. Called from
+    /// the phase-transition and run-launch boundaries the spec treats as
+    /// natural reset points after manual navigation.
+    fn enable_progress_follow_and_refocus(&mut self) {
+        self.progress_follow_active = true;
+        self.maybe_refocus_to_progress();
+    }
+
     fn can_focus_input(&self) -> bool {
         self.is_expanded(self.selected)
             && self.state.current_phase == Phase::IdeaInput
@@ -745,6 +798,12 @@ impl App {
         let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
         self.viewport_top = next as usize;
         self.set_follow_tail(self.viewport_top as isize >= max_top);
+        // Explicit paging (PageUp/PageDown today, equivalent mouse handlers
+        // tomorrow) signals operator-driven browsing. Implicit scrolls from
+        // arrow-key handoff or clamp_viewport do not.
+        if explicit {
+            self.progress_follow_active = false;
+        }
     }
 
     /// Single writer for `follow_tail`. Tracks the message-count baseline so
@@ -851,13 +910,12 @@ impl App {
         self.live_summary_cached_mtime = None;
         self.rebuild_tree_view(None);
 
-        // Move cursor to the row of the new current stage.
-        if let Some(target) = node_key_at_path(&self.nodes, &[self.current_node()])
-            && let Some(idx) = self.visible_rows.iter().position(|row| row.key == target)
-        {
-            self.selected = idx;
-            self.selected_key = Some(target);
-        }
+        // Phase transitions are an automatic re-enable point for progress
+        // follow: re-engage and snap focus to the running stage / latest run.
+        // The collapsed-ancestor fallback inside `maybe_refocus_to_progress`
+        // matches the pre-existing single-stage cursor move when no run is
+        // active yet.
+        self.enable_progress_follow_and_refocus();
         // Re-engage tail-follow on phase change so the new stage's transcript
         // streams into view.
         self.set_follow_tail(true);
@@ -2160,6 +2218,11 @@ impl App {
         self.read_live_summary_pipeline();
         self.messages = SessionState::load_messages(&self.state.session_id).unwrap_or_default();
         self.rebuild_tree_view(None);
+        // A fresh run launch (including a retry creating a newer attempt) is
+        // the other automatic re-enable point: turn progress follow back on
+        // even if the operator had previously navigated manually, then refocus
+        // onto the new run's deepest visible row.
+        self.enable_progress_follow_and_refocus();
     }
 
     fn update_agent_progress(&mut self) {
@@ -5003,6 +5066,10 @@ impl App {
         }
         self.live_summary_cached_text = sanitized;
         self.live_summary_cached_mtime = Some(mtime);
+        // Live-summary deltas are an automatic refocus event, but they are
+        // not a re-enable boundary: if the operator has manually navigated
+        // away the arrow stays put.
+        self.maybe_refocus_to_progress();
     }
 
     /// Final read + cleanup of the live-summary file when a run finishes.
@@ -6398,6 +6465,7 @@ mod tests {
             viewport_top: 0,
             follow_tail: true,
             explicit_viewport_scroll: false,
+            progress_follow_active: true,
             tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,
@@ -7146,6 +7214,7 @@ mod tests {
             viewport_top: 0,
             follow_tail: true,
             explicit_viewport_scroll: false,
+            progress_follow_active: true,
             tail_detach_baseline: None,
             body_inner_height: 30,
             body_inner_width: 80,

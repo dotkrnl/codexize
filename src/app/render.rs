@@ -1197,6 +1197,7 @@ mod tests {
             viewport_top: 0,
             follow_tail: true,
             explicit_viewport_scroll: false,
+            progress_follow_active: true,
             tail_detach_baseline: None,
             body_inner_height: 20,
             body_inner_width: 80,

@@ -179,6 +179,32 @@ pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey>
     keys
 }
 
+/// Find the deepest node path whose `run_id` or `leaf_run_id` matches `run_id`.
+/// Used by progress-follow focus to refocus on the most specific row backing a
+/// particular run when the operator has not opted out of automatic following.
+pub fn deepest_path_for_run(nodes: &[Node], run_id: u64) -> Option<NodePath> {
+    fn walk(nodes: &[Node], path: &mut NodePath, run_id: u64, best: &mut Option<NodePath>) {
+        for (index, node) in nodes.iter().enumerate() {
+            path.push(index);
+            let matches = node.run_id == Some(run_id) || node.leaf_run_id == Some(run_id);
+            if matches {
+                let replace = best
+                    .as_ref()
+                    .is_none_or(|existing| existing.len() <= path.len());
+                if replace {
+                    *best = Some(path.clone());
+                }
+            }
+            walk(&node.children, path, run_id, best);
+            path.pop();
+        }
+    }
+    let mut best = None;
+    let mut path = Vec::new();
+    walk(nodes, &mut path, run_id, &mut best);
+    best
+}
+
 fn flatten_rows(
     nodes: &[Node],
     parent_path: &mut NodePath,

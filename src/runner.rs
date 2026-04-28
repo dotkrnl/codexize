@@ -1,6 +1,6 @@
 use crate::adapters::{AgentAdapter, AgentRun, shell_escape};
 use crate::state;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -239,9 +239,9 @@ pub fn run(
     artifacts: Vec<String>,
     command: Vec<String>,
 ) -> Result<()> {
-    if command.is_empty() {
-        bail!("no command provided to agent-run");
-    }
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| anyhow!("no command provided to agent-run"))?;
 
     let dir = state::session_dir(&session_id);
     fs::create_dir_all(&dir)?;
@@ -263,8 +263,8 @@ pub fn run(
 
     print_title_box(&phase, &role, &command);
 
-    let mut child = Command::new(&command[0])
-        .args(&command[1..])
+    let mut child = Command::new(program)
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1008,5 +1008,22 @@ head_state = "unstable"
         .unwrap();
         let stamp = read_finish_stamp(&path).unwrap();
         assert_eq!(stamp.signal_received, "");
+    }
+
+    #[test]
+    fn run_returns_err_on_empty_command() {
+        let result = run(
+            "test-empty-cmd-session".to_string(),
+            "audit".to_string(),
+            "auditor".to_string(),
+            vec![],
+            vec![],
+        );
+        assert!(result.is_err(), "empty command must error, not panic");
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains("no command provided"),
+            "unexpected error message: {msg}"
+        );
     }
 }

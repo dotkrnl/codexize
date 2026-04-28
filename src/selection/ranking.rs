@@ -14,15 +14,22 @@ fn selection_events() -> &'static Mutex<Vec<SelectionEvent>> {
 }
 
 pub fn selection_events_snapshot() -> Vec<SelectionEvent> {
+    // SAFETY: `selection_events()` guards a `Vec<SelectionEvent>` whose
+    // only mutators are `push`/`clear` — neither can panic — so the mutex
+    // cannot be poisoned and `lock().unwrap()` is unreachable.
     selection_events().lock().unwrap().clone()
 }
 
 #[cfg(test)]
 fn clear_selection_events() {
+    // SAFETY: see `selection_events_snapshot` — the guarded `Vec` has no
+    // panicking mutators, so the mutex cannot be poisoned here.
     selection_events().lock().unwrap().clear();
 }
 
 fn record_zero_as_missing(axis: &str, phase: &str) {
+    // SAFETY: see `selection_events_snapshot` — the guarded `Vec` has no
+    // panicking mutators, so the mutex cannot be poisoned here.
     selection_events()
         .lock()
         .unwrap()

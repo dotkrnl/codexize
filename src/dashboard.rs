@@ -24,15 +24,22 @@ fn ingest_events() -> &'static Mutex<Vec<IngestEvent>> {
 /// Snapshot of every ingest event recorded since process start (or since
 /// the last `clear_ingest_events`). Intended for test assertions.
 pub fn ingest_events_snapshot() -> Vec<IngestEvent> {
+    // SAFETY: `ingest_events()` guards a `Vec<IngestEvent>` whose only
+    // mutators are `push`/`clear` — neither can panic — so the mutex
+    // cannot be poisoned and `lock().unwrap()` is unreachable.
     ingest_events().lock().unwrap().clone()
 }
 
 #[cfg(test)]
 fn clear_ingest_events() {
+    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
+    // panicking mutators, so the mutex cannot be poisoned here.
     ingest_events().lock().unwrap().clear();
 }
 
 fn record_axis_dropped(reason: &str) {
+    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
+    // panicking mutators, so the mutex cannot be poisoned here.
     ingest_events()
         .lock()
         .unwrap()
@@ -42,6 +49,8 @@ fn record_axis_dropped(reason: &str) {
 }
 
 fn record_axis_parse_fail(suite: &str, axis: &str) {
+    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
+    // panicking mutators, so the mutex cannot be poisoned here.
     ingest_events()
         .lock()
         .unwrap()

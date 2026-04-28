@@ -79,7 +79,10 @@ impl App {
                 self.open_editable_artifact();
                 false
             }
-            KeyCode::Char('t') => false,
+            KeyCode::Char('t') => {
+                self.toggle_cheap_mode();
+                false
+            }
             KeyCode::PageUp => {
                 let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
                 self.scroll_viewport(-step, true);

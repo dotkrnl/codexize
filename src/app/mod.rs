@@ -23,7 +23,7 @@ use crate::{
         config::SelectionPhase,
         ranking::{VersionIndex, build_version_index},
         selection::{
-            pick_for_phase, pick_for_phase_with_effort, select_excluding, select_for_review,
+            SelectionWarning, pick_for_phase_with_effort, select_excluding,
             select_for_review_with_effort,
         },
     },
@@ -1756,6 +1756,101 @@ impl App {
         }
     }
 
+    fn emit_selection_warning(&mut self, warning: Option<SelectionWarning>) {
+        let Some(SelectionWarning::CheapFallback { phase, reason }) = warning else {
+            return;
+        };
+        let message = format!("cheap_fallback: phase={} reason={reason}", phase.name());
+        let _ = self.state.log_event(message.clone());
+        self.push_status(message, status_line::Severity::Warn, Duration::from_secs(8));
+    }
+
+    fn toggle_cheap_mode(&mut self) {
+        self.set_cheap_mode(!self.state.modes.cheap);
+    }
+
+    fn set_cheap_mode(&mut self, value: bool) {
+        self.state.modes.cheap = value;
+        if let Err(err) = self.state.save() {
+            self.state.agent_error = Some(format!("failed to save cheap mode: {err:#}"));
+            return;
+        }
+        // Ambiguous until the full command palette lands: this temporary TUI hook
+        // records the same source the eventual `:cheap` palette command will use.
+        let _ = self.state.log_event(format!(
+            "mode_toggled: mode=cheap value={value} source=palette"
+        ));
+        let status = if value {
+            "cheap: ON  (next agent launch limited to sonnet/kimi/codex-low/flash)"
+        } else {
+            "cheap: OFF"
+        };
+        self.push_status(
+            status.to_string(),
+            status_line::Severity::Info,
+            Duration::from_secs(5),
+        );
+    }
+
+    fn choose_primary_model(
+        &mut self,
+        override_model: Option<&CachedModel>,
+        phase: SelectionPhase,
+        effort: EffortLevel,
+        cheap: bool,
+    ) -> Option<(String, VendorKind, String)> {
+        if let Some(model) = override_model {
+            return Some((
+                model.name.clone(),
+                model.vendor,
+                vendor_tag(model.vendor).to_string(),
+            ));
+        }
+
+        let outcome =
+            pick_for_phase_with_effort(&self.models, phase, None, &self.versions, effort, cheap)?;
+        let picked = (
+            outcome.model.name.clone(),
+            outcome.model.vendor,
+            vendor_tag(outcome.model.vendor).to_string(),
+        );
+        self.emit_selection_warning(outcome.warning);
+        Some(picked)
+    }
+
+    fn choose_review_model(
+        &mut self,
+        override_model: Option<&CachedModel>,
+        used_vendors: &[VendorKind],
+        used_models: &[(VendorKind, String)],
+        effort: EffortLevel,
+        cheap: bool,
+    ) -> Option<(String, VendorKind, String)> {
+        if let Some(model) = override_model {
+            return Some((
+                model.name.clone(),
+                model.vendor,
+                vendor_tag(model.vendor).to_string(),
+            ));
+        }
+
+        let outcome = select_for_review_with_effort(
+            &self.models,
+            used_vendors,
+            used_models,
+            &self.versions,
+            effort,
+            cheap,
+        )?;
+        let picked = (
+            outcome.model.name.clone(),
+            outcome.model.vendor,
+            vendor_tag(outcome.model.vendor).to_string(),
+        );
+        self.emit_selection_warning(outcome.warning);
+        Some(picked)
+    }
+
     // This launch bookkeeping intentionally keeps the selected model metadata
     // explicit at the call site so run records cannot silently omit a field.
     #[allow(clippy::too_many_arguments)]
@@ -2527,11 +2622,13 @@ impl App {
             .join(format!("recovery-plan-review-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| pick_for_phase(&self.models, SelectionPhase::Review, None, &self.versions))
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Review,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -2569,7 +2666,6 @@ impl App {
             item.status = PipelineItemStatus::Running;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
@@ -2662,13 +2758,13 @@ impl App {
             .join(format!("recovery-sharding-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Planning,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -2708,7 +2804,6 @@ impl App {
             item.status = PipelineItemStatus::Running;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
@@ -3371,11 +3466,13 @@ impl App {
         }
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| Self::select_brainstorm_model(&self.models, &self.versions))
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Idea,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error =
                 Some("no model available with quota — check model strip".to_string());
             let _ = self.state.save();
@@ -3423,7 +3520,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -3485,11 +3581,12 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     fn select_brainstorm_model<'a>(
         models: &'a [CachedModel],
         versions: &VersionIndex,
     ) -> Option<&'a CachedModel> {
-        pick_for_phase(models, SelectionPhase::Idea, None, versions)
+        crate::selection::selection::pick_for_phase(models, SelectionPhase::Idea, None, versions)
     }
 
     fn launch_retry_for_stage(
@@ -3553,25 +3650,25 @@ impl App {
             .join(format!("spec-review-{round}.md"));
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                let runs: Vec<_> = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .filter(|run| {
-                        (run.stage == "brainstorm"
-                            || (run.stage == "spec-review" && run.round == round))
-                            && run.status == RunStatus::Done
-                    })
-                    .cloned()
-                    .collect();
-                let (used_vendors, used_models) = Self::used_review_pairs(&runs);
-                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let runs: Vec<_> = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                (run.stage == "brainstorm" || (run.stage == "spec-review" && run.round == round))
+                    && run.status == RunStatus::Done
             })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+            .cloned()
+            .collect();
+        let (used_vendors, used_models) = Self::used_review_pairs(&runs);
+        let Some(chosen) = self.choose_review_model(
+            override_model.as_ref(),
+            &used_vendors,
+            &used_models,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
             return false;
@@ -3593,7 +3690,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
@@ -3688,13 +3784,13 @@ impl App {
             .collect();
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Planning,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -3716,7 +3812,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -3814,25 +3909,25 @@ impl App {
             .join(format!("plan-review-{round}.md"));
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                let runs: Vec<_> = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .filter(|run| {
-                        (run.stage == "planning"
-                            || (run.stage == "plan-review" && run.round == round))
-                            && run.status == RunStatus::Done
-                    })
-                    .cloned()
-                    .collect();
-                let (used_vendors, used_models) = Self::used_review_pairs(&runs);
-                select_for_review(&self.models, &used_vendors, &used_models, &self.versions)
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let runs: Vec<_> = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                (run.stage == "planning" || (run.stage == "plan-review" && run.round == round))
+                    && run.status == RunStatus::Done
             })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+            .cloned()
+            .collect();
+        let (used_vendors, used_models) = Self::used_review_pairs(&runs);
+        let Some(chosen) = self.choose_review_model(
+            override_model.as_ref(),
+            &used_vendors,
+            &used_models,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
             return false;
@@ -3856,7 +3951,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
@@ -3935,13 +4029,13 @@ impl App {
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Planning,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -3963,7 +4057,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -4051,13 +4144,13 @@ impl App {
             .join(format!("recovery-r{round}.md"));
 
         let modes = self.state.launch_modes();
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                pick_for_phase(&self.models, SelectionPhase::Planning, None, &self.versions)
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let effort = modes.effort_for(EffortLevel::Normal);
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Planning,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -4104,7 +4197,6 @@ impl App {
             return false;
         }
 
-        let effort = modes.effort_for(EffortLevel::Normal);
         let run = AgentRun {
             model: model.clone(),
             prompt_path,
@@ -4216,19 +4308,12 @@ impl App {
         // Override-model bypass: an explicit operator pick wins over the
         // tough-eligibility filter (spec §3.7). The adapter still emits the
         // launch-snapshot effort flag derived from `task.tough`.
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                pick_for_phase_with_effort(
-                    &self.models,
-                    SelectionPhase::Build,
-                    None,
-                    &self.versions,
-                    effort,
-                )
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let Some(chosen) = self.choose_primary_model(
+            override_model.as_ref(),
+            SelectionPhase::Build,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available with quota".to_string());
             let _ = self.state.save();
             return false;
@@ -4367,20 +4452,14 @@ impl App {
         let requested_effort = task_effort_for(&session_dir, task_id);
         let effort = modes.effort_for(requested_effort);
         // Override-model bypass: explicit operator pick beats the effort filter.
-        let Some(chosen) = override_model
-            .as_ref()
-            .or_else(|| {
-                let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
-                select_for_review_with_effort(
-                    &self.models,
-                    &used_vendors,
-                    &used_models,
-                    &self.versions,
-                    effort,
-                )
-            })
-            .map(|m| (m.name.clone(), m.vendor, vendor_tag(m.vendor).to_string()))
-        else {
+        let (used_vendors, used_models) = Self::used_review_pairs(&excluded);
+        let Some(chosen) = self.choose_review_model(
+            override_model.as_ref(),
+            &used_vendors,
+            &used_models,
+            effort,
+            modes.cheap,
+        ) else {
             self.state.agent_error = Some("no model available for review".to_string());
             let _ = self.state.save();
             return false;
@@ -7811,13 +7890,16 @@ mod tests {
             state.modes.cheap = true;
 
             let mut app = idle_app(state);
-            app.models = vec![ranked_model(
-                selection::VendorKind::Codex,
-                "gpt-5",
-                10,
-                1,
-                10,
-            )];
+            app.models = vec![
+                ranked_model(selection::VendorKind::Claude, "claude-opus-4-7", 10, 1, 10),
+                ranked_model(
+                    selection::VendorKind::Claude,
+                    "claude-sonnet-4-6",
+                    10,
+                    10,
+                    10,
+                ),
+            ];
             app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
                 TestLaunchHarness {
                     outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
@@ -7841,8 +7923,96 @@ mod tests {
                     cheap: true,
                 }
             );
+            assert_eq!(run.model, "claude-sonnet-4-6");
             assert_eq!(run.effort, EffortLevel::Low);
             assert!(run.window_name.ends_with("[low]"));
+        });
+    }
+
+    #[test]
+    fn cheap_coder_fallback_logs_warning_when_budget_models_exhausted() {
+        with_temp_root(|| {
+            let session_id = "cheap-fallback-coder";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            state.modes.cheap = true;
+
+            let mut cheap_model = ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet-4-6",
+                10,
+                1,
+                10,
+            );
+            cheap_model.quota_percent = Some(0);
+            let expensive =
+                ranked_model(selection::VendorKind::Claude, "claude-opus-4-7", 10, 1, 10);
+
+            let mut app = idle_app(state);
+            app.models = vec![cheap_model, expensive];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                    }]),
+                },
+            )));
+
+            assert!(app.launch_coder_with_model(None));
+            let run = app.state.agent_runs.last().expect("run");
+            assert_eq!(run.model, "claude-opus-4-7");
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("cheap_fallback: phase=build reason=no_eligible_with_quota"));
+        });
+    }
+
+    #[test]
+    fn cheap_toggle_persists_audits_flashes_and_preserves_running_snapshot() {
+        with_temp_root(|| {
+            let session_id = "cheap-toggle";
+            let mut state = SessionState::new(session_id.to_string());
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "coder".to_string(),
+                task_id: Some(1),
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: "[Round 1 Coder] gpt-5".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+            state.save().expect("save session");
+            let mut app = idle_app(state);
+
+            app.handle_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('t'),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+
+            assert!(app.state.modes.cheap);
+            assert!(
+                !app.state.agent_runs[0].modes.cheap,
+                "already-running snapshots must not be rewritten"
+            );
+            assert!(SessionState::load(session_id).expect("reload").modes.cheap);
+            let events =
+                std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                    .expect("events");
+            assert!(events.contains("mode_toggled: mode=cheap value=true source=palette"));
+            let status = app.status_line.borrow().render().expect("status flash");
+            assert!(status.to_string().contains("cheap: ON"));
         });
     }
 

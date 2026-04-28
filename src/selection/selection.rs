@@ -1,9 +1,10 @@
 use super::config::{SELECTION_CONFIG, SelectionPhase};
 use super::ranking::{VersionIndex, selection_probability};
 use super::types::{CachedModel, VendorKind};
-use super::vendor::is_tough_eligible;
+use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
 use std::cmp::Ordering;
+use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
@@ -11,6 +12,44 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 #[cfg(test)]
 static TEST_SAMPLE_SEED: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionWarning {
+    CheapFallback {
+        phase: SelectionPhase,
+        reason: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SelectionOutcome<'a> {
+    pub model: &'a CachedModel,
+    pub warning: Option<SelectionWarning>,
+}
+
+impl<'a> SelectionOutcome<'a> {
+    fn ok(model: &'a CachedModel) -> Self {
+        Self {
+            model,
+            warning: None,
+        }
+    }
+
+    fn with_warning(model: &'a CachedModel, warning: SelectionWarning) -> Self {
+        Self {
+            model,
+            warning: Some(warning),
+        }
+    }
+}
+
+impl Deref for SelectionOutcome<'_> {
+    type Target = CachedModel;
+
+    fn deref(&self) -> &Self::Target {
+        self.model
+    }
+}
 
 /// Select a model for the given phase using relative cutoff + weighted random.
 ///
@@ -86,10 +125,39 @@ pub fn pick_for_phase_with_effort<'a>(
     vendor_filter: Option<VendorKind>,
     version_index: &VersionIndex,
     effort: EffortLevel,
-) -> Option<&'a CachedModel> {
+    cheap: bool,
+) -> Option<SelectionOutcome<'a>> {
+    if cheap {
+        let eligible: Vec<CachedModel> = models
+            .iter()
+            .filter(|m| is_cheap_eligible(m))
+            .cloned()
+            .collect();
+
+        if !eligible.is_empty()
+            && let Some(chosen) = pick_for_phase(&eligible, phase, vendor_filter, version_index)
+            && let Some(found) = models
+                .iter()
+                .find(|m| m.vendor == chosen.vendor && m.name == chosen.name)
+        {
+            return Some(SelectionOutcome::ok(found));
+        }
+
+        return pick_for_phase(models, phase, vendor_filter, version_index).map(|model| {
+            SelectionOutcome::with_warning(
+                model,
+                SelectionWarning::CheapFallback {
+                    phase,
+                    reason: "no_eligible_with_quota",
+                },
+            )
+        });
+    }
+
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return pick_for_phase(models, phase, vendor_filter, version_index);
+            return pick_for_phase(models, phase, vendor_filter, version_index)
+                .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
@@ -109,11 +177,11 @@ pub fn pick_for_phase_with_effort<'a>(
             .iter()
             .find(|m| m.vendor == chosen.vendor && m.name == chosen.name)
         {
-            return Some(found);
+            return Some(SelectionOutcome::ok(found));
         }
     }
 
-    pick_for_phase(models, phase, vendor_filter, version_index)
+    pick_for_phase(models, phase, vendor_filter, version_index).map(SelectionOutcome::ok)
 }
 
 /// Select a model for review with unused-vendor preference.
@@ -177,16 +245,54 @@ pub fn select_for_review_with_effort<'a>(
     used_models: &[(VendorKind, String)],
     version_index: &VersionIndex,
     effort: EffortLevel,
-) -> Option<&'a CachedModel> {
+    cheap: bool,
+) -> Option<SelectionOutcome<'a>> {
+    if cheap {
+        let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_cheap_eligible(m)).collect();
+        if let Some(model) =
+            select_for_review_from_eligible(&eligible, used_vendors, used_models, version_index)
+        {
+            return Some(SelectionOutcome::ok(model));
+        }
+
+        return select_for_review(models, used_vendors, used_models, version_index).map(|model| {
+            SelectionOutcome::with_warning(
+                model,
+                SelectionWarning::CheapFallback {
+                    phase: SelectionPhase::Review,
+                    reason: "no_eligible_with_quota",
+                },
+            )
+        });
+    }
+
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return select_for_review(models, used_vendors, used_models, version_index);
+            return select_for_review(models, used_vendors, used_models, version_index)
+                .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
 
     let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_tough_eligible(m)).collect();
 
+    select_for_review_from_eligible(&eligible, used_vendors, used_models, version_index)
+        .map(SelectionOutcome::ok)
+        .or_else(|| {
+            // Degraded fallback: no tough-eligible model has any quota at all —
+            // run the original diversity logic over the full slice so the review
+            // still launches.
+            select_for_review(models, used_vendors, used_models, version_index)
+                .map(SelectionOutcome::ok)
+        })
+}
+
+fn select_for_review_from_eligible<'a>(
+    eligible: &[&'a CachedModel],
+    used_vendors: &[VendorKind],
+    used_models: &[(VendorKind, String)],
+    version_index: &VersionIndex,
+) -> Option<&'a CachedModel> {
     // Tier 1: tough-eligible AND fresh-vendor AND fresh-model.
     let fresh_vendor: Vec<(&CachedModel, f64)> = eligible
         .iter()
@@ -238,10 +344,7 @@ pub fn select_for_review_with_effort<'a>(
         return Some(model);
     }
 
-    // Degraded fallback: no tough-eligible model has any quota at all —
-    // run the original diversity logic over the full slice so the review
-    // still launches.
-    select_for_review(models, used_vendors, used_models, version_index)
+    None
 }
 
 /// Select a model excluding a list of models, with diversity bonus for non-last-failed vendors.
@@ -613,6 +716,7 @@ mod tests {
             None,
             &index,
             EffortLevel::Normal,
+            false,
         )
         .expect("Normal must pick from non-empty slice");
         assert!(matches!(
@@ -635,12 +739,78 @@ mod tests {
             None,
             &index,
             EffortLevel::Low,
+            false,
         )
         .expect("Low effort must use the non-tough path until cheap filtering is wired");
         assert!(matches!(
             chosen.vendor,
             VendorKind::Kimi | VendorKind::Gemini
         ));
+    }
+
+    #[test]
+    fn pick_with_effort_cheap_filters_to_budget_subset() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5-flash", 80),
+        ];
+        let index = build_version_index(&models);
+
+        for seed in 1..100_u64 {
+            TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+            let chosen = pick_for_phase_with_effort(
+                &models,
+                SelectionPhase::Build,
+                None,
+                &index,
+                EffortLevel::Tough,
+                true,
+            )
+            .expect("cheap candidate exists");
+            assert_eq!(chosen.warning, None);
+            assert!(
+                matches!(
+                    chosen.model.name.as_str(),
+                    "claude-sonnet-4-6" | "gemini-2.5-flash"
+                ),
+                "cheap selection must not pick {:?} {}",
+                chosen.model.vendor,
+                chosen.model.name
+            );
+        }
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 0),
+            sample_model(VendorKind::Gemini, "gemini-2.5-flash", 0),
+            sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = pick_for_phase_with_effort(
+            &models,
+            SelectionPhase::Build,
+            None,
+            &index,
+            EffortLevel::Low,
+            true,
+        )
+        .expect("full-pool fallback must yield a candidate");
+        assert_eq!(chosen.model.name, "claude-opus-4-7");
+        assert_eq!(
+            chosen.warning,
+            Some(SelectionWarning::CheapFallback {
+                phase: SelectionPhase::Build,
+                reason: "no_eligible_with_quota",
+            })
+        );
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 
     #[test]
@@ -656,6 +826,7 @@ mod tests {
                 None,
                 &index,
                 EffortLevel::Tough,
+                false,
             )
             .expect("eligible candidate exists");
             assert!(
@@ -684,6 +855,7 @@ mod tests {
             None,
             &index,
             EffortLevel::Tough,
+            false,
         )
         .expect("degraded fallback must yield a candidate");
         assert!(matches!(
@@ -708,6 +880,7 @@ mod tests {
             None,
             &index,
             EffortLevel::Tough,
+            false,
         )
         .expect("degraded fallback must yield a candidate");
         assert_eq!(chosen.vendor, VendorKind::Claude);
@@ -735,6 +908,7 @@ mod tests {
             &used_models,
             &index,
             EffortLevel::Normal,
+            false,
         )
         .expect("Normal review picks fresh Kimi");
         assert_eq!(chosen.vendor, VendorKind::Kimi);
@@ -758,9 +932,59 @@ mod tests {
             &used_models,
             &index,
             EffortLevel::Low,
+            false,
         )
         .expect("Low review effort must use the non-tough path");
         assert_eq!(chosen.vendor, VendorKind::Kimi);
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
+            sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
+        ];
+        let index = build_version_index(&models);
+        let used_vendors = vec![VendorKind::Claude];
+        let used_models = vec![(VendorKind::Claude, "claude-sonnet-4-6".to_string())];
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen = select_for_review_with_effort(
+            &models,
+            &used_vendors,
+            &used_models,
+            &index,
+            EffortLevel::Low,
+            true,
+        )
+        .expect("cheap reviewer should reuse the only eligible model");
+        assert_eq!(chosen.warning, None);
+        assert_eq!(chosen.model.name, "claude-sonnet-4-6");
+        TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+    }
+
+    #[test]
+    fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
+        let models = vec![
+            sample_model(VendorKind::Claude, "claude-sonnet-4-6", 0),
+            sample_model(VendorKind::Kimi, "kimi-k2", 0),
+            sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
+        ];
+        let index = build_version_index(&models);
+
+        TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+        let chosen =
+            select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Low, true)
+                .expect("full-pool fallback must yield a reviewer");
+        assert_eq!(chosen.model.name, "gemini-2.5-pro");
+        assert_eq!(
+            chosen.warning,
+            Some(SelectionWarning::CheapFallback {
+                phase: SelectionPhase::Review,
+                reason: "no_eligible_with_quota",
+            })
+        );
         TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
     }
 
@@ -787,6 +1011,7 @@ mod tests {
             &used_models,
             &index,
             EffortLevel::Tough,
+            false,
         )
         .expect("eligibility-dominated reuse expected");
         assert_eq!(chosen.vendor, VendorKind::Claude);
@@ -805,8 +1030,9 @@ mod tests {
         let index = build_version_index(&models);
 
         TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-        let chosen = select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough)
-            .expect("degraded fallback must yield a candidate");
+        let chosen =
+            select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough, false)
+                .expect("degraded fallback must yield a candidate");
         assert!(matches!(
             chosen.vendor,
             VendorKind::Kimi | VendorKind::Gemini
@@ -825,8 +1051,9 @@ mod tests {
         let index = build_version_index(&models);
 
         TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-        let chosen = select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough)
-            .expect("degraded fallback must yield an available candidate");
+        let chosen =
+            select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough, false)
+                .expect("degraded fallback must yield an available candidate");
         assert!(
             matches!(chosen.vendor, VendorKind::Kimi | VendorKind::Gemini),
             "exhausted tough-eligible model was selected: {:?} {}",

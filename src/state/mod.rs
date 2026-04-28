@@ -588,9 +588,8 @@ impl BuilderState {
         for item in &mut self.pipeline_items[renumber_start..] {
             if item.stage == "coder"
                 && item.status == PipelineItemStatus::Pending
-                && item.task_id.is_some()
+                && let Some(old_id) = item.task_id
             {
-                let old_id = item.task_id.unwrap();
                 let new_id = next_id;
                 next_id += 1;
                 renumber_map.insert(old_id, new_id);

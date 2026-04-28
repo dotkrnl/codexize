@@ -491,4 +491,35 @@ mod tests {
         assert!(builder.pending.len() >= 2);
         assert_eq!(builder.last_verdict.as_deref(), Some("revise"));
     }
+
+    #[test]
+    fn test_apply_revise_skips_pending_coder_with_no_task_id() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+        // Inject a pending coder item with no task_id after the running task
+        // to exercise the renumber loop's None branch.
+        builder.pipeline_items.push(PipelineItem {
+            id: builder.next_pipeline_id(),
+            stage: "coder".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: Some("draft".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+
+        let ids = builder.apply_revise_with_new_tasks(
+            2,
+            vec![("New".into(), "d".into(), "t".into(), 1000)],
+        );
+
+        assert_eq!(ids.len(), 1);
+        let untyped_still_none = builder
+            .pipeline_items
+            .iter()
+            .any(|item| item.stage == "coder" && item.title.as_deref() == Some("draft") && item.task_id.is_none());
+        assert!(untyped_still_none, "no-task-id coder pending row must be left untouched");
+    }
 }

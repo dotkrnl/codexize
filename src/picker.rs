@@ -376,36 +376,44 @@ impl SessionPicker {
     }
 
     fn palette_commands(&self) -> Vec<PaletteCommand> {
+        // Direct keys in the picker (see `handle_key`): `Esc` quits, `n`
+        // opens the new-session input. Everything else is palette-only.
         let mut commands = vec![
             PaletteCommand {
                 name: "quit",
                 aliases: &["q"],
                 help: "Exit picker",
+                key_hint: Some("Esc"),
             },
             PaletteCommand {
                 name: "new",
                 aliases: &["n"],
                 help: "Create a session",
+                key_hint: Some("n"),
             },
             PaletteCommand {
                 name: "idea",
                 aliases: &["i"],
                 help: "Create a session with the given idea text",
+                key_hint: None,
             },
             PaletteCommand {
                 name: "show-archived",
                 aliases: &["a"],
                 help: "Toggle archived sessions",
+                key_hint: None,
             },
             PaletteCommand {
                 name: "archive",
                 aliases: &["d"],
                 help: "Archive selected session",
+                key_hint: None,
             },
             PaletteCommand {
                 name: "delete",
                 aliases: &["D"],
                 help: "Permanently delete selected session",
+                key_hint: None,
             },
         ];
         if self
@@ -417,6 +425,7 @@ impl SessionPicker {
                 name: "restore",
                 aliases: &["r"],
                 help: "Restore selected archived session",
+                key_hint: None,
             });
         }
         commands

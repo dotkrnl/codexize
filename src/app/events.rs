@@ -92,21 +92,28 @@ impl App {
     }
 
     pub(super) fn palette_commands(&self) -> Vec<PaletteCommand> {
+        // Direct keys in the running app (see `handle_key`): only `Esc` and
+        // Ctrl-C quit the TUI, plus `:` opens the palette. Everything else
+        // is palette-only, so `back`, `edit`, `cheap`, and `yolo` advertise
+        // no shortcut even though they have palette aliases.
         let mut commands = vec![
             PaletteCommand {
                 name: "quit",
                 aliases: &["q"],
                 help: "Exit the TUI",
+                key_hint: Some("Esc"),
             },
             PaletteCommand {
                 name: "cheap",
                 aliases: &[],
                 help: "Toggle cheap mode",
+                key_hint: None,
             },
             PaletteCommand {
                 name: "yolo",
                 aliases: &[],
                 help: "Toggle YOLO mode",
+                key_hint: None,
             },
         ];
         if self.can_go_back() || self.confirm_back {
@@ -114,6 +121,7 @@ impl App {
                 name: "back",
                 aliases: &["b"],
                 help: "Go back",
+                key_hint: None,
             });
         }
         if self.editable_artifact().is_some() {
@@ -121,6 +129,7 @@ impl App {
                 name: "edit",
                 aliases: &["e"],
                 help: "Edit artifact",
+                key_hint: None,
             });
         }
         commands

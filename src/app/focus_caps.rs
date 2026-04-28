@@ -7,4 +7,5 @@ pub struct FocusCaps {
     pub can_expand: bool,
     pub can_edit: bool,
     pub can_back: bool,
+    pub can_input: bool,
 }

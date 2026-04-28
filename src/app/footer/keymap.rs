@@ -613,6 +613,7 @@ mod tests {
             can_expand: true,
             can_edit: true,
             can_back: true,
+            can_input: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text = line_text(&line);
@@ -734,6 +735,7 @@ mod tests {
             can_expand: false,
             can_edit: true,
             can_back: true,
+            can_input: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         assert!(
@@ -750,6 +752,7 @@ mod tests {
             can_expand: false,
             can_edit: true,
             can_back: true,
+            can_input: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         assert!(
@@ -766,6 +769,7 @@ mod tests {
             can_expand: false,
             can_edit: false,
             can_back: false,
+            can_input: false,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text = line_text(&line);
@@ -834,6 +838,7 @@ mod tests {
             can_expand: true,
             can_edit: true,
             can_back: true,
+            can_input: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
         let text = line_text(&line);
@@ -848,6 +853,7 @@ mod tests {
             can_expand: true,
             can_edit: true,
             can_back: true,
+            can_input: true,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 120);
         let text = line_text(&line);
@@ -1043,6 +1049,7 @@ mod tests {
             can_expand: false,
             can_edit: false,
             can_back: false,
+            can_input: false,
         };
         let line = keymap(Phase::IdeaInput, None, caps, false, 200);
 

@@ -377,6 +377,7 @@ impl App {
                 .is_some_and(|row| row.is_expandable()),
             can_edit: self.editable_artifact().is_some(),
             can_back: self.can_go_back(),
+            can_input: self.can_focus_input(),
         }
     }
 

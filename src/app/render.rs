@@ -56,10 +56,24 @@ impl Widget for PipelineWidget<'_> {
         let viewport_top = self
             .app
             .viewport_top
-            .min(lines.len().saturating_sub(area_h));
-        let end = (viewport_top + area_h).min(lines.len());
+            .min(self.app.max_viewport_top_for_height(area_h));
+        let pinned_header = self.app.pinned_running_header(viewport_top);
+        let (content_y, content_h) = if let Some((index, _)) = pinned_header {
+            if let Some(node) = self.app.node_for_row(index) {
+                let expanded = self.app.is_expanded(index);
+                let line = self.app.node_header(index, expanded, node);
+                buf.set_line(area.x, area.y, &line, area.width);
+            }
+            // Pinning only happens when the header's natural y is above the
+            // viewport, so the source slice cannot also contain it.
+            (area.y.saturating_add(1), area_h.saturating_sub(1))
+        } else {
+            (area.y, area_h)
+        };
+
+        let end = (viewport_top + content_h).min(lines.len());
         for (offset, line) in lines[viewport_top..end].iter().enumerate() {
-            buf.set_line(area.x, area.y + offset as u16, line, area.width);
+            buf.set_line(area.x, content_y + offset as u16, line, area.width);
         }
     }
 }
@@ -305,7 +319,7 @@ impl App {
     fn unread_badge(&self) -> Option<UnreadBadge> {
         let unread = self.unread_below_count();
         let at_bottom = self.viewport_top >= self.max_viewport_top();
-        let viewport_bottom = self.viewport_top + self.body_inner_height;
+        let viewport_bottom = self.viewport_top + self.effective_body_inner_height();
         let unread_below_viewport = self
             .first_unread_rendered_line()
             .map(|line| line >= viewport_bottom)
@@ -2002,6 +2016,167 @@ mod tests {
         let mut buf = Buffer::empty(area);
         PipelineWidget { app }.render(area, &mut buf);
         buf
+    }
+
+    fn row_text_count(lines: &[String], needle: &str) -> usize {
+        lines.iter().filter(|line| line.contains(needle)).count()
+    }
+
+    fn flat_stage_app(labels: &[(&str, NodeStatus)]) -> App {
+        test_app(
+            labels
+                .iter()
+                .map(|(label, status)| {
+                    node(label, NodeKind::Stage, *status, Vec::new(), None, None)
+                })
+                .collect(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn sticky_running_stage_header_pins_above_scrolled_viewport() {
+        let mut app = test_app(
+            vec![node(
+                "Running Stage",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![
+                    node(
+                        "Task A",
+                        NodeKind::Task,
+                        NodeStatus::Done,
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    node(
+                        "Task B",
+                        NodeKind::Task,
+                        NodeStatus::Pending,
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                ],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        app.viewport_top = 2;
+
+        let buf = render_pipeline_buf(&app, 80, 2);
+
+        assert!(
+            line_text(&buf, 0, 80).contains("Running Stage"),
+            "running stage header should pin to row 0"
+        );
+        assert_eq!(
+            buf[(0, 0)].style().bg,
+            Some(Color::Blue),
+            "pinned running stage header should keep the depth-0 background"
+        );
+        assert!(
+            line_text(&buf, 1, 80).contains("Task B"),
+            "normal scrolled content should start below the pinned row"
+        );
+    }
+
+    #[test]
+    fn sticky_running_stage_header_deactivates_while_naturally_visible() {
+        let mut app = test_app(
+            vec![node(
+                "Running Stage",
+                NodeKind::Stage,
+                NodeStatus::Running,
+                vec![node(
+                    "Task A",
+                    NodeKind::Task,
+                    NodeStatus::Done,
+                    Vec::new(),
+                    None,
+                    None,
+                )],
+                None,
+                None,
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        app.viewport_top = 0;
+
+        let lines = render_lines(&app, 4);
+
+        assert_eq!(
+            row_text_count(&lines, "Running Stage"),
+            1,
+            "naturally visible running stage must not be duplicated"
+        );
+        assert!(
+            lines[1].contains("Task A"),
+            "when unpinned, content should still begin at the natural next row"
+        );
+    }
+
+    #[test]
+    fn focus_scroll_uses_effective_height_with_sticky_header() {
+        let mut app = flat_stage_app(&[
+            ("Running Stage", NodeStatus::Running),
+            ("One", NodeStatus::Done),
+            ("Two", NodeStatus::Done),
+            ("Three", NodeStatus::Done),
+            ("Four", NodeStatus::Done),
+            ("Focused", NodeStatus::Pending),
+        ]);
+        app.body_inner_height = 5;
+        app.viewport_top = 1;
+        app.selected = 5;
+        app.selected_key = Some(app.visible_rows[5].key.clone());
+        app.set_follow_tail(false);
+        app.explicit_viewport_scroll = false;
+
+        app.clamp_viewport();
+
+        assert_eq!(
+            app.viewport_top, 2,
+            "row 0 is pinned, so the selected row needs a four-line content viewport"
+        );
+        let lines = render_lines(&app, app.body_inner_height as u16);
+        assert!(
+            lines[0].contains("Running Stage"),
+            "running stage should remain pinned"
+        );
+        assert!(
+            lines[4].contains("Focused"),
+            "focused row should be visible below the pinned header"
+        );
+    }
+
+    #[test]
+    fn tail_follow_uses_effective_height_with_sticky_header() {
+        let mut app = flat_stage_app(&[
+            ("Running Stage", NodeStatus::Running),
+            ("One", NodeStatus::Done),
+            ("Two", NodeStatus::Done),
+            ("Three", NodeStatus::Done),
+            ("Four", NodeStatus::Done),
+            ("Tail", NodeStatus::Pending),
+        ]);
+        app.body_inner_height = 5;
+
+        app.clamp_viewport();
+
+        assert_eq!(
+            app.viewport_top, 2,
+            "tail-follow should scroll to the bottom of the reduced content viewport"
+        );
+        assert_eq!(app.viewport_top, app.max_viewport_top());
+        let lines = render_lines(&app, app.body_inner_height as u16);
+        assert!(lines[0].contains("Running Stage"));
+        assert!(lines[4].contains("Tail"));
     }
 
     #[test]

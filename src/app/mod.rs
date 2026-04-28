@@ -28,8 +28,8 @@ use crate::{
         },
     },
     state::{
-        self as session_state, Message, MessageKind, MessageSender, Node, PendingGuardDecision,
-        Phase, PipelineItem, PipelineItemStatus, RunStatus, SessionState,
+        self as session_state, Message, MessageKind, MessageSender, Node, NodeStatus,
+        PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RunStatus, SessionState,
     },
     tasks, tmux,
     tmux::TmuxContext,
@@ -590,6 +590,61 @@ impl App {
         (ys, y)
     }
 
+    pub(super) fn running_depth_0_header(&self) -> Option<(usize, usize)> {
+        let (ys, _) = self.header_y_offsets();
+        let mut candidates = self
+            .visible_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.depth == 0)
+            .filter_map(|(index, _)| {
+                let node = self.node_for_row(index)?;
+                (node.status == NodeStatus::Running).then_some((index, ys[index]))
+            });
+        let candidate = candidates.next()?;
+        if candidates.next().is_some() {
+            return None;
+        }
+        Some(candidate)
+    }
+
+    pub(super) fn pinned_running_header(&self, viewport_top: usize) -> Option<(usize, usize)> {
+        self.running_depth_0_header()
+            .filter(|(_, header_y)| *header_y < viewport_top)
+    }
+
+    pub(super) fn effective_body_height_for_top(
+        &self,
+        viewport_top: usize,
+        body_height: usize,
+    ) -> usize {
+        if self.pinned_running_header(viewport_top).is_some() {
+            body_height.saturating_sub(1)
+        } else {
+            body_height
+        }
+    }
+
+    pub(super) fn effective_body_inner_height(&self) -> usize {
+        self.effective_body_height_for_top(self.viewport_top, self.body_inner_height)
+    }
+
+    pub(super) fn max_viewport_top_for_height(&self, body_height: usize) -> usize {
+        if body_height == 0 {
+            return 0;
+        }
+        let (_, total) = self.header_y_offsets();
+        let normal_max = total.saturating_sub(body_height);
+        if self
+            .running_depth_0_header()
+            .is_some_and(|(_, header_y)| header_y < normal_max)
+        {
+            total.saturating_sub(body_height.saturating_sub(1))
+        } else {
+            normal_max
+        }
+    }
+
     pub(super) fn clamp_viewport(&mut self) {
         let area_h = self.body_inner_height;
         if area_h == 0 {
@@ -597,7 +652,7 @@ impl App {
             return;
         }
         let (ys, total) = self.header_y_offsets();
-        let max_top = total.saturating_sub(area_h);
+        let max_top = self.max_viewport_top_for_height(area_h);
         if self.follow_tail {
             self.viewport_top = max_top;
             self.explicit_viewport_scroll = false;
@@ -607,13 +662,20 @@ impl App {
             && let Some(&header_y) = ys.get(self.selected)
         {
             let section_bottom = ys.get(self.selected + 1).copied().unwrap_or(total);
-            // Keep any line of the selected section visible. This lets the user
-            // scroll viewport_top through a tall body without the viewport snapping
-            // back to the header on every render.
-            if section_bottom <= self.viewport_top {
-                self.viewport_top = section_bottom.saturating_sub(1);
-            } else if header_y >= self.viewport_top + area_h {
-                self.viewport_top = header_y + 1 - area_h;
+            // A first adjustment can move the viewport above a running header,
+            // which activates pinning and reduces the content height by one.
+            for _ in 0..2 {
+                let effective_h = self.effective_body_height_for_top(self.viewport_top, area_h);
+                // Keep any line of the selected section visible. This lets the user
+                // scroll viewport_top through a tall body without the viewport snapping
+                // back to the header on every render.
+                if section_bottom <= self.viewport_top {
+                    self.viewport_top = section_bottom.saturating_sub(1);
+                } else if header_y >= self.viewport_top + effective_h {
+                    self.viewport_top = header_y + 1 - effective_h;
+                } else {
+                    break;
+                }
             }
         }
         self.viewport_top = self.viewport_top.min(max_top);
@@ -624,8 +686,7 @@ impl App {
     }
 
     pub(super) fn max_viewport_top(&self) -> usize {
-        let (_, total) = self.header_y_offsets();
-        total.saturating_sub(self.body_inner_height)
+        self.max_viewport_top_for_height(self.body_inner_height)
     }
 
     pub(super) fn scroll_viewport(&mut self, delta: isize, explicit: bool) {

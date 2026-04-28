@@ -240,7 +240,7 @@ impl App {
 
     pub(super) fn scroll_or_move_focus(&mut self, delta: isize) {
         let idx = self.selected;
-        let area_h = self.body_inner_height;
+        let area_h = self.effective_body_inner_height();
         let (ys, total) = self.header_y_offsets();
         let Some(&header_y) = ys.get(idx) else {
             self.move_focus(delta);

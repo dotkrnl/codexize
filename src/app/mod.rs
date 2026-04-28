@@ -606,12 +606,21 @@ impl App {
 
     /// Derive the preferred row for automatic progress follow.
     ///
-    /// Resolution order: deepest node backing the current run id, then the
-    /// current top-level pipeline stage. Returns `None` only when the
+    /// Resolution order: deepest node backing the current run id when that
+    /// run is still `Running`, then the current top-level pipeline stage.
+    /// The status check matters during rewinds (`go_back`) and other paths
+    /// that finalize the run before clearing `current_run_id` — without it,
+    /// a refocus event fired in that window would land on the just-aborted
+    /// row instead of the new active stage. Returns `None` only when the
     /// pipeline has no live stage (everything `Done`/`Skipped`), which lets
     /// callers leave `selected_key` alone on terminal phases.
     fn progress_focus_key(&self) -> Option<NodeKey> {
         if let Some(run_id) = self.current_run_id
+            && self
+                .state
+                .agent_runs
+                .iter()
+                .any(|run| run.id == run_id && run.status == RunStatus::Running)
             && let Some(path) = deepest_path_for_run(&self.nodes, run_id)
             && let Some(key) = node_key_at_path(&self.nodes, &path)
         {
@@ -7116,6 +7125,123 @@ mod tests {
         // live stage to follow and the helper preserves whatever the operator
         // had selected.
         assert!(app.progress_focus_key().is_none());
+    }
+
+    #[test]
+    fn progress_focus_key_skips_finalized_run_when_id_still_set() {
+        // Regression: `go_back` finalizes the active run before
+        // `transition_to_phase` clears `current_run_id`. The refocus inside
+        // `transition_to_phase` would otherwise see a non-running run id
+        // and pin focus on the just-aborted row instead of the rewound
+        // stage. The status check belongs in `progress_focus_key` so any
+        // future call site that finalizes-then-transitions stays correct.
+        let mut state = coder_round_state("pf-finalized-stale");
+        state.agent_runs.push(make_coder_run(10, 1, 1));
+
+        let mut app = build_progress_follow_app(state, 10);
+        let coder_node = app
+            .node_for_row(app.selected)
+            .expect("baseline coder row exists");
+        assert_eq!(
+            coder_node.run_id.or(coder_node.leaf_run_id),
+            Some(10),
+            "baseline: progress focus lands on the running coder row"
+        );
+
+        // Mirror the first half of `go_back`: finalize the run while
+        // `current_run_id` still points at it.
+        app.finalize_run_record(10, false, Some("aborted by user".to_string()));
+        assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
+        assert_eq!(
+            app.current_run_id,
+            Some(10),
+            "stale id intentionally retained to mirror the rewind window"
+        );
+
+        // The next refocus event must skip the just-aborted run.
+        let target = app
+            .progress_focus_key()
+            .expect("falls back to the active top-level stage");
+        let target_idx = app
+            .visible_rows
+            .iter()
+            .position(|row| row.key == target)
+            .expect("target row visible");
+        let target_node = app.node_for_row(target_idx).expect("target node");
+        assert_ne!(
+            target_node.run_id.or(target_node.leaf_run_id),
+            Some(10),
+            "stale current_run_id pointing at a non-Running run must not steer focus"
+        );
+    }
+
+    #[test]
+    fn progress_follow_back_during_running_agent_focuses_new_stage() {
+        // End-to-end regression: invoking `go_back` while a run is active
+        // must leave focus on the rewound stage, not on the just-aborted
+        // run row that lingers in the tree because `agent_runs` history
+        // is preserved across rewinds.
+        with_temp_root(|| {
+            let session_id = "pf-go-back-running";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::SpecReviewRunning;
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Done,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+            state.agent_runs.push(RunRecord {
+                id: 2,
+                stage: "spec-review".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "m".to_string(),
+                vendor: "v".to_string(),
+                window_name: "[Spec Review 1]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let mut app = idle_app(state);
+            app.current_run_id = Some(2);
+            app.rebuild_tree_view(None);
+
+            app.go_back();
+
+            assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
+            assert_eq!(app.current_run_id, None, "go_back clears current_run_id");
+            assert_eq!(
+                app.state.agent_runs[1].status,
+                RunStatus::Failed,
+                "spec-review run was finalized as failed"
+            );
+            let row_node = app.node_for_row(app.selected).expect("selected row");
+            assert_ne!(
+                row_node.run_id.or(row_node.leaf_run_id),
+                Some(2),
+                "rewind must not refocus to the just-aborted spec-review run"
+            );
+        });
     }
 
     #[test]

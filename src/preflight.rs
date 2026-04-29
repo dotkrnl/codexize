@@ -16,6 +16,7 @@ enum Scenario {
     NoGitEmpty,
     NoGitHasFiles,
     GitExistsNotIgnored,
+    CodexAcpMissing,
     ClaudeAcpMissing,
 }
 
@@ -195,6 +196,17 @@ fn install_claude_acp() -> Result<()> {
         .context("failed to run npm install for Claude ACP")?;
     if !status.success() {
         anyhow::bail!("Claude ACP install failed with status {}", status);
+    }
+    Ok(())
+}
+
+fn install_codex_acp() -> Result<()> {
+    let status = Command::new("brew")
+        .args(["install", "codex-acp"])
+        .status()
+        .context("failed to run brew install codex-acp")?;
+    if !status.success() {
+        anyhow::bail!("Codex ACP install failed with status {}", status);
     }
     Ok(())
 }
@@ -382,12 +394,34 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
             ];
             (title, lines)
         }
+        Scenario::CodexAcpMissing => {
+            let title = " Codex ACP not installed ";
+            let lines = vec![
+                Line::from(""),
+                Line::from("Codex CLI is installed, but codex-acp is missing."),
+                Line::from("Install it with Homebrew?"),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("[Y]", Style::default().fg(Color::Green)),
+                    Span::raw("/"),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw("  brew install codex-acp"),
+                ]),
+                Line::from(vec![
+                    Span::styled("[N]", Style::default().fg(Color::DarkGray)),
+                    Span::raw("/"),
+                    Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+                    Span::raw("  skip"),
+                ]),
+            ];
+            (title, lines)
+        }
         Scenario::ClaudeAcpMissing => {
             let root = crate::acp::claude_acp_install_root();
             let title = " Claude ACP not installed ";
             let lines = vec![
                 Line::from(""),
-                Line::from("Claude models require claude-agent-acp."),
+                Line::from("Claude CLI is installed, but claude-agent-acp is missing."),
                 Line::from(format!("Install it under {}?", root.display())),
                 Line::from(""),
                 Line::from(vec![
@@ -398,11 +432,9 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
                 ]),
                 Line::from(vec![
                     Span::styled("[N]", Style::default().fg(Color::DarkGray)),
-                    Span::raw("        continue without Claude"),
-                ]),
-                Line::from(vec![
-                    Span::styled("[Q]", Style::default().fg(Color::Red)),
-                    Span::raw("        exit codexize"),
+                    Span::raw("/"),
+                    Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+                    Span::raw("  skip"),
                 ]),
             ];
             (title, lines)
@@ -460,10 +492,10 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
 
     if has_git {
         if detect_ignored(&root) {
-            return run_claude_acp_modal_if_missing(terminal);
+            return run_acp_install_modals_if_missing(terminal);
         }
         run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?;
-        return run_claude_acp_modal_if_missing(terminal);
+        return run_acp_install_modals_if_missing(terminal);
     }
 
     let scenario = if has_existing_files() {
@@ -473,7 +505,7 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
     };
 
     run_git_init_modal(terminal, scenario, &codexize_entry)?;
-    run_claude_acp_modal_if_missing(terminal)
+    run_acp_install_modals_if_missing(terminal)
 }
 
 fn run_git_init_modal(
@@ -550,14 +582,24 @@ fn run_gitignore_modal(
     }
 }
 
-fn run_claude_acp_modal_if_missing(terminal: &mut AppTerminal) -> Result<()> {
-    if crate::acp::claude_acp_is_available() {
-        return Ok(());
+fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
+    if crate::acp::should_offer_codex_acp_install() {
+        run_acp_install_modal(terminal, Scenario::CodexAcpMissing, install_codex_acp)?;
     }
+    if crate::acp::should_offer_claude_acp_install() {
+        run_acp_install_modal(terminal, Scenario::ClaudeAcpMissing, install_claude_acp)?;
+    }
+    Ok(())
+}
 
+fn run_acp_install_modal(
+    terminal: &mut AppTerminal,
+    scenario: Scenario,
+    install: fn() -> Result<()>,
+) -> Result<()> {
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, Scenario::ClaudeAcpMissing);
+            render_preflight_modal(frame, scenario);
         })?;
 
         if event::poll(Duration::from_millis(100))?
@@ -568,14 +610,15 @@ fn run_claude_acp_modal_if_missing(terminal: &mut AppTerminal) -> Result<()> {
             }
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    install_claude_acp()?;
+                    install()?;
                     return Ok(());
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                KeyCode::Char('n')
+                | KeyCode::Char('N')
+                | KeyCode::Char('q')
+                | KeyCode::Char('Q')
+                | KeyCode::Esc => {
                     return Ok(());
-                }
-                KeyCode::Char('q') | KeyCode::Char('Q') => {
-                    std::process::exit(0);
                 }
                 _ => {}
             }

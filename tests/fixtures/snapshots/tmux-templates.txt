@@ -1,0 +1,4 @@
+session=<current tmux session>
+brainstorm=[Brainstorm] opus-4-7
+coder_tough=[Round 1 Coder] gpt-5.5:xhigh
+planning_low=[Planning] sonnet-4.6:low

@@ -1,0 +1,13 @@
+Run an agent for a specific phase (used by orchestrated windows)
+
+Usage: codexize agent-run [OPTIONS] --session-id <SESSION_ID> --phase <PHASE> --role <ROLE> [-- <COMMAND>...]
+
+Arguments:
+  [COMMAND]...  
+
+Options:
+      --session-id <SESSION_ID>  
+      --phase <PHASE>            
+      --role <ROLE>              
+      --artifact <ARTIFACTS>     Required artifact paths — agent is blocked from stopping until all exist
+  -h, --help                     Print help

@@ -1,0 +1,13 @@
+Agentic development orchestrator
+
+Usage: codexize [OPTIONS] [COMMAND]
+
+Commands:
+  agent-run  Run an agent for a specific phase (used by orchestrated windows)
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --yolo               Seed newly created sessions with YOLO mode
+      --cheap              Seed newly created sessions with Cheap mode
+  -m, --message <MESSAGE>  Idea text for a direct-create YOLO session (skips the picker). Requires --yolo. The message is trimmed; internal whitespace and newlines are preserved verbatim. Blank-after-trim is rejected
+  -h, --help               Print help

@@ -214,3 +214,38 @@ fn startup_cache_has_expired_section(loaded: &cache::LoadedCache) -> bool {
     let quotas_expired = loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true);
     dashboard_expired || quotas_expired
 }
+
+#[doc(hidden)]
+pub fn snapshot_default_footer_keymap(width: u16) -> String {
+    let line = footer::keymap::keymap(
+        crate::state::Phase::IdeaInput,
+        None,
+        focus_caps::FocusCaps {
+            can_expand: true,
+            can_edit: true,
+            can_back: true,
+            can_input: true,
+        },
+        false,
+        width,
+    )
+    .to_string()
+    .trim_end()
+    .to_string();
+    format!("{line}\n")
+}
+
+#[doc(hidden)]
+pub fn snapshot_warn_status_line() -> String {
+    let mut line = status_line::StatusLine::new();
+    line.push(
+        "warn: smoke snapshot".to_string(),
+        status_line::Severity::Warn,
+        Duration::from_secs(10),
+    );
+    let line = line
+        .render()
+        .map(|line| line.to_string())
+        .unwrap_or_default();
+    format!("{line}\n")
+}

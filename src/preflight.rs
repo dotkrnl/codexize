@@ -16,6 +16,7 @@ enum Scenario {
     NoGitEmpty,
     NoGitHasFiles,
     GitExistsNotIgnored,
+    ClaudeAcpMissing,
 }
 
 const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
@@ -176,6 +177,24 @@ fn run_git_init() -> Result<()> {
         .context("failed to run git init")?;
     if !status.success() {
         anyhow::bail!("git init failed with status {}", status);
+    }
+    Ok(())
+}
+
+fn install_claude_acp() -> Result<()> {
+    let root = crate::acp::claude_acp_install_root();
+    fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
+    let status = Command::new("npm")
+        .args([
+            "install",
+            "--prefix",
+            root.to_string_lossy().as_ref(),
+            "@agentclientprotocol/claude-agent-acp",
+        ])
+        .status()
+        .context("failed to run npm install for Claude ACP")?;
+    if !status.success() {
+        anyhow::bail!("Claude ACP install failed with status {}", status);
     }
     Ok(())
 }
@@ -363,6 +382,31 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
             ];
             (title, lines)
         }
+        Scenario::ClaudeAcpMissing => {
+            let root = crate::acp::claude_acp_install_root();
+            let title = " Claude ACP not installed ";
+            let lines = vec![
+                Line::from(""),
+                Line::from("Claude models require claude-agent-acp."),
+                Line::from(format!("Install it under {}?", root.display())),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("[Y]", Style::default().fg(Color::Green)),
+                    Span::raw("/"),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw("  install Claude ACP"),
+                ]),
+                Line::from(vec![
+                    Span::styled("[N]", Style::default().fg(Color::DarkGray)),
+                    Span::raw("        continue without Claude"),
+                ]),
+                Line::from(vec![
+                    Span::styled("[Q]", Style::default().fg(Color::Red)),
+                    Span::raw("        exit codexize"),
+                ]),
+            ];
+            (title, lines)
+        }
     };
 
     let inner_width = modal_width.saturating_sub(2) as usize;
@@ -416,9 +460,10 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
 
     if has_git {
         if detect_ignored(&root) {
-            return Ok(());
+            return run_claude_acp_modal_if_missing(terminal);
         }
-        return run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry);
+        run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?;
+        return run_claude_acp_modal_if_missing(terminal);
     }
 
     let scenario = if has_existing_files() {
@@ -427,7 +472,8 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
         Scenario::NoGitEmpty
     };
 
-    run_git_init_modal(terminal, scenario, &codexize_entry)
+    run_git_init_modal(terminal, scenario, &codexize_entry)?;
+    run_claude_acp_modal_if_missing(terminal)
 }
 
 fn run_git_init_modal(
@@ -496,6 +542,39 @@ fn run_gitignore_modal(
                     return Ok(());
                 }
                 KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn run_claude_acp_modal_if_missing(terminal: &mut AppTerminal) -> Result<()> {
+    if crate::acp::claude_acp_is_available() {
+        return Ok(());
+    }
+
+    loop {
+        terminal.draw(|frame| {
+            render_preflight_modal(frame, Scenario::ClaudeAcpMissing);
+        })?;
+
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    install_claude_acp()?;
+                    return Ok(());
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    return Ok(());
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') => {
                     std::process::exit(0);
                 }
                 _ => {}
@@ -581,6 +660,27 @@ mod tests {
             assert!(content.contains("node_modules/"));
             assert!(content.contains(".codexize/"));
         });
+    }
+
+    #[test]
+    fn claude_acp_install_root_uses_home_codexize_acp() {
+        let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let prev_home = std::env::var_os("HOME");
+        let home = tempfile::TempDir::new().unwrap();
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let root = crate::acp::claude_acp_install_root();
+
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        assert_eq!(root, home.path().join(".codexize").join("acp"));
     }
 
     #[test]

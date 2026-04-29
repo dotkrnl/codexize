@@ -14,7 +14,7 @@ use crate::{
         self as session_state, Message, MessageKind, MessageSender, PendingGuardDecision, Phase,
         PipelineItem, PipelineItemStatus, RunStatus, SessionState,
     },
-    tasks, tmux,
+    tasks,
 };
 use anyhow::Result;
 
@@ -89,12 +89,12 @@ impl App {
             .any(|run| run.status == RunStatus::Running)
     }
 
-    pub(super) fn window_exists(&self, window_name: &str) -> bool {
+    pub(super) fn active_run_exists(&self, window_name: &str) -> bool {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return false;
         }
-        crate::runner::window_is_active(window_name) || tmux::window_exists(window_name)
+        crate::runner::run_label_is_active(window_name)
     }
 
     pub(super) fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {
@@ -136,26 +136,6 @@ impl App {
             "reviewer" => SelectionPhase::Review,
             _ => SelectionPhase::Build,
         }
-    }
-
-    pub(super) fn run_status_path_for(
-        &self,
-        stage: &str,
-        task_id: Option<u32>,
-        round: u32,
-        attempt: u32,
-    ) -> std::path::PathBuf {
-        let task = task_id
-            .map(|id| format!("task-{id}"))
-            .unwrap_or_else(|| "stage".to_string());
-        session_state::session_dir(&self.state.session_id)
-            .join("artifacts")
-            .join("run-status")
-            .join(format!("{stage}-{task}-r{round}-a{attempt}.txt"))
-    }
-
-    pub(super) fn run_status_path(&self, run: &crate::state::RunRecord) -> std::path::PathBuf {
-        self.run_status_path_for(&run.stage, run.task_id, run.round, run.attempt)
     }
 
     pub(super) fn run_key_for(
@@ -285,9 +265,9 @@ impl App {
     }
 
     pub(super) fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
-        std::fs::read_to_string(self.run_status_path(run))
+        crate::runner::read_finish_stamp(&self.finish_stamp_path_for(run))
             .ok()
-            .and_then(|text| text.trim().parse::<i32>().ok())
+            .map(|stamp| stamp.exit_code)
     }
 
     pub(super) fn artifact_present(path: &std::path::Path) -> bool {
@@ -774,9 +754,9 @@ impl App {
         trigger_summary: Option<String>,
         trigger: &str,
     ) -> bool {
-        if self.current_run_id.is_some() || self.window_launched {
+        if self.current_run_id.is_some() || self.run_launched {
             let _ = self.state.log_event(
-                "enter_builder_recovery called while a run window is still marked active"
+                "enter_builder_recovery called while a run label is still marked active"
                     .to_string(),
             );
         }

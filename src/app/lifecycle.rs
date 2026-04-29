@@ -9,7 +9,6 @@ use crate::{
         RunStatus, SessionState,
     },
     tasks,
-    tmux::TmuxContext,
     tui::AppTerminal,
 };
 use anyhow::Result;
@@ -125,7 +124,7 @@ impl App {
         }
     }
 
-    pub fn new(tmux: TmuxContext, mut state: SessionState) -> Self {
+    pub fn new(mut state: SessionState) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         if state.builder.task_titles.is_empty() {
             let tasks_path = session_state::session_dir(&state.session_id)
@@ -143,7 +142,6 @@ impl App {
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
         let mut app = Self {
-            tmux,
             state,
             nodes,
             visible_rows: Vec::new(),
@@ -168,7 +166,7 @@ impl App {
             input_cursor: 0,
             pending_view_path: None,
             confirm_back: false,
-            window_launched: false,
+            run_launched: false,
             quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
             agent_line_count: 0,
@@ -208,31 +206,19 @@ impl App {
                 app.model_refresh = ModelRefreshState::Idle(Instant::now());
             }
         }
-        if let Ok(output) = std::process::Command::new("tmux")
-            .args(["list-windows", "-F", "#{window_name}"])
-            .output()
-        {
-            let live_windows = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            if let Ok(run_id) =
-                session_state::transitions::resume_running_runs(&mut app.state, &live_windows)
-            {
-                app.current_run_id = run_id;
-                app.window_launched = run_id.is_some();
-                if let Some(rid) = run_id {
-                    if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid).cloned() {
-                        app.live_summary_path = Some(app.live_summary_path_for(&run));
-                        app.prime_yolo_exit_tracking(&run);
-                    }
-                    app.read_live_summary_pipeline();
+        if let Ok(run_id) = session_state::transitions::resume_running_runs(&mut app.state) {
+            app.current_run_id = run_id;
+            app.run_launched = run_id.is_some();
+            if let Some(rid) = run_id {
+                if let Some(run) = app.state.agent_runs.iter().find(|r| r.id == rid).cloned() {
+                    app.live_summary_path = Some(app.live_summary_path_for(&run));
+                    app.prime_yolo_exit_tracking(&run);
                 }
-                app.messages =
-                    SessionState::load_messages(&app.state.session_id).unwrap_or_default();
-                app.rebuild_tree_view(None);
-                app.maybe_refocus_to_progress();
+                app.read_live_summary_pipeline();
             }
+            app.messages = SessionState::load_messages(&app.state.session_id).unwrap_or_default();
+            app.rebuild_tree_view(None);
+            app.maybe_refocus_to_progress();
         }
         // Resume validation: if the session was interrupted mid-guard-decision,
         // restore the modal or fail closed.
@@ -344,7 +330,7 @@ impl App {
                 }
             }
             self.refresh_models_if_due();
-            self.poll_agent_window();
+            self.poll_agent_run();
             self.maybe_yolo_auto_resolve();
             self.maybe_auto_launch();
             self.update_agent_progress();
@@ -926,17 +912,11 @@ impl App {
         if path.exists() { Some(path) } else { None }
     }
 
-    pub(super) fn open_editable_artifact(&self) {
+    pub(super) fn open_editable_artifact(&mut self) {
         let Some(path) = self.editable_artifact() else {
             return;
         };
-        let path_str = path.display().to_string();
-        let _ = std::process::Command::new("tmux")
-            .args(["new-window", "-n", "[Edit]", &format!("vim {path_str}")])
-            .output();
-        let _ = std::process::Command::new("tmux")
-            .args(["select-window", "-t", "[Edit]"])
-            .output();
+        self.pending_view_path = Some(path);
     }
 
     pub(super) fn queue_view_of_current_artifact(&mut self, filename: &str) {
@@ -1052,9 +1032,8 @@ impl App {
             .collect::<BTreeSet<_>>();
         for run in &removed_runs {
             if run.status == RunStatus::Running {
-                kill_window(&run.window_name);
+                cancel_run_label(&run.window_name);
             }
-            let _ = fs::remove_file(self.run_status_path(run));
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
         }
@@ -1086,7 +1065,7 @@ impl App {
 
         self.clear_agent_error();
         self.current_run_id = None;
-        self.window_launched = false;
+        self.run_launched = false;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         session_state::transitions::set_phase_for_operator_retry(
@@ -1128,7 +1107,7 @@ impl App {
 
         self.clear_agent_error();
         self.current_run_id = None;
-        self.window_launched = false;
+        self.run_launched = false;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         if let Some(phase) = retry_phase_for_stage(stage) {
@@ -1160,9 +1139,8 @@ impl App {
             .collect::<BTreeSet<_>>();
         for run in removed_runs {
             if run.status == RunStatus::Running {
-                kill_window(&run.window_name);
+                cancel_run_label(&run.window_name);
             }
-            let _ = fs::remove_file(self.run_status_path(run));
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
         }
@@ -1184,8 +1162,8 @@ impl App {
         let prompts = session_dir.join("prompts");
 
         // Interrupt the running agent (if any) so rewinding takes effect even
-        // when the phase-specific kill_window base doesn't match the launch
-        // window name (e.g. "[Spec Review 1]" vs "[Spec Review]").
+        // when the phase-specific cancel_run_label base doesn't match the launch
+        // run label (e.g. "[Spec Review 1]" vs "[Spec Review]").
         if let Some(run_id) = self.current_run_id {
             let running = self
                 .state
@@ -1194,7 +1172,7 @@ impl App {
                 .find(|r| r.id == run_id)
                 .cloned();
             if let Some(run) = running {
-                kill_window(&run.window_name);
+                cancel_run_label(&run.window_name);
                 if run.status == crate::state::RunStatus::Running {
                     self.finalize_run_record(run_id, false, Some("aborted by user".to_string()));
                 }
@@ -1203,14 +1181,14 @@ impl App {
 
         match self.state.current_phase {
             Phase::BrainstormRunning => {
-                kill_window("[Brainstorm]");
+                cancel_run_label("[Brainstorm]");
                 let _ = fs::remove_file(artifacts.join("spec.md"));
                 let _ = fs::remove_file(prompts.join("brainstorm.md"));
                 self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::IdeaInput);
             }
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
-                kill_window("[Spec Review]");
+                cancel_run_label("[Spec Review]");
                 let _ = fs::remove_file(artifacts.join("spec-review-1.md"));
                 let _ = fs::remove_file(prompts.join("spec-review-1.md"));
                 // TODO(Task 2): clean up all review artifacts by RunRecord instead of the
@@ -1218,12 +1196,12 @@ impl App {
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::PlanningRunning => {
-                kill_window("[Planning]");
+                cancel_run_label("[Planning]");
                 let _ = fs::remove_file(artifacts.join("plan.md"));
                 let _ = self.transition_to_phase(Phase::SpecReviewRunning);
             }
             Phase::PlanReviewRunning => {
-                kill_window("[Plan Review 1]");
+                cancel_run_label("[Plan Review 1]");
                 let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
                 let _ = fs::remove_file(prompts.join("plan-review-1.md"));
                 let plan_backup = artifacts.join("plan.pre-review-1.md");
@@ -1251,7 +1229,7 @@ impl App {
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::ShardingRunning => {
-                kill_window("[Sharding]");
+                cancel_run_label("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
                 // TODO(Task 2): remove sharding launch metadata from RunRecord instead of the
@@ -1259,7 +1237,7 @@ impl App {
                 let _ = self.transition_to_phase(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {
-                kill_window(&format!("[Builder r{r}]"));
+                cancel_run_label(&format!("[Builder r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
                     if self.state.skip_to_impl_rationale.is_some() {
@@ -1274,36 +1252,36 @@ impl App {
                 let _ = self.transition_to_phase(prev);
             }
             Phase::ReviewRound(r) => {
-                kill_window(&format!("[Review r{r}]"));
+                cancel_run_label(&format!("[Review r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let _ = self.transition_to_phase(Phase::ImplementationRound(r));
             }
             Phase::BuilderRecovery(r) => {
-                kill_window("[Recovery]");
+                cancel_run_label("[Recovery]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-r{r}.md")));
                 // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
                 // the triggering review round so the operator can intervene.
                 let _ = self.transition_to_phase(Phase::ReviewRound(r));
             }
             Phase::BuilderRecoveryPlanReview(r) => {
-                kill_window("[Recovery Plan Review]");
+                cancel_run_label("[Recovery Plan Review]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-plan-review-r{r}.md")));
                 let _ = self.transition_to_phase(Phase::BuilderRecovery(r));
             }
             Phase::BuilderRecoverySharding(r) => {
-                kill_window("[Recovery Sharding]");
+                cancel_run_label("[Recovery Sharding]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-sharding-r{r}.md")));
                 let _ = self.transition_to_phase(Phase::BuilderRecoveryPlanReview(r));
             }
             Phase::SkipToImplPending => {
-                kill_window("[Skip Confirm]");
+                cancel_run_label("[Skip Confirm]");
                 let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
                 session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
                 self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::GitGuardPending => {
-                // No window owned by this phase; the modal is purely TUI.
+                // No agent process owned by this phase; the modal is purely TUI.
                 // Operator handlers are the legitimate exit path; go_back is
                 // a no-op while the decision is pending.
             }
@@ -1311,7 +1289,7 @@ impl App {
         }
 
         self.clear_agent_error();
-        self.window_launched = false;
+        self.run_launched = false;
         self.current_run_id = None;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
@@ -1338,11 +1316,13 @@ impl App {
             self.agent_last_change = None;
             return;
         };
-        let output = std::process::Command::new("tmux")
-            .args(["capture-pane", "-t", &run.window_name, "-p", "-J"])
-            .output();
-        let Ok(out) = output else { return };
-        let text = String::from_utf8_lossy(&out.stdout);
+        let text = self
+            .messages
+            .iter()
+            .filter(|message| message.run_id == run.id)
+            .map(|message| message.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         self.agent_line_count = text.lines().filter(|l| !l.trim().is_empty()).count();
 
         use std::hash::{Hash, Hasher};
@@ -1365,10 +1345,10 @@ impl App {
 
     /// Auto-launch the agent for the current phase if it's a non-interactive
     /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
-    /// window is already up, if models aren't loaded, or if the last run
+    /// run is already launched, if models aren't loaded, or if the last run
     /// errored (user needs to intervene).
     pub(super) fn maybe_auto_launch(&mut self) {
-        if self.window_launched || self.state.agent_error.is_some() || self.models.is_empty() {
+        if self.run_launched || self.state.agent_error.is_some() || self.models.is_empty() {
             return;
         }
         match self.state.current_phase {
@@ -1390,7 +1370,7 @@ impl App {
         }
     }
 
-    pub(super) fn poll_agent_window(&mut self) {
+    pub(super) fn poll_agent_run(&mut self) {
         let Some(run_id) = self.current_run_id else {
             self.pending_drain_deadline = None;
             return;
@@ -1405,7 +1385,7 @@ impl App {
             self.pending_drain_deadline = None;
             return;
         };
-        if self.window_exists(&run.window_name) {
+        if self.active_run_exists(&run.window_name) {
             self.maybe_issue_yolo_exit(&run);
             self.pending_drain_deadline = None;
             return;
@@ -1436,7 +1416,7 @@ impl App {
         }
 
         self.pending_drain_deadline = None;
-        self.window_launched = false;
+        self.run_launched = false;
         self.current_run_id = None;
         let outcome = self.finalize_current_run(&run);
         if let Err(err) = outcome {

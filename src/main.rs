@@ -1,9 +1,9 @@
 use anyhow::{Result, bail};
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use codexize::{
-    app, picker, preflight, runner,
+    app, picker, preflight,
     state::{self},
-    tmux, tui,
+    tui,
 };
 use std::process::ExitCode;
 #[derive(Parser)]
@@ -21,26 +21,6 @@ struct Cli {
     /// newlines are preserved verbatim. Blank-after-trim is rejected.
     #[arg(short = 'm', long = "message")]
     message: Option<String>,
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Run an agent for a specific phase (used by orchestrated windows)
-    AgentRun {
-        #[arg(long)]
-        session_id: String,
-        #[arg(long)]
-        phase: String,
-        #[arg(long)]
-        role: String,
-        /// Required artifact paths — agent is blocked from stopping until all exist
-        #[arg(long = "artifact")]
-        artifacts: Vec<String>,
-        #[arg(last = true)]
-        command: Vec<String>,
-    },
 }
 
 /// Result of validating CLI flags for the top-level (no-subcommand) path.
@@ -91,54 +71,42 @@ fn main() -> ExitCode {
 fn try_main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Some(Commands::AgentRun {
-            session_id,
-            phase,
-            role,
-            artifacts,
-            command,
-        }) => runner::run(session_id, phase, role, artifacts, command),
-        None => {
-            let plan = plan_launch(&cli)?;
-            let tmux = tmux::current_context()?;
-            let mut terminal = tui::start()?;
+    let plan = plan_launch(&cli)?;
+    let mut terminal = tui::start()?;
 
-            preflight::check(&mut terminal, &tmux)?;
+    preflight::check(&mut terminal)?;
 
-            let session_id = match plan {
-                LaunchPlan::DirectCreate { idea, modes } => {
-                    // Direct creation always produces a fresh session, so the
-                    // resume-ignored warnings do not apply here.
-                    picker::create_session(&idea, modes)?
-                }
-                LaunchPlan::Picker { create_modes } => {
-                    let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
-                    let selection = match picker.run(&mut terminal)? {
-                        Some(selection) => selection,
-                        None => {
-                            tui::stop(&mut terminal)?;
-                            return Ok(());
-                        }
-                    };
-
-                    if !selection.created {
-                        for warning in resume_ignored_mode_warnings(create_modes) {
-                            eprintln!("{warning}");
-                        }
-                    }
-                    selection.session_id
+    let session_id = match plan {
+        LaunchPlan::DirectCreate { idea, modes } => {
+            // Direct creation always produces a fresh session, so the
+            // resume-ignored warnings do not apply here.
+            picker::create_session(&idea, modes)?
+        }
+        LaunchPlan::Picker { create_modes } => {
+            let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
+            let selection = match picker.run(&mut terminal)? {
+                Some(selection) => selection,
+                None => {
+                    tui::stop(&mut terminal)?;
+                    return Ok(());
                 }
             };
 
-            let mut state = state::SessionState::load(&session_id)?;
-            let _ = state::resume::resume_session(&mut state);
-
-            let result = app::App::new(tmux, state).run(&mut terminal);
-            tui::stop(&mut terminal)?;
-            result
+            if !selection.created {
+                for warning in resume_ignored_mode_warnings(create_modes) {
+                    eprintln!("{warning}");
+                }
+            }
+            selection.session_id
         }
-    }
+    };
+
+    let mut state = state::SessionState::load(&session_id)?;
+    let _ = state::resume::resume_session(&mut state);
+
+    let result = app::App::new(state).run(&mut terminal);
+    tui::stop(&mut terminal)?;
+    result
 }
 
 fn resume_ignored_mode_warnings(modes: state::Modes) -> Vec<&'static str> {

@@ -62,7 +62,7 @@ fn coder_retry_loop_uses_distinct_models_until_success() {
             if app.current_run_id.is_none() {
                 break;
             }
-            app.poll_agent_window();
+            app.poll_agent_run();
         }
 
         assert!(app.current_run_id.is_none());
@@ -308,7 +308,7 @@ fn coder_retry_exhaustion_enters_builder_recovery() {
             if app.current_run_id.is_none() {
                 break;
             }
-            app.poll_agent_window();
+            app.poll_agent_run();
         }
 
         assert!(app.current_run_id.is_none());
@@ -608,9 +608,8 @@ fn brainstorm_failure_auto_retries_with_next_model() {
                 }]),
             },
         )));
-        std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
-            .expect("create status dir");
-        std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
+
+        write_finish_stamp_for_run(&app, &run, 1, "");
 
         app.finalize_current_run(&run)
             .expect("finalize brainstorm failure");

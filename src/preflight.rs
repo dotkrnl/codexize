@@ -1,5 +1,4 @@
 use crate::state::codexize_root;
-use crate::tmux::TmuxContext;
 use crate::tui::AppTerminal;
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -277,7 +276,7 @@ fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     lines.join("\n")
 }
 
-fn spawn_gitignore_agent(_tmux: &TmuxContext, codexize_entry: &str) -> Result<std::path::PathBuf> {
+fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::PathBuf> {
     let finish_marker =
         std::env::temp_dir().join(format!("codexize-gitignore-{}.done", std::process::id()));
     // Preflight intentionally stays deterministic here instead of opening an
@@ -404,7 +403,7 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
     frame.render_widget(paragraph, rect);
 }
 
-pub fn check(terminal: &mut AppTerminal, tmux: &TmuxContext) -> Result<()> {
+pub fn check(terminal: &mut AppTerminal) -> Result<()> {
     let has_git = detect_git();
     let root = codexize_root();
     let codexize_entry = match std::env::current_dir() {
@@ -419,12 +418,7 @@ pub fn check(terminal: &mut AppTerminal, tmux: &TmuxContext) -> Result<()> {
         if detect_ignored(&root) {
             return Ok(());
         }
-        return run_gitignore_modal(
-            terminal,
-            Scenario::GitExistsNotIgnored,
-            tmux,
-            &codexize_entry,
-        );
+        return run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry);
     }
 
     let scenario = if has_existing_files() {
@@ -433,13 +427,12 @@ pub fn check(terminal: &mut AppTerminal, tmux: &TmuxContext) -> Result<()> {
         Scenario::NoGitEmpty
     };
 
-    run_git_init_modal(terminal, scenario, tmux, &codexize_entry)
+    run_git_init_modal(terminal, scenario, &codexize_entry)
 }
 
 fn run_git_init_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
-    tmux: &TmuxContext,
     codexize_entry: &str,
 ) -> Result<()> {
     loop {
@@ -456,7 +449,7 @@ fn run_git_init_modal(
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     if scenario == Scenario::NoGitHasFiles {
-                        let finish_marker = spawn_gitignore_agent(tmux, codexize_entry)?;
+                        let finish_marker = generate_gitignore_preflight_file(codexize_entry)?;
                         debug_assert!(
                             finish_marker.exists(),
                             "deterministic preflight generation should create its marker eagerly"
@@ -480,7 +473,6 @@ fn run_git_init_modal(
 fn run_gitignore_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
-    _tmux: &TmuxContext,
     codexize_entry: &str,
 ) -> Result<()> {
     loop {
@@ -624,21 +616,13 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_generation_is_deterministic_without_tmux_or_agent_launch() {
+    fn gitignore_generation_is_deterministic_without_runtime_launch() {
         with_temp_dir(|| {
             fs::write("Cargo.toml", "[package]\nname = \"demo\"\n").unwrap();
 
             let fake_bin = Path::new("fake-bin");
             fs::create_dir_all(fake_bin).unwrap();
-            let tmux_log = Path::new("tmux.log");
             let codex_log = Path::new("codex.log");
-            write_fake_executable(
-                &fake_bin.join("tmux"),
-                &format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\nexit 0\n",
-                    tmux_log.display()
-                ),
-            );
             write_fake_executable(
                 &fake_bin.join("codex"),
                 &format!(
@@ -653,12 +637,8 @@ mod tests {
                 std::env::set_var("PATH", fake_bin);
             }
 
-            let tmux = TmuxContext {
-                session_name: "test".to_string(),
-                window_index: "1".to_string(),
-                window_name: "preflight".to_string(),
-            };
-            let outcome = std::panic::catch_unwind(|| spawn_gitignore_agent(&tmux, ".codexize/"));
+            let outcome =
+                std::panic::catch_unwind(|| generate_gitignore_preflight_file(".codexize/"));
 
             unsafe {
                 match original_path {
@@ -676,10 +656,6 @@ mod tests {
             assert!(
                 finish_marker.exists(),
                 "expected finish marker to be written"
-            );
-            assert!(
-                !tmux_log.exists(),
-                "preflight gitignore generation must not spawn tmux"
             );
             assert!(
                 !codex_log.exists(),

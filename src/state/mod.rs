@@ -81,6 +81,8 @@ pub struct RunRecord {
     pub attempt: u32,
     pub model: String,
     pub vendor: String,
+    /// Persisted key retained for schema compatibility; ACP treats it as a
+    /// run label, not a tmux window identifier.
     pub window_name: String,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -511,9 +513,9 @@ impl SessionState {
     ///
     /// Returns the current run ID if exactly one `Running` run exists after
     /// applying same-host identity validation. The app is responsible for
-    /// routing missing-window runs through the drain barrier and finish-stamp
+    /// routing resumed runs through the drain barrier and finish-stamp
     /// finalization path.
-    pub fn resume_running_runs(&mut self, live_windows: &[String]) -> Result<Option<u64>> {
+    pub fn resume_running_runs(&mut self) -> Result<Option<u64>> {
         // Check for hostname/device identity mismatch first
         let current_hostname = Self::capture_hostname();
         let current_device_id = Self::capture_mount_device_id();
@@ -598,14 +600,6 @@ impl SessionState {
         }
 
         let run_id = running_ids[0];
-        let window_name = self
-            .agent_runs
-            .iter()
-            .find(|r| r.id == run_id)
-            .map(|r| r.window_name.clone())
-            .unwrap_or_default();
-        let _window_live = live_windows.contains(&window_name);
-
         self.save()?;
         Ok(Some(run_id))
     }

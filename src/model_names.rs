@@ -34,7 +34,7 @@ pub fn display_name_for_vendor(canonical: &str, vendor_prefix: &str) -> String {
     }
 }
 
-pub fn tmux_name(canonical: &str) -> String {
+pub fn run_label_name(canonical: &str) -> String {
     if let Some(display) = explicit_display_name(canonical) {
         display.to_string()
     } else {
@@ -81,9 +81,9 @@ mod tests {
     }
 
     #[test]
-    fn tmux_name_keeps_existing_claude_behavior_and_shortens_known_gemini() {
-        assert_eq!(tmux_name("claude-sonnet-4.6"), "sonnet-4.6");
-        assert_eq!(tmux_name("gemini-3.1-pro-preview"), "3.1-pro");
-        assert_eq!(tmux_name("gpt-5.2"), "gpt-5.2");
+    fn run_label_name_keeps_existing_claude_behavior_and_shortens_known_gemini() {
+        assert_eq!(run_label_name("claude-sonnet-4.6"), "sonnet-4.6");
+        assert_eq!(run_label_name("gemini-3.1-pro-preview"), "3.1-pro");
+        assert_eq!(run_label_name("gpt-5.2"), "gpt-5.2");
     }
 }

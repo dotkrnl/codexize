@@ -269,9 +269,7 @@ fn yolo_exit_resume_guard_waits_for_new_observable_update() {
             "stale artifacts alone must not exit a resumed invocation"
         );
 
-        let status_path = app.run_status_path(&run);
-        std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
-        std::fs::write(&status_path, "0").expect("status artifact");
+        write_finish_stamp_for_run(&app, &run, 0, "");
 
         app.maybe_issue_yolo_exit(&run);
         assert!(app.yolo_exit_issued.contains(&run.id));

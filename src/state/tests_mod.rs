@@ -566,8 +566,7 @@ fn test_resume_one_running_live_window() {
             mount_device_id: None,
         });
 
-        let live_windows = vec!["[Brainstorm]".to_string()];
-        let result = state.resume_running_runs(&live_windows);
+        let result = state.resume_running_runs();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(1));
@@ -598,8 +597,7 @@ fn test_resume_one_running_missing_window() {
             mount_device_id: None,
         });
 
-        let live_windows = vec![]; // No live windows
-        let result = state.resume_running_runs(&live_windows);
+        let result = state.resume_running_runs();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(1));
@@ -647,8 +645,7 @@ fn test_resume_multiple_running_runs() {
         mount_device_id: None,
     });
 
-    let live_windows = vec!["[Brainstorm]".to_string(), "[Spec]".to_string()];
-    let result = state.resume_running_runs(&live_windows);
+    let result = state.resume_running_runs();
 
     assert!(result.is_err());
     let err = format!("{:?}", result.unwrap_err());
@@ -1196,8 +1193,7 @@ fn test_resume_hostname_mismatch_marks_failed_unverified() {
             mount_device_id: None,
         });
 
-        let live_windows = vec!["[Coder]".to_string()];
-        let result = state.resume_running_runs(&live_windows);
+        let result = state.resume_running_runs();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
@@ -1260,8 +1256,7 @@ fn test_resume_mount_device_mismatch_marks_failed_unverified() {
             mount_device_id: different_device,
         });
 
-        let live_windows = vec!["[Coder]".to_string()];
-        let result = state.resume_running_runs(&live_windows);
+        let result = state.resume_running_runs();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
@@ -1303,8 +1298,7 @@ fn test_resume_same_host_identity_preserves_running() {
             mount_device_id: current_device,
         });
 
-        let live_windows = vec!["[Coder]".to_string()];
-        let result = state.resume_running_runs(&live_windows);
+        let result = state.resume_running_runs();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(1));

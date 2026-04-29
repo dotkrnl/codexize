@@ -76,7 +76,6 @@ impl App {
     pub(super) fn yolo_exit_snapshot(&self, run: &RunRecord) -> YoloExitSnapshot {
         YoloExitSnapshot {
             live_summary: Self::observed_path_state(&self.live_summary_path_for(run)),
-            run_status: Self::observed_path_state(&self.run_status_path(run)),
             finish_stamp: Self::observed_path_state(&self.finish_stamp_path_for(run)),
             stage_artifacts: self
                 .yolo_exit_stage_artifacts(run)
@@ -180,13 +179,7 @@ impl App {
         let _ = self
             .state
             .log_event(format!("yolo_auto_approved: gate={gate}"));
-        crate::runner::request_window_exit(&run.window_name);
-        #[cfg(not(test))]
-        {
-            let _ = std::process::Command::new("tmux")
-                .args(["send-keys", "-t", &run.window_name, "/exit", "Enter"])
-                .output();
-        }
+        crate::runner::request_run_label_exit(&run.window_name);
     }
 
     pub(super) fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {

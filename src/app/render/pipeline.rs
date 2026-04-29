@@ -316,7 +316,7 @@ impl App {
         let gutter = "│ ".repeat(depth);
         let dim = Style::default().fg(Color::DarkGray);
 
-        if node.status == NodeStatus::Running && self.window_launched {
+        if node.status == NodeStatus::Running && self.run_launched {
             let spin = spinner_frame(self.spinner_tick);
             lines.push(Line::from(vec![
                 Span::styled(format!(" {gutter}  "), dim),

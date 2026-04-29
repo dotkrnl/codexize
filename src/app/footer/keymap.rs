@@ -4,7 +4,8 @@ use ratatui::text::{Line, Span};
 use super::super::focus_caps::FocusCaps;
 use super::super::{ModalKind, StageId};
 use super::keymap_view_model::{
-    WidthTier, render_binding, select_modal_tier, select_simple_tier, select_width_tier,
+    WidthTier, binding_enabled, render_binding, select_modal_tier, select_simple_tier,
+    select_width_tier,
 };
 use crate::state::Phase;
 
@@ -35,40 +36,6 @@ pub(crate) const RULE_COLOR: Color = Color::DarkGray;
 pub(crate) const SEP_INNER: &str = " · ";
 /// Separator between categories.
 pub(crate) const SEP_CATEGORY: &str = "  ·  ";
-
-fn binding_enabled(binding: &KeyBinding, caps: &dyn Fn(Option<Capability>) -> bool) -> bool {
-    binding.capability.map(|c| caps(Some(c))).unwrap_or(true)
-}
-
-/// Width budget contribution for a single binding, accounting for the rule
-/// that capability-disabled bindings render glyph-only and never advertise
-/// their action label even when `show_label` is true.
-fn binding_width(
-    binding: &KeyBinding,
-    show_label: bool,
-    caps: &dyn Fn(Option<Capability>) -> bool,
-) -> usize {
-    let mut len = binding.glyph.chars().count();
-    if show_label && binding_enabled(binding, caps) {
-        len += 1 + binding.action.chars().count();
-    }
-    len
-}
-
-pub(super) fn category_width(
-    bindings: &[KeyBinding],
-    show_labels: bool,
-    caps: &dyn Fn(Option<Capability>) -> bool,
-) -> usize {
-    let mut len = 0;
-    for (i, b) in bindings.iter().enumerate() {
-        if i > 0 {
-            len += SEP_INNER.chars().count();
-        }
-        len += binding_width(b, show_labels, caps);
-    }
-    len
-}
 
 /// Default phase keymap: navigation · actions · system.
 fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
@@ -218,12 +185,6 @@ fn input_bindings() -> Vec<KeyBinding> {
             capability: None,
         },
     ]
-}
-
-/// Width tier for progressive collapse.
-pub(super) fn measure_system(system: &[KeyBinding], show_label: bool) -> usize {
-    let dummy_caps: &dyn Fn(Option<Capability>) -> bool = &|_| true;
-    category_width(system, show_label, dummy_caps)
 }
 
 fn render_category(
@@ -650,7 +611,7 @@ mod tests {
                     })
                     .unwrap_or(true)
                 });
-            let sys = measure_system(&system, true);
+            let sys = keymap_view_model::measure_system(&system, true);
             (left + SEP_CATEGORY.chars().count() + sys) as u16
         };
 

@@ -1296,6 +1296,13 @@ impl App {
         })
     }
 
+    pub(super) fn has_running_agent(&self) -> bool {
+        self.state
+            .agent_runs
+            .iter()
+            .any(|run| run.status == RunStatus::Running)
+    }
+
     fn try_test_launch(
         &mut self,
         status_path: &std::path::Path,
@@ -2371,7 +2378,7 @@ impl App {
         {
             let _ = std::process::Command::new("tmux")
                 .args(["send-keys", "-t", &run.window_name, "/exit", "Enter"])
-                .status();
+                .output();
         }
     }
 

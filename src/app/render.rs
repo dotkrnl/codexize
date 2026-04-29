@@ -728,23 +728,19 @@ impl App {
         }
 
         let dim = Style::default().fg(Color::DarkGray);
-        let highlight_bg = status_highlight_bg(node.status);
-        let highlight = |bg: Color| Style::default().bg(bg).fg(Color::Black);
-        let (marker_style, gap_style, label_style) = match (highlight_bg, is_focused) {
-            // Focused with a status: chevron + gap + label form one block.
-            (Some(bg), true) => (highlight(bg), highlight(bg), highlight(bg)),
-            // Unfocused with a status: chevron-only highlight.
-            (Some(bg), false) => (highlight(bg), Style::default(), Style::default()),
-            // No status highlight (Pending / WaitingUser / Skipped).
-            (None, _) => (Style::default(), Style::default(), Style::default()),
+        let color_block_style = match status_highlight_bg(node.status) {
+            Some(bg) => Style::default().bg(bg),
+            None => Style::default(),
         };
 
         let mut spans = vec![
             Span::styled(focus_glyph, Style::default()),
+            Span::styled(" ", color_block_style),
             Span::styled(indent, dim),
-            Span::styled(marker.to_string(), marker_style),
-            Span::styled(" ", gap_style),
-            Span::styled(node.label.clone(), label_style),
+            Span::raw(" "),
+            Span::raw(marker.to_string()),
+            Span::raw(" "),
+            Span::raw(node.label.clone()),
             Span::styled(" · ", dim),
             Span::styled(node.status.label(), node.status.style()),
         ];
@@ -1364,12 +1360,12 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("└─▾ Task A") && line.contains("running"))
+                .any(|line| line.contains("└─ ▾ Task A") && line.contains("running"))
         );
         assert!(
             lines
                 .iter()
-                .any(|line| line.contains("└─▾ Builder") && line.contains("running"))
+                .any(|line| line.contains("└─ ▾ Builder") && line.contains("running"))
         );
         assert!(
             lines
@@ -2468,8 +2464,8 @@ mod tests {
             lines,
             vec![
                 "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
-                "▌▾ Implementation · running",
-                " └─▾ Builder · running",
+                "▌  ▾ Implementation · running",
+                "  └─ ▾ Builder · running",
                 "XX:XX:XX ⠋ Wiring full-screen tests",
                 "",
                 "",
@@ -2792,12 +2788,12 @@ mod tests {
             !pinned_style.add_modifier.contains(Modifier::UNDERLINED),
             "pinned running stage header should not be underlined"
         );
-        // Chevron lives at col 1 and should carry the running highlight bg.
-        let chevron_style = buf[(1, 0)].style();
+        // The status color block lives at col 1 and should carry the running bg.
+        let block_style = buf[(1, 0)].style();
         assert_eq!(
-            chevron_style.bg,
+            block_style.bg,
             Some(Color::Cyan),
-            "running chevron should carry the status highlight bg"
+            "running color block should carry the status highlight bg"
         );
         assert!(
             line_text(&buf, 1, 80).contains("Task B"),
@@ -2899,44 +2895,14 @@ mod tests {
         assert!(lines[4].contains("Tail"));
     }
 
-    /// Focused depth-0 row: chevron (col 1), gap (col 2), and label (cols 3..=7
-    /// for "Stage") form one contiguous highlight block. Focus glyph and the
-    /// trailing separator stay unhighlighted.
-    fn assert_focused_depth_0_block(status: NodeStatus, expected_bg: Color) {
-        let app = test_app(
-            vec![node("Stage", NodeKind::Stage, status, Vec::new(), None, None)],
-            Vec::new(),
-            Vec::new(),
-        );
-        // test_app sets selected=0, so row 0 is focused.
-        let buf = render_pipeline_buf(&app, 80, 5);
-        for col in 0u16..80 {
-            let style = buf[(col, 0)].style();
-            assert!(
-                !style.add_modifier.contains(Modifier::UNDERLINED),
-                "no cell on a depth-0 row should be underlined; col={col}"
-            );
-        }
-        assert!(
-            buf[(0, 0)].style().bg != Some(expected_bg),
-            "focus glyph cell must not carry the status highlight bg"
-        );
-        for col in 1u16..=7 {
-            assert_eq!(
-                buf[(col, 0)].style().bg,
-                Some(expected_bg),
-                "focused chevron+gap+label cell at col {col} should carry the status highlight bg"
-            );
-        }
-        assert!(
-            buf[(8, 0)].style().bg != Some(expected_bg),
-            "trailing separator after label should not be highlighted"
-        );
-    }
-
-    /// Unfocused depth-0 row: only the chevron (col 1) carries the highlight
-    /// bg; the gap, label, and surrounding cells do not.
-    fn assert_unfocused_depth_0_chevron_only(status: NodeStatus, expected_bg: Color) {
+    /// Depth-0 row layout: `[focus][color block] > Title · status`.
+    /// - col 0: focus glyph (no bg)
+    /// - col 1: status color block (carries status bg when present)
+    /// - col 2: gap (no bg)
+    /// - col 3: chevron `▾`/`▸` (no bg)
+    /// - col 4: gap (no bg)
+    /// - col 5+: title (no bg)
+    fn assert_depth_0_color_block(status: NodeStatus, expected_bg: Color, focused: bool) {
         let mut app = test_app(
             vec![
                 node("Stage", NodeKind::Stage, status, Vec::new(), None, None),
@@ -2952,22 +2918,35 @@ mod tests {
             Vec::new(),
             Vec::new(),
         );
-        // Move focus off of row 0 so the highlight rule for unfocused rows applies.
-        app.selected = 1;
-        app.selected_key = Some(app.visible_rows[1].key.clone());
+        if !focused {
+            app.selected = 1;
+            app.selected_key = Some(app.visible_rows[1].key.clone());
+        }
 
         let buf = render_pipeline_buf(&app, 80, 5);
-        // Chevron (col 1) is highlighted.
+        // No underline anywhere on depth-0 rows.
+        for col in 0u16..80 {
+            assert!(
+                !buf[(col, 0)].style().add_modifier.contains(Modifier::UNDERLINED),
+                "no cell on a depth-0 row should be underlined; col={col}"
+            );
+        }
+        // Focus glyph (col 0) never carries the status bg.
+        assert!(
+            buf[(0, 0)].style().bg != Some(expected_bg),
+            "focus glyph cell must not carry the status highlight bg"
+        );
+        // Color block (col 1) carries the status bg.
         assert_eq!(
             buf[(1, 0)].style().bg,
             Some(expected_bg),
-            "unfocused chevron should carry the status highlight bg"
+            "color block at col 1 should carry the status highlight bg"
         );
-        // Gap (col 2) and label (cols 3..=7) are NOT highlighted.
-        for col in [2u16, 3, 4, 5, 6, 7] {
+        // Chevron (col 3) and label (cols 5..=9 for "Stage") do NOT carry the bg.
+        for col in [2u16, 3, 4, 5, 6, 7, 8, 9] {
             assert!(
                 buf[(col, 0)].style().bg != Some(expected_bg),
-                "unfocused gap/label cell at col {col} should not be highlighted; \
+                "cell at col {col} should not carry the status highlight bg; \
                  got {:?}",
                 buf[(col, 0)].style().bg
             );
@@ -2975,27 +2954,27 @@ mod tests {
     }
 
     #[test]
-    fn depth_0_running_focused_block_unfocused_chevron() {
-        assert_focused_depth_0_block(NodeStatus::Running, Color::Cyan);
-        assert_unfocused_depth_0_chevron_only(NodeStatus::Running, Color::Cyan);
+    fn depth_0_running_color_block() {
+        assert_depth_0_color_block(NodeStatus::Running, Color::Cyan, true);
+        assert_depth_0_color_block(NodeStatus::Running, Color::Cyan, false);
     }
 
     #[test]
-    fn depth_0_done_focused_block_unfocused_chevron() {
-        assert_focused_depth_0_block(NodeStatus::Done, Color::Green);
-        assert_unfocused_depth_0_chevron_only(NodeStatus::Done, Color::Green);
+    fn depth_0_done_color_block() {
+        assert_depth_0_color_block(NodeStatus::Done, Color::Green, true);
+        assert_depth_0_color_block(NodeStatus::Done, Color::Green, false);
     }
 
     #[test]
-    fn depth_0_failed_focused_block_unfocused_chevron() {
-        assert_focused_depth_0_block(NodeStatus::Failed, Color::Red);
-        assert_unfocused_depth_0_chevron_only(NodeStatus::Failed, Color::Red);
+    fn depth_0_failed_color_block() {
+        assert_depth_0_color_block(NodeStatus::Failed, Color::Red, true);
+        assert_depth_0_color_block(NodeStatus::Failed, Color::Red, false);
     }
 
     #[test]
-    fn depth_0_failed_unverified_focused_block_unfocused_chevron() {
-        assert_focused_depth_0_block(NodeStatus::FailedUnverified, Color::LightYellow);
-        assert_unfocused_depth_0_chevron_only(NodeStatus::FailedUnverified, Color::LightYellow);
+    fn depth_0_failed_unverified_color_block() {
+        assert_depth_0_color_block(NodeStatus::FailedUnverified, Color::LightYellow, true);
+        assert_depth_0_color_block(NodeStatus::FailedUnverified, Color::LightYellow, false);
     }
 
     #[test]

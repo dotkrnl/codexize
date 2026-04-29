@@ -53,7 +53,18 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Esc => true,
+            KeyCode::Esc | KeyCode::Char('q') => {
+                if self.has_running_agent() {
+                    self.push_status(
+                        "agent running — use :quit to exit".to_string(),
+                        Severity::Warn,
+                        Duration::from_secs(3),
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char(':') => {
                 self.palette.open();

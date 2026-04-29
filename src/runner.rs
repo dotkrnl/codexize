@@ -478,13 +478,14 @@ fn launch_in_window(
     } else {
         vec!["new-window", "-d", "-n", window_name, &shell_cmd]
     };
-    let status = Command::new("tmux")
+    let output = Command::new("tmux")
         .args(&args)
-        .status()
+        .output()
         .context("failed to create tmux window")?;
 
-    if !status.success() {
-        bail!("tmux new-window failed");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("tmux new-window failed: {}", stderr.trim());
     }
 
     Ok(())

@@ -7,6 +7,7 @@ use ratatui::{
     widgets::Widget,
 };
 
+use crate::app::chat_widget_view_model::chat_scroll_window;
 use crate::app::footer::{HistoricalStyleHints, format_historical_message};
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
 
@@ -350,29 +351,14 @@ impl Widget for ChatWidget<'_> {
             return;
         }
 
-        let has_overflow = total > height;
-        let max_offset = if has_overflow {
-            total.saturating_sub(height.saturating_sub(1))
-        } else {
-            0
+        let Some(window) = chat_scroll_window(total, height, self.scroll_offset) else {
+            return;
         };
-        let offset = self.scroll_offset.min(max_offset);
-
-        let show_above_indicator = offset > 0;
-        let mut message_rows = height.saturating_sub(show_above_indicator as usize);
-        let show_below_indicator = total > offset.saturating_add(message_rows);
-        if show_below_indicator {
-            message_rows = message_rows.saturating_sub(1);
-        }
-
-        let vis_end = (offset + message_rows).min(total);
-        let above = offset;
-        let below = total.saturating_sub(vis_end);
 
         let mut row = area.y;
 
-        if show_above_indicator {
-            let indicator = format!("  ↑ {} more above", above);
+        if window.show_above_indicator {
+            let indicator = format!("  ↑ {} more above", window.above_count);
             let line = Line::from(Span::styled(
                 indicator,
                 Style::default().fg(Color::DarkGray),
@@ -381,14 +367,14 @@ impl Widget for ChatWidget<'_> {
             row += 1;
         }
 
-        for line in &all_lines[offset..vis_end] {
+        for line in &all_lines[window.offset..window.visible_end] {
             let line = line.clone();
             buf.set_line(area.x, row, &line, area.width);
             row += 1;
         }
 
-        if show_below_indicator {
-            let indicator = format!("  ↓ {} more below", below);
+        if window.show_below_indicator {
+            let indicator = format!("  ↓ {} more below", window.below_count);
             let line = Line::from(Span::styled(
                 indicator,
                 Style::default().fg(Color::DarkGray),
@@ -414,41 +400,26 @@ pub fn chat_lines(
         return Vec::new();
     }
 
-    let has_overflow = total > available_height;
-    let max_offset = if has_overflow {
-        total.saturating_sub(available_height.saturating_sub(1))
-    } else {
-        0
+    let Some(window) = chat_scroll_window(total, available_height, scroll_offset) else {
+        return Vec::new();
     };
-    let offset = scroll_offset.min(max_offset);
-
-    let show_above = offset > 0;
-    let mut message_rows = available_height.saturating_sub(show_above as usize);
-    let show_below = total > offset.saturating_add(message_rows);
-    if show_below {
-        message_rows = message_rows.saturating_sub(1);
-    }
-
-    let vis_end = (offset + message_rows).min(total);
-    let above = offset;
-    let below = total.saturating_sub(vis_end);
 
     let mut lines = Vec::new();
 
-    if show_above {
+    if window.show_above_indicator {
         lines.push(Line::from(Span::styled(
-            format!("  ↑ {} more above", above),
+            format!("  ↑ {} more above", window.above_count),
             Style::default().fg(Color::DarkGray),
         )));
     }
 
-    for line in &all_lines[offset..vis_end] {
+    for line in &all_lines[window.offset..window.visible_end] {
         lines.push(line.clone());
     }
 
-    if show_below {
+    if window.show_below_indicator {
         lines.push(Line::from(Span::styled(
-            format!("  ↓ {} more below", below),
+            format!("  ↓ {} more below", window.below_count),
             Style::default().fg(Color::DarkGray),
         )));
     }

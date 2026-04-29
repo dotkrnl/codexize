@@ -22,6 +22,7 @@ use super::{
         format_running_transcript_leaf, keymap,
     },
     models_area,
+    render_view_model::is_last_sibling,
     sheet::bottom_sheet,
 };
 use crate::tui::wrap_input;
@@ -133,19 +134,6 @@ pub fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi_codes(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()
-}
-
-/// Determines whether the row at `index` is the last sibling at its depth.
-///
-/// Scans forward from `index+1` until a row with depth <= current depth is found.
-/// Returns true if no such row exists or if the found row has depth < current depth.
-fn is_last_sibling(visible_rows: &[super::tree::VisibleNodeRow], index: usize) -> bool {
-    let cur_depth = visible_rows[index].depth;
-    visible_rows[index + 1..]
-        .iter()
-        .find(|r| r.depth <= cur_depth)
-        .map(|r| r.depth < cur_depth)
-        .unwrap_or(true)
 }
 
 impl App {

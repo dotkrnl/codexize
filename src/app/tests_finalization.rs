@@ -788,6 +788,92 @@ estimated_tokens = 10
 }
 
 #[test]
+fn recovery_status_revise_can_escalate_next_retry_to_human_blocked() {
+    with_temp_root(|| {
+        let session_id = "recovery-revise-human-blocked";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        let round_dir = session_dir.join("rounds").join("007");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+        std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            r#"[[tasks]]
+id = 5
+title = "Operator decision"
+description = "Surface deferred rows for operator decision."
+test = "not testable - orchestration handoff"
+estimated_tokens = 10
+"#,
+        )
+        .expect("tasks");
+        std::fs::write(
+            round_dir.join("recovery.toml"),
+            r#"status = "revise"
+trigger = "human_blocked"
+interactive = false
+summary = "Recovery cannot autonomously close the deferred inventory rows."
+feedback = ["Ask the operator whether to open a follow-up campaign or close the rows."]
+changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
+"#,
+        )
+        .expect("recovery");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BuilderRecovery(7);
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: Some(7),
+            status: PipelineItemStatus::Running,
+            title: Some("Agent pivot recovery".to_string()),
+            mode: None,
+            trigger: Some("agent_pivot".to_string()),
+            interactive: Some(false),
+        });
+        let run = RunRecord {
+            id: 77,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 7,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        };
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+
+        let reason = app
+            .normalized_failure_reason(&run)
+            .expect("normalized")
+            .expect("revise status must fail recovery run");
+
+        assert!(reason.starts_with("recovery_requested_revise:"), "{reason}");
+        let recovery_item = app
+            .state
+            .builder
+            .pipeline_items
+            .iter()
+            .find(|item| item.stage == "recovery")
+            .expect("recovery pipeline item");
+        assert_eq!(recovery_item.trigger.as_deref(), Some("human_blocked"));
+        assert_eq!(recovery_item.interactive, Some(true));
+    });
+}
+
+#[test]
 fn recovery_reconcile_replaces_pending_and_sets_retry_reset_cutoff() {
     with_temp_root(|| {
         let session_id = "recovery-reconcile-success";
@@ -826,9 +912,12 @@ estimated_tokens = 10
         .expect("tasks");
         std::fs::write(
             round_dir.join("recovery.toml"),
-            r#"status = "agent_pivot"
+            r#"status = "approved"
+trigger = "agent_pivot"
+interactive = false
 summary = "recovered queue"
 feedback = ["split task 2"]
+changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
 "#,
         )
         .expect("recovery");

@@ -22,12 +22,16 @@ impl App {
         match watcher_result {
             Ok(mut watcher) => {
                 let Some(path) = self.live_summary_path.clone() else {
+                    self.live_summary_watcher = None;
+                    self.live_summary_change_rx = None;
                     return Ok(());
                 };
                 if let Err(e) = watcher.watch(&path, notify::RecursiveMode::NonRecursive) {
                     let _ = self
                         .state
                         .log_event(format!("watcher setup failed: {}, falling back to poll", e));
+                    self.live_summary_watcher = None;
+                    self.live_summary_change_rx = None;
                     return Ok(());
                 }
                 self.live_summary_watcher = Some(watcher);
@@ -38,6 +42,8 @@ impl App {
                 let _ = self
                     .state
                     .log_event(format!("watcher init failed: {}, falling back to poll", e));
+                self.live_summary_watcher = None;
+                self.live_summary_change_rx = None;
                 Ok(())
             }
         }
@@ -185,5 +191,7 @@ impl App {
         let _ = std::fs::remove_file(&path);
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
+        self.live_summary_watcher = None;
+        self.live_summary_change_rx = None;
     }
 }

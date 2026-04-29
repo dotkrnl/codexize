@@ -2,8 +2,8 @@ use crate::state;
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use crate::{
     acp::{
-        AcpConfig, AcpConnector, AcpLaunchRequest, AcpTextAccumulator, ClientUpdate, PromptPayload,
-        SubprocessConnector,
+        AcpCompletionEvent, AcpConfig, AcpConnector, AcpLaunchRequest, AcpRuntimeEvent,
+        AcpTextAccumulator, PromptPayload, SubprocessConnector, translate_update,
     },
     adapters::AgentRun,
     selection::VendorKind,
@@ -421,8 +421,13 @@ fn run_managed_acp_launch(
             };
         }
 
-        match session.try_next_update().map_err(|err| anyhow!("{err}"))? {
-            Some(ClientUpdate::PromptTurnFinished) => {
+        let event = session
+            .try_next_update()
+            .map_err(|err| anyhow!("{err}"))?
+            .and_then(|update| translate_update(update, launch.resolved.interactive));
+
+        match event {
+            Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
                 flush_agent_text_turn(&launch, &mut agent_text);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 if let Some(path) = launch.required_artifact.as_deref() {
@@ -433,7 +438,7 @@ fn run_managed_acp_launch(
                     signal_received: String::new(),
                 };
             }
-            Some(ClientUpdate::PromptTurnFailed { .. }) => {
+            Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
                 flush_agent_text_turn(&launch, &mut agent_text);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 break ManagedAcpOutcome {
@@ -441,19 +446,15 @@ fn run_managed_acp_launch(
                     signal_received: String::new(),
                 };
             }
-            Some(ClientUpdate::AgentMessageText(text)) => {
+            Some(AcpRuntimeEvent::Text(text_event)) => {
+                let text = text_event.text;
                 if let Some(block) = agent_text.push(&text) {
                     persist_agent_text_block(&launch, block);
                 }
                 flush_agent_text_ready(&launch, &mut agent_text);
                 thread::sleep(ACP_POLL_INTERVAL)
             }
-            Some(
-                ClientUpdate::AgentThoughtText(_)
-                | ClientUpdate::SessionInfoUpdate { .. }
-                | ClientUpdate::Unknown { .. },
-            )
-            | None => thread::sleep(ACP_POLL_INTERVAL),
+            Some(AcpRuntimeEvent::Lifecycle(_)) | None => thread::sleep(ACP_POLL_INTERVAL),
         }
     };
 

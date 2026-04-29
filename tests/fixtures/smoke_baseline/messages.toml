@@ -1,0 +1,4 @@
+messages = [
+  { kind = "Brief", run_id = 1, sender = { Agent = { model = "claude-opus-4-7", vendor = "anthropic" } }, text = "root=<ROOT>", ts = "<TIMESTAMP>" },
+  { kind = "End", run_id = 1, sender = "System", text = "done in 0m10s", ts = "<TIMESTAMP>" },
+]

@@ -1,0 +1,21 @@
+agent_runs = [
+  { attempt = 1, effort = "Normal", hostname = "<ENV>", id = 1, model = "claude-opus-4-7", modes = { cheap = true, yolo = true }, mount_device_id = "<ENV>", round = 1, stage = "brainstorm", started_at = "<TIMESTAMP>", status = "Done", vendor = "anthropic", window_name = "[Brainstorm]" },
+]
+archived = false
+current_phase = "IdeaInput"
+schema_version = 2
+session_id = "<SESSION_ID>"
+
+[builder]
+done = []
+iteration = 0
+pending = []
+pending_refine_feedback = []
+pipeline_items = []
+recovery_cycle_count = 0
+recovery_prev_task_ids = []
+task_titles = {}
+
+[modes]
+cheap = true
+yolo = true

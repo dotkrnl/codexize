@@ -1691,16 +1691,16 @@ mod tests {
         let alpha_y = alpha_row.expect("alpha row rendered");
         let beta_y = beta_row.expect("beta row rendered");
 
-        // The first text cell after the list border must be the focus marker
-        // for the selected row and a blank for unselected rows.
-        let cell_after_border = |y: u16| -> String { buf[(1, y)].symbol().to_string() };
+        // Borderless rows place the selection marker in the first cell.
+        // Unselected rows keep that cell blank.
+        let marker_cell = |y: u16| -> String { buf[(0, y)].symbol().to_string() };
         assert_eq!(
-            cell_after_border(alpha_y),
+            marker_cell(alpha_y),
             " ",
             "unselected row stays blank"
         );
         assert_eq!(
-            cell_after_border(beta_y),
+            marker_cell(beta_y),
             ">",
             "selected row shows > marker"
         );

@@ -534,16 +534,19 @@ impl App {
                     // Warnings are NOT appended yet — they replay at resolution time.
                     // The finalization caller detects the populated field and
                     // transitions to GitGuardPending instead of completing normally.
-                    self.state.pending_guard_decision = Some(PendingGuardDecision {
-                        stage: run.stage.clone(),
-                        task_id: run.task_id,
-                        round: run.round,
-                        attempt: run.attempt,
-                        run_id: run.id,
-                        captured_head,
-                        current_head,
-                        warnings,
-                    });
+                    session_state::transitions::record_pending_guard_decision(
+                        &mut self.state,
+                        PendingGuardDecision {
+                            stage: run.stage.clone(),
+                            task_id: run.task_id,
+                            round: run.round,
+                            attempt: run.attempt,
+                            run_id: run.id,
+                            captured_head,
+                            current_head,
+                            warnings,
+                        },
+                    );
                     return Ok(None);
                 }
             }
@@ -649,9 +652,9 @@ impl App {
     }
 
     pub(super) fn set_cheap_mode(&mut self, value: bool, source: &str) {
-        self.state.modes.cheap = value;
+        session_state::transitions::set_cheap_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
-            self.state.agent_error = Some(format!("failed to save cheap mode: {err:#}"));
+            self.record_agent_error(format!("failed to save cheap mode: {err:#}"));
             return;
         }
         let _ = self.state.log_event(format!(
@@ -670,7 +673,8 @@ impl App {
     }
 
     pub(super) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
-        let task_id = self.state.builder.ensure_task_for_round(round)?;
+        let task_id =
+            session_state::transitions::ensure_builder_task_for_round(&mut self.state, round)?;
         let round_dir = session_state::session_dir(&self.state.session_id)
             .join("rounds")
             .join(format!("{round:03}"));
@@ -714,13 +718,12 @@ impl App {
 
         // Circuit breaker: after 3 consecutive recovery cycles without an approved
         // plan review, force human_blocked so a human can break the loop.
-        self.state.builder.recovery_cycle_count += 1;
-        let effective_trigger = if self.state.builder.recovery_cycle_count >= 3
-            && trigger != "human_blocked"
-        {
+        let recovery_cycle_count =
+            session_state::transitions::increment_recovery_cycle_count(&mut self.state);
+        let effective_trigger = if recovery_cycle_count >= 3 && trigger != "human_blocked" {
             let loop_msg = format!(
                 "recovery loop: {} consecutive recovery cycles without approval — escalating to human_blocked",
-                self.state.builder.recovery_cycle_count
+                recovery_cycle_count
             );
             let _ = self.state.log_event(loop_msg.clone());
             let msg = Message {
@@ -742,43 +745,28 @@ impl App {
             trigger
         };
 
-        self.state.builder.recovery_trigger_task_id =
-            trigger_task_id.or(self.state.builder.current_task_id());
-        self.state.builder.recovery_prev_max_task_id = prev_max;
-        self.state.builder.recovery_prev_task_ids = prev_task_ids;
-        self.state.builder.recovery_trigger_summary = trigger_summary;
-        if let Some(current_task_id) = self.state.builder.current_task_id() {
-            let status = if self.state.builder.pipeline_items.is_empty() {
-                PipelineItemStatus::Pending
-            } else {
-                PipelineItemStatus::Failed
-            };
-            let _ =
-                self.state
-                    .builder
-                    .set_task_status(current_task_id, status, Some(triggering_round));
-        }
+        session_state::transitions::record_builder_recovery_context(
+            &mut self.state,
+            trigger_task_id,
+            prev_max,
+            prev_task_ids,
+            trigger_summary,
+        );
+        session_state::transitions::mark_current_task_for_recovery(
+            &mut self.state,
+            triggering_round,
+        );
         let interactive = effective_trigger == "human_blocked";
-        let title = if interactive {
-            "Human-blocked recovery"
-        } else {
-            "Agent pivot recovery"
-        };
-        self.state.builder.push_pipeline_item(PipelineItem {
-            id: 0,
-            stage: "recovery".to_string(),
-            task_id: None,
-            round: Some(triggering_round),
-            status: PipelineItemStatus::Running,
-            title: Some(title.to_string()),
-            mode: None,
-            trigger: Some(effective_trigger.to_string()),
-            interactive: Some(interactive),
-        });
-        self.state.agent_error = None;
+        session_state::transitions::queue_recovery_stage(
+            &mut self.state,
+            triggering_round,
+            effective_trigger.to_string(),
+            interactive,
+        );
+        self.clear_agent_error();
 
         if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
-            self.state.agent_error = Some(format!("failed to enter builder recovery: {err}"));
+            self.record_agent_error(format!("failed to enter builder recovery: {err}"));
             self.clear_builder_recovery_context();
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
         }
@@ -936,11 +924,12 @@ impl App {
                 });
             }
         }
+        let recovered_titles = parsed
+            .tasks
+            .iter()
+            .map(|task| (task.id, task.title.clone()))
+            .collect::<Vec<_>>();
         for task in &parsed.tasks {
-            self.state
-                .builder
-                .task_titles
-                .insert(task.id, task.title.clone());
             if !completed_set.contains(&task.id) {
                 next_items.push(PipelineItem {
                     id: 0,
@@ -955,19 +944,13 @@ impl App {
                 });
             }
         }
-        self.state.builder.pipeline_items = next_items;
-        self.state.builder.sync_legacy_queue_views();
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .rev()
-            .find(|item| item.stage == "recovery" && item.status == PipelineItemStatus::Running)
-        {
-            item.status = PipelineItemStatus::Done;
-        }
-        self.state.builder.retry_reset_run_id_cutoff = Some(recovery_run_id);
+        session_state::transitions::replace_recovery_pipeline(
+            &mut self.state,
+            next_items,
+            recovered_titles,
+        );
+        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "recovery");
+        session_state::transitions::set_retry_reset_run_id_cutoff(&mut self.state, recovery_run_id);
         self.clear_builder_recovery_context();
         Ok(())
     }
@@ -985,17 +968,7 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
 
-        // Mark the recovery plan-review pipeline item as done/completed.
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .rev()
-            .find(|i| i.stage == "plan-review" && i.status == PipelineItemStatus::Running)
-        {
-            item.status = PipelineItemStatus::Done;
-        }
+        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
 
         match review::validate(&plan_review_path) {
             Ok(verdict) => {
@@ -1024,13 +997,13 @@ impl App {
                     }
                 }
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 match verdict.status {
                     review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
                         // Reset circuit-breaker: recovery reached an approved plan review.
                         // Refine is treated as approval here — recovery has no
                         // "next implementation" to carry forward to.
-                        self.state.builder.recovery_cycle_count = 0;
+                        session_state::transitions::reset_recovery_cycle_count(&mut self.state);
                         self.queue_recovery_sharding_pipeline_item(round);
                         self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
                     }
@@ -1059,7 +1032,7 @@ impl App {
                     .cloned()
                     .unwrap_or_else(|| run.clone());
                 if !self.maybe_auto_retry(&failed_run) {
-                    self.state.agent_error = Some(reason);
+                    self.record_agent_error(reason);
                 }
             }
         }
@@ -1078,17 +1051,7 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
 
-        // Mark the recovery sharding pipeline item as done.
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .rev()
-            .find(|i| i.stage == "sharding" && i.status == PipelineItemStatus::Running)
-        {
-            item.status = PipelineItemStatus::Done;
-        }
+        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "sharding");
 
         match tasks::validate(&tasks_path) {
             Ok(parsed) => {
@@ -1111,7 +1074,7 @@ impl App {
                             task.id, max_seen
                         );
                         self.finalize_run_record(run.id, false, Some(reason.clone()));
-                        self.state.agent_error = Some(reason);
+                        self.record_agent_error(reason);
                         self.clear_builder_recovery_context();
                         let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
                         return Ok(());
@@ -1119,7 +1082,7 @@ impl App {
                 }
 
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
 
                 // Rebuild pipeline: completed tasks stay as-is, add pending from recovered tasks.
                 let mut next_items: Vec<PipelineItem> = self
@@ -1150,11 +1113,12 @@ impl App {
                     }
                 }
 
+                let recovered_titles = parsed
+                    .tasks
+                    .iter()
+                    .map(|task| (task.id, task.title.clone()))
+                    .collect::<Vec<_>>();
                 for task in &parsed.tasks {
-                    self.state
-                        .builder
-                        .task_titles
-                        .insert(task.id, task.title.clone());
                     if !done_ids.contains(&task.id) {
                         next_items.push(PipelineItem {
                             id: 0,
@@ -1169,8 +1133,11 @@ impl App {
                         });
                     }
                 }
-                self.state.builder.pipeline_items = next_items;
-                self.state.builder.sync_legacy_queue_views();
+                session_state::transitions::replace_recovery_pipeline(
+                    &mut self.state,
+                    next_items,
+                    recovered_titles,
+                );
 
                 let pipeline_msg = format!(
                     "recovery sharding complete: {} pending tasks",
@@ -1191,7 +1158,7 @@ impl App {
                     .cloned()
                     .unwrap_or_else(|| run.clone());
                 if !self.maybe_auto_retry(&failed_run) {
-                    self.state.agent_error = Some(reason);
+                    self.record_agent_error(reason);
                 }
             }
         }
@@ -1205,52 +1172,40 @@ impl App {
         success: bool,
         error: Option<String>,
     ) {
-        let Some(run) = self
-            .state
-            .agent_runs
-            .iter_mut()
-            .find(|run| run.id == run_id)
+        let Some(finished) =
+            session_state::transitions::finish_run_record(&mut self.state, run_id, success, error)
         else {
             return;
         };
-        let ended_at = chrono::Utc::now();
-        run.ended_at = Some(ended_at);
-        let unverified = error
-            .as_deref()
-            .is_some_and(|reason| reason.starts_with("failed_unverified:"));
-        run.status = if success {
-            RunStatus::Done
-        } else if unverified {
-            RunStatus::FailedUnverified
-        } else {
-            RunStatus::Failed
-        };
-        run.error = error.clone();
 
-        let duration = ended_at.signed_duration_since(run.started_at);
+        let duration = finished.ended_at.signed_duration_since(finished.started_at);
         let total_seconds = duration.num_seconds().max(0);
         let minutes = total_seconds / 60;
         let seconds = total_seconds % 60;
         let text = if success {
             format!(
                 "done in {minutes}m{seconds:02}s · {} ({})",
-                run.model, run.vendor
+                finished.model, finished.vendor
             )
-        } else if unverified {
+        } else if finished.unverified {
             format!(
                 "attempt {} unverified: {}",
-                run.attempt,
-                error.unwrap_or_else(|| "unknown error".to_string())
+                finished.attempt,
+                finished
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )
         } else {
             format!(
                 "attempt {} failed: {}",
-                run.attempt,
-                error.unwrap_or_else(|| "unknown error".to_string())
+                finished.attempt,
+                finished
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             )
         };
         let message = Message {
-            ts: ended_at,
+            ts: finished.ended_at,
             run_id,
             kind: MessageKind::End,
             sender: MessageSender::System,
@@ -1333,13 +1288,13 @@ impl App {
             }
             if failed_run.stage == "recovery" {
                 let summary = format!("builder recovery retry exhausted\n{summary}");
-                self.state.agent_error = Some(summary.clone());
+                self.record_agent_error(summary.clone());
                 let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
                 self.append_system_message(failed_run.id, MessageKind::End, summary);
                 return true;
             }
 
-            self.state.agent_error = Some(summary.clone());
+            self.record_agent_error(summary.clone());
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             let _ = self.state.log_event(format!(
@@ -1388,13 +1343,13 @@ impl App {
         }
         if failed_run.stage == "recovery" {
             let summary = format!("builder recovery retry exhausted\n{summary}");
-            self.state.agent_error = Some(summary.clone());
+            self.record_agent_error(summary.clone());
             let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             return true;
         }
 
-        self.state.agent_error = Some(summary.clone());
+        self.record_agent_error(summary.clone());
         let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
         self.append_system_message(failed_run.id, MessageKind::End, summary);
         true
@@ -1436,7 +1391,7 @@ impl App {
                 .cloned()
                 .unwrap_or_else(|| run.clone());
             if !self.maybe_auto_retry(&failed_run) {
-                self.state.agent_error = Some(error);
+                self.record_agent_error(error);
             }
             return Ok(());
         }
@@ -1467,7 +1422,10 @@ impl App {
                     .join(ArtifactKind::SessionSummary.filename());
                 match crate::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
                     Ok(Some(summary)) => {
-                        self.state.title = Some(summary.title.trim().to_string());
+                        session_state::transitions::record_session_title(
+                            &mut self.state,
+                            summary.title.trim().to_string(),
+                        );
                     }
                     Ok(None) => {}
                     Err(err) => {
@@ -1478,12 +1436,15 @@ impl App {
                 }
 
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
 
                 match proposal {
                     Some(p) if p.proposed => {
-                        self.state.skip_to_impl_rationale = Some(p.rationale);
-                        self.state.skip_to_impl_kind = Some(p.status);
+                        session_state::transitions::record_skip_to_impl_proposal(
+                            &mut self.state,
+                            p.rationale,
+                            p.status,
+                        );
                         self.transition_to_phase(Phase::SkipToImplPending)?;
                     }
                     _ => {
@@ -1493,7 +1454,7 @@ impl App {
             }
             Phase::SpecReviewRunning => {
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 self.transition_to_phase(Phase::SpecReviewPaused)?;
                 self.append_system_message(
                     run.id,
@@ -1506,7 +1467,7 @@ impl App {
             }
             Phase::PlanningRunning => {
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 // Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md` existing.
                 // The successful-finalization context already implies the artifact, but the
                 // explicit guard protects against a planning agent that reports success
@@ -1523,7 +1484,7 @@ impl App {
             }
             Phase::PlanReviewRunning => {
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 self.transition_to_phase(Phase::PlanReviewPaused)?;
                 self.append_system_message(
                     run.id,
@@ -1540,19 +1501,15 @@ impl App {
                     .with_context(|| format!("invalid {}", tasks_path.display()));
                 match parsed {
                     Ok(parsed) => {
-                        self.state.builder.task_titles = parsed
-                            .tasks
-                            .iter()
-                            .map(|t| (t.id, t.title.clone()))
-                            .collect();
-                        self.state.builder.reset_task_pipeline(
+                        session_state::transitions::initialize_task_pipeline(
+                            &mut self.state,
                             parsed
                                 .tasks
                                 .iter()
-                                .map(|task| (task.id, Some(task.title.clone()))),
+                                .map(|task| (task.id, task.title.clone())),
                         );
                         self.finalize_run_record(run.id, true, None);
-                        self.state.agent_error = None;
+                        self.clear_agent_error();
                         self.transition_to_phase(Phase::ImplementationRound(1))?;
                     }
                     Err(err) => return Err(err),
@@ -1563,7 +1520,7 @@ impl App {
                 let scope = read_review_scope(&round_dir.join("review_scope.toml"))?;
                 let _ = write_review_scope_artifact(&round_dir, &scope.base_sha);
                 self.finalize_run_record(run.id, true, None);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 self.transition_to_phase(Phase::ReviewRound(round))?;
             }
             Phase::ReviewRound(round) => {
@@ -1603,9 +1560,11 @@ impl App {
                             }
                         }
                         self.finalize_run_record(run.id, true, None);
-                        self.state.agent_error = None;
-                        self.state.builder.last_verdict =
-                            Some(format!("{:?}", verdict.status).to_lowercase());
+                        self.clear_agent_error();
+                        session_state::transitions::record_builder_verdict(
+                            &mut self.state,
+                            format!("{:?}", verdict.status).to_lowercase(),
+                        );
                         match verdict.status {
                             review::ReviewStatus::Approved => {
                                 // Advisory feedback on an approved verdict is non-blocking;
@@ -1635,7 +1594,8 @@ impl App {
                                     }
                                 }
                                 if let Some(task_id) = self.state.builder.current_task_id() {
-                                    let _ = self.state.builder.set_task_status(
+                                    let _ = session_state::transitions::mark_task_status(
+                                        &mut self.state,
                                         task_id,
                                         PipelineItemStatus::Approved,
                                         Some(round),
@@ -1652,12 +1612,13 @@ impl App {
                             review::ReviewStatus::Refine => {
                                 // Approve the current task and stash feedback for
                                 // the next coder. No re-review of this round.
-                                self.state
-                                    .builder
-                                    .pending_refine_feedback
-                                    .extend(verdict.feedback.iter().cloned());
+                                session_state::transitions::append_refine_feedback(
+                                    &mut self.state,
+                                    verdict.feedback.iter().cloned(),
+                                );
                                 if let Some(task_id) = self.state.builder.current_task_id() {
-                                    let _ = self.state.builder.set_task_status(
+                                    let _ = session_state::transitions::mark_task_status(
+                                        &mut self.state,
                                         task_id,
                                         PipelineItemStatus::Approved,
                                         Some(round),
@@ -1674,7 +1635,8 @@ impl App {
                             review::ReviewStatus::Revise => {
                                 if let Some(task_id) = self.state.builder.current_task_id() {
                                     if verdict.new_tasks.is_empty() {
-                                        let _ = self.state.builder.set_task_status(
+                                        let _ = session_state::transitions::mark_task_status(
+                                            &mut self.state,
                                             task_id,
                                             PipelineItemStatus::Revise,
                                             Some(round),
@@ -1702,13 +1664,11 @@ impl App {
                                             &verdict.new_tasks,
                                             &assigned_ids,
                                         )?;
-                                        self.state
-                                            .builder
-                                            .apply_revise_with_new_tasks(task_id, new_tasks);
-                                        if let Some(first_inserted) = assigned_ids.first().copied()
-                                        {
-                                            self.state.builder.current_task = Some(first_inserted);
-                                        }
+                                        session_state::transitions::apply_revise_with_new_tasks(
+                                            &mut self.state,
+                                            task_id,
+                                            new_tasks,
+                                        );
                                     }
                                 }
                                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
@@ -1732,7 +1692,8 @@ impl App {
                                     }
                                 };
                                 if let Some(task_id) = self.state.builder.current_task_id() {
-                                    let _ = self.state.builder.set_task_status(
+                                    let _ = session_state::transitions::mark_task_status(
+                                        &mut self.state,
                                         task_id,
                                         verdict_status,
                                         Some(round),
@@ -1756,7 +1717,7 @@ impl App {
             Phase::BuilderRecovery(round) => match self.reconcile_builder_recovery(run.id) {
                 Ok(()) => {
                     self.finalize_run_record(run.id, true, None);
-                    self.state.agent_error = None;
+                    self.clear_agent_error();
                     if run.modes.yolo {
                         // Recovery has already validated `recovery.toml`/`tasks.toml`; yolo
                         // delegates the review gate, not the artifact validation step.
@@ -1766,17 +1727,10 @@ impl App {
                     } else {
                         // Insert the recovery-mode plan review pipeline item before
                         // transitioning so the UI shows it as the next pending stage.
-                        self.state.builder.push_pipeline_item(PipelineItem {
-                            id: 0,
-                            stage: "plan-review".to_string(),
-                            task_id: None,
-                            round: Some(round),
-                            status: PipelineItemStatus::Pending,
-                            title: Some("Recovery plan review".to_string()),
-                            mode: Some("recovery".to_string()),
-                            trigger: None,
-                            interactive: Some(false),
-                        });
+                        session_state::transitions::queue_recovery_plan_review(
+                            &mut self.state,
+                            round,
+                        );
                         self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
                     }
                 }
@@ -1791,7 +1745,7 @@ impl App {
                         .cloned()
                         .unwrap_or_else(|| run.clone());
                     if !self.maybe_auto_retry(&failed_run) {
-                        self.state.agent_error = Some(reason);
+                        self.record_agent_error(reason);
                     }
                 }
             },

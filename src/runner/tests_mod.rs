@@ -366,11 +366,7 @@ fn run_child_with_timeout_propagates_spawn_failure() {
     );
 }
 
-fn with_test_env<T>(
-    repo_dir: &Path,
-    vars: &[(&str, Option<String>)],
-    f: impl FnOnce() -> T,
-) -> T {
+fn with_test_env<T>(repo_dir: &Path, vars: &[(&str, Option<String>)], f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -440,7 +436,11 @@ fn init_git_repo(dir: &Path) {
         .status()
         .expect("git commit");
     fs::create_dir_all(dir.join(".git").join("info")).expect("git info dir");
-    fs::write(dir.join(".git").join("info").join("exclude"), "/artifacts\n").expect("exclude");
+    fs::write(
+        dir.join(".git").join("info").join("exclude"),
+        "/artifacts\n",
+    )
+    .expect("exclude");
 }
 
 fn write_test_acp_script(dir: &Path) -> PathBuf {
@@ -465,6 +465,10 @@ while IFS= read -r line; do
         *'"method":"initialize"'*)
             if [ -n "$log_path" ]; then
                 printf '%s\n' "$$" >> "$log_path"
+            fi
+            if [ "$mode" = "invalid_initialize_json" ]; then
+                printf '{"jsonrpc":\n'
+                exit 0
             fi
             printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"sessionCapabilities":{"close":true}}}}\n' "$id"
             ;;
@@ -501,7 +505,9 @@ done
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&script).expect("script metadata").permissions();
+        let mut perms = fs::metadata(&script)
+            .expect("script metadata")
+            .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms).expect("script perms");
     }
@@ -555,7 +561,10 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
             );
             let err = result.expect_err("missing CLI must bail before launch");
             let msg = format!("{:#}", err);
-            assert!(msg.contains("agent CLI not found"), "unexpected error: {msg}");
+            assert!(
+                msg.contains("agent CLI not found"),
+                "unexpected error: {msg}"
+            );
         },
     );
 }
@@ -585,7 +594,10 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
             );
             let err = result.expect_err("missing CLI must bail before launch");
             let msg = format!("{:#}", err);
-            assert!(msg.contains("agent CLI not found"), "unexpected error: {msg}");
+            assert!(
+                msg.contains("agent CLI not found"),
+                "unexpected error: {msg}"
+            );
         },
     );
 }
@@ -596,7 +608,11 @@ fn acp_launch_writes_finish_stamp_and_status_on_success() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("coder.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("coder_summary.toml");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
@@ -627,7 +643,12 @@ fn acp_launch_writes_finish_stamp_and_status_on_success() {
 
             wait_for_window_to_finish("[Coder]");
 
-            assert_eq!(fs::read_to_string(&status_path).expect("read status").trim(), "0");
+            assert_eq!(
+                fs::read_to_string(&status_path)
+                    .expect("read status")
+                    .trim(),
+                "0"
+            );
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 0);
             assert_eq!(stamp.head_state, "stable");
@@ -643,7 +664,11 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("coder.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("coder_summary.toml");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
@@ -670,7 +695,12 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
 
             wait_for_window_to_finish("[Coder]");
 
-            assert_eq!(fs::read_to_string(&status_path).expect("read status").trim(), "1");
+            assert_eq!(
+                fs::read_to_string(&status_path)
+                    .expect("read status")
+                    .trim(),
+                "1"
+            );
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 1);
             assert!(!artifact_path.exists(), "artifact should be absent");
@@ -684,7 +714,11 @@ fn acp_launch_marks_early_process_exit_as_failed() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("coder.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
     with_test_env(
@@ -710,9 +744,68 @@ fn acp_launch_marks_early_process_exit_as_failed() {
 
             wait_for_window_to_finish("[Coder]");
 
-            assert_eq!(fs::read_to_string(&status_path).expect("read status").trim(), "1");
+            assert_eq!(
+                fs::read_to_string(&status_path)
+                    .expect("read status")
+                    .trim(),
+                "1"
+            );
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 1);
+        },
+    );
+}
+
+#[test]
+fn acp_launch_records_cause_when_transport_init_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let run = launch_test_run(dir.path());
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
+    let artifacts_dir = dir.path().join("artifacts");
+    let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
+    let cause_path = artifacts_dir.join("run-finish").join("coder-run.cause.txt");
+    with_test_env(
+        dir.path(),
+        &[
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("invalid_initialize_json".to_string())),
+        ],
+        || {
+            launch_noninteractive(
+                "[Coder]",
+                &run,
+                VendorKind::Codex,
+                &status_path,
+                "coder-run",
+                &artifacts_dir,
+                None,
+            )
+            .expect("launch ACP run");
+
+            wait_for_window_to_finish("[Coder]");
+
+            assert_eq!(
+                fs::read_to_string(&status_path)
+                    .expect("read status")
+                    .trim(),
+                "1"
+            );
+            let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
+            assert_eq!(stamp.exit_code, 1);
+            let cause = fs::read_to_string(&cause_path).expect("read launch cause");
+            assert!(
+                cause.contains("invalid ACP JSON message"),
+                "unexpected cause text: {cause}"
+            );
         },
     );
 }
@@ -723,7 +816,11 @@ fn acp_launch_enforces_single_active_run() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("coder.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     with_test_env(
         dir.path(),
@@ -757,7 +854,10 @@ fn acp_launch_enforces_single_active_run() {
             )
             .expect_err("second active run must be rejected");
             let msg = format!("{:#}", err);
-            assert!(msg.contains("one active ACP run"), "unexpected error: {msg}");
+            assert!(
+                msg.contains("one active ACP run"),
+                "unexpected error: {msg}"
+            );
 
             cancel_windows_matching("[Coder 1]");
             wait_for_window_to_finish("[Coder 1]");
@@ -771,7 +871,11 @@ fn acp_launch_cleans_up_child_on_cancel() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("coder.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
     with_test_env(
@@ -798,7 +902,12 @@ fn acp_launch_cleans_up_child_on_cancel() {
             cancel_windows_matching("[Coder]");
             wait_for_window_to_finish("[Coder]");
 
-            assert_eq!(fs::read_to_string(&status_path).expect("read status").trim(), "143");
+            assert_eq!(
+                fs::read_to_string(&status_path)
+                    .expect("read status")
+                    .trim(),
+                "143"
+            );
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 143);
             assert_eq!(stamp.signal_received, "TERM");
@@ -812,7 +921,11 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("run-status").join("stage.txt");
+    let status_path = dir
+        .path()
+        .join("artifacts")
+        .join("run-status")
+        .join("stage.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("stage.toml");
     let log_path = dir.path().join("agent-pids.log");

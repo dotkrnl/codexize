@@ -41,6 +41,7 @@ pub struct SessionPicker {
     entries: Vec<SessionEntry>,
     selected: usize,
     viewport_top: usize,
+    body_inner_height: usize,
     expanded: Option<String>,
     input_mode: bool,
     input_buffer: String,
@@ -69,6 +70,7 @@ impl SessionPicker {
             entries,
             selected: 0,
             viewport_top: 0,
+            body_inner_height: 0,
             expanded: None,
             input_mode: false,
             input_buffer: String::new(),
@@ -173,6 +175,7 @@ impl SessionPicker {
 
         let chrome_h = 1 + 1 + footer_h;
         let body_h = term_h.saturating_sub(chrome_h);
+        self.body_inner_height = body_h as usize;
 
         let mut y = area.y;
 
@@ -375,6 +378,13 @@ impl SessionPicker {
         for (i, (_, line)) in rendered_rows[self.viewport_top..end].iter().enumerate() {
             buf.set_line(area.x, area.y + i as u16, line, area.width);
         }
+    }
+
+    fn page_step(&self) -> usize {
+        // Before the first draw there is no measured body height yet. The
+        // interactive run loop always draws before reading input, so callers
+        // without a render pass conservatively get a zero-step page move.
+        self.body_inner_height.saturating_sub(1)
     }
 
     fn keymap_line(
@@ -734,7 +744,7 @@ impl SessionPicker {
                 Ok(KeyAction::Continue)
             }
             KeyCode::PageUp => {
-                let step = 10;
+                let step = self.page_step();
                 self.selected = self.selected.saturating_sub(step);
                 if self.expanded.is_some()
                     && self.expanded != self.selected_entry().map(|e| e.session_id.clone())
@@ -745,7 +755,7 @@ impl SessionPicker {
             }
             KeyCode::PageDown => {
                 let visible_count = self.visible_entries().len();
-                let step = 10;
+                let step = self.page_step();
                 self.selected = (self.selected + step).min(visible_count.saturating_sub(1));
                 if self.expanded.is_some()
                     && self.expanded != self.selected_entry().map(|e| e.session_id.clone())
@@ -1180,6 +1190,7 @@ mod tests {
             entries: Vec::new(),
             selected: 0,
             viewport_top: 0,
+            body_inner_height: 0,
             expanded: None,
             input_mode: true,
             input_buffer: input_buffer.to_string(),
@@ -1637,6 +1648,7 @@ mod tests {
             entries,
             selected,
             viewport_top: 0,
+            body_inner_height: 0,
             expanded: None,
             input_mode: false,
             input_buffer: String::new(),
@@ -1694,16 +1706,8 @@ mod tests {
         // Borderless rows place the selection marker in the first cell.
         // Unselected rows keep that cell blank.
         let marker_cell = |y: u16| -> String { buf[(0, y)].symbol().to_string() };
-        assert_eq!(
-            marker_cell(alpha_y),
-            " ",
-            "unselected row stays blank"
-        );
-        assert_eq!(
-            marker_cell(beta_y),
-            ">",
-            "selected row shows > marker"
-        );
+        assert_eq!(marker_cell(alpha_y), " ", "unselected row stays blank");
+        assert_eq!(marker_cell(beta_y), ">", "selected row shows > marker");
 
         // Selected row must not rely on reversed background. Scan every cell
         // on the selected row to confirm REVERSED is absent.
@@ -1833,24 +1837,30 @@ mod tests {
     }
 
     #[test]
-    fn pgup_pgdn_collapses_expanded_session() {
+    fn pgup_pgdn_use_visible_body_step_and_collapse_expansion() {
         let mut picker = picker_with_entries(
             (0..20)
                 .map(|i| dummy_entry(&format!("sess-{i}"), &format!("idea {i}")))
                 .collect(),
-            5,
+            8,
         );
 
-        // Expand sess-5
+        // term_h = 10 => body_h = 7, so PageUp/PageDown should move by 6
+        // sessions rather than a fixed constant.
+        let backend = ratatui::backend::TestBackend::new(80, 10);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+
+        // Expand sess-8.
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char(' '),
                 crossterm::event::KeyModifiers::NONE,
             ))
             .unwrap();
-        assert_eq!(picker.expanded, Some("sess-5".to_string()));
+        assert_eq!(picker.expanded, Some("sess-8".to_string()));
 
-        // PageUp collapses
+        // PageUp collapses and moves by body_h - 1 sessions.
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::PageUp,
@@ -1858,17 +1868,17 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(picker.expanded, None);
-        assert!(picker.selected < 5);
+        assert_eq!(picker.selected, 2);
 
         // Re-expand and PageDown
-        picker.selected = 5;
+        picker.selected = 8;
         picker
             .handle_key(KeyEvent::new(
                 KeyCode::Char(' '),
                 crossterm::event::KeyModifiers::NONE,
             ))
             .unwrap();
-        assert_eq!(picker.expanded, Some("sess-5".to_string()));
+        assert_eq!(picker.expanded, Some("sess-8".to_string()));
 
         picker
             .handle_key(KeyEvent::new(
@@ -1877,6 +1887,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(picker.expanded, None);
+        assert_eq!(picker.selected, 14);
     }
 
     #[test]
@@ -1916,10 +1927,9 @@ mod tests {
         assert_eq!(picker.selected, 7);
 
         terminal.draw(|frame| picker.draw(frame)).unwrap();
-        // Viewport must have scrolled to keep sess-7 visible.
-        assert!(
-            picker.viewport_top > 0,
-            "viewport_top should scroll when selected item is pushed off-screen by expanded details"
+        assert_eq!(
+            picker.viewport_top, 1,
+            "viewport_top should account for the expanded detail rows exactly"
         );
     }
 
@@ -1944,11 +1954,19 @@ mod tests {
         let text = (0..12)
             .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
-            .join("
-");
+            .join(
+                "
+",
+            );
 
-        assert!(text.contains("Phase:"), "expanded session must show phase: {text}");
-        assert!(text.contains("Idea:"), "expanded session must show idea: {text}");
+        assert!(
+            text.contains("Phase:"),
+            "expanded session must show phase: {text}"
+        );
+        assert!(
+            text.contains("Idea:"),
+            "expanded session must show idea: {text}"
+        );
         assert!(
             text.contains("Last agent:"),
             "expanded session must show last agent: {text}"
@@ -1974,8 +1992,10 @@ mod tests {
         let text = (0..8)
             .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect::<Vec<_>>()
-            .join("
-");
+            .join(
+                "
+",
+            );
 
         assert!(
             !text.contains("Phase:"),

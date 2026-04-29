@@ -487,6 +487,7 @@ pub fn run_child_with_timeout(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn launch_in_window(
     window_name: &str,
     agent_cmd: &str,

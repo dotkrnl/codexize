@@ -7,21 +7,15 @@ use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
 
-#[allow(clippy::type_complexity)]
-pub fn load_quota_maps() -> (
-    BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
-    Vec<QuotaError>,
-) {
+type VendorQuotaMap = BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>;
+type QuotaLoadResult = (VendorQuotaMap, Vec<QuotaError>);
+
+pub fn load_quota_maps() -> QuotaLoadResult {
     let vendors = crate::adapters::all_vendors();
     load_quota_maps_for(vendors)
 }
 
-pub fn load_quota_maps_for(
-    vendors: impl IntoIterator<Item = VendorKind>,
-) -> (
-    BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
-    Vec<QuotaError>,
-) {
+pub fn load_quota_maps_for(vendors: impl IntoIterator<Item = VendorKind>) -> QuotaLoadResult {
     let (tx, rx) = mpsc::channel();
     let vendors = vendors.into_iter().collect::<Vec<_>>();
     thread::scope(|scope| {

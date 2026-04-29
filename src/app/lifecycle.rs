@@ -1011,7 +1011,7 @@ impl App {
             .iter()
             .next_back()
             .copied()
-            .or_else(|| match self.state.current_phase {
+            .or(match self.state.current_phase {
                 Phase::ImplementationRound(round) | Phase::ReviewRound(round) => Some(round),
                 Phase::BuilderRecovery(round)
                 | Phase::BuilderRecoveryPlanReview(round)

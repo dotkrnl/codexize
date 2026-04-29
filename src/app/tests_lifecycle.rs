@@ -1019,10 +1019,12 @@ fn non_coder_missing_stamp_warns_and_still_retries_after_timeout() {
                     TestLaunchOutcome {
                         exit_code: 1,
                         artifact_contents: None,
+                        launch_error: None,
                     },
                     TestLaunchOutcome {
                         exit_code: 1,
                         artifact_contents: None,
+                        launch_error: None,
                     },
                 ]),
             },
@@ -1712,6 +1714,7 @@ fn stage_error_enter_relaunches_from_non_current_row() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));

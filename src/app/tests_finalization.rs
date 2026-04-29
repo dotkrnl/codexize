@@ -321,10 +321,12 @@ fn same_key_retry_waits_for_stamp_or_timeout_after_live_summary_absent() {
                     TestLaunchOutcome {
                         exit_code: 1,
                         artifact_contents: None,
+                        launch_error: None,
                     },
                     TestLaunchOutcome {
                         exit_code: 1,
                         artifact_contents: None,
+                        launch_error: None,
                     },
                 ]),
             },
@@ -602,6 +604,7 @@ fn recovery_sharding_retry_uses_recovery_launcher() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));
@@ -984,6 +987,7 @@ estimated_tokens = 1
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));

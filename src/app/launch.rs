@@ -41,6 +41,9 @@ impl App {
                 .pop_front()
                 .expect("expected queued test launch outcome");
             Some((|| -> Result<()> {
+                if let Some(error) = outcome.launch_error {
+                    anyhow::bail!(error);
+                }
                 if let Some(parent) = status_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
@@ -870,7 +873,7 @@ impl App {
             modes.yolo,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            let _ = self.state.log_event(format!("error writing prompt: {e}"));
+            self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
 
@@ -936,9 +939,7 @@ impl App {
                 true
             }
             Err(e) => {
-                let _ = self
-                    .state
-                    .log_event(format!("failed to launch planning: {e}"));
+                self.surface_boundary_error(format!("failed to launch planning: {e}"), true);
                 false
             }
         }
@@ -1127,7 +1128,7 @@ impl App {
         let live_summary_path = self.live_summary_path_for_run("sharding", None, 1, attempt);
         let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path);
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            let _ = self.state.log_event(format!("error writing prompt: {e}"));
+            self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
 
@@ -1177,9 +1178,7 @@ impl App {
                 true
             }
             Err(e) => {
-                let _ = self
-                    .state
-                    .log_event(format!("failed to launch sharding: {e}"));
+                self.surface_boundary_error(format!("failed to launch sharding: {e}"), true);
                 false
             }
         }
@@ -1423,7 +1422,7 @@ impl App {
             &refine_carryover,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            let _ = self.state.log_event(format!("error writing prompt: {e}"));
+            self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
 
@@ -1476,7 +1475,7 @@ impl App {
                 true
             }
             Err(e) => {
-                let _ = self.state.log_event(format!("failed to launch coder: {e}"));
+                self.surface_boundary_error(format!("failed to launch coder: {e}"), true);
                 false
             }
         }
@@ -1571,7 +1570,7 @@ impl App {
             live_summary_path: &live_summary_path,
         });
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            let _ = self.state.log_event(format!("error writing prompt: {e}"));
+            self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
 
@@ -1631,9 +1630,7 @@ impl App {
                 true
             }
             Err(e) => {
-                let _ = self
-                    .state
-                    .log_event(format!("failed to launch reviewer: {e}"));
+                self.surface_boundary_error(format!("failed to launch reviewer: {e}"), true);
                 false
             }
         }

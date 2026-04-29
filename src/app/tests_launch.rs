@@ -41,14 +41,17 @@ fn coder_retry_loop_uses_distinct_models_until_success() {
                 TestLaunchOutcome {
                     exit_code: 1,
                     artifact_contents: None,
+                    launch_error: None,
                 },
                 TestLaunchOutcome {
                     exit_code: 1,
                     artifact_contents: None,
+                    launch_error: None,
                 },
                 TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: Some("abc123".to_string()),
+                    launch_error: None,
                 },
             ]),
         }));
@@ -289,10 +292,12 @@ fn coder_retry_exhaustion_enters_builder_recovery() {
                 TestLaunchOutcome {
                     exit_code: 1,
                     artifact_contents: None,
+                    launch_error: None,
                 },
                 TestLaunchOutcome {
                     exit_code: 1,
                     artifact_contents: None,
+                    launch_error: None,
                 },
             ]),
         }));
@@ -348,6 +353,7 @@ fn coder_launch_records_modes_snapshot() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));
@@ -369,6 +375,84 @@ fn coder_launch_records_modes_snapshot() {
         assert_eq!(run.model, "claude-sonnet-4-6");
         assert_eq!(run.effort, EffortLevel::Low);
         assert!(run.window_name.ends_with(":low"));
+    });
+}
+
+#[test]
+fn planning_launch_failure_surfaces_status_line_and_agent_error() {
+    with_temp_root(|| {
+        let session_id = "planning-launch-failure";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::PlanningRunning;
+
+        let session_dir = session_state::session_dir(session_id);
+        std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+        std::fs::write(session_dir.join("artifacts/spec.md"), "# Spec\n").expect("write spec");
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            1,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 1,
+                    artifact_contents: None,
+                    launch_error: Some("spawn denied".to_string()),
+                }]),
+            },
+        )));
+
+        assert!(!app.launch_planning_with_model(None, true));
+
+        let error = app
+            .state
+            .agent_error
+            .as_deref()
+            .expect("planning launch failure should set agent_error");
+        assert!(error.contains("failed to launch planning"));
+        assert!(error.contains("spawn denied"));
+
+        let status = app.status_line.borrow().render().expect("status flash");
+        assert!(status.to_string().contains("failed to launch planning"));
+
+        let events =
+            std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                .expect("events");
+        assert!(events.contains("failed to launch planning"));
+    });
+}
+
+#[test]
+fn watcher_setup_failure_surfaces_status_line_and_keeps_poll_fallback() {
+    with_temp_root(|| {
+        let session_id = "watcher-setup-failure";
+        let state = SessionState::new(session_id.to_string());
+        let mut app = idle_app(state);
+        app.live_summary_path = Some(
+            session_state::session_dir(session_id)
+                .join("missing")
+                .join("live_summary.txt"),
+        );
+
+        app.setup_watcher().expect("watcher setup should fall back");
+
+        assert!(app.live_summary_watcher.is_none());
+        assert!(app.live_summary_change_rx.is_none());
+
+        let status = app.status_line.borrow().render().expect("status flash");
+        let rendered = status.to_string();
+        assert!(rendered.contains("watcher setup failed"));
+        assert!(rendered.contains("falling back to poll"));
+
+        let events =
+            std::fs::read_to_string(session_state::session_dir(session_id).join("events.toml"))
+                .expect("events");
+        assert!(events.contains("watcher setup failed"));
     });
 }
 
@@ -398,6 +482,7 @@ fn cheap_coder_fallback_logs_warning_when_budget_models_exhausted() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));
@@ -518,6 +603,7 @@ fn brainstorm_failure_auto_retries_with_next_model() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));
@@ -643,6 +729,7 @@ fn launch_recovery_uses_interactive_prompt_for_human_blocked() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));
@@ -708,6 +795,7 @@ fn launch_recovery_uses_noninteractive_prompt_for_agent_pivot() {
                 outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
                     exit_code: 0,
                     artifact_contents: None,
+                    launch_error: None,
                 }]),
             },
         )));

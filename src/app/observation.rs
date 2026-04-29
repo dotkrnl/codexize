@@ -27,9 +27,10 @@ impl App {
                     return Ok(());
                 };
                 if let Err(e) = watcher.watch(&path, notify::RecursiveMode::NonRecursive) {
-                    let _ = self
-                        .state
-                        .log_event(format!("watcher setup failed: {}, falling back to poll", e));
+                    self.surface_boundary_error(
+                        format!("watcher setup failed: {e}, falling back to poll"),
+                        false,
+                    );
                     self.live_summary_watcher = None;
                     self.live_summary_change_rx = None;
                     return Ok(());
@@ -39,9 +40,10 @@ impl App {
                 Ok(())
             }
             Err(e) => {
-                let _ = self
-                    .state
-                    .log_event(format!("watcher init failed: {}, falling back to poll", e));
+                self.surface_boundary_error(
+                    format!("watcher init failed: {e}, falling back to poll"),
+                    false,
+                );
                 self.live_summary_watcher = None;
                 self.live_summary_change_rx = None;
                 Ok(())

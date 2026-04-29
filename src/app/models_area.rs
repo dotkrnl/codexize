@@ -10,7 +10,7 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use crate::model_names;
 use crate::selection::{
@@ -21,18 +21,12 @@ use crate::selection::{
 };
 
 use super::models::{vendor_color, vendor_prefix};
+use super::models_area_view_model::{
+    ProbColumn, QuotaColumn, choose_mode, format_name_with_freshness, name_budget_for,
+    name_width_min, probability_color, probability_percent,
+};
 
-/// Mode chosen by the height budget. Owned by `App` and threaded back in
-/// next frame as `prev_mode` so the asymmetric hysteresis thresholds work.
-///
-/// The default is `FullTable`: on the first frame the strict (== count)
-/// threshold then applies, matching the spec's "no hysteresis on entry".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ModelsAreaMode {
-    #[default]
-    FullTable,
-    CompactQuota,
-}
+pub use super::models_area_view_model::ModelsAreaMode;
 
 /// Lines reserved by surrounding chrome before the models area:
 /// top rule (1) + bottom rule (1) + keymap (1) + pipeline body floor (8).
@@ -83,60 +77,9 @@ pub fn responsive_models_area(
     (lines, mode)
 }
 
-fn choose_mode(
-    visible_count: u16,
-    models_budget: u16,
-    prev_mode: ModelsAreaMode,
-) -> ModelsAreaMode {
-    match prev_mode {
-        ModelsAreaMode::FullTable => {
-            // Full → Compact requires one extra row of headroom; Compact → Full below
-            // keeps the same threshold, creating the intended two-line hysteresis band.
-            if models_budget > visible_count {
-                ModelsAreaMode::FullTable
-            } else {
-                ModelsAreaMode::CompactQuota
-            }
-        }
-        ModelsAreaMode::CompactQuota => {
-            // Compact → Full requires +1 to absorb single-row resize jitter.
-            if models_budget >= visible_count.saturating_add(1) {
-                ModelsAreaMode::FullTable
-            } else {
-                ModelsAreaMode::CompactQuota
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Width tiers
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuotaColumn {
-    Expanded, // "Quota 100%" — 10 cols
-    Narrow,   // "100%"       —  4 cols
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProbColumn {
-    IpbrVerbose, // "Idea XX   Plan XX   Build XX   Review XX" — 40 cols
-    Ipbr,        // full "Ixx Pxx Bxx Rxx"                      — 15 cols
-    TopRank,     // single 3-col cell, top-rank phase          —  3 cols
-    None,
-}
-
-/// Compute the name budget if we selected `quota`, `prob_col` and `vendor_width`.
-fn name_budget_for(
-    width: u16,
-    vendor_width: usize,
-    quota: QuotaColumn,
-    prob_col: ProbColumn,
-) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
-    (width as usize).saturating_sub(fixed)
-}
 
 /// Empirically choose a layout: try each from widest to narrowest.
 /// First pass: try to fit without truncating the full name (`max_req_name_width`).
@@ -164,7 +107,7 @@ fn choose_layout(
     }
 
     for &(quota, prob) in &layouts {
-        if name_budget_for(width, vendor_width, quota, prob) >= NAME_WIDTH_MIN {
+        if name_budget_for(width, vendor_width, quota, prob) >= name_width_min() {
             return (quota, prob);
         }
     }
@@ -175,32 +118,6 @@ fn choose_layout(
 // ---------------------------------------------------------------------------
 // Probability column helpers
 // ---------------------------------------------------------------------------
-
-fn probability_percent(weight: f64, total: f64) -> u8 {
-    if total <= 0.0 || weight <= 0.0 {
-        return 0;
-    }
-    (weight / total * 100.0).round().clamp(0.0, 99.0) as u8
-}
-
-fn probability_color(pct: u8, max_pct: u8) -> Color {
-    if pct == 0 {
-        return Color::DarkGray;
-    }
-    let t = if max_pct == 0 {
-        0.0
-    } else {
-        (pct as f64 / max_pct as f64).clamp(0.0, 1.0)
-    };
-    let (r, g) = if t < 0.5 {
-        let k = t / 0.5;
-        (220, (40.0 + (220.0 - 40.0) * k) as u8)
-    } else {
-        let k = (t - 0.5) / 0.5;
-        ((220.0 - (220.0 - 60.0) * k) as u8, 220)
-    };
-    Color::Rgb(r, g, 60)
-}
 
 fn probability_span(label: &str, pct: u8, max_pct: u8, is_top_rank: bool) -> Span<'static> {
     let mut style = Style::default().fg(probability_color(pct, max_pct));
@@ -219,8 +136,6 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 // ---------------------------------------------------------------------------
 
 const STATUS_DOT: &str = "●";
-
-const NAME_WIDTH_MIN: usize = 8;
 
 fn vendor_label(vendor: VendorKind) -> &'static str {
     match vendor {
@@ -261,7 +176,7 @@ fn full_row_fixed_width(vendor_width: usize, quota: QuotaColumn, prob_col: ProbC
 fn name_budget(width: u16, vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
     let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
     let raw = (width as usize).saturating_sub(fixed);
-    raw.max(NAME_WIDTH_MIN) // no upper clamp; fills remaining space
+    raw.max(name_width_min()) // no upper clamp; fills remaining space
 }
 
 fn render_full_table(
@@ -616,99 +531,6 @@ fn top_rank_prob_span(
         .max_by_key(|(_, pct, _)| *pct)
         .unwrap_or(("P", 0, 0));
     probability_span(label, pct, max, false)
-}
-
-// ---------------------------------------------------------------------------
-// Name + freshness formatting (spec: degrade " (new)" → "*" → omitted)
-// ---------------------------------------------------------------------------
-
-fn name_style() -> Style {
-    Style::default().fg(Color::Cyan)
-}
-
-fn freshness_style() -> Style {
-    Style::default().fg(Color::DarkGray)
-}
-
-fn ellipsis_style() -> Style {
-    Style::default().fg(Color::DarkGray)
-}
-
-const ELLIPSIS: &str = "...";
-
-/// Render the `name + freshness` column as a sequence of spans whose total
-/// visible width equals `budget`. Freshness degrades " (new)" → "*" →
-/// omitted before the name itself starts truncating with an ellipsis.
-fn format_name_with_freshness(short_name: &str, is_new: bool, budget: usize) -> Vec<Span<'static>> {
-    if budget == 0 {
-        return Vec::new();
-    }
-    let name_len = short_name.width();
-
-    if is_new {
-        // 1. " (new)" suffix
-        if name_len + " (new)".width() <= budget {
-            let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
-            spans.push(Span::styled(" (new)", freshness_style()));
-            let pad = budget - name_len - " (new)".width();
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
-            }
-            return spans;
-        }
-        // 2. "*" suffix
-        if name_len < budget {
-            let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
-            spans.push(Span::styled("*", freshness_style()));
-            let pad = budget - name_len - 1;
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
-            }
-            return spans;
-        }
-        // 3. fall through — name truncates with ellipsis, no marker.
-    }
-
-    // Plain name path (or freshness fully degraded away).
-    if name_len <= budget {
-        let pad = budget - name_len;
-        let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
-        if pad > 0 {
-            spans.push(Span::raw(" ".repeat(pad)));
-        }
-        return spans;
-    }
-
-    let ellipsis_len = ELLIPSIS.width();
-    if budget > ellipsis_len {
-        let visible_width = budget - ellipsis_len;
-        let mut truncated = String::new();
-        let mut w = 0;
-        for c in short_name.chars() {
-            let cw = c.width().unwrap_or(0);
-            if w + cw > visible_width {
-                break;
-            }
-            w += cw;
-            truncated.push(c);
-        }
-        return vec![
-            Span::styled(truncated, name_style()),
-            Span::styled(ELLIPSIS, ellipsis_style()),
-        ];
-    }
-
-    let mut truncated = String::new();
-    let mut w = 0;
-    for c in ELLIPSIS.chars() {
-        let cw = c.width().unwrap_or(0);
-        if w + cw > budget {
-            break;
-        }
-        w += cw;
-        truncated.push(c);
-    }
-    vec![Span::styled(truncated, ellipsis_style())]
 }
 
 // ---------------------------------------------------------------------------

@@ -2,69 +2,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::super::clock::Clock;
+use super::live_agent_message_view_model::{capitalize_first, gradient_spans};
+
+pub use super::live_agent_message_view_model::extract_short_title;
 
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Running-state color per spec.
 const RUNNING_COLOR: Color = Color::Blue;
-const GRADIENT_STOPS: &[(u8, u8, u8)] = &[
-    (0xFF, 0x6B, 0x6B),
-    (0xFF, 0xD1, 0x66),
-    (0x06, 0xD6, 0xA0),
-    (0x4C, 0xC9, 0xF0),
-    (0x7B, 0x5B, 0xE0),
-    (0xF0, 0x72, 0xB6),
-];
-const GRADIENT_STEP: usize = 4;
-
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
-
-fn interpolate_rgb(from: (u8, u8, u8), to: (u8, u8, u8), step: usize, max_step: usize) -> Color {
-    let interpolate_channel = |start: u8, end: u8| {
-        let delta = end as i16 - start as i16;
-        (start as i16 + (delta * step as i16) / max_step as i16) as u8
-    };
-
-    Color::Rgb(
-        interpolate_channel(from.0, to.0),
-        interpolate_channel(from.1, to.1),
-        interpolate_channel(from.2, to.2),
-    )
-}
-
-/// Paint a string as one colored span per char using a phased horizontal gradient.
-pub fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
-    if text.is_empty() {
-        return Vec::new();
-    }
-
-    let cycle = GRADIENT_STOPS.len() * GRADIENT_STEP;
-    let mut spans = Vec::with_capacity(text.chars().count());
-
-    // Spec leaves exact drift math open; this keeps each 50ms visible frame moving
-    // while the spinner glyph cadence remains independently readable.
-    for (index, ch) in text.chars().enumerate() {
-        let offset = (phase + index) % cycle;
-        let start_index = offset / GRADIENT_STEP;
-        let step = offset % GRADIENT_STEP;
-        let end_index = (start_index + 1) % GRADIENT_STOPS.len();
-        let color = interpolate_rgb(
-            GRADIENT_STOPS[start_index],
-            GRADIENT_STOPS[end_index],
-            step,
-            GRADIENT_STEP,
-        );
-        spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
-    }
-
-    spans
-}
 
 /// Style hints for historical message rendering.
 #[derive(Clone, Copy, Debug, Default)]
@@ -180,17 +125,6 @@ pub struct FixedFetcher(pub String);
 impl LiveSummaryFetcher for FixedFetcher {
     fn fetch(&self) -> String {
         self.0.clone()
-    }
-}
-
-/// Extract the short title from a live summary line.
-///
-/// Format: `<short title ≤5 words> | <body>` or just `<short title>`.
-pub fn extract_short_title(text: &str) -> String {
-    if let Some((title, _)) = text.split_once('|') {
-        title.trim().to_string()
-    } else {
-        text.trim().to_string()
     }
 }
 

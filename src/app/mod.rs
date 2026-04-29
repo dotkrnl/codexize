@@ -12,6 +12,7 @@ mod launch;
 mod lifecycle;
 mod models;
 mod models_area;
+mod models_area_view_model;
 mod observation;
 pub(crate) mod palette;
 mod prompts;

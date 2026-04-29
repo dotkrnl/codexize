@@ -5326,6 +5326,10 @@ MUST cover, in this order:
   - Open risks the spec does not address.
   - TL;DR check: confirm the spec's TL;DR (top of file) matches the body —
     flag any decision in the body missing from the TL;DR or vice versa.
+  - Treat the `## User-stated requirements (authoritative)` section as
+    read-only. If the rest of the spec contradicts an item there, flag the
+    contradiction with the spec section as the offender — never the
+    authoritative section. Do not propose edits to that section.
   - Bottom-line judgement on the last line: ship-as-is / needs-revision /
     reject.
 {instr}"#
@@ -5381,10 +5385,12 @@ defect — don't force one internal design when several satisfy the spec and
 the plan's explicit interfaces. When in doubt, leave it alone.
 
 If — and only if — you find critical issues, directly edit {plan_path} (and
-{spec_path} if spec-level) with the smallest fix. Write a markdown-bullet
-changelog to {review_path}: one bullet per edit, naming the file changed and
-citing the spec section / plan step that mandated the fix (audit trail). If
-nothing was critical, write a single bullet saying so — do NOT invent issues.
+{spec_path} if spec-level — but NEVER the `## User-stated requirements
+(authoritative)` section; if the issue lives there, it must be raised to the
+operator, not patched) with the smallest fix. Write a markdown-bullet changelog
+to {review_path}: one bullet per edit, naming the file changed and citing the
+spec section / plan step that mandated the fix (audit trail). If nothing was
+critical, write a single bullet saying so — do NOT invent issues.
 {instr}"#
     )
 }
@@ -5410,6 +5416,17 @@ Idea:
 Operator IS available for design questions — interrogate them on ambiguities,
 scope, and trade-offs BEFORE drafting. The "stop and exit" rule below covers
 stage-transition asks only, not design clarifications.
+
+Authoritative user input — at the top of {spec_path}, write a section titled
+exactly:
+
+    ## User-stated requirements (authoritative)
+
+Quote each user-stated decision from the Idea above verbatim as a bullet.
+Use the user's own wording, not a paraphrase. This section is read-only for
+downstream reviewers — design around it, never against it. If a user
+statement is ambiguous, ask the operator. If two user statements conflict with
+each other, ask the operator. Never silently reinterpret.
 
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
   1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy
@@ -5471,6 +5488,20 @@ Idea:
 ---
 
 Operator is unavailable; resolve ambiguities, scope, and trade-offs yourself per the trust preamble above.
+
+Authoritative user input — at the top of {spec_path}, write a section titled
+exactly:
+
+    ## User-stated requirements (authoritative)
+
+Quote each user-stated decision from the Idea above verbatim as a bullet.
+Use the user's own wording, not a paraphrase. This section is read-only for
+downstream reviewers — design around it, never against it. If a user
+statement is ambiguous, pick the narrowest reasonable reading and note the
+assumption in a sibling `## Assumptions` section. If two user statements
+conflict with each other, list both verbatim and pick the narrowest reading
+consistent with the rest of the Idea, recording the choice under
+`## Assumptions`. Never silently reinterpret.
 
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
   1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy
@@ -6146,8 +6177,12 @@ Hard rules:
   - No clarifying questions — work from task + spec + plan.
   - Stay in this task's scope. Follow-up work you uncover → note for the
     reviewer, don't do it yourself.
-  - Leave the working tree clean on exit. The wrapper records git cleanliness
-    after the agent exits; a dirty tree fails the run before review.
+  - Working tree must be clean on exit. Commit every change you intend to
+    keep; revert anything you don't author or don't want to keep.
+    `git status --porcelain` MUST be empty when you stop, even if the
+    tree was already dirty when you started — inherited dirt is your
+    problem to resolve (revert it; don't carry it forward). Leaving the
+    tree dirty is a hard failure regardless of test/lint state.
   - No force-push, no history rewrite, no branch deletes.
 
 Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
@@ -6158,7 +6193,8 @@ Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
                                             # addressed; prefix each item with [Round N, Item M]
 
 If the task was already complete and you committed nothing, status = "done"
-with the reason in summary — that's not a failure.
+with the reason in summary — that's not a failure. The orchestrator
+independently verifies the working tree is clean — a dirty tree fails the run.
 {instr}"#,
         task_id = task_id,
         round = round,
@@ -11761,6 +11797,101 @@ summary = "   "
             assert!(prompt.contains("review only `base..HEAD`"));
             assert!(prompt.contains("Coder summary:"));
             assert!(prompt.contains("Coder rebuttal (round 2):"));
+        });
+    }
+
+    #[test]
+    fn brainstorm_prompts_require_authoritative_user_requirements() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("brainstorm-authoritative-section");
+            let artifacts = session_dir.join("artifacts");
+            let spec_path = artifacts.join("spec.md");
+            let summary_path = artifacts.join("session_summary.toml");
+            let live_summary = artifacts.join("live_summary.txt");
+            std::fs::create_dir_all(&artifacts).unwrap();
+
+            for yolo in [false, true] {
+                let prompt = brainstorm_prompt(
+                    "add retries unless disabled",
+                    &spec_path.display().to_string(),
+                    &summary_path.display().to_string(),
+                    &live_summary.display().to_string(),
+                    yolo,
+                );
+
+                assert!(prompt.contains("## User-stated requirements (authoritative)"));
+                assert!(
+                    prompt.contains("Quote each user-stated decision from the Idea above verbatim")
+                );
+                assert!(prompt.contains("Use the user's own wording, not a paraphrase."));
+                assert!(prompt.contains("Never silently reinterpret."));
+                if yolo {
+                    assert!(prompt.contains("pick the narrowest reasonable reading"));
+                    assert!(prompt.contains("recording the choice under\n`## Assumptions`"));
+                } else {
+                    assert!(prompt.contains("statement is ambiguous, ask the operator."));
+                    assert!(prompt.contains(
+                        "If two user statements conflict with\neach other, ask the operator."
+                    ));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn review_prompts_protect_authoritative_user_requirements() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("review-authoritative-section");
+            let artifacts = session_dir.join("artifacts");
+            let spec_path = artifacts.join("spec.md");
+            let plan_path = artifacts.join("plan.md");
+            let spec_review_path = artifacts.join("spec-review-1.md");
+            let plan_review_path = artifacts.join("plan-review-1.md");
+            let live_summary = artifacts.join("live_summary.txt");
+            std::fs::create_dir_all(&artifacts).unwrap();
+
+            let spec_prompt = spec_review_prompt(
+                &spec_path.display().to_string(),
+                &spec_review_path.display().to_string(),
+                &live_summary.display().to_string(),
+            );
+            assert!(spec_prompt.contains(
+                "Treat the `## User-stated requirements (authoritative)` section as\n    read-only."
+            ));
+            assert!(spec_prompt.contains("Do not propose edits to that section."));
+
+            let plan_prompt = plan_review_prompt(
+                &spec_path.display().to_string(),
+                &plan_path.display().to_string(),
+                &plan_review_path.display().to_string(),
+                1,
+                &live_summary.display().to_string(),
+            );
+            assert!(
+                plan_prompt
+                    .contains("NEVER the `## User-stated requirements\n(authoritative)` section")
+            );
+            assert!(plan_prompt.contains("it must be raised to the\noperator, not patched"));
+        });
+    }
+
+    #[test]
+    fn coder_prompt_requires_clean_exit_and_new_summary_schema() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("coder-clean-exit-prompt");
+            let round_dir = session_dir.join("rounds/001");
+            let task_file = round_dir.join("task.toml");
+            let live_summary = session_dir.join("artifacts/live_summary.txt");
+            std::fs::create_dir_all(&round_dir).unwrap();
+
+            let prompt = coder_prompt(&session_dir, 1, 1, &task_file, &live_summary, false, &[]);
+
+            assert!(prompt.contains("Working tree must be clean on exit."));
+            assert!(prompt.contains("git status --porcelain` MUST be empty when you stop"));
+            assert!(prompt.contains("tree dirty is a hard failure"));
+            assert!(!prompt.contains("dirty_before"));
+            assert!(!prompt.contains("dirty_after"));
+            assert!(prompt.contains("independently verifies the working tree is clean"));
         });
     }
 

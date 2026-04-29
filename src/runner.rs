@@ -208,7 +208,7 @@ on_signal() {{
 }}
 
 trap 'status=$?; if [ "$finalized" -eq 0 ]; then exit_code=$status; finalize; fi' EXIT
-trap 'on_signal HUP' HUP
+trap '' HUP
 trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}

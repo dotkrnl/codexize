@@ -558,6 +558,67 @@ fn shell_cmd_writes_stamp_when_interrupted() {
 }
 
 #[test]
+fn shell_cmd_ignores_hup_without_forwarding_to_child() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let status_dir = dir.path().join("status");
+    let status_path = status_dir.join("run.txt");
+    let finish_dir = dir.path().join("run-finish");
+    let stamp_path = finish_dir.join("hup-ignored.toml");
+    let child_done = dir.path().join("child-done");
+
+    let agent_cmd = format!("sleep 1; touch {}", child_done.to_string_lossy());
+    let cmd = build_shell_cmd(
+        &agent_cmd,
+        "[Test]",
+        &status_dir.to_string_lossy(),
+        &status_path.to_string_lossy(),
+        &finish_dir.to_string_lossy(),
+        &stamp_path.to_string_lossy(),
+    );
+
+    let mut child = std::process::Command::new("bash")
+        .args(["-c", &cmd])
+        .current_dir(dir.path())
+        .spawn()
+        .expect("spawn bash");
+
+    std::thread::sleep(Duration::from_millis(200));
+    let pid = child.id().to_string();
+    let kill_status = std::process::Command::new("kill")
+        .args(["-HUP", &pid])
+        .status()
+        .expect("send HUP");
+    assert!(kill_status.success(), "failed to signal wrapper process");
+
+    let mut attempts = 0;
+    loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            assert!(status.success(), "wrapper should ignore HUP: {status}");
+            break;
+        }
+        attempts += 1;
+        if attempts > 50 {
+            let _ = child.kill();
+            panic!("wrapper did not finish after ignored HUP");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    assert!(
+        child_done.exists(),
+        "child command should complete after wrapper receives HUP"
+    );
+    assert_eq!(
+        fs::read_to_string(&status_path).expect("read status"),
+        "0",
+        "ignored HUP should not change exit status"
+    );
+    let stamp = read_finish_stamp(&stamp_path).expect("parse finish stamp");
+    assert_eq!(stamp.exit_code, 0);
+    assert_eq!(stamp.signal_received, "");
+}
+
+#[test]
 fn finish_stamp_parses_old_stamp_without_signal_received() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("stamp.toml");

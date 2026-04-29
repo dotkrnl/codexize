@@ -409,15 +409,27 @@ fn read_loop(
             }
 
             if let Some(id) = value.get("id") {
-                let error = json!({
-                    "jsonrpc": "2.0",
-                    "id": id.clone(),
-                    "error": {
-                        "code": -32601,
-                        "message": format!("codexize client does not implement method {method}"),
-                    }
-                });
-                let _ = write_json_rpc_line(&writer, &error);
+                let response = value
+                    .get("params")
+                    .and_then(|params| client_request_response(method, params))
+                    .map(|result| {
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": id.clone(),
+                            "result": result,
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": id.clone(),
+                            "error": {
+                                "code": -32601,
+                                "message": format!("codexize client does not implement method {method}"),
+                            }
+                        })
+                    });
+                let _ = write_json_rpc_line(&writer, &response);
             }
             continue;
         }
@@ -472,6 +484,36 @@ fn broadcast_transport_error(
         let _ = sender.send(Err(err.clone()));
     }
     let _ = updates_tx.send(Err(err));
+}
+
+fn client_request_response(method: &str, params: &Value) -> Option<Value> {
+    match method {
+        "session/request_permission" => permission_response(params),
+        _ => None,
+    }
+}
+
+fn permission_response(params: &Value) -> Option<Value> {
+    let options = params.get("options").and_then(Value::as_array)?;
+    let selected = options
+        .iter()
+        .find(|option| {
+            option.get("kind").and_then(Value::as_str) == Some("allow_once")
+                || option.get("optionId").and_then(Value::as_str) == Some("approve")
+        })
+        .or_else(|| {
+            options
+                .iter()
+                .find(|option| option.get("kind").and_then(Value::as_str) == Some("allow_always"))
+        })?;
+    let option_id = selected.get("optionId").and_then(Value::as_str)?;
+
+    Some(json!({
+        "outcome": {
+            "outcome": "selected",
+            "optionId": option_id
+        }
+    }))
 }
 
 #[derive(Debug)]
@@ -768,6 +810,30 @@ mod tests {
         let result =
             parse_prompt_result(json!({ "stopReason": "end_turn" })).expect("stop reason parsed");
         assert_eq!(result, PromptTurnOutcome::Finished);
+    }
+
+    #[test]
+    fn permission_request_selects_approve_option() {
+        let response = client_request_response(
+            "session/request_permission",
+            &json!({
+                "options": [
+                    { "optionId": "approve", "kind": "allow_once" },
+                    { "optionId": "reject", "kind": "reject_once" }
+                ]
+            }),
+        )
+        .expect("permission request should be handled");
+
+        assert_eq!(
+            response,
+            json!({
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "approve"
+                }
+            })
+        );
     }
 
     #[test]

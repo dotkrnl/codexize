@@ -145,11 +145,11 @@ impl App {
                 key_hint: None,
             });
         }
-        if self.selected_task_id().is_some() {
+        if self.selected_retry_target().is_some() {
             commands.push(PaletteCommand {
                 name: "retry",
                 aliases: &["r"],
-                help: "Retry selected task",
+                help: "Retry selected stage or task",
                 key_hint: None,
             });
         }
@@ -267,7 +267,7 @@ impl App {
                 false
             }
             "retry" => {
-                self.retry_selected_task();
+                self.retry_selected_target();
                 false
             }
             "edit" => {

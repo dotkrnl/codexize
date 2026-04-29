@@ -1698,6 +1698,146 @@ fn palette_retry_is_available_from_builder_loop_focus() {
 }
 
 #[test]
+fn palette_retry_clears_brainstorm_attempt_logs_and_relaunches() {
+    with_temp_root(|| {
+        let session_id = "palette-retry-brainstorm";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.idea_text = Some("draft the spec".to_string());
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Brainstorm] gpt-5".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        let removed_run = state.agent_runs[0].clone();
+        state.save().expect("save");
+        state
+            .append_message(&crate::state::Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::End,
+                sender: crate::state::MessageSender::System,
+                text: "brainstorm failed".to_string(),
+            })
+            .expect("append message");
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            1,
+            10,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some("# Spec\n".to_string()),
+                    launch_error: None,
+                }]),
+            },
+        )));
+        std::fs::create_dir_all(app.run_status_path(&removed_run).parent().unwrap())
+            .expect("status dir");
+        std::fs::write(app.run_status_path(&removed_run), "1").expect("status");
+        std::fs::write(app.live_summary_path_for(&removed_run), "old summary").expect("summary");
+        app.rebuild_tree_view(None);
+        app.selected = row_index(&app, "Brainstorm");
+
+        assert!(
+            app.palette_commands()
+                .iter()
+                .any(|command| command.name == "retry"),
+            ":retry should be available for Brainstorm focus"
+        );
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "retry".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert_eq!(app.state.agent_runs.len(), 1);
+        let fresh = &app.state.agent_runs[0];
+        assert_eq!(fresh.stage, "brainstorm");
+        assert_eq!(fresh.attempt, 1);
+        assert_eq!(fresh.status, RunStatus::Running);
+        assert!(!app.live_summary_path_for(&removed_run).exists());
+        let messages = SessionState::load_messages(session_id).expect("messages");
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.text != "brainstorm failed")
+        );
+    });
+}
+
+#[test]
+fn palette_retry_is_available_from_non_task_stage_focus() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("palette-retry-stage-focus".to_string());
+        for (id, stage) in [
+            (1, "brainstorm"),
+            (2, "spec-review"),
+            (3, "planning"),
+            (4, "plan-review"),
+            (5, "sharding"),
+        ] {
+            state.agent_runs.push(RunRecord {
+                id,
+                stage: stage.to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "gpt-5".to_string(),
+                vendor: "codex".to_string(),
+                window_name: format!("[{stage}]"),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("exit(1)".to_string()),
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+        }
+        let mut app = idle_app(state);
+
+        for label in [
+            "Brainstorm",
+            "Spec Review",
+            "Planning",
+            "Plan Review",
+            "Sharding",
+        ] {
+            app.selected = row_index(&app, label);
+            assert!(
+                app.palette_commands()
+                    .iter()
+                    .any(|command| command.name == "retry"),
+                ":retry should be available for {label} focus"
+            );
+        }
+    });
+}
+
+#[test]
 fn pending_guard_resume_fail_closed_when_decision_missing() {
     with_temp_root(|| {
         let session_id = "pending-guard-resume-fail";

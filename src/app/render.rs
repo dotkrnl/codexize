@@ -1086,9 +1086,7 @@ fn stage_error_title(stage_id: StageId) -> &'static str {
 fn modal_border_style(kind: ModalKind) -> Style {
     use ratatui::style::{Color, Modifier};
     match kind {
-        ModalKind::StageError(_) => {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-        }
+        ModalKind::StageError(_) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ModalKind::SkipToImpl | ModalKind::GitGuard => Style::default().fg(Color::Yellow),
         ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
             Style::default().fg(Color::Cyan)
@@ -2306,8 +2304,7 @@ mod tests {
             )
         );
         assert!(
-            raw_line_text(&buf, dialog.y + dialog.height - 2, width)
-                .contains("Enter continue"),
+            raw_line_text(&buf, dialog.y + dialog.height - 2, width).contains("Enter continue"),
             "keymap should occupy the last inner row"
         );
         assert_eq!(
@@ -2359,8 +2356,7 @@ mod tests {
             )
         );
         assert!(
-            raw_line_text(&buf, dialog.y + dialog.height - 2, width)
-                .contains("r retry"),
+            raw_line_text(&buf, dialog.y + dialog.height - 2, width).contains("r retry"),
             "keymap should remain visible after wrapped error content"
         );
     }

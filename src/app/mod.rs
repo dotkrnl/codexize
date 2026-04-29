@@ -34,6 +34,7 @@ mod tests_prompts;
 #[cfg(test)]
 mod tests_yolo;
 mod tree;
+mod tree_view_model;
 mod yolo_exit;
 
 pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};

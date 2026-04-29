@@ -48,7 +48,7 @@ fn detect_git() -> bool {
 fn detect_ignored(root: &Path) -> bool {
     let ignored = |path: &std::ffi::OsStr| {
         Command::new("git")
-            .args(["check-ignore", "-q", "--"])
+            .args(["check-ignore", "-q", "--no-index", "--"])
             .arg(path)
             .output()
             .map(|o| o.status.success())
@@ -735,6 +735,28 @@ mod tests {
         with_temp_dir(|| {
             git_cmd(&["init"]);
             fs::write(".gitignore", ".codexize/\n").unwrap();
+
+            assert!(detect_ignored(Path::new(".codexize")));
+        });
+    }
+
+    #[test]
+    fn detect_ignored_accepts_required_entry_when_old_session_file_is_tracked() {
+        with_temp_dir(|| {
+            git_cmd(&["init"]);
+            fs::write(".gitignore", ".codexize/\n").unwrap();
+            fs::create_dir_all(".codexize/sessions/old/rounds/001").unwrap();
+            fs::write(
+                ".codexize/sessions/old/rounds/001/coder_summary.toml",
+                "status = \"done\"\n",
+            )
+            .unwrap();
+            git_cmd(&["add", ".gitignore"]);
+            git_cmd(&[
+                "add",
+                "-f",
+                ".codexize/sessions/old/rounds/001/coder_summary.toml",
+            ]);
 
             assert!(detect_ignored(Path::new(".codexize")));
         });

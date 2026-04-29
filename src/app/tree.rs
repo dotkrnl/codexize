@@ -1046,7 +1046,10 @@ pub fn collapse_tree(node: &mut Node) {
     if node.children.len() == 1 {
         let child_kind = node.children[0].kind;
         if matches!(child_kind, NodeKind::Round | NodeKind::AgentRun) {
-            let child = node.children.pop().unwrap();
+            let child = node
+                .children
+                .pop()
+                .expect("invariant: len() == 1 before collapsing single-child tree layer");
             if child.kind == NodeKind::AgentRun {
                 node.leaf_run_id = child.run_id;
             } else {

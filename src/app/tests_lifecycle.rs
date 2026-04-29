@@ -1494,6 +1494,144 @@ fn pending_guard_modal_consumes_unrelated_keys() {
 }
 
 #[test]
+fn palette_back_rewinds_without_second_confirmation() {
+    with_temp_root(|| {
+        let mut app = mk_app(mk_state_with_runs());
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "back".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
+        assert!(!app.confirm_back);
+    });
+}
+
+#[test]
+fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
+    with_temp_root(|| {
+        let session_id = "palette-retry-selected-task";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.builder.recovery_trigger_task_id = Some(1);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "claude-sonnet".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "reviewer".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "gemini-2.5-pro".to_string(),
+            vendor: "gemini".to_string(),
+            window_name: "[Round 1 Reviewer]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 3,
+            stage: "recovery".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Recovery]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        let removed_run = state.agent_runs[0].clone();
+        state.save().expect("save");
+        state
+            .append_message(&crate::state::Message {
+                ts: chrono::Utc::now(),
+                run_id: 1,
+                kind: MessageKind::End,
+                sender: crate::state::MessageSender::System,
+                text: "attempt 1 failed".to_string(),
+            })
+            .expect("append message");
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            1,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            },
+        )));
+        std::fs::create_dir_all(app.run_status_path(&removed_run).parent().unwrap())
+            .expect("status dir");
+        std::fs::write(app.run_status_path(&removed_run), "1").expect("status");
+        std::fs::write(app.live_summary_path_for(&removed_run), "old summary").expect("summary");
+        app.rebuild_tree_view(None);
+        app.selected = row_index(&app, "Task 1");
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "retry".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert_eq!(app.state.agent_runs.len(), 1);
+        let fresh = &app.state.agent_runs[0];
+        assert_eq!(fresh.stage, "coder");
+        assert_eq!(fresh.task_id, Some(1));
+        assert_eq!(fresh.attempt, 1);
+        assert_eq!(fresh.status, RunStatus::Running);
+        assert!(!app.live_summary_path_for(&removed_run).exists());
+        let messages = SessionState::load_messages(session_id).expect("messages");
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.text != "attempt 1 failed")
+        );
+    });
+}
+
+#[test]
 fn pending_guard_resume_fail_closed_when_decision_missing() {
     with_temp_root(|| {
         let session_id = "pending-guard-resume-fail";

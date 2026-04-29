@@ -383,6 +383,31 @@ impl SessionState {
         Ok(read_messages_file(&path)?.messages)
     }
 
+    /// Remove persisted messages whose run id is in `run_ids`.
+    pub fn remove_messages_for_runs(
+        &self,
+        run_ids: &std::collections::BTreeSet<u64>,
+    ) -> Result<()> {
+        if run_ids.is_empty() {
+            return Ok(());
+        }
+        let dir = session_dir(&self.session_id);
+        fs::create_dir_all(&dir)?;
+        reject_old_artifact(&dir.join("messages.jsonl"))?;
+        let path = dir.join("messages.toml");
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let mut file = read_messages_file(&path)?;
+        file.messages
+            .retain(|message| !run_ids.contains(&message.run_id));
+        let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
+        fs::write(&path, text)
+            .with_context(|| format!("failed to write messages to {}", path.display()))?;
+        Ok(())
+    }
+
     /// Create a new RunRecord, push it to agent_runs, and return its id.
     #[allow(clippy::too_many_arguments)]
     pub fn create_run_record(

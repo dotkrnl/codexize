@@ -3,7 +3,7 @@ use ratatui::{
     buffer::Buffer,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph, Widget},
+    widgets::{Clear, Paragraph, Widget},
 };
 
 use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans},
+    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans, modal::render_modal_overlay},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
     footer::{
@@ -319,58 +319,12 @@ impl App {
         // 5. Footer zone — three-way branch (see "Determine footer zone").
         if let Some(m) = modal {
             let terminal_width = area.width;
-            let terminal_height = area.height;
             let max_w = terminal_width.saturating_sub(4).max(1);
             let dialog_w = max_w.min(80).max(max_w.min(40));
             let inner_w = dialog_w.saturating_sub(2);
             let content = self.modal_content_lines(m, inner_w);
-            let content_h = content.len();
-            let dialog_h = ((content_h + 3) as u16).min(terminal_height.saturating_sub(2));
-            let dialog = ratatui::layout::Rect::new(
-                (terminal_width.saturating_sub(dialog_w)) / 2,
-                (terminal_height.saturating_sub(dialog_h)) / 2,
-                dialog_w,
-                dialog_h,
-            );
-
-            // Clear only the dialog rect so the surrounding top/body chrome
-            // remains visible behind the centered overlay.
-            frame.render_widget(Clear, dialog);
-            let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
-            frame.render_widget(block.clone(), dialog);
-            let inner = block.inner(dialog);
-
-            if inner.height > 0 && inner.width > 0 {
-                let modal_keymap =
-                    keymap(self.state.current_phase, Some(m), caps, false, inner.width);
-                let inner_h = inner.height as usize;
-
-                // The keymap occupies the last inner row, so content can use
-                // up to `inner_h - 1` rows. If content overflows, truncate
-                // and append a single `…` row in default style — the spec
-                // requires the keymap to remain reachable.
-                let content_capacity = inner_h.saturating_sub(1);
-                let lines_to_write: Vec<Line<'static>> = if content.len() <= content_capacity {
-                    content
-                } else {
-                    let keep = content_capacity.saturating_sub(1);
-                    let mut truncated: Vec<Line<'static>> =
-                        content.into_iter().take(keep).collect();
-                    truncated.push(Line::from("…"));
-                    truncated
-                };
-
-                let buf = frame.buffer_mut();
-                for (offset, line) in lines_to_write.iter().enumerate() {
-                    buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
-                }
-                buf.set_line(
-                    inner.x,
-                    inner.y + inner.height - 1,
-                    &modal_keymap,
-                    inner.width,
-                );
-            }
+            let modal_keymap = keymap(self.state.current_phase, Some(m), caps, false, inner_w);
+            render_modal_overlay(frame, area, content, modal_keymap);
         } else if let Some(content) = sheet_content {
             let sheet_lines = bottom_sheet(content, keymap_line, footer_h, width);
             for line in sheet_lines {

@@ -3,7 +3,10 @@ mod config;
 mod events;
 
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
-pub use config::{AcpAgentDefinition, AcpConfig, program_is_executable};
+pub use config::{
+    AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_is_available,
+    claude_acp_local_program, program_is_executable,
+};
 pub use events::{
     AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextEvent,
     ClientUpdate, translate_update,

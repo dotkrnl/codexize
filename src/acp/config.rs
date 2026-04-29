@@ -73,11 +73,7 @@ impl AcpConfig {
             crate::adapters::EffortLevel::Normal => AcpReasoningEffort::Medium,
             crate::adapters::EffortLevel::Tough => AcpReasoningEffort::High,
         };
-        let permission_mode = if request.modes.yolo {
-            AcpPermissionMode::Code
-        } else {
-            AcpPermissionMode::Ask
-        };
+        let permission_mode = AcpPermissionMode::Code;
 
         let mut env = agent.env.clone();
         env.insert(
@@ -180,12 +176,65 @@ impl Default for AcpConfig {
         // ACP directly, while Codex and Claude are commonly launched through
         // ACP bridge binaries, so keep the executable boundary explicit here.
         let definitions = [
-            default_agent_definition(VendorKind::Claude, "claude-code-acp", Vec::<String>::new()),
-            default_agent_definition(VendorKind::Codex, "codex-acp", Vec::<String>::new()),
-            default_agent_definition(VendorKind::Gemini, "gemini", vec!["--acp".to_string()]),
-            default_agent_definition(VendorKind::Kimi, "kimi", vec!["acp".to_string()]),
+            default_agent_definition(
+                VendorKind::Claude,
+                &default_claude_acp_program(),
+                Vec::<String>::new(),
+            ),
+            default_agent_definition(
+                VendorKind::Codex,
+                "codex-acp",
+                vec![
+                    "-c".to_string(),
+                    "sandbox_mode=\"danger-full-access\"".to_string(),
+                    "-c".to_string(),
+                    "approval_policy=\"never\"".to_string(),
+                ],
+            ),
+            default_agent_definition(
+                VendorKind::Gemini,
+                "gemini",
+                vec!["--yolo".to_string(), "--acp".to_string()],
+            ),
+            default_agent_definition(
+                VendorKind::Kimi,
+                "kimi",
+                vec![
+                    "--yolo".to_string(),
+                    "--thinking".to_string(),
+                    "acp".to_string(),
+                ],
+            ),
         ];
         Self::from_agents(definitions)
+    }
+}
+
+pub fn claude_acp_install_root() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codexize")
+        .join("acp")
+}
+
+pub fn claude_acp_local_program() -> PathBuf {
+    claude_acp_install_root()
+        .join("node_modules")
+        .join(".bin")
+        .join("claude-agent-acp")
+}
+
+pub fn claude_acp_is_available() -> bool {
+    path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp")
+}
+
+fn default_claude_acp_program() -> String {
+    let local = claude_acp_local_program();
+    if path_is_executable(&local) {
+        local.display().to_string()
+    } else {
+        "claude-agent-acp".to_string()
     }
 }
 
@@ -294,6 +343,17 @@ mod tests {
         }
     }
 
+    fn non_yolo_request(vendor: VendorKind) -> AcpLaunchRequest {
+        AcpLaunchRequest {
+            modes: LaunchModes {
+                yolo: false,
+                cheap: false,
+                interactive: false,
+            },
+            ..sample_request(vendor)
+        }
+    }
+
     #[test]
     fn resolves_vendor_keyed_definitions_with_launch_metadata() {
         let resolved = AcpConfig::default()
@@ -302,7 +362,10 @@ mod tests {
 
         assert_eq!(resolved.vendor, VendorKind::Gemini);
         assert_eq!(resolved.spawn.program, "gemini");
-        assert_eq!(resolved.spawn.args, vec!["--acp".to_string()]);
+        assert_eq!(
+            resolved.spawn.args,
+            vec!["--yolo".to_string(), "--acp".to_string()]
+        );
         assert_eq!(resolved.session.reasoning_effort, AcpReasoningEffort::Low);
         assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
         assert_eq!(
@@ -329,6 +392,15 @@ mod tests {
             .resolve(&sample_request(VendorKind::Codex))
             .expect("resolve codex");
 
+        assert_eq!(
+            resolved.spawn.args,
+            vec![
+                "-c".to_string(),
+                "sandbox_mode=\"danger-full-access\"".to_string(),
+                "-c".to_string(),
+                "approval_policy=\"never\"".to_string(),
+            ]
+        );
         assert_eq!(resolved.session.model, "gpt-5.5");
         assert_eq!(resolved.session.requested_effort, EffortLevel::Normal);
         assert_eq!(resolved.session.effective_effort, EffortLevel::Low);
@@ -348,6 +420,70 @@ mod tests {
                 .get("CODEXIZE_ACP_PERMISSION_MODE")
                 .map(String::as_str),
             Some("code")
+        );
+    }
+
+    #[test]
+    fn acp_launches_use_code_permission_mode_even_without_codexize_yolo() {
+        let resolved = AcpConfig::default()
+            .resolve(&non_yolo_request(VendorKind::Kimi))
+            .expect("resolve kimi");
+
+        assert_eq!(
+            resolved.spawn.args,
+            vec![
+                "--yolo".to_string(),
+                "--thinking".to_string(),
+                "acp".to_string()
+            ]
+        );
+        assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_PERMISSION_MODE")
+                .map(String::as_str),
+            Some("code")
+        );
+        assert_eq!(
+            resolved
+                .session
+                .metadata
+                .get("codexize.permission_mode")
+                .map(String::as_str),
+            Some("code")
+        );
+    }
+
+    #[test]
+    fn claude_acp_local_program_lives_under_home_codexize_acp() {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let prev_home = std::env::var_os("HOME");
+        let home = tempfile::TempDir::new().expect("temp home");
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let program = claude_acp_local_program();
+
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        assert_eq!(
+            program,
+            home.path()
+                .join(".codexize")
+                .join("acp")
+                .join("node_modules")
+                .join(".bin")
+                .join("claude-agent-acp")
         );
     }
 

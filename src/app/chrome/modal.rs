@@ -58,13 +58,18 @@ pub fn render_modal_overlay(
         let inner_h = inner.height as usize;
         let content_capacity = inner_h.saturating_sub(1);
         let lines_to_write: Vec<Line<'static>> = if content.len() <= content_capacity {
-            content
+            content.into_iter().map(dialog_line_style).collect()
         } else {
             let keep = content_capacity.saturating_sub(1);
-            let mut truncated: Vec<Line<'static>> = content.into_iter().take(keep).collect();
-            truncated.push(Line::from("…"));
+            let mut truncated: Vec<Line<'static>> = content
+                .into_iter()
+                .take(keep)
+                .map(dialog_line_style)
+                .collect();
+            truncated.push(dialog_line_style(Line::from("…")));
             truncated
         };
+        let keymap_line = dialog_line_style(keymap_line);
 
         let buf = frame.buffer_mut();
         for (offset, line) in lines_to_write.iter().enumerate() {
@@ -77,4 +82,14 @@ pub fn render_modal_overlay(
             inner.width,
         );
     }
+}
+
+fn dialog_line_style(mut line: Line<'static>) -> Line<'static> {
+    for span in &mut line.spans {
+        span.style = span.style.bg(Color::Black);
+        if matches!(span.style.fg, None | Some(Color::Black | Color::DarkGray)) {
+            span.style = span.style.fg(Color::Gray);
+        }
+    }
+    line
 }

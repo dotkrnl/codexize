@@ -1752,4 +1752,234 @@ mod tests {
         let (badge, _, _) = phase_badge(Phase::ImplementationRound(3));
         assert_eq!(badge, "coding r3");
     }
+
+    #[test]
+    fn space_toggles_expansion_on_selected_session() {
+        let mut picker = picker_with_entries(
+            vec![
+                dummy_entry("alpha", "first idea"),
+                dummy_entry("beta", "second idea"),
+            ],
+            0,
+        );
+
+        assert_eq!(picker.expanded, None);
+
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, Some("alpha".to_string()));
+
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, None);
+    }
+
+    #[test]
+    fn navigation_collapses_expanded_session() {
+        let mut picker = picker_with_entries(
+            vec![
+                dummy_entry("alpha", "first idea"),
+                dummy_entry("beta", "second idea"),
+                dummy_entry("gamma", "third idea"),
+            ],
+            1,
+        );
+
+        // Expand beta
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, Some("beta".to_string()));
+
+        // Move up collapses
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Up,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.selected, 0);
+        assert_eq!(picker.expanded, None);
+
+        // Expand alpha
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, Some("alpha".to_string()));
+
+        // Move down collapses
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.expanded, None);
+    }
+
+    #[test]
+    fn pgup_pgdn_collapses_expanded_session() {
+        let mut picker = picker_with_entries(
+            (0..20)
+                .map(|i| dummy_entry(&format!("sess-{i}"), &format!("idea {i}")))
+                .collect(),
+            5,
+        );
+
+        // Expand sess-5
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, Some("sess-5".to_string()));
+
+        // PageUp collapses
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::PageUp,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, None);
+        assert!(picker.selected < 5);
+
+        // Re-expand and PageDown
+        picker.selected = 5;
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, Some("sess-5".to_string()));
+
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::PageDown,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+        assert_eq!(picker.expanded, None);
+    }
+
+    #[test]
+    fn expanded_details_force_viewport_to_scroll_when_off_screen() {
+        let entries: Vec<SessionEntry> = (0..8)
+            .map(|i| dummy_entry(&format!("sess-{i}"), &format!("idea {i}")))
+            .collect();
+        let mut picker = picker_with_entries(entries, 0);
+
+        // term_h = 10 => body_h ≈ 7 (10 - 1 - 1 - 1 footer), which fits 7 rows.
+        let backend = ratatui::backend::TestBackend::new(80, 10);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        assert_eq!(picker.viewport_top, 0);
+
+        // Expand sess-0 (adds 4 detail rows).
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+
+        // Now select sess-7. With sess-0 expanded we have 8 header + 4 detail = 12 rows.
+        // body_h = 10 - 1 - 1 - 1 = 7 (no status line).
+        // selected_top_idx for sess-7 = 7, selected_bottom_idx = 7.
+        // 7 >= 0 + 7, so viewport_top should become 7 + 1 - 7 = 1.
+        for _ in 0..7 {
+            picker
+                .handle_key(KeyEvent::new(
+                    KeyCode::Down,
+                    crossterm::event::KeyModifiers::NONE,
+                ))
+                .unwrap();
+        }
+        assert_eq!(picker.selected, 7);
+
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        // Viewport must have scrolled to keep sess-7 visible.
+        assert!(
+            picker.viewport_top > 0,
+            "viewport_top should scroll when selected item is pushed off-screen by expanded details"
+        );
+    }
+
+    #[test]
+    fn expanded_session_renders_detail_lines() {
+        let entries = vec![dummy_entry("alpha", "only idea")];
+        let mut picker = picker_with_entries(entries, 0);
+
+        let backend = ratatui::backend::TestBackend::new(80, 12);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        // Expand
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char(' '),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap();
+
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..12)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("
+");
+
+        assert!(text.contains("Phase:"), "expanded session must show phase: {text}");
+        assert!(text.contains("Idea:"), "expanded session must show idea: {text}");
+        assert!(
+            text.contains("Last agent:"),
+            "expanded session must show last agent: {text}"
+        );
+        assert!(
+            text.contains("Modified:"),
+            "expanded session must show modified date: {text}"
+        );
+    }
+
+    #[test]
+    fn degenerate_terminal_omits_expansion() {
+        let entries = vec![dummy_entry("alpha", "only idea")];
+        let mut picker = picker_with_entries(entries, 0);
+        picker.expanded = Some("alpha".to_string());
+
+        // term_h < 10 triggers degenerate mode
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+        let text = (0..8)
+            .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("
+");
+
+        assert!(
+            !text.contains("Phase:"),
+            "degenerate terminal must omit detail expansion: {text}"
+        );
+    }
 }

@@ -186,14 +186,14 @@ pub(super) fn project_doc_instr() -> String {
 
 pub(super) fn live_summary_instruction(path: &std::path::Path) -> String {
     format!(
-        "\n\nEvery 2–3 min and on each sub-goal change, overwrite {} with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>` (process killed after 10 min wall-time idle, tool-call time excluded).\n",
+        "\n\nImmediately create {}, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).\n",
         path.display()
     )
 }
 
 pub(super) fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
     format!(
-        "\n\nEvery 2–3 min, overwrite {} with `<short title> | <one-paragraph summary>` so the operator can follow along.\n",
+        "\n\nImmediately create {}, then every 2–3 min overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. Keep this file current until you exit.\n",
         path.display()
     )
 }

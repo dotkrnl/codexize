@@ -39,6 +39,60 @@ fn parse_task_label_id(label: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum RetryTarget {
+    Task(u32),
+    Stage(&'static str),
+}
+
+impl RetryTarget {
+    fn label(&self) -> String {
+        match self {
+            Self::Task(task_id) => format!("task {task_id}"),
+            Self::Stage(stage) => stage.replace('-', " "),
+        }
+    }
+}
+
+fn retry_stage_for_label(label: &str) -> Option<&'static str> {
+    match label {
+        "Brainstorm" => Some("brainstorm"),
+        "Spec Review" => Some("spec-review"),
+        "Planning" => Some("planning"),
+        "Plan Review" => Some("plan-review"),
+        "Sharding" => Some("sharding"),
+        _ => None,
+    }
+}
+
+fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
+    match stage {
+        "brainstorm" => Some(Phase::BrainstormRunning),
+        "spec-review" => Some(Phase::SpecReviewRunning),
+        "planning" => Some(Phase::PlanningRunning),
+        "plan-review" => Some(Phase::PlanReviewRunning),
+        "sharding" => Some(Phase::ShardingRunning),
+        _ => None,
+    }
+}
+
+fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
+    run.task_id
+        .map(RetryTarget::Task)
+        .or_else(|| stage_str(&run.stage).map(RetryTarget::Stage))
+}
+
+fn stage_str(stage: &str) -> Option<&'static str> {
+    match stage {
+        "brainstorm" => Some("brainstorm"),
+        "spec-review" => Some("spec-review"),
+        "planning" => Some("planning"),
+        "plan-review" => Some("plan-review"),
+        "sharding" => Some("sharding"),
+        _ => None,
+    }
+}
+
 impl App {
     pub(super) fn active_modal(&self) -> Option<ModalKind> {
         match self.state.current_phase {
@@ -897,12 +951,17 @@ impl App {
         !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
     }
 
-    pub(super) fn selected_task_id(&self) -> Option<u32> {
+    pub(super) fn selected_retry_target(&self) -> Option<RetryTarget> {
         let row = self.visible_rows.get(self.selected)?;
         for depth in (1..=row.path.len()).rev() {
             let node = node_at_path(&self.nodes, &row.path[..depth])?;
             if node.kind == NodeKind::Task {
-                return parse_task_label_id(&node.label);
+                return parse_task_label_id(&node.label).map(RetryTarget::Task);
+            }
+            if node.kind == NodeKind::Stage
+                && let Some(stage) = retry_stage_for_label(&node.label)
+            {
+                return Some(RetryTarget::Stage(stage));
             }
         }
         row.backing_leaf_run_id
@@ -911,7 +970,7 @@ impl App {
                     .agent_runs
                     .iter()
                     .find(|run| run.id == run_id)
-                    .and_then(|run| run.task_id)
+                    .and_then(retry_target_for_run)
             })
             .or_else(|| {
                 self.current_run_id.and_then(|run_id| {
@@ -919,22 +978,28 @@ impl App {
                         .agent_runs
                         .iter()
                         .find(|run| run.id == run_id)
-                        .and_then(|run| run.task_id)
+                        .and_then(retry_target_for_run)
                 })
             })
-            .or_else(|| self.state.builder.current_task_id())
+            .or_else(|| self.state.builder.current_task_id().map(RetryTarget::Task))
     }
 
-    pub(super) fn retry_selected_task(&mut self) {
-        let Some(task_id) = self.selected_task_id() else {
+    pub(super) fn retry_selected_target(&mut self) {
+        let Some(target) = self.selected_retry_target() else {
             self.push_status(
-                "retry: select a task first".to_string(),
+                "retry: select a stage or task first".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );
             return;
         };
+        match target {
+            RetryTarget::Task(task_id) => self.retry_task(task_id),
+            RetryTarget::Stage(stage) => self.retry_stage(stage),
+        }
+    }
 
+    fn retry_task(&mut self, task_id: u32) {
         let task_rounds = self
             .state
             .agent_runs
@@ -1034,6 +1099,80 @@ impl App {
         let _ = self.state.save();
         self.rebuild_tree_view(None);
         self.launch_coder();
+    }
+
+    fn retry_stage(&mut self, stage: &'static str) {
+        let removed_runs = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == stage && run.task_id.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        if removed_runs.is_empty() {
+            self.push_status(
+                format!(
+                    "retry: no attempt logs for {}",
+                    RetryTarget::Stage(stage).label()
+                ),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+
+        let removed_ids = self.remove_retry_runs(&removed_runs);
+        self.failed_models
+            .retain(|(key_stage, key_task_id, _), _| key_stage != stage || key_task_id.is_some());
+
+        self.clear_agent_error();
+        self.current_run_id = None;
+        self.window_launched = false;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        if let Some(phase) = retry_phase_for_stage(stage) {
+            session_state::transitions::set_phase_for_operator_retry(&mut self.state, phase);
+        }
+        let _ = self.state.log_event(format!(
+            "palette_retry: stage={stage} removed_runs={}",
+            removed_ids.len()
+        ));
+        let _ = self.state.save();
+        self.rebuild_tree_view(None);
+        match stage {
+            "brainstorm" => {
+                let idea = self.state.idea_text.clone().unwrap_or_default();
+                self.launch_brainstorm(idea);
+            }
+            "spec-review" => self.launch_spec_review(),
+            "planning" => self.launch_planning(),
+            "plan-review" => self.launch_plan_review(),
+            "sharding" => self.launch_sharding(),
+            _ => {}
+        }
+    }
+
+    fn remove_retry_runs(&mut self, removed_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
+        let removed_ids = removed_runs
+            .iter()
+            .map(|run| run.id)
+            .collect::<BTreeSet<_>>();
+        for run in removed_runs {
+            if run.status == RunStatus::Running {
+                kill_window(&run.window_name);
+            }
+            let _ = fs::remove_file(self.run_status_path(run));
+            let _ = fs::remove_file(self.live_summary_path_for(run));
+            let _ = fs::remove_file(self.finish_stamp_path_for(run));
+        }
+
+        self.state
+            .agent_runs
+            .retain(|run| !removed_ids.contains(&run.id));
+        let _ = self.state.remove_messages_for_runs(&removed_ids);
+        self.messages
+            .retain(|message| !removed_ids.contains(&message.run_id));
+        removed_ids
     }
 
     pub(super) fn go_back(&mut self) {

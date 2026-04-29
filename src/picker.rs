@@ -1,6 +1,7 @@
 use crate::app::chrome::{bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans};
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
+use crate::picker_view_model;
 use crate::state::{self as session_state, Modes, Phase, SessionState};
 use crate::tui::{AppTerminal, wrap_input};
 use anyhow::Result;
@@ -93,15 +94,11 @@ impl SessionPicker {
     }
 
     fn visible_entries(&self) -> Vec<&SessionEntry> {
-        self.entries
-            .iter()
-            .filter(|e| self.show_archived || !e.archived)
-            .collect()
+        picker_view_model::visible_entries(&self.entries, self.show_archived)
     }
 
     fn selected_entry(&self) -> Option<&SessionEntry> {
-        let visible = self.visible_entries();
-        visible.get(self.selected).copied()
+        picker_view_model::selected_entry(&self.entries, self.show_archived, self.selected)
     }
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<Option<PickerSelection>> {
@@ -383,10 +380,7 @@ impl SessionPicker {
     }
 
     fn page_step(&self) -> usize {
-        // Before the first draw there is no measured body height yet. The
-        // interactive run loop always draws before reading input, so callers
-        // without a render pass conservatively get a zero-step page move.
-        self.body_inner_height.saturating_sub(1)
+        picker_view_model::page_step(self.body_inner_height)
     }
 
     fn keymap_line(
@@ -640,73 +634,25 @@ impl SessionPicker {
         );
     }
 
-    fn palette_inner_rows(&self) -> u16 {
-        const MAX_OVERLAY_INNER: u16 = 12;
-        let commands = self.palette_commands();
-        let filtered = palette::filter(&self.palette.buffer, &commands);
-        let suggestions = filtered.len().min(10) as u16;
-        (1 + suggestions + 1).min(MAX_OVERLAY_INNER)
-    }
-
     fn palette_overlay_height(&self, total_height: u16) -> u16 {
-        const LIST_RESERVE: u16 = 4;
-        let inner = self.palette_inner_rows();
-        let desired = inner + 2;
-        let cap = total_height.saturating_sub(LIST_RESERVE).max(3);
-        desired.min(cap).max(3)
+        picker_view_model::palette_overlay_height(
+            &self.palette.buffer,
+            self.selected_entry()
+                .map(|entry| entry.archived)
+                .unwrap_or(false),
+            total_height,
+        )
     }
 
     fn palette_lines(&self, width: u16, inner_h: u16) -> Vec<Line<'static>> {
-        let commands = self.palette_commands();
-        let buffer = self.palette.buffer.clone();
-        let ghost = palette::ghost_completion(&buffer, &commands).unwrap_or("");
-        let suffix = ghost.strip_prefix(buffer.trim()).unwrap_or("");
-        let mut input = vec![
-            Span::styled(
-                ":",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(buffer.clone()),
-        ];
-        if !suffix.is_empty() {
-            input.push(Span::styled(
-                suffix.to_string(),
-                Style::default().fg(Color::DarkGray),
-            ));
-        }
-
-        let mut lines: Vec<Line<'static>> = vec![Line::from(input)];
-        let max = inner_h as usize;
-        if max == 0 {
-            return lines;
-        }
-
-        let inner_width = width.saturating_sub(2);
-
-        let help = "Esc close  Tab complete  Enter run".to_string();
-        let help_fits = max >= 2 && (inner_width as usize) >= help.chars().count().min(1);
-        let help_reserve = if help_fits { 1 } else { 0 };
-        let suggestion_capacity = max.saturating_sub(1).saturating_sub(help_reserve);
-
-        let filtered = palette::filter(&buffer, &commands);
-        for cmd in filtered.iter().take(suggestion_capacity) {
-            let text = palette::suggestion_text(cmd, inner_width);
-            lines.push(Line::from(Span::styled(
-                text,
-                Style::default().fg(Color::Gray),
-            )));
-        }
-
-        if help_fits && lines.len() < max {
-            lines.push(Line::from(Span::styled(
-                help,
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        lines
+        picker_view_model::palette_lines(
+            &self.palette.buffer,
+            self.selected_entry()
+                .map(|entry| entry.archived)
+                .unwrap_or(false),
+            width,
+            inner_h,
+        )
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
@@ -837,57 +783,11 @@ impl SessionPicker {
     }
 
     fn palette_commands(&self) -> Vec<PaletteCommand> {
-        let mut commands = vec![
-            PaletteCommand {
-                name: "quit",
-                aliases: &["q"],
-                help: "Exit picker",
-                key_hint: Some("Esc"),
-            },
-            PaletteCommand {
-                name: "new",
-                aliases: &["n"],
-                help: "Create a session",
-                key_hint: Some("n"),
-            },
-            PaletteCommand {
-                name: "idea",
-                aliases: &["i"],
-                help: "Create a session with the given idea text",
-                key_hint: None,
-            },
-            PaletteCommand {
-                name: "show-archived",
-                aliases: &["a"],
-                help: "Toggle archived sessions",
-                key_hint: None,
-            },
-            PaletteCommand {
-                name: "archive",
-                aliases: &["d"],
-                help: "Archive selected session",
-                key_hint: None,
-            },
-            PaletteCommand {
-                name: "delete",
-                aliases: &["D"],
-                help: "Permanently delete selected session",
-                key_hint: None,
-            },
-        ];
-        if self
-            .selected_entry()
-            .map(|entry| entry.archived)
-            .unwrap_or(false)
-        {
-            commands.push(PaletteCommand {
-                name: "restore",
-                aliases: &["r"],
-                help: "Restore selected archived session",
-                key_hint: None,
-            });
-        }
-        commands
+        picker_view_model::palette_commands(
+            self.selected_entry()
+                .map(|entry| entry.archived)
+                .unwrap_or(false),
+        )
     }
 
     fn handle_palette_key(&mut self, key: KeyEvent) -> Result<KeyAction> {

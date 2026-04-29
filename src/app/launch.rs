@@ -148,7 +148,8 @@ impl App {
         modes: LaunchModes,
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
-        let run_id = self.state.create_run_record(
+        let run_id = session_state::transitions::start_agent_run(
+            &mut self.state,
             stage.to_string(),
             task_id,
             round,
@@ -219,10 +220,11 @@ impl App {
     ) -> bool {
         use anyhow::Context;
 
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -257,7 +259,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -278,21 +280,14 @@ impl App {
         if let Err(err) = std::fs::write(&prompt_path, prompt)
             .with_context(|| format!("cannot write {}", prompt_path.display()))
         {
-            self.state.agent_error = Some(err.to_string());
+            self.record_agent_error(err.to_string());
             return false;
         }
 
-        // Update plan-review pipeline item to Running.
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .rev()
-            .find(|i| i.stage == "plan-review" && i.status == PipelineItemStatus::Pending)
-        {
-            item.status = PipelineItemStatus::Running;
-        }
+        session_state::transitions::mark_latest_pipeline_stage_running(
+            &mut self.state,
+            "plan-review",
+        );
 
         let run = AgentRun {
             model: model.clone(),
@@ -348,8 +343,7 @@ impl App {
                 true
             }
             Err(err) => {
-                self.state.agent_error =
-                    Some(format!("failed to launch recovery plan review: {err}"));
+                self.record_agent_error(format!("failed to launch recovery plan review: {err}"));
                 false
             }
         }
@@ -366,10 +360,11 @@ impl App {
     ) -> bool {
         use anyhow::Context;
 
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -395,7 +390,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -418,21 +413,11 @@ impl App {
         if let Err(err) = std::fs::write(&prompt_path, prompt)
             .with_context(|| format!("cannot write {}", prompt_path.display()))
         {
-            self.state.agent_error = Some(err.to_string());
+            self.record_agent_error(err.to_string());
             return false;
         }
 
-        // Update sharding pipeline item to Running.
-        if let Some(item) = self
-            .state
-            .builder
-            .pipeline_items
-            .iter_mut()
-            .rev()
-            .find(|i| i.stage == "sharding" && i.status == PipelineItemStatus::Pending)
-        {
-            item.status = PipelineItemStatus::Running;
-        }
+        session_state::transitions::mark_latest_pipeline_stage_running(&mut self.state, "sharding");
 
         let run = AgentRun {
             model: model.clone(),
@@ -485,7 +470,7 @@ impl App {
                 true
             }
             Err(err) => {
-                self.state.agent_error = Some(format!("failed to launch recovery sharding: {err}"));
+                self.record_agent_error(format!("failed to launch recovery sharding: {err}"));
                 false
             }
         }
@@ -500,11 +485,12 @@ impl App {
         idea: String,
         override_model: Option<CachedModel>,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
 
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -516,8 +502,9 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error =
-                Some("no model available with quota — check model strip".to_string());
+            self.record_agent_error(
+                "no model available with quota — check model strip".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -560,7 +547,7 @@ impl App {
             modes.yolo,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
-            self.state.agent_error = Some(format!("error writing prompt: {e}"));
+            self.record_agent_error(format!("error writing prompt: {e}"));
             return false;
         }
 
@@ -608,8 +595,11 @@ impl App {
         };
         match launch_result {
             Ok(()) => {
-                self.state.idea_text = Some(idea.clone());
-                self.state.selected_model = Some(model.clone());
+                session_state::transitions::record_brainstorm_launch(
+                    &mut self.state,
+                    idea.clone(),
+                    model.clone(),
+                );
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
                 self.start_run_tracking(
                     "brainstorm",
@@ -627,7 +617,7 @@ impl App {
                 true
             }
             Err(e) => {
-                self.state.agent_error = Some(format!("failed to launch brainstorm: {e}"));
+                self.record_agent_error(format!("failed to launch brainstorm: {e}"));
                 false
             }
         }
@@ -682,10 +672,11 @@ impl App {
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -725,7 +716,7 @@ impl App {
             effort,
             modes.cheap,
         ) else {
-            self.state.agent_error = Some("no model available for review".to_string());
+            self.record_agent_error("no model available for review".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -742,7 +733,7 @@ impl App {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
-            self.state.agent_error = Some(format!("error writing prompt: {err}"));
+            self.record_agent_error(format!("error writing prompt: {err}"));
             return false;
         }
 
@@ -801,7 +792,7 @@ impl App {
                 true
             }
             Err(err) => {
-                self.state.agent_error = Some(format!("failed to launch spec review: {err}"));
+                self.record_agent_error(format!("failed to launch spec review: {err}"));
                 false
             }
         }
@@ -816,11 +807,12 @@ impl App {
         override_model: Option<CachedModel>,
         interactive: bool,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
 
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -850,7 +842,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -953,10 +945,11 @@ impl App {
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -997,7 +990,7 @@ impl App {
             effort,
             modes.cheap,
         ) else {
-            self.state.agent_error = Some("no model available for review".to_string());
+            self.record_agent_error("no model available for review".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -1016,7 +1009,7 @@ impl App {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
-            self.state.agent_error = Some(format!("error writing prompt: {err}"));
+            self.record_agent_error(format!("error writing prompt: {err}"));
             return false;
         }
 
@@ -1075,7 +1068,7 @@ impl App {
                 true
             }
             Err(err) => {
-                self.state.agent_error = Some(format!("failed to launch plan review: {err}"));
+                self.record_agent_error(format!("failed to launch plan review: {err}"));
                 false
             }
         }
@@ -1089,11 +1082,12 @@ impl App {
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
 
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1111,7 +1105,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1194,10 +1188,11 @@ impl App {
     ) -> bool {
         use anyhow::Context;
 
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1225,7 +1220,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1267,7 +1262,7 @@ impl App {
         if let Err(err) = std::fs::write(&prompt_path, prompt)
             .with_context(|| format!("cannot write {}", prompt_path.display()))
         {
-            self.state.agent_error = Some(err.to_string());
+            self.record_agent_error(err.to_string());
             return false;
         }
 
@@ -1332,7 +1327,7 @@ impl App {
                 true
             }
             Err(err) => {
-                self.state.agent_error = Some(format!("failed to launch recovery: {err}"));
+                self.record_agent_error(format!("failed to launch recovery: {err}"));
                 false
             }
         }
@@ -1343,10 +1338,11 @@ impl App {
     }
 
     pub(super) fn launch_coder_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1356,7 +1352,7 @@ impl App {
         };
 
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
-            self.state.agent_error = Some("no pending tasks".to_string());
+            self.record_agent_error("no pending tasks".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -1388,7 +1384,7 @@ impl App {
         let Some(chosen) =
             self.choose_primary_model(override_model.as_ref(), phase, effort, modes.cheap)
         else {
-            self.state.agent_error = Some("no model available with quota".to_string());
+            self.record_agent_error("no model available with quota".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -1410,7 +1406,7 @@ impl App {
         let refine_carryover: Vec<String> = if resume {
             Vec::new()
         } else {
-            std::mem::take(&mut self.state.builder.pending_refine_feedback)
+            session_state::transitions::take_pending_refine_feedback(&mut self.state)
         };
         let prompt = coder_prompt(
             &session_dir,
@@ -1489,10 +1485,11 @@ impl App {
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
-        self.state.agent_error = None;
+        self.clear_agent_error();
         if self.models.is_empty() {
-            self.state.agent_error =
-                Some("model list not yet loaded — wait a moment and try again".to_string());
+            self.record_agent_error(
+                "model list not yet loaded — wait a moment and try again".to_string(),
+            );
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
@@ -1501,7 +1498,7 @@ impl App {
             return false;
         };
         let Some(task_id) = self.state.builder.current_task_id() else {
-            self.state.agent_error = Some("no current task".to_string());
+            self.record_agent_error("no current task".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -1538,7 +1535,7 @@ impl App {
             effort,
             modes.cheap,
         ) else {
-            self.state.agent_error = Some("no model available for review".to_string());
+            self.record_agent_error("no model available for review".to_string());
             let _ = self.state.save();
             return false;
         };
@@ -1551,7 +1548,7 @@ impl App {
             .join("prompts")
             .join(format!("reviewer-r{r}.md"));
         if let Err(err) = read_review_scope(&review_scope_file) {
-            self.state.agent_error = Some(format!("invalid review scope: {err:#}"));
+            self.record_agent_error(format!("invalid review scope: {err:#}"));
             let _ = self.state.save();
             return false;
         }

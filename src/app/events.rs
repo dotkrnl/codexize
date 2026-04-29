@@ -22,7 +22,7 @@ impl App {
         let _ = self.state.log_event(message.clone());
         self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
         if persist_agent_error {
-            self.state.agent_error = Some(message);
+            self.record_agent_error(message);
             let _ = self.state.save();
             self.rebuild_tree_view(None);
         }
@@ -304,7 +304,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
                 false
             }
@@ -323,7 +323,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
                 let _ = self.transition_to_phase(Phase::ShardingRunning);
                 false
@@ -487,15 +487,17 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Err(err) = self.accept_skip_to_implementation() {
-                    self.state.agent_error =
-                        Some(format!("accept skip-to-implementation failed: {err:#}"));
+                    self.record_agent_error(format!(
+                        "accept skip-to-implementation failed: {err:#}"
+                    ));
                 }
                 false
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 if let Err(err) = self.decline_skip_to_implementation() {
-                    self.state.agent_error =
-                        Some(format!("decline skip-to-implementation failed: {err:#}"));
+                    self.record_agent_error(format!(
+                        "decline skip-to-implementation failed: {err:#}"
+                    ));
                 }
                 false
             }
@@ -509,13 +511,13 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {
-                    self.state.agent_error = Some(format!("guard reset failed: {err:#}"));
+                    self.record_agent_error(format!("guard reset failed: {err:#}"));
                 }
                 false
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 if let Err(err) = self.accept_guard_keep() {
-                    self.state.agent_error = Some(format!("guard keep failed: {err:#}"));
+                    self.record_agent_error(format!("guard keep failed: {err:#}"));
                 }
                 false
             }

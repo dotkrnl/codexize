@@ -67,8 +67,10 @@ impl App {
                 .join("artifacts")
                 .join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
-                state.builder.task_titles =
-                    parsed.tasks.into_iter().map(|t| (t.id, t.title)).collect();
+                session_state::transitions::load_task_titles_if_empty(
+                    &mut state,
+                    parsed.tasks.into_iter().map(|t| (t.id, t.title)),
+                );
             }
         }
         let nodes = build_tree(&state);
@@ -149,7 +151,9 @@ impl App {
                 .lines()
                 .map(str::to_string)
                 .collect::<Vec<_>>();
-            if let Ok(run_id) = app.state.resume_running_runs(&live_windows) {
+            if let Ok(run_id) =
+                session_state::transitions::resume_running_runs(&mut app.state, &live_windows)
+            {
                 app.current_run_id = run_id;
                 app.window_launched = run_id.is_some();
                 if let Some(rid) = run_id {
@@ -169,7 +173,7 @@ impl App {
         // restore the modal or fail closed.
         if app.state.current_phase == Phase::GitGuardPending {
             if app.state.pending_guard_decision.is_none() {
-                app.state.agent_error = Some("guard pending state missing on resume".to_string());
+                app.record_agent_error("guard pending state missing on resume".to_string());
                 app.clear_builder_recovery_context();
                 let _ = app.transition_to_phase(Phase::BlockedNeedsUser);
                 let _ = app.state.save();
@@ -180,7 +184,7 @@ impl App {
                 "warning: clearing stale pending_guard_decision (phase mismatch on resume)"
                     .to_string(),
             );
-            app.state.pending_guard_decision = None;
+            session_state::transitions::clear_pending_guard_decision(&mut app.state);
             let _ = app.state.save();
         }
         // Orphan sweep: remove stale live_summary.*.txt files that do not
@@ -674,7 +678,7 @@ impl App {
     }
 
     pub(super) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
-        self.state.transition_to(next_phase)?;
+        session_state::transitions::execute_transition(&mut self.state, next_phase)?;
         self.agent_line_count = 0;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
@@ -692,11 +696,16 @@ impl App {
         Ok(())
     }
 
+    pub(super) fn record_agent_error(&mut self, message: impl Into<String>) {
+        session_state::transitions::record_agent_error(&mut self.state, message);
+    }
+
+    pub(super) fn clear_agent_error(&mut self) {
+        session_state::transitions::clear_agent_error(&mut self.state);
+    }
+
     pub(super) fn clear_builder_recovery_context(&mut self) {
-        self.state.builder.recovery_trigger_task_id = None;
-        self.state.builder.recovery_prev_max_task_id = None;
-        self.state.builder.recovery_prev_task_ids.clear();
-        self.state.builder.recovery_trigger_summary = None;
+        session_state::transitions::clear_builder_recovery_context(&mut self.state);
     }
 
     pub fn accept_skip_to_implementation(&mut self) -> Result<()> {
@@ -729,16 +738,12 @@ impl App {
         let parsed_tasks = tasks::validate(&tasks_path)
             .with_context(|| format!("invalid {}", tasks_path.display()))?;
 
-        self.state.builder.task_titles = parsed_tasks
-            .tasks
-            .iter()
-            .map(|t| (t.id, t.title.clone()))
-            .collect();
-        self.state.builder.reset_task_pipeline(
+        session_state::transitions::initialize_task_pipeline(
+            &mut self.state,
             parsed_tasks
                 .tasks
                 .iter()
-                .map(|task| (task.id, Some(task.title.clone()))),
+                .map(|task| (task.id, task.title.clone())),
         );
 
         self.transition_to_phase(Phase::ImplementationRound(1))?;
@@ -750,8 +755,7 @@ impl App {
     pub fn decline_skip_to_implementation(&mut self) -> Result<()> {
         use crate::artifacts::SkipToImplKind;
         let kind = self.state.skip_to_impl_kind;
-        self.state.skip_to_impl_rationale = None;
-        self.state.skip_to_impl_kind = None;
+        session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
         let target = if kind == Some(SkipToImplKind::NothingToDo) {
             Phase::BrainstormRunning
         } else {
@@ -763,11 +767,10 @@ impl App {
     }
 
     pub fn accept_guard_reset(&mut self) -> Result<()> {
-        let decision = self
-            .state
-            .pending_guard_decision
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("accept_guard_reset: no pending guard decision"))?;
+        let decision = session_state::transitions::take_pending_guard_decision(
+            &mut self.state,
+            "accept_guard_reset",
+        )?;
 
         for w in &decision.warnings {
             self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
@@ -789,11 +792,10 @@ impl App {
     }
 
     pub fn accept_guard_keep(&mut self) -> Result<()> {
-        let decision = self
-            .state
-            .pending_guard_decision
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("accept_guard_keep: no pending guard decision"))?;
+        let decision = session_state::transitions::take_pending_guard_decision(
+            &mut self.state,
+            "accept_guard_keep",
+        )?;
 
         for w in &decision.warnings {
             self.append_system_message(decision.run_id, MessageKind::SummaryWarn, w.clone());
@@ -824,7 +826,7 @@ impl App {
             "recovery" => Phase::BuilderRecovery(decision.round),
             other => anyhow::bail!("accept_guard_keep: unexpected stage '{other}'"),
         };
-        self.state.current_phase = originating;
+        session_state::transitions::restore_guard_originating_phase(&mut self.state, originating);
         self.complete_run_finalization(&run, None)
     }
 
@@ -914,7 +916,7 @@ impl App {
                 kill_window("[Brainstorm]");
                 let _ = fs::remove_file(artifacts.join("spec.md"));
                 let _ = fs::remove_file(prompts.join("brainstorm.md"));
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::IdeaInput);
             }
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
@@ -940,7 +942,7 @@ impl App {
                     (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
-                self.state.agent_error = None;
+                self.clear_agent_error();
                 // TODO(Task 2): restore the paused/running distinction from RunRecord state.
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
@@ -973,7 +975,7 @@ impl App {
                     if self.state.skip_to_impl_rationale.is_some() {
                         Phase::BrainstormRunning
                     } else {
-                        self.state.builder = session_state::BuilderState::default();
+                        session_state::transitions::reset_builder_after_rewind(&mut self.state);
                         Phase::ShardingRunning
                     }
                 } else {
@@ -1006,9 +1008,8 @@ impl App {
             Phase::SkipToImplPending => {
                 kill_window("[Skip Confirm]");
                 let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
-                self.state.skip_to_impl_rationale = None;
-                self.state.skip_to_impl_kind = None;
-                self.state.agent_error = None;
+                session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
+                self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::GitGuardPending => {
@@ -1019,7 +1020,7 @@ impl App {
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }
 
-        self.state.agent_error = None;
+        self.clear_agent_error();
         self.window_launched = false;
         self.current_run_id = None;
         self.live_summary_cached_text.clear();
@@ -1149,7 +1150,7 @@ impl App {
         self.current_run_id = None;
         let outcome = self.finalize_current_run(&run);
         if let Err(err) = outcome {
-            self.state.agent_error = Some(err.to_string());
+            self.record_agent_error(err.to_string());
             let _ = self.state.log_event(format!(
                 "run finalization failed for {}: {err}",
                 run.window_name

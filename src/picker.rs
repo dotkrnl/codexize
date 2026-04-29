@@ -1,7 +1,7 @@
 use crate::app::chrome::{bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans};
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
-use crate::state::{Modes, Phase, SessionState};
+use crate::state::{self as session_state, Modes, Phase, SessionState};
 use crate::tui::{AppTerminal, wrap_input};
 use anyhow::Result;
 use chrono::{DateTime, Local};
@@ -802,7 +802,7 @@ impl SessionPicker {
                     ConfirmKind::Archive => {
                         if let Some(entry) = self.selected_entry() {
                             let mut state = SessionState::load(&entry.session_id)?;
-                            state.archived = true;
+                            session_state::transitions::archive_session(&mut state);
                             state.save()?;
                             self.refresh()?;
                             self.status_line.push(
@@ -1031,7 +1031,7 @@ impl SessionPicker {
             && entry.archived
         {
             let mut state = SessionState::load(&entry.session_id)?;
-            state.archived = false;
+            session_state::transitions::restore_archived_session(&mut state);
             state.save()?;
             self.refresh()?;
             self.status_line.push(
@@ -1109,9 +1109,7 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
 pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
     let session_id = generate_session_id();
     let mut state = SessionState::new(session_id.clone());
-    state.modes = modes;
-    state.idea_text = Some(idea.to_string());
-    state.current_phase = Phase::BrainstormRunning;
+    session_state::transitions::prepare_new_session_for_brainstorm(&mut state, idea, modes);
     state.save()?;
     state.log_event("session created")?;
     if state.modes.yolo {

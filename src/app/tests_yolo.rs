@@ -99,6 +99,7 @@ fn yolo_planning_finalization_skips_plan_review_after_plan_artifact_exists() {
         run.modes = crate::state::LaunchModes {
             yolo: true,
             cheap: false,
+            interactive: false,
         };
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);
@@ -132,6 +133,7 @@ fn yolo_dirty_worktree_gate_is_audited_from_launch_snapshot() {
             crate::state::LaunchModes {
                 yolo: true,
                 cheap: false,
+                interactive: false,
             },
         );
 
@@ -222,6 +224,7 @@ fn yolo_exit_issues_once_per_invocation_after_new_observable_update() {
         run.modes = crate::state::LaunchModes {
             yolo: true,
             cheap: false,
+            interactive: false,
         };
 
         app.maybe_issue_yolo_exit(&run);
@@ -257,6 +260,7 @@ fn yolo_exit_resume_guard_waits_for_new_observable_update() {
         run.modes = crate::state::LaunchModes {
             yolo: true,
             cheap: false,
+            interactive: false,
         };
 
         app.maybe_issue_yolo_exit(&run);
@@ -362,6 +366,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
         run.modes = crate::state::LaunchModes {
             yolo: true,
             cheap: false,
+            interactive: false,
         };
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);

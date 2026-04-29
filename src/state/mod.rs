@@ -42,6 +42,12 @@ pub struct LaunchModes {
     pub yolo: bool,
     #[serde(default)]
     pub cheap: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Modes {
@@ -49,6 +55,7 @@ impl Modes {
         LaunchModes {
             yolo: self.yolo,
             cheap: self.cheap,
+            interactive: false,
         }
     }
 }

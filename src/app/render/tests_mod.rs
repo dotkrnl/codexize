@@ -117,6 +117,19 @@ fn message(run_id: u64, text: &str) -> Message {
     }
 }
 
+fn agent_text(run_id: u64, text: &str) -> Message {
+    Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind: MessageKind::AgentText,
+        sender: MessageSender::Agent {
+            model: "model".to_string(),
+            vendor: "vendor".to_string(),
+        },
+        text: text.to_string(),
+    }
+}
+
 // model_strip_* full-table rendering tests have moved to
 // src/app/models_area.rs and target the new responsive_models_area
 // entry point. The underlying model_strip / model_strip_height /
@@ -230,10 +243,64 @@ fn expanded_structural_parents_do_not_render_duplicate_child_list_body() {
         vec![message(1, "only the transcript body")],
     );
 
-    let lines = render_lines(&app, 12);
+    let lines = render_lines(&app, 20);
 
     assert!(!lines.iter().any(|line| line.contains("── Task A")));
     assert!(!lines.iter().any(|line| line.contains("── Builder")));
+}
+
+#[test]
+fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
+    let app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Running)],
+        vec![
+            message(1, "summary stays visible"),
+            agent_text(1, "raw noninteractive text"),
+        ],
+    );
+
+    let lines = render_lines(&app, 20);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Summary stays visible"))
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("Raw noninteractive text"))
+    );
+
+    let mut app = app;
+    app.state.show_noninteractive_texts = true;
+    let lines = render_lines(&app, 12);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Raw noninteractive text"))
+    );
+}
+
+#[test]
+fn interactive_agent_text_is_always_visible() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_text(1, "live interactive text")],
+    );
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Live interactive text"))
+    );
 }
 
 #[test]

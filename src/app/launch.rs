@@ -145,9 +145,10 @@ impl App {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
-        modes: LaunchModes,
+        mut modes: LaunchModes,
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
+        modes.interactive = self.run_is_interactive(stage, round, modes);
         let run_id = session_state::transitions::start_agent_run(
             &mut self.state,
             stage.to_string(),
@@ -189,6 +190,9 @@ impl App {
             self.messages.push(started);
         }
         self.current_run_id = Some(run_id);
+        if run.modes.interactive {
+            self.palette.open();
+        }
         self.window_launched = true;
         self.live_summary_path =
             Some(self.live_summary_path_for_run(stage, task_id, round, attempt));
@@ -208,6 +212,22 @@ impl App {
         // even if the operator had previously navigated manually, then refocus
         // onto the new run's deepest visible row.
         self.enable_progress_follow_and_refocus();
+    }
+
+    fn run_is_interactive(&self, stage: &str, round: u32, modes: LaunchModes) -> bool {
+        match stage {
+            "brainstorm" | "planning" => !modes.yolo,
+            "recovery" => self
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .rev()
+                .find(|item| item.stage == "recovery" && item.round == Some(round))
+                .and_then(|item| item.interactive)
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     pub(super) fn launch_recovery_plan_review(&mut self) {

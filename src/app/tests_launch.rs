@@ -370,6 +370,7 @@ fn coder_launch_records_modes_snapshot() {
             crate::state::LaunchModes {
                 yolo: true,
                 cheap: true,
+                interactive: false,
             }
         );
         assert_eq!(run.model, "claude-sonnet-4-6");

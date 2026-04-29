@@ -1,5 +1,5 @@
 use codexize::{
-    adapters::{EffortLevel, window_name_with_model},
+    adapters::{EffortLevel, run_label_with_model},
     app,
     selection::VendorKind,
 };
@@ -35,7 +35,6 @@ fn run_help(args: &[&str]) -> String {
 #[test]
 fn cli_help_matches_snapshot() {
     assert_snapshot("cli-help.txt", run_help(&["--help"]));
-    assert_snapshot("cli-agent-run-help.txt", run_help(&["agent-run", "--help"]));
 }
 
 #[test]
@@ -48,12 +47,11 @@ fn footer_and_status_strings_match_snapshot() {
 }
 
 #[test]
-fn tmux_name_templates_match_snapshot() {
+fn acp_run_labels_match_snapshot() {
     let snapshot = [
-        "session=<current tmux session>".to_string(),
         format!(
             "brainstorm={}",
-            window_name_with_model(
+            run_label_with_model(
                 "[Brainstorm]",
                 "claude-opus-4-7",
                 VendorKind::Claude,
@@ -62,7 +60,7 @@ fn tmux_name_templates_match_snapshot() {
         ),
         format!(
             "coder_tough={}",
-            window_name_with_model(
+            run_label_with_model(
                 "[Round 1 Coder]",
                 "gpt-5.5",
                 VendorKind::Codex,
@@ -71,7 +69,7 @@ fn tmux_name_templates_match_snapshot() {
         ),
         format!(
             "planning_low={}",
-            window_name_with_model(
+            run_label_with_model(
                 "[Planning]",
                 "claude-sonnet-4.6",
                 VendorKind::Claude,
@@ -80,5 +78,5 @@ fn tmux_name_templates_match_snapshot() {
         ),
     ]
     .join("\n");
-    assert_snapshot("tmux-templates.txt", format!("{snapshot}\n"));
+    assert_snapshot("acp-run-labels.txt", format!("{snapshot}\n"));
 }

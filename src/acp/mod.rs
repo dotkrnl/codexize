@@ -3,10 +3,10 @@ mod config;
 mod events;
 
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
-pub use config::{AcpAgentDefinition, AcpConfig};
+pub use config::{AcpAgentDefinition, AcpConfig, program_is_executable};
 pub use events::{
-    AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextEvent, ClientUpdate,
-    translate_update,
+    AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextEvent,
+    ClientUpdate, translate_update,
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};

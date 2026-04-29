@@ -1,7 +1,9 @@
 use crate::state;
+use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use crate::{
     acp::{
-        AcpConfig, AcpConnector, AcpLaunchRequest, ClientUpdate, PromptPayload, SubprocessConnector,
+        AcpConfig, AcpConnector, AcpLaunchRequest, AcpTextAccumulator, ClientUpdate, PromptPayload,
+        SubprocessConnector,
     },
     adapters::AgentRun,
     selection::VendorKind,
@@ -133,6 +135,8 @@ struct ManagedAcpRun {
 #[derive(Debug, Clone)]
 struct ManagedAcpLaunch {
     resolved: crate::acp::AcpResolvedLaunch,
+    window_name: String,
+    session_id: Option<String>,
     status_path: PathBuf,
     stamp_path: PathBuf,
     cause_path: PathBuf,
@@ -151,7 +155,9 @@ fn active_acp_runs() -> &'static Mutex<std::collections::HashMap<String, Managed
     ACTIVE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_managed_acp_launch(
+    window_name: &str,
     vendor: VendorKind,
     run: &AgentRun,
     status_path: &Path,
@@ -185,6 +191,8 @@ fn build_managed_acp_launch(
 
     Ok(ManagedAcpLaunch {
         resolved,
+        window_name: window_name.to_string(),
+        session_id: session_id_from_artifacts_dir(artifacts_dir),
         status_path: status_path.to_path_buf(),
         stamp_path: artifacts_dir
             .join("run-finish")
@@ -199,20 +207,19 @@ fn build_managed_acp_launch(
 }
 
 fn ensure_program_exists(program: &str) -> Result<()> {
-    let candidate = Path::new(program);
-    if candidate.components().count() > 1 {
-        if candidate.exists() {
-            return Ok(());
-        }
-        bail!("ACP agent CLI not found — install it first");
-    }
-
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    if std::env::split_paths(&path).any(|dir| dir.join(program).exists()) {
+    if crate::acp::program_is_executable(program) {
         Ok(())
     } else {
         bail!("ACP agent CLI not found — install it first");
     }
+}
+
+fn session_id_from_artifacts_dir(artifacts_dir: &Path) -> Option<String> {
+    artifacts_dir
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
 }
 
 fn write_status_code(path: &Path, exit_code: i32) -> Result<()> {
@@ -230,6 +237,19 @@ fn write_launch_cause(path: &Path, cause: &str) -> Result<()> {
             .with_context(|| format!("failed to create cause dir {}", parent.display()))?;
     }
     fs::write(path, cause).with_context(|| format!("failed to write cause {}", path.display()))
+}
+
+fn append_launch_cause(path: &Path, cause: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let text = if existing.is_empty() {
+        cause.to_string()
+    } else {
+        format!("{existing}\n{cause}")
+    };
+    let _ = fs::write(path, text);
 }
 
 fn git_rev_parse_head() -> Option<String> {
@@ -293,6 +313,75 @@ fn wait_for_stable_head() -> (String, String) {
     }
 }
 
+fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, String, String)> {
+    let state = SessionState::load(session_id).ok()?;
+    state
+        .agent_runs
+        .iter()
+        .rev()
+        .find(|run| run.window_name == window_name && run.status == RunStatus::Running)
+        .or_else(|| {
+            state
+                .agent_runs
+                .iter()
+                .rev()
+                .find(|run| run.window_name == window_name)
+        })
+        .map(|run| (run.id, run.model.clone(), run.vendor.clone()))
+}
+
+fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String) {
+    if text.is_empty() {
+        return;
+    }
+    let Some(session_id) = launch.session_id.as_deref() else {
+        return;
+    };
+
+    // ACP output can arrive before the app thread finishes saving the run
+    // record, so transcript persistence waits briefly for that handoff.
+    let run = (0..80).find_map(|_| {
+        let found = find_transcript_run(session_id, &launch.window_name);
+        if found.is_none() {
+            thread::sleep(Duration::from_millis(25));
+        }
+        found
+    });
+    let Some((run_id, model, vendor)) = run else {
+        append_launch_cause(
+            &launch.cause_path,
+            "failed to persist ACP text: run record was not available",
+        );
+        return;
+    };
+
+    let msg = Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind: MessageKind::AgentText,
+        sender: MessageSender::Agent { model, vendor },
+        text,
+    };
+    if let Err(err) = SessionState::load(session_id).and_then(|state| state.append_message(&msg)) {
+        append_launch_cause(
+            &launch.cause_path,
+            &format!("failed to persist ACP text for run {run_id}: {err:#}"),
+        );
+    }
+}
+
+fn flush_agent_text_ready(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
+    while let Some(text) = accumulator.next_ready() {
+        persist_agent_text_block(launch, text);
+    }
+}
+
+fn flush_agent_text_turn(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
+    while let Some(text) = accumulator.finish_prompt_turn() {
+        persist_agent_text_block(launch, text);
+    }
+}
+
 fn write_finish_stamp_for_outcome(
     stamp_path: &Path,
     head_before: String,
@@ -320,9 +409,11 @@ fn run_managed_acp_launch(
     let mut session = connector
         .connect(&launch.resolved)
         .map_err(|err| anyhow!("{err}"))?;
+    let mut agent_text = AcpTextAccumulator::new();
 
     let outcome = loop {
         if cancel_rx.try_recv().is_ok() {
+            flush_agent_text_turn(&launch, &mut agent_text);
             session.close().map_err(|err| anyhow!("{err}"))?;
             break ManagedAcpOutcome {
                 exit_code: 143,
@@ -332,6 +423,7 @@ fn run_managed_acp_launch(
 
         match session.try_next_update().map_err(|err| anyhow!("{err}"))? {
             Some(ClientUpdate::PromptTurnFinished) => {
+                flush_agent_text_turn(&launch, &mut agent_text);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 if let Some(path) = launch.required_artifact.as_deref() {
                     validate_toml_artifacts(&[path])?;
@@ -342,15 +434,22 @@ fn run_managed_acp_launch(
                 };
             }
             Some(ClientUpdate::PromptTurnFailed { .. }) => {
+                flush_agent_text_turn(&launch, &mut agent_text);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 break ManagedAcpOutcome {
                     exit_code: 1,
                     signal_received: String::new(),
                 };
             }
+            Some(ClientUpdate::AgentMessageText(text)) => {
+                if let Some(block) = agent_text.push(&text) {
+                    persist_agent_text_block(&launch, block);
+                }
+                flush_agent_text_ready(&launch, &mut agent_text);
+                thread::sleep(ACP_POLL_INTERVAL)
+            }
             Some(
-                ClientUpdate::AgentMessageText(_)
-                | ClientUpdate::AgentThoughtText(_)
+                ClientUpdate::AgentThoughtText(_)
                 | ClientUpdate::SessionInfoUpdate { .. }
                 | ClientUpdate::Unknown { .. },
             )
@@ -638,6 +737,7 @@ pub fn launch_interactive(
     required_artifact: Option<&Path>,
 ) -> Result<()> {
     let launch = build_managed_acp_launch(
+        window_name,
         vendor,
         run,
         status_path,
@@ -662,6 +762,7 @@ pub fn launch_noninteractive(
     required_artifact: Option<&Path>,
 ) -> Result<()> {
     let launch = build_managed_acp_launch(
+        window_name,
         vendor,
         run,
         status_path,

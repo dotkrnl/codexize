@@ -5,6 +5,7 @@ use codexize::{
     state::{self},
     tmux, tui,
 };
+use std::process::ExitCode;
 #[derive(Parser)]
 #[command(name = "codexize")]
 #[command(about = "Agentic development orchestrator", long_about = None)]
@@ -75,7 +76,19 @@ fn plan_launch(cli: &Cli) -> Result<LaunchPlan> {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match try_main() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            // This crate does not install a tracing subscriber today, so
+            // stderr is the existing non-interactive boundary-error sink.
+            eprintln!("{err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn try_main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {

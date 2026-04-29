@@ -116,6 +116,7 @@ pub(super) enum ModalKind {
 struct TestLaunchOutcome {
     exit_code: i32,
     artifact_contents: Option<String>,
+    launch_error: Option<String>,
 }
 
 #[cfg(test)]

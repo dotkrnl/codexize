@@ -18,6 +18,16 @@ impl App {
         self.status_line.borrow_mut().push(message, severity, ttl);
     }
 
+    pub(super) fn surface_boundary_error(&mut self, message: String, persist_agent_error: bool) {
+        let _ = self.state.log_event(message.clone());
+        self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
+        if persist_agent_error {
+            self.state.agent_error = Some(message);
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
+        }
+    }
+
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;

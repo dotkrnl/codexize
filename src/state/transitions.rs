@@ -1,6 +1,11 @@
-use super::{Phase, SessionState};
+use super::{
+    BuilderState, LaunchModes, Modes, PendingGuardDecision, Phase, PipelineItem,
+    PipelineItemStatus, RunStatus, SessionState,
+};
+use crate::adapters::EffortLevel;
 use anyhow::{Context, Result};
-use std::path::Path;
+use chrono::{DateTime, Utc};
+use std::{collections::BTreeSet, path::Path};
 
 /// Errors that can occur during phase transitions.
 #[derive(Debug)]
@@ -65,6 +70,404 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
         .context("failed to save state after transition")?;
 
     Ok(())
+}
+
+pub fn prepare_new_session_for_brainstorm(
+    state: &mut SessionState,
+    idea: impl Into<String>,
+    modes: Modes,
+) {
+    state.modes = modes;
+    state.idea_text = Some(idea.into());
+    state.current_phase = Phase::BrainstormRunning;
+}
+
+pub fn archive_session(state: &mut SessionState) {
+    state.archived = true;
+}
+
+pub fn restore_archived_session(state: &mut SessionState) {
+    state.archived = false;
+}
+
+pub fn record_agent_error(state: &mut SessionState, message: impl Into<String>) {
+    state.agent_error = Some(message.into());
+}
+
+pub fn clear_agent_error(state: &mut SessionState) {
+    state.agent_error = None;
+}
+
+pub fn set_yolo_mode(state: &mut SessionState, value: bool) {
+    state.modes.yolo = value;
+}
+
+pub fn set_cheap_mode(state: &mut SessionState, value: bool) {
+    state.modes.cheap = value;
+}
+
+pub fn record_brainstorm_launch(
+    state: &mut SessionState,
+    idea: impl Into<String>,
+    model: impl Into<String>,
+) {
+    state.idea_text = Some(idea.into());
+    state.selected_model = Some(model.into());
+}
+
+pub fn record_session_title(state: &mut SessionState, title: impl Into<String>) {
+    state.title = Some(title.into());
+}
+
+pub fn record_skip_to_impl_proposal(
+    state: &mut SessionState,
+    rationale: impl Into<String>,
+    kind: crate::artifacts::SkipToImplKind,
+) {
+    state.skip_to_impl_rationale = Some(rationale.into());
+    state.skip_to_impl_kind = Some(kind);
+}
+
+pub fn clear_skip_to_impl_proposal(state: &mut SessionState) {
+    state.skip_to_impl_rationale = None;
+    state.skip_to_impl_kind = None;
+}
+
+pub fn reset_builder_after_rewind(state: &mut SessionState) {
+    state.builder = BuilderState::default();
+}
+
+pub fn load_task_titles_if_empty(
+    state: &mut SessionState,
+    titles: impl IntoIterator<Item = (u32, String)>,
+) {
+    if state.builder.task_titles.is_empty() {
+        state.builder.task_titles = titles.into_iter().collect();
+    }
+}
+
+pub fn initialize_task_pipeline(
+    state: &mut SessionState,
+    tasks: impl IntoIterator<Item = (u32, String)>,
+) {
+    let tasks = tasks.into_iter().collect::<Vec<_>>();
+    state.builder.task_titles = tasks
+        .iter()
+        .map(|(id, title)| (*id, title.clone()))
+        .collect();
+    state
+        .builder
+        .reset_task_pipeline(tasks.into_iter().map(|(id, title)| (id, Some(title))));
+}
+
+pub fn ensure_builder_task_for_round(state: &mut SessionState, round: u32) -> Option<u32> {
+    state.builder.ensure_task_for_round(round)
+}
+
+pub fn mark_task_status(
+    state: &mut SessionState,
+    task_id: u32,
+    status: PipelineItemStatus,
+    round: Option<u32>,
+) -> bool {
+    state.builder.set_task_status(task_id, status, round)
+}
+
+pub fn record_builder_verdict(state: &mut SessionState, verdict: impl Into<String>) {
+    state.builder.last_verdict = Some(verdict.into());
+}
+
+pub fn mark_current_task_for_recovery(
+    state: &mut SessionState,
+    triggering_round: u32,
+) -> Option<u32> {
+    let current_task_id = state.builder.current_task_id()?;
+    let status = if state.builder.pipeline_items.is_empty() {
+        PipelineItemStatus::Pending
+    } else {
+        PipelineItemStatus::Failed
+    };
+    state
+        .builder
+        .set_task_status(current_task_id, status, Some(triggering_round));
+    Some(current_task_id)
+}
+
+pub fn append_refine_feedback(
+    state: &mut SessionState,
+    feedback: impl IntoIterator<Item = String>,
+) {
+    state.builder.pending_refine_feedback.extend(feedback);
+}
+
+pub fn take_pending_refine_feedback(state: &mut SessionState) -> Vec<String> {
+    std::mem::take(&mut state.builder.pending_refine_feedback)
+}
+
+pub fn apply_revise_with_new_tasks(
+    state: &mut SessionState,
+    task_id: u32,
+    new_tasks: Vec<(String, String, String, u32)>,
+) -> Vec<u32> {
+    let assigned = state
+        .builder
+        .apply_revise_with_new_tasks(task_id, new_tasks);
+    if let Some(first_inserted) = assigned.first().copied() {
+        state.builder.current_task = Some(first_inserted);
+        state.builder.sync_legacy_queue_views();
+    }
+    assigned
+}
+
+pub fn queue_recovery_stage(
+    state: &mut SessionState,
+    round: u32,
+    trigger: impl Into<String>,
+    interactive: bool,
+) {
+    let title = if interactive {
+        "Human-blocked recovery"
+    } else {
+        "Agent pivot recovery"
+    };
+    state.builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "recovery".to_string(),
+        task_id: None,
+        round: Some(round),
+        status: PipelineItemStatus::Running,
+        title: Some(title.to_string()),
+        mode: None,
+        trigger: Some(trigger.into()),
+        interactive: Some(interactive),
+    });
+}
+
+pub fn queue_recovery_plan_review(state: &mut SessionState, round: u32) {
+    state.builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "plan-review".to_string(),
+        task_id: None,
+        round: Some(round),
+        status: PipelineItemStatus::Pending,
+        title: Some("Recovery plan review".to_string()),
+        mode: Some("recovery".to_string()),
+        trigger: None,
+        interactive: Some(false),
+    });
+}
+
+pub fn queue_recovery_sharding(state: &mut SessionState, round: u32) {
+    state.builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "sharding".to_string(),
+        task_id: None,
+        round: Some(round),
+        status: PipelineItemStatus::Pending,
+        title: Some("Recovery sharding".to_string()),
+        mode: Some("recovery".to_string()),
+        trigger: None,
+        interactive: Some(false),
+    });
+}
+
+pub fn mark_latest_pipeline_stage_running(state: &mut SessionState, stage: &str) -> bool {
+    mark_latest_pipeline_stage(
+        state,
+        stage,
+        PipelineItemStatus::Pending,
+        PipelineItemStatus::Running,
+    )
+}
+
+pub fn mark_latest_pipeline_stage_done(state: &mut SessionState, stage: &str) -> bool {
+    mark_latest_pipeline_stage(
+        state,
+        stage,
+        PipelineItemStatus::Running,
+        PipelineItemStatus::Done,
+    )
+}
+
+fn mark_latest_pipeline_stage(
+    state: &mut SessionState,
+    stage: &str,
+    from: PipelineItemStatus,
+    to: PipelineItemStatus,
+) -> bool {
+    if let Some(item) = state
+        .builder
+        .pipeline_items
+        .iter_mut()
+        .rev()
+        .find(|item| item.stage == stage && item.status == from)
+    {
+        item.status = to;
+        true
+    } else {
+        false
+    }
+}
+
+pub fn replace_recovery_pipeline(
+    state: &mut SessionState,
+    items: Vec<PipelineItem>,
+    task_titles: impl IntoIterator<Item = (u32, String)>,
+) {
+    for (task_id, title) in task_titles {
+        state.builder.task_titles.insert(task_id, title);
+    }
+    state.builder.pipeline_items = items;
+    normalize_pipeline_item_ids(&mut state.builder);
+    state.builder.sync_legacy_queue_views();
+}
+
+fn normalize_pipeline_item_ids(builder: &mut BuilderState) {
+    let mut seen = BTreeSet::new();
+    let mut next_id = builder.next_pipeline_id();
+    for item in &mut builder.pipeline_items {
+        if item.id != 0 && seen.insert(item.id) {
+            continue;
+        }
+        while seen.contains(&next_id) {
+            next_id += 1;
+        }
+        item.id = next_id;
+        seen.insert(next_id);
+        next_id += 1;
+    }
+}
+
+pub fn set_retry_reset_run_id_cutoff(state: &mut SessionState, run_id: u64) {
+    state.builder.retry_reset_run_id_cutoff = Some(run_id);
+}
+
+pub fn increment_recovery_cycle_count(state: &mut SessionState) -> u32 {
+    state.builder.recovery_cycle_count += 1;
+    state.builder.recovery_cycle_count
+}
+
+pub fn reset_recovery_cycle_count(state: &mut SessionState) {
+    state.builder.recovery_cycle_count = 0;
+}
+
+pub fn record_builder_recovery_context(
+    state: &mut SessionState,
+    trigger_task_id: Option<u32>,
+    prev_max: Option<u32>,
+    prev_task_ids: Vec<u32>,
+    trigger_summary: Option<String>,
+) {
+    state.builder.recovery_trigger_task_id = trigger_task_id.or(state.builder.current_task_id());
+    state.builder.recovery_prev_max_task_id = prev_max;
+    state.builder.recovery_prev_task_ids = prev_task_ids;
+    state.builder.recovery_trigger_summary = trigger_summary;
+}
+
+pub fn clear_builder_recovery_context(state: &mut SessionState) {
+    state.builder.recovery_trigger_task_id = None;
+    state.builder.recovery_prev_max_task_id = None;
+    state.builder.recovery_prev_task_ids.clear();
+    state.builder.recovery_trigger_summary = None;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn start_agent_run(
+    state: &mut SessionState,
+    stage: String,
+    task_id: Option<u32>,
+    round: u32,
+    attempt: u32,
+    model: String,
+    vendor: String,
+    window_name: String,
+    effort: EffortLevel,
+    modes: LaunchModes,
+) -> u64 {
+    state.create_run_record(
+        stage,
+        task_id,
+        round,
+        attempt,
+        model,
+        vendor,
+        window_name,
+        effort,
+        modes,
+    )
+}
+
+#[derive(Debug, Clone)]
+pub struct FinishedRunRecord {
+    pub ended_at: DateTime<Utc>,
+    pub started_at: DateTime<Utc>,
+    pub attempt: u32,
+    pub model: String,
+    pub vendor: String,
+    pub unverified: bool,
+    pub error: Option<String>,
+}
+
+pub fn finish_run_record(
+    state: &mut SessionState,
+    run_id: u64,
+    success: bool,
+    error: Option<String>,
+) -> Option<FinishedRunRecord> {
+    let run = state.agent_runs.iter_mut().find(|run| run.id == run_id)?;
+    let ended_at = Utc::now();
+    run.ended_at = Some(ended_at);
+    let unverified = error
+        .as_deref()
+        .is_some_and(|reason| reason.starts_with("failed_unverified:"));
+    run.status = if success {
+        RunStatus::Done
+    } else if unverified {
+        RunStatus::FailedUnverified
+    } else {
+        RunStatus::Failed
+    };
+    run.error = error.clone();
+    Some(FinishedRunRecord {
+        ended_at,
+        started_at: run.started_at,
+        attempt: run.attempt,
+        model: run.model.clone(),
+        vendor: run.vendor.clone(),
+        unverified,
+        error,
+    })
+}
+
+pub fn record_pending_guard_decision(state: &mut SessionState, decision: PendingGuardDecision) {
+    state.pending_guard_decision = Some(decision);
+}
+
+pub fn take_pending_guard_decision(
+    state: &mut SessionState,
+    context: &str,
+) -> Result<PendingGuardDecision> {
+    state
+        .pending_guard_decision
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("{context}: no pending guard decision"))
+}
+
+pub fn clear_pending_guard_decision(state: &mut SessionState) {
+    state.pending_guard_decision = None;
+}
+
+pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Phase) {
+    // The guard modal is an interstitial persisted phase; on "keep", finalization
+    // must resume the original running phase before applying its normal successor.
+    state.current_phase = originating;
+}
+
+pub fn resume_running_runs(
+    state: &mut SessionState,
+    live_windows: &[String],
+) -> Result<Option<u64>> {
+    state.resume_running_runs(live_windows)
 }
 
 /// Per-stage definition of which artifacts are passed by pointer and which are
@@ -304,6 +707,61 @@ mod tests {
         std::fs::write(&path, "status = \"approved\"\nsummary = \"good\"").unwrap();
         let val: toml::Value = try_parse_toml_artifact(&path).unwrap();
         assert_eq!(val.get("status").unwrap().as_str(), Some("approved"));
+    }
+
+    #[test]
+    fn replace_recovery_pipeline_assigns_missing_pipeline_ids() {
+        let mut state = SessionState::new("test".to_string());
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("done".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+
+        replace_recovery_pipeline(
+            &mut state,
+            vec![
+                PipelineItem {
+                    id: 1,
+                    stage: "coder".to_string(),
+                    task_id: Some(1),
+                    round: Some(1),
+                    status: PipelineItemStatus::Approved,
+                    title: Some("done".to_string()),
+                    mode: None,
+                    trigger: None,
+                    interactive: None,
+                },
+                PipelineItem {
+                    id: 0,
+                    stage: "coder".to_string(),
+                    task_id: Some(2),
+                    round: None,
+                    status: PipelineItemStatus::Pending,
+                    title: Some("new".to_string()),
+                    mode: None,
+                    trigger: None,
+                    interactive: None,
+                },
+            ],
+            [(2, "new".to_string())],
+        );
+
+        let ids = state
+            .builder
+            .pipeline_items
+            .iter()
+            .map(|item| item.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.iter().all(|id| *id != 0));
+        assert_ne!(ids[0], ids[1]);
     }
 
     #[test]

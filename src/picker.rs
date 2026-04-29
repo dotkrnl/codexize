@@ -630,7 +630,14 @@ impl SessionPicker {
             area.width.clamp(40, 80).saturating_sub(4),
         );
 
-        render_modal_overlay(frame, area, content, modal_keymap);
+        render_modal_overlay(
+            frame,
+            area,
+            Some(title),
+            ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+            content,
+            modal_keymap,
+        );
     }
 
     fn palette_inner_rows(&self) -> u16 {

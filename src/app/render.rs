@@ -324,7 +324,14 @@ impl App {
             let inner_w = dialog_w.saturating_sub(2);
             let content = self.modal_content_lines(m, inner_w);
             let modal_keymap = keymap(self.state.current_phase, Some(m), caps, false, inner_w);
-            render_modal_overlay(frame, area, content, modal_keymap);
+            render_modal_overlay(
+                frame,
+                area,
+                modal_title(m),
+                modal_border_style(m),
+                content,
+                modal_keymap,
+            );
         } else if let Some(content) = sheet_content {
             let sheet_lines = bottom_sheet(content, keymap_line, footer_h, width);
             for line in sheet_lines {
@@ -1073,6 +1080,29 @@ fn stage_error_title(stage_id: StageId) -> &'static str {
         StageId::Sharding => "Sharding failed",
         StageId::Implementation => "Implementation failed",
         StageId::Review => "Review failed",
+    }
+}
+
+fn modal_border_style(kind: ModalKind) -> Style {
+    use ratatui::style::{Color, Modifier};
+    match kind {
+        ModalKind::StageError(_) => {
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+        }
+        ModalKind::SkipToImpl | ModalKind::GitGuard => Style::default().fg(Color::Yellow),
+        ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
+            Style::default().fg(Color::Cyan)
+        }
+    }
+}
+
+fn modal_title(kind: ModalKind) -> Option<&'static str> {
+    match kind {
+        ModalKind::SkipToImpl => Some("Skip to implementation?"),
+        ModalKind::GitGuard => Some("Git guard"),
+        ModalKind::SpecReviewPaused => Some("Spec review complete"),
+        ModalKind::PlanReviewPaused => Some("Plan review complete"),
+        ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),
     }
 }
 
@@ -1937,7 +1967,7 @@ mod tests {
     fn expected_dialog_rect(terminal_width: u16, terminal_height: u16, content_h: usize) -> Rect {
         let max_w = terminal_width.saturating_sub(4).max(1);
         let dialog_w = max_w.min(80).max(max_w.min(40));
-        let dialog_h = ((content_h + 3) as u16).min(terminal_height.saturating_sub(2));
+        let dialog_h = ((content_h + 5) as u16).min(terminal_height.saturating_sub(4));
         Rect::new(
             (terminal_width - dialog_w) / 2,
             (terminal_height - dialog_h) / 2,
@@ -2260,17 +2290,12 @@ mod tests {
         let dialog = expected_dialog_rect(width, height, 1);
         let inner_width = dialog.width.saturating_sub(2);
 
-        assert_eq!(dialog, Rect::new(10, 13, 80, 4));
+        assert_eq!(dialog, Rect::new(10, 12, 80, 6));
         assert!(raw_line_text(&buf, 0, width).contains("Spec Review · paused"));
-        assert_eq!(
-            raw_line_text(&buf, dialog.y, width),
-            format!(
-                "{}┌{}┐{}",
-                " ".repeat(dialog.x as usize),
-                "─".repeat(inner_width as usize),
-                " ".repeat((width - dialog.x - dialog.width) as usize)
-            )
-        );
+        let top_line = raw_line_text(&buf, dialog.y, width);
+        assert!(top_line.contains("┌"));
+        assert!(top_line.contains("┐"));
+        assert!(top_line.contains("Spec review complete"));
         assert_eq!(
             raw_line_text(&buf, dialog.y + 1, width),
             format!(
@@ -2281,7 +2306,8 @@ mod tests {
             )
         );
         assert!(
-            raw_line_text(&buf, dialog.y + 2, width).contains("Enter continue"),
+            raw_line_text(&buf, dialog.y + dialog.height - 2, width)
+                .contains("Enter continue"),
             "keymap should occupy the last inner row"
         );
         assert_eq!(
@@ -2309,7 +2335,7 @@ mod tests {
         let buf = render_full_frame_buf(&mut app, width, height);
         let dialog = expected_dialog_rect(width, height, 4);
 
-        assert_eq!(dialog, Rect::new(10, 11, 80, 7));
+        assert_eq!(dialog, Rect::new(10, 10, 80, 9));
         assert!(raw_line_text(&buf, dialog.y + 1, width).contains("Spec review failed"));
         assert_eq!(
             raw_line_text(&buf, dialog.y + 3, width),
@@ -2333,7 +2359,8 @@ mod tests {
             )
         );
         assert!(
-            raw_line_text(&buf, dialog.y + 5, width).contains("r retry"),
+            raw_line_text(&buf, dialog.y + dialog.height - 2, width)
+                .contains("r retry"),
             "keymap should remain visible after wrapped error content"
         );
     }
@@ -2352,7 +2379,7 @@ mod tests {
         let buf = render_full_frame_buf(&mut app, width, height);
         let dialog = expected_dialog_rect(width, height, 5);
 
-        assert_eq!(dialog, Rect::new(10, 11, 80, 8));
+        assert_eq!(dialog, Rect::new(10, 10, 80, 10));
         assert!(raw_line_text(&buf, dialog.y + 1, width).contains("The brainstorm agent proposes"));
         assert_eq!(
             raw_line_text(&buf, dialog.y + 3, width),
@@ -2389,16 +2416,11 @@ mod tests {
         let buf = render_full_frame_buf(&mut app, width, height);
         let dialog = expected_dialog_rect(width, height, 1);
 
-        assert_eq!(dialog, Rect::new(2, 8, 26, 4));
-        assert_eq!(
-            raw_line_text(&buf, dialog.y, width),
-            format!(
-                "{}┌{}┐{}",
-                " ".repeat(dialog.x as usize),
-                "─".repeat(dialog.width.saturating_sub(2) as usize),
-                " ".repeat((width - dialog.x - dialog.width) as usize)
-            )
-        );
+        assert_eq!(dialog, Rect::new(2, 7, 26, 6));
+        let top_line = raw_line_text(&buf, dialog.y, width);
+        assert!(top_line.contains("┌"));
+        assert!(top_line.contains("┐"));
+        assert!(top_line.contains("Spec review complete"));
     }
 
     #[test]

@@ -1,31 +1,56 @@
 use ratatui::{
     Frame,
+    layout::Rect,
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Clear},
+    widgets::{Block, Clear, Paragraph},
 };
 
 pub fn render_modal_overlay(
     frame: &mut Frame,
-    terminal_area: ratatui::layout::Rect,
+    terminal_area: Rect,
+    title: Option<&str>,
+    border_style: Style,
     content: Vec<Line<'static>>,
     keymap_line: Line<'static>,
 ) {
+    // 3. Dim the background behind the modal.
+    let dim = Paragraph::new("").style(Style::default().bg(Color::Black));
+    frame.render_widget(dim, terminal_area);
+
     let terminal_width = terminal_area.width;
     let terminal_height = terminal_area.height;
     let max_w = terminal_width.saturating_sub(4).max(1);
     let dialog_w = max_w.min(80).max(max_w.min(40));
     let content_h = content.len();
-    let dialog_h = ((content_h + 3) as u16).min(terminal_height.saturating_sub(2));
-    let dialog = ratatui::layout::Rect::new(
+    // 6. Increase internal padding (+5 instead of +3) and reserve more vertical margin.
+    let dialog_h = ((content_h + 5) as u16).min(terminal_height.saturating_sub(4));
+    let dialog = Rect::new(
         (terminal_width.saturating_sub(dialog_w)) / 2,
         (terminal_height.saturating_sub(dialog_h)) / 2,
         dialog_w,
         dialog_h,
     );
 
+    // 5. Drop shadow — render a dark block offset by (1, 1).
+    let shadow_rect = Rect::new(
+        (dialog.x + 1).min(terminal_area.x + terminal_area.width),
+        (dialog.y + 1).min(terminal_area.y + terminal_area.height),
+        dialog_w.saturating_sub(1),
+        dialog_h.saturating_sub(1),
+    );
+    let shadow = Paragraph::new("").style(Style::default().bg(Color::Black));
+    frame.render_widget(shadow, shadow_rect);
+
     frame.render_widget(Clear, dialog);
-    let block = Block::bordered().border_style(Style::default().fg(Color::DarkGray));
+
+    // 1. Solid background, 2B. Semantic border colour, 4. Optional title.
+    let mut block = Block::bordered()
+        .border_style(border_style)
+        .style(Style::default().bg(Color::Black));
+    if let Some(t) = title {
+        block = block.title(t.to_string());
+    }
     frame.render_widget(block.clone(), dialog);
     let inner = block.inner(dialog);
 

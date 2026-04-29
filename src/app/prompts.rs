@@ -7,6 +7,7 @@ use crate::{
 };
 use anyhow::Context;
 pub(super) fn kill_window(base: &str) {
+    crate::runner::cancel_windows_matching(base);
     // Windows are now named "[Base] <model>", so match by prefix: exact match
     // or the base followed by a space. The base ends with `]`, which prevents
     // `[Builder r1]` from accidentally matching `[Builder r10]`, etc.

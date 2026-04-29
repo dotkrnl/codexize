@@ -1,5 +1,5 @@
 pub mod chat_widget;
-mod chrome;
+pub mod chrome;
 mod clock;
 mod events;
 mod focus_caps;
@@ -13,6 +13,10 @@ mod sheet;
 mod state;
 mod status_line;
 mod tree;
+
+pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
+pub(crate) use sheet::bottom_sheet;
+pub(crate) use status_line::{Severity, StatusLine};
 
 use crate::{
     adapters::{AgentRun, EffortLevel, adapter_for_vendor, window_name_with_model},

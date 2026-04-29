@@ -8,10 +8,10 @@ use crate::state::Phase;
 /// Key binding with optional capability requirement.
 #[derive(Clone, Copy)]
 pub(crate) struct KeyBinding {
-    glyph: &'static str,
-    action: &'static str,
-    is_primary: bool,
-    capability: Option<Capability>,
+    pub(crate) glyph: &'static str,
+    pub(crate) action: &'static str,
+    pub(crate) is_primary: bool,
+    pub(crate) capability: Option<Capability>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -33,7 +33,6 @@ pub(crate) const SEP_INNER: &str = " · ";
 /// Separator between categories.
 pub(crate) const SEP_CATEGORY: &str = "  ·  ";
 
-
 fn binding_enabled(binding: &KeyBinding, caps: &dyn Fn(Option<Capability>) -> bool) -> bool {
     binding.capability.map(|c| caps(Some(c))).unwrap_or(true)
 }
@@ -41,7 +40,11 @@ fn binding_enabled(binding: &KeyBinding, caps: &dyn Fn(Option<Capability>) -> bo
 /// Width budget contribution for a single binding, accounting for the rule
 /// that capability-disabled bindings render glyph-only and never advertise
 /// their action label even when `show_label` is true.
-fn binding_width(binding: &KeyBinding, show_label: bool, caps: &dyn Fn(Option<Capability>) -> bool) -> usize {
+fn binding_width(
+    binding: &KeyBinding,
+    show_label: bool,
+    caps: &dyn Fn(Option<Capability>) -> bool,
+) -> usize {
     let mut len = binding.glyph.chars().count();
     if show_label && binding_enabled(binding, caps) {
         len += 1 + binding.action.chars().count();
@@ -49,7 +52,11 @@ fn binding_width(binding: &KeyBinding, show_label: bool, caps: &dyn Fn(Option<Ca
     len
 }
 
-fn category_width(bindings: &[KeyBinding], show_labels: bool, caps: &dyn Fn(Option<Capability>) -> bool) -> usize {
+fn category_width(
+    bindings: &[KeyBinding],
+    show_labels: bool,
+    caps: &dyn Fn(Option<Capability>) -> bool,
+) -> usize {
     let mut len = 0;
     for (i, b) in bindings.iter().enumerate() {
         if i > 0 {
@@ -391,7 +398,12 @@ fn select_modal_tier(actions: &[KeyBinding], system: &[KeyBinding], width: u16) 
     WidthTier::FirstKeyOnly
 }
 
-fn render_modal_keymap(actions: &[KeyBinding], system: &[KeyBinding], caps: &dyn Fn(Option<Capability>) -> bool, width: u16) -> Line<'static> {
+fn render_modal_keymap(
+    actions: &[KeyBinding],
+    system: &[KeyBinding],
+    caps: &dyn Fn(Option<Capability>) -> bool,
+    width: u16,
+) -> Line<'static> {
     let tier = select_modal_tier(actions, system, width);
 
     let (act_labels, sys_label, first_only) = match tier {
@@ -428,7 +440,11 @@ fn render_modal_keymap(actions: &[KeyBinding], system: &[KeyBinding], caps: &dyn
     Line::from(spans)
 }
 
-fn render_simple_keymap(bindings: &[KeyBinding], caps: &dyn Fn(Option<Capability>) -> bool, width: u16) -> Line<'static> {
+fn render_simple_keymap(
+    bindings: &[KeyBinding],
+    caps: &dyn Fn(Option<Capability>) -> bool,
+    width: u16,
+) -> Line<'static> {
     let tier = select_simple_tier(bindings, width);
     let (show_labels, first_only) = match tier {
         WidthTier::Full | WidthTier::DropSystemLabel | WidthTier::DropActionsLabels => {
@@ -442,8 +458,13 @@ fn render_simple_keymap(bindings: &[KeyBinding], caps: &dyn Fn(Option<Capability
     Line::from(spans)
 }
 
-fn render_default_keymap(nav: &[KeyBinding], actions: &[KeyBinding], system: &[KeyBinding], caps: &dyn Fn(Option<Capability>) -> bool, width: u16) -> Line<'static> {
-    
+fn render_default_keymap(
+    nav: &[KeyBinding],
+    actions: &[KeyBinding],
+    system: &[KeyBinding],
+    caps: &dyn Fn(Option<Capability>) -> bool,
+    width: u16,
+) -> Line<'static> {
     let tier = select_width_tier(nav, actions, system, caps, width);
 
     let (nav_labels, act_labels, sys_label, first_only) = match tier {
@@ -471,7 +492,7 @@ fn render_default_keymap(nav: &[KeyBinding], actions: &[KeyBinding], system: &[K
         spans
     };
 
-    let sys_spans = render_category(&system, &|_| true, sys_label, first_only);
+    let sys_spans = render_category(system, &|_| true, sys_label, first_only);
 
     let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
     let sys_len: usize = sys_spans.iter().map(|s| s.content.chars().count()).sum();
@@ -543,6 +564,20 @@ pub fn keymap(
 
     let (nav, actions, system) = default_bindings();
     render_keymap_line(&[&nav, &actions, &system], &caps_fn, width)
+}
+
+/// Renders a context-aware keymap line.
+pub fn render_keymap_line(
+    categories: &[&[KeyBinding]],
+    caps: &dyn Fn(Option<Capability>) -> bool,
+    width: u16,
+) -> Line<'static> {
+    match categories.len() {
+        1 => render_simple_keymap(categories[0], caps, width),
+        2 => render_modal_keymap(categories[0], categories[1], caps, width),
+        3 => render_default_keymap(categories[0], categories[1], categories[2], caps, width),
+        _ => Line::from(vec![]),
+    }
 }
 
 #[cfg(test)]
@@ -749,7 +784,13 @@ mod tests {
         let width = {
             let (nav, actions, system) = default_bindings();
             // Width that fits the disabled rendering exactly.
-            let left = measure_full_width(&nav, &actions, &system, true, &|cap| cap.map(|c| match c { Capability::Expand => caps_disabled.can_expand, Capability::Input => caps_disabled.can_input }).unwrap_or(true));
+            let left = measure_full_width(&nav, &actions, &system, true, &|cap| {
+                cap.map(|c| match c {
+                    Capability::Expand => caps_disabled.can_expand,
+                    Capability::Input => caps_disabled.can_input,
+                })
+                .unwrap_or(true)
+            });
             let sys = measure_system(&system, true);
             (left + SEP_CATEGORY.chars().count() + sys) as u16
         };
@@ -1137,19 +1178,5 @@ mod tests {
                 || s.style.fg == Some(ENABLED_ACTION)
         });
         assert!(has_enabled_style, "should have enabled styling too");
-    }
-}
-
-/// Renders a context-aware keymap line.
-pub fn render_keymap_line(
-    categories: &[&[KeyBinding]],
-    caps: &dyn Fn(Option<Capability>) -> bool,
-    width: u16,
-) -> Line<'static> {
-    match categories.len() {
-        1 => render_simple_keymap(categories[0], caps, width),
-        2 => render_modal_keymap(categories[0], categories[1], caps, width),
-        3 => render_default_keymap(categories[0], categories[1], categories[2], caps, width),
-        _ => Line::from(vec![]),
     }
 }

@@ -1,4 +1,4 @@
-mod keymap;
+pub mod keymap;
 mod live_agent_message;
 
 pub use keymap::keymap;

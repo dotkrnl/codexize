@@ -5,7 +5,9 @@ mod events;
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
 pub use config::{
     AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_is_available,
-    claude_acp_local_program, program_is_executable,
+    claude_acp_local_program, claude_cli_is_available, codex_acp_is_available,
+    codex_cli_is_available, program_is_executable, should_offer_claude_acp_install,
+    should_offer_codex_acp_install,
 };
 pub use events::{
     AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextEvent,

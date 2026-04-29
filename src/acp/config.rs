@@ -229,6 +229,26 @@ pub fn claude_acp_is_available() -> bool {
     path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp")
 }
 
+pub fn claude_cli_is_available() -> bool {
+    program_is_executable("claude")
+}
+
+pub fn should_offer_claude_acp_install() -> bool {
+    claude_cli_is_available() && !claude_acp_is_available()
+}
+
+pub fn codex_acp_is_available() -> bool {
+    program_is_executable("codex-acp")
+}
+
+pub fn codex_cli_is_available() -> bool {
+    program_is_executable("codex")
+}
+
+pub fn should_offer_codex_acp_install() -> bool {
+    codex_cli_is_available() && !codex_acp_is_available()
+}
+
 fn default_claude_acp_program() -> String {
     let local = claude_acp_local_program();
     if path_is_executable(&local) {
@@ -488,6 +508,69 @@ mod tests {
     }
 
     #[test]
+    fn claude_acp_install_prompt_requires_claude_cli_and_missing_acp() {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let home = tempfile::TempDir::new().expect("temp home");
+        let fake_bin = tempfile::TempDir::new().expect("fake bin");
+        let prev_home = std::env::var_os("HOME");
+        let prev_path = std::env::var_os("PATH");
+
+        unsafe {
+            std::env::set_var("HOME", home.path());
+            std::env::set_var("PATH", fake_bin.path());
+        }
+
+        assert!(!should_offer_claude_acp_install());
+
+        write_fake_executable(&fake_bin.path().join("claude"));
+        assert!(should_offer_claude_acp_install());
+
+        write_fake_executable(&fake_bin.path().join("claude-agent-acp"));
+        assert!(!should_offer_claude_acp_install());
+
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_path {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn codex_acp_install_prompt_requires_codex_cli_and_missing_acp() {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let fake_bin = tempfile::TempDir::new().expect("fake bin");
+        let prev_path = std::env::var_os("PATH");
+
+        unsafe {
+            std::env::set_var("PATH", fake_bin.path());
+        }
+
+        assert!(!should_offer_codex_acp_install());
+
+        write_fake_executable(&fake_bin.path().join("codex"));
+        assert!(should_offer_codex_acp_install());
+
+        write_fake_executable(&fake_bin.path().join("codex-acp"));
+        assert!(!should_offer_codex_acp_install());
+
+        unsafe {
+            match prev_path {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    #[test]
     fn available_vendors_follow_configured_programs() {
         let config = AcpConfig::from_agents([
             AcpAgentDefinition {
@@ -509,5 +592,18 @@ mod tests {
         assert_eq!(available.len(), 1);
         assert!(available.contains(&VendorKind::Codex));
         assert!(!available.contains(&VendorKind::Claude));
+    }
+
+    fn write_fake_executable(path: &Path) {
+        std::fs::write(path, "#!/bin/sh\nexit 0\n").expect("write fake executable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path)
+                .expect("fake executable metadata")
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).expect("chmod fake executable");
+        }
     }
 }

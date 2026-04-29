@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, ErrorKind, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -14,6 +14,7 @@ use std::{
 };
 
 type PendingRequests = Arc<Mutex<BTreeMap<u64, Sender<AcpResult<Value>>>>>;
+type SharedWriter = Arc<Mutex<Option<ChildStdin>>>;
 
 pub trait AcpSession: Send {
     fn session_id(&self) -> &str;
@@ -23,6 +24,10 @@ pub trait AcpSession: Send {
 
 pub trait AcpConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>>;
+}
+
+trait RpcCaller {
+    fn call(&mut self, method: &str, params: Value) -> AcpResult<Value>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,7 +42,9 @@ impl AcpConnector for SubprocessConnector {
             .current_dir(&launch.session.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            // Keep stderr from backing up an unread pipe; protocol diagnostics
+            // flow through ACP updates and request failures.
+            .stderr(Stdio::null());
 
         let mut child = command.spawn().map_err(|err| {
             AcpError::human_block(format!(
@@ -133,17 +140,31 @@ impl AcpSession for SubprocessSession {
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
-        match self.rpc.try_next_update()? {
-            Some(update) => return Ok(Some(update)),
-            None if !self.prompt_finished => {}
-            None => return Ok(None),
+        match self.rpc.try_next_update() {
+            Ok(Some(update)) => return Ok(Some(update)),
+            Ok(None) if !self.prompt_finished => {}
+            Ok(None) => return Ok(None),
+            Err(err) => {
+                self.prompt_finished = true;
+                return Ok(Some(ClientUpdate::PromptTurnFailed {
+                    message: err.to_string(),
+                }));
+            }
         }
 
         match self.prompt_response.try_recv() {
             Ok(Ok(result)) => {
                 self.prompt_finished = true;
-                parse_prompt_result(result)?;
-                Ok(Some(ClientUpdate::PromptTurnFinished))
+                let update = match parse_prompt_result(result) {
+                    Ok(PromptTurnOutcome::Finished) => ClientUpdate::PromptTurnFinished,
+                    Ok(PromptTurnOutcome::Failed { message }) => {
+                        ClientUpdate::PromptTurnFailed { message }
+                    }
+                    Err(err) => ClientUpdate::PromptTurnFailed {
+                        message: err.to_string(),
+                    },
+                };
+                Ok(Some(update))
             }
             Ok(Err(err)) => {
                 self.prompt_finished = true;
@@ -200,7 +221,7 @@ impl Drop for SubprocessSession {
 }
 
 struct RpcPeer {
-    writer: Option<ChildStdin>,
+    writer: SharedWriter,
     pending: PendingRequests,
     updates_rx: Receiver<AcpResult<ClientUpdate>>,
     reader_handle: Option<JoinHandle<()>>,
@@ -209,24 +230,20 @@ struct RpcPeer {
 
 impl RpcPeer {
     fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
+        let writer = Arc::new(Mutex::new(Some(stdin)));
         let pending = Arc::new(Mutex::new(BTreeMap::<u64, Sender<AcpResult<Value>>>::new()));
         let (updates_tx, updates_rx) = mpsc::channel();
+        let reader_writer = Arc::clone(&writer);
         let reader_pending = Arc::clone(&pending);
-        let reader_handle = thread::spawn(move || read_loop(stdout, reader_pending, updates_tx));
+        let reader_handle =
+            thread::spawn(move || read_loop(stdout, reader_writer, reader_pending, updates_tx));
         Self {
-            writer: Some(stdin),
+            writer,
             pending,
             updates_rx,
             reader_handle: Some(reader_handle),
             next_request_id: 0,
         }
-    }
-
-    fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
-        let receiver = self.start_request(method, params)?;
-        receiver
-            .recv()
-            .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
     }
 
     fn start_request(
@@ -249,17 +266,16 @@ impl RpcPeer {
             "method": method,
             "params": params
         });
-        let writer = self
-            .writer
-            .as_mut()
-            .ok_or_else(|| AcpError::protocol("ACP transport writer already closed"))?;
-        let encoded = serde_json::to_string(&message)
-            .map_err(|err| AcpError::protocol(format!("failed to encode ACP request: {err}")))?;
-        writer
-            .write_all(encoded.as_bytes())
-            .and_then(|_| writer.write_all(b"\n"))
-            .and_then(|_| writer.flush())
-            .map_err(|err| AcpError::io(format!("failed to write ACP request {method}: {err}")))?;
+        let write_result = write_json_rpc_line(&self.writer, &message);
+        if let Err(err) = write_result {
+            self.pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&id);
+            return Err(AcpError::io(format!(
+                "failed to write ACP request {method}: {err}"
+            )));
+        }
         Ok(rx)
     }
 
@@ -273,7 +289,10 @@ impl RpcPeer {
     }
 
     fn shutdown(&mut self) {
-        self.writer.take();
+        self.writer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
         if let Some(handle) = self.reader_handle.take() {
             let _ = handle.join();
         }
@@ -284,8 +303,33 @@ impl RpcPeer {
     }
 }
 
+impl RpcCaller for RpcPeer {
+    fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
+        let receiver = self.start_request(method, params)?;
+        receiver
+            .recv()
+            .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
+    }
+}
+
+fn write_json_rpc_line(writer: &SharedWriter, message: &Value) -> std::io::Result<()> {
+    let encoded = serde_json::to_string(message)
+        .map_err(|err| std::io::Error::new(ErrorKind::InvalidData, err))?;
+    let mut guard = writer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let writer = guard
+        .as_mut()
+        .ok_or_else(|| std::io::Error::new(ErrorKind::BrokenPipe, "ACP writer already closed"))?;
+    writer
+        .write_all(encoded.as_bytes())
+        .and_then(|_| writer.write_all(b"\n"))
+        .and_then(|_| writer.flush())
+}
+
 fn read_loop(
     stdout: ChildStdout,
+    writer: SharedWriter,
     pending: PendingRequests,
     updates_tx: Sender<AcpResult<ClientUpdate>>,
 ) {
@@ -316,6 +360,33 @@ fn read_loop(
             }
         };
 
+        if let Some(method) = value.get("method").and_then(Value::as_str) {
+            if method == "session/update" {
+                let update = value
+                    .get("params")
+                    .and_then(|params| params.get("update"))
+                    .map(parse_update)
+                    .unwrap_or_else(|| ClientUpdate::Unknown {
+                        kind: "session/update".to_string(),
+                    });
+                let _ = updates_tx.send(Ok(update));
+                continue;
+            }
+
+            if let Some(id) = value.get("id") {
+                let error = json!({
+                    "jsonrpc": "2.0",
+                    "id": id.clone(),
+                    "error": {
+                        "code": -32601,
+                        "message": format!("codexize client does not implement method {method}"),
+                    }
+                });
+                let _ = write_json_rpc_line(&writer, &error);
+            }
+            continue;
+        }
+
         if let Some(id) = value.get("id").and_then(Value::as_u64) {
             let sender = pending
                 .lock()
@@ -337,25 +408,6 @@ fn read_loop(
                     )));
                 }
             }
-            continue;
-        }
-
-        if value.get("method").and_then(Value::as_str) == Some("session/update") {
-            let update = value
-                .get("params")
-                .and_then(|params| params.get("update"))
-                .map(parse_update)
-                .unwrap_or_else(|| ClientUpdate::Unknown {
-                    kind: "session/update".to_string(),
-                });
-            let _ = updates_tx.send(Ok(update));
-            continue;
-        }
-
-        if let Some(method) = value.get("method").and_then(Value::as_str) {
-            let _ = updates_tx.send(Err(AcpError::protocol(format!(
-                "unsupported ACP agent request {method}; codexize client methods are not wired yet",
-            ))));
             continue;
         }
     }
@@ -438,13 +490,37 @@ fn parse_new_session_result(value: Value) -> AcpResult<NewSessionResult> {
     })
 }
 
-fn parse_prompt_result(value: Value) -> AcpResult<()> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PromptTurnOutcome {
+    Finished,
+    Failed { message: String },
+}
+
+fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> {
     let stop_reason = value
         .get("stopReason")
         .and_then(Value::as_str)
         .ok_or_else(|| AcpError::protocol("ACP prompt response missing stopReason"))?;
-    let _ = stop_reason;
-    Ok(())
+    if is_failed_stop_reason(stop_reason) {
+        return Ok(PromptTurnOutcome::Failed {
+            message: format!("ACP prompt turn failed with stopReason={stop_reason}"),
+        });
+    }
+    Ok(PromptTurnOutcome::Finished)
+}
+
+fn is_failed_stop_reason(stop_reason: &str) -> bool {
+    matches!(
+        stop_reason,
+        "cancelled"
+            | "canceled"
+            | "interrupted"
+            | "error"
+            | "errored"
+            | "failed"
+            | "timeout"
+            | "timed_out"
+    )
 }
 
 fn parse_update(value: &Value) -> ClientUpdate {
@@ -497,8 +573,12 @@ fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
     })])
 }
 
+fn debug_protocol(message: impl AsRef<str>) {
+    eprintln!("[codexize][acp][debug] {}", message.as_ref());
+}
+
 fn apply_session_config(
-    rpc: &mut RpcPeer,
+    rpc: &mut impl RpcCaller,
     session_id: &str,
     session: &super::AcpSessionSpec,
     config_options: &mut Vec<ConfigOption>,
@@ -514,9 +594,10 @@ fn apply_session_config(
             session.reasoning_effort.as_str().to_string(),
         ),
     ];
+    let baseline_options = config_options.clone();
 
     for (category, value) in desired {
-        let Some(option) = config_options
+        let Some(option) = baseline_options
             .iter()
             .find(|option| option.category.as_deref() == Some(category) || option.id == category)
             .cloned()
@@ -541,9 +622,23 @@ fn apply_session_config(
             }),
         ) {
             Ok(response) => response,
-            Err(_) => continue,
+            Err(err) => {
+                debug_protocol(format!(
+                    "session/set_config_option failed for category={category} id={} value={value}: {err}",
+                    option.id
+                ));
+                continue;
+            }
         };
-        *config_options = parse_config_options_response(response)?;
+        match parse_config_options_response(response) {
+            Ok(updated) => *config_options = updated,
+            Err(err) => {
+                debug_protocol(format!(
+                    "session/set_config_option response parse failed for category={category} id={}: {err}",
+                    option.id
+                ));
+            }
+        }
     }
 
     Ok(())
@@ -562,4 +657,138 @@ fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
         ))
     })?;
     Ok(response.config_options)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{adapters::EffortLevel, state::LaunchModes};
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    #[derive(Default)]
+    struct StubRpcCaller {
+        calls: Vec<(String, Value)>,
+        responses: Vec<AcpResult<Value>>,
+    }
+
+    impl RpcCaller for StubRpcCaller {
+        fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
+            self.calls.push((method.to_string(), params));
+            if self.responses.is_empty() {
+                return Err(AcpError::protocol(
+                    "stub RPC missing response for session/set_config_option",
+                ));
+            }
+            self.responses.remove(0)
+        }
+    }
+
+    fn sample_session() -> super::super::AcpSessionSpec {
+        super::super::AcpSessionSpec {
+            cwd: PathBuf::from("/tmp/project"),
+            prompt: PromptPayload::Text("ship it".to_string()),
+            model: "model-next".to_string(),
+            requested_effort: EffortLevel::Normal,
+            effective_effort: EffortLevel::Normal,
+            reasoning_effort: super::super::AcpReasoningEffort::High,
+            permission_mode: super::super::AcpPermissionMode::Code,
+            interactive: false,
+            modes: LaunchModes::default(),
+            required_artifacts: Vec::new(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    fn configurable_option(
+        id: &str,
+        category: &str,
+        current: &str,
+        choices: &[&str],
+    ) -> ConfigOption {
+        ConfigOption {
+            id: id.to_string(),
+            category: Some(category.to_string()),
+            current_value: Some(current.to_string()),
+            options: choices
+                .iter()
+                .map(|choice| ConfigChoice {
+                    value: (*choice).to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn parse_prompt_result_marks_failure_stop_reasons() {
+        let result = parse_prompt_result(json!({ "stopReason": "interrupted" }))
+            .expect("stop reason should parse");
+        assert!(matches!(
+            result,
+            PromptTurnOutcome::Failed { message } if message.contains("interrupted")
+        ));
+    }
+
+    #[test]
+    fn parse_prompt_result_accepts_success_stop_reasons() {
+        let result =
+            parse_prompt_result(json!({ "stopReason": "end_turn" })).expect("stop reason parsed");
+        assert_eq!(result, PromptTurnOutcome::Finished);
+    }
+
+    #[test]
+    fn apply_session_config_uses_baseline_option_snapshot() {
+        let mut rpc = StubRpcCaller {
+            responses: vec![
+                Ok(json!({
+                    "configOptions": [{
+                        "id": "mode",
+                        "category": "mode",
+                        "currentValue": "code"
+                    }]
+                })),
+                Ok(json!({
+                    "configOptions": [{
+                        "id": "model",
+                        "category": "model",
+                        "currentValue": "model-next"
+                    }]
+                })),
+                Ok(json!({
+                    "configOptions": [{
+                        "id": "thought_level",
+                        "category": "thought_level",
+                        "currentValue": "high"
+                    }]
+                })),
+            ],
+            ..Default::default()
+        };
+        let session = sample_session();
+        let mut config_options = vec![
+            configurable_option("mode", "mode", "ask", &["ask", "code"]),
+            configurable_option("model", "model", "model-old", &["model-old", "model-next"]),
+            configurable_option(
+                "thought_level",
+                "thought_level",
+                "medium",
+                &["medium", "high"],
+            ),
+        ];
+
+        apply_session_config(&mut rpc, "sess-test", &session, &mut config_options)
+            .expect("session config applies");
+
+        assert_eq!(rpc.calls.len(), 3);
+        let config_ids = rpc
+            .calls
+            .iter()
+            .map(|(_, params)| {
+                params
+                    .get("configId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(config_ids, vec!["mode", "model", "thought_level"]);
+    }
 }

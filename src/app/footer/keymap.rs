@@ -3,6 +3,9 @@ use ratatui::text::{Line, Span};
 
 use super::super::focus_caps::FocusCaps;
 use super::super::{ModalKind, StageId};
+use super::keymap_view_model::{
+    WidthTier, render_binding, select_modal_tier, select_simple_tier, select_width_tier,
+};
 use crate::state::Phase;
 
 /// Key binding with optional capability requirement.
@@ -52,7 +55,7 @@ fn binding_width(
     len
 }
 
-fn category_width(
+pub(super) fn category_width(
     bindings: &[KeyBinding],
     show_labels: bool,
     caps: &dyn Fn(Option<Capability>) -> bool,
@@ -218,132 +221,9 @@ fn input_bindings() -> Vec<KeyBinding> {
 }
 
 /// Width tier for progressive collapse.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum WidthTier {
-    Full,
-    DropSystemLabel,
-    DropActionsLabels,
-    DropNavLabels,
-    FirstKeyOnly,
-}
-
-fn measure_full_width(
-    nav: &[KeyBinding],
-    actions: &[KeyBinding],
-    _system: &[KeyBinding],
-    show_labels: bool,
-    caps: &dyn Fn(Option<Capability>) -> bool,
-) -> usize {
-    let mut len = category_width(nav, show_labels, caps);
-    if !nav.is_empty() && !actions.is_empty() {
-        len += SEP_CATEGORY.chars().count();
-    }
-    len += category_width(actions, show_labels, caps);
-    len
-}
-
-fn measure_system(system: &[KeyBinding], show_label: bool) -> usize {
+pub(super) fn measure_system(system: &[KeyBinding], show_label: bool) -> usize {
     let dummy_caps: &dyn Fn(Option<Capability>) -> bool = &|_| true;
     category_width(system, show_label, dummy_caps)
-}
-
-fn measure_simple_bindings(bindings: &[KeyBinding], show_labels: bool) -> usize {
-    let dummy_caps: &dyn Fn(Option<Capability>) -> bool = &|_| true;
-    category_width(bindings, show_labels, dummy_caps)
-}
-
-fn select_width_tier(
-    nav: &[KeyBinding],
-    actions: &[KeyBinding],
-    system: &[KeyBinding],
-    caps: &dyn Fn(Option<Capability>) -> bool,
-    width: u16,
-) -> WidthTier {
-    let w = width as usize;
-
-    let left_full = measure_full_width(nav, actions, system, true, caps);
-    let sys_full = measure_system(system, true);
-    if left_full + SEP_CATEGORY.chars().count() + sys_full <= w {
-        return WidthTier::Full;
-    }
-
-    let sys_no_label = measure_system(system, false);
-    if left_full + SEP_CATEGORY.chars().count() + sys_no_label <= w {
-        return WidthTier::DropSystemLabel;
-    }
-
-    // Drop action labels only; nav labels still rendered (for enabled bindings).
-    let nav_full = category_width(nav, true, caps);
-    let actions_no_labels = category_width(actions, false, caps);
-    let nav_actions_drop_act = nav_full
-        + (if !nav.is_empty() && !actions.is_empty() {
-            SEP_CATEGORY.chars().count()
-        } else {
-            0
-        })
-        + actions_no_labels;
-    if nav_actions_drop_act + SEP_CATEGORY.chars().count() + sys_no_label <= w {
-        return WidthTier::DropActionsLabels;
-    }
-
-    let nav_no_labels = category_width(nav, false, caps);
-    let total_no_nav_labels = nav_no_labels
-        + (if !nav.is_empty() && !actions.is_empty() {
-            SEP_CATEGORY.chars().count()
-        } else {
-            0
-        })
-        + actions_no_labels
-        + SEP_CATEGORY.chars().count()
-        + sys_no_label;
-    if total_no_nav_labels <= w {
-        return WidthTier::DropNavLabels;
-    }
-
-    WidthTier::FirstKeyOnly
-}
-
-fn select_simple_tier(bindings: &[KeyBinding], width: u16) -> WidthTier {
-    let w = width as usize;
-    if measure_simple_bindings(bindings, true) <= w {
-        return WidthTier::Full;
-    }
-    if measure_simple_bindings(bindings, false) <= w {
-        return WidthTier::DropNavLabels;
-    }
-    WidthTier::FirstKeyOnly
-}
-
-fn render_binding(binding: &KeyBinding, show_label: bool, enabled: bool) -> Vec<Span<'static>> {
-    if !enabled {
-        // Disabled bindings render glyph-only in the shared dim color regardless
-        // of the surrounding width tier; their action labels are never shown
-        // and were already excluded from width measurement.
-        return vec![Span::styled(
-            binding.glyph.to_string(),
-            Style::default().fg(DISABLED_DIM),
-        )];
-    }
-
-    let glyph_color = if binding.is_primary {
-        ENABLED_GLYPH_PRIMARY
-    } else {
-        ENABLED_GLYPH
-    };
-
-    let mut spans = vec![Span::styled(
-        binding.glyph.to_string(),
-        Style::default().fg(glyph_color),
-    )];
-
-    if show_label {
-        spans.push(Span::styled(
-            format!(" {}", binding.action),
-            Style::default().fg(ENABLED_ACTION),
-        ));
-    }
-
-    spans
 }
 
 fn render_category(
@@ -371,31 +251,6 @@ fn render_category(
     }
 
     spans
-}
-
-fn select_modal_tier(actions: &[KeyBinding], system: &[KeyBinding], width: u16) -> WidthTier {
-    let w = width as usize;
-
-    let act_full = measure_simple_bindings(actions, true);
-    let sys_full = measure_system(system, true);
-    let total = act_full + SEP_CATEGORY.chars().count() + sys_full;
-    if total <= w {
-        return WidthTier::Full;
-    }
-
-    let sys_no_label = measure_system(system, false);
-    let total_drop_sys = act_full + SEP_CATEGORY.chars().count() + sys_no_label;
-    if total_drop_sys <= w {
-        return WidthTier::DropSystemLabel;
-    }
-
-    let act_no_labels = measure_simple_bindings(actions, false);
-    let total_drop_act = act_no_labels + SEP_CATEGORY.chars().count() + sys_no_label;
-    if total_drop_act <= w {
-        return WidthTier::DropActionsLabels;
-    }
-
-    WidthTier::FirstKeyOnly
 }
 
 fn render_modal_keymap(
@@ -583,6 +438,7 @@ pub fn render_keymap_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::footer::keymap_view_model;
 
     fn line_text(line: &Line) -> String {
         line.spans
@@ -784,13 +640,16 @@ mod tests {
         let width = {
             let (nav, actions, system) = default_bindings();
             // Width that fits the disabled rendering exactly.
-            let left = measure_full_width(&nav, &actions, &system, true, &|cap| {
-                cap.map(|c| match c {
-                    Capability::Expand => caps_disabled.can_expand,
-                    Capability::Input => caps_disabled.can_input,
-                })
-                .unwrap_or(true)
-            });
+            let left =
+                keymap_view_model::measure_full_width(&nav, &actions, true, &|cap: Option<
+                    Capability,
+                >| {
+                    cap.map(|c| match c {
+                        Capability::Expand => caps_disabled.can_expand,
+                        Capability::Input => caps_disabled.can_input,
+                    })
+                    .unwrap_or(true)
+                });
             let sys = measure_system(&system, true);
             (left + SEP_CATEGORY.chars().count() + sys) as u16
         };

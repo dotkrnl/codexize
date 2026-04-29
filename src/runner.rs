@@ -1,9 +1,11 @@
+use crate::state;
 use crate::{
-    acp::{AcpConfig, AcpConnector, AcpLaunchRequest, ClientUpdate, PromptPayload, SubprocessConnector},
+    acp::{
+        AcpConfig, AcpConnector, AcpLaunchRequest, ClientUpdate, PromptPayload, SubprocessConnector,
+    },
     adapters::AgentRun,
     selection::VendorKind,
 };
-use crate::state;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -133,6 +135,7 @@ struct ManagedAcpLaunch {
     resolved: crate::acp::AcpResolvedLaunch,
     status_path: PathBuf,
     stamp_path: PathBuf,
+    cause_path: PathBuf,
     required_artifact: Option<PathBuf>,
 }
 
@@ -183,7 +186,14 @@ fn build_managed_acp_launch(
     Ok(ManagedAcpLaunch {
         resolved,
         status_path: status_path.to_path_buf(),
-        stamp_path: artifacts_dir.join("run-finish").join(format!("{run_key}.toml")),
+        stamp_path: artifacts_dir
+            .join("run-finish")
+            .join(format!("{run_key}.toml")),
+        // Keep transport-boundary diagnostics adjacent to finish stamps so
+        // postmortems can inspect one per-run directory.
+        cause_path: artifacts_dir
+            .join("run-finish")
+            .join(format!("{run_key}.cause.txt")),
         required_artifact: required_artifact.map(Path::to_path_buf),
     })
 }
@@ -212,6 +222,14 @@ fn write_status_code(path: &Path, exit_code: i32) -> Result<()> {
     }
     fs::write(path, exit_code.to_string())
         .with_context(|| format!("failed to write run status {}", path.display()))
+}
+
+fn write_launch_cause(path: &Path, cause: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create cause dir {}", parent.display()))?;
+    }
+    fs::write(path, cause).with_context(|| format!("failed to write cause {}", path.display()))
 }
 
 fn git_rev_parse_head() -> Option<String> {
@@ -349,8 +367,14 @@ fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
 ) {
-    if run_managed_acp_launch(launch.clone(), cancel_rx).is_ok() {
-        return;
+    match run_managed_acp_launch(launch.clone(), cancel_rx) {
+        Ok(_) => {
+            let _ = fs::remove_file(&launch.cause_path);
+            return;
+        }
+        Err(err) => {
+            let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
+        }
     }
 
     let fallback_head_before = git_rev_parse_head().unwrap_or_default();
@@ -396,7 +420,10 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
     let mut guard = active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if guard.values().any(|run| !run.finished.load(Ordering::SeqCst)) {
+    if guard
+        .values()
+        .any(|run| !run.finished.load(Ordering::SeqCst))
+    {
         bail!("codexize only supports one active ACP run at a time");
     }
 
@@ -463,7 +490,9 @@ pub fn shutdown_all_runs() {
         let mut guard = active_acp_runs()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *guard).into_values().collect::<Vec<_>>()
+        std::mem::take(&mut *guard)
+            .into_values()
+            .collect::<Vec<_>>()
     };
 
     for mut run in runs {

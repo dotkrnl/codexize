@@ -53,28 +53,6 @@ fn test_validate_toml_artifacts_mix_missing_and_malformed() {
 }
 
 #[test]
-fn test_extract_model_from_flag() {
-    let cmd = vec![
-        "claude".to_string(),
-        "--model".to_string(),
-        "opus-4".to_string(),
-    ];
-    assert_eq!(extract_model(&cmd), "opus-4");
-}
-
-#[test]
-fn test_extract_model_from_equals() {
-    let cmd = vec!["claude".to_string(), "--model=sonnet-4".to_string()];
-    assert_eq!(extract_model(&cmd), "sonnet-4");
-}
-
-#[test]
-fn test_extract_model_fallback_to_binary() {
-    let cmd = vec!["/usr/bin/claude".to_string(), "--fast".to_string()];
-    assert_eq!(extract_model(&cmd), "claude");
-}
-
-#[test]
 fn finish_stamp_round_trip() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("stamp.toml");
@@ -231,102 +209,6 @@ head_state = "unstable"
     .unwrap();
     let stamp = read_finish_stamp(&path).unwrap();
     assert_eq!(stamp.signal_received, "");
-}
-
-#[test]
-fn run_returns_err_on_empty_command() {
-    let result = run(
-        "test-empty-cmd-session".to_string(),
-        "audit".to_string(),
-        "auditor".to_string(),
-        vec![],
-        vec![],
-    );
-    assert!(result.is_err(), "empty command must error, not panic");
-    let msg = format!("{:#}", result.unwrap_err());
-    assert!(
-        msg.contains("no command provided"),
-        "unexpected error message: {msg}"
-    );
-}
-
-fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let temp = tempfile::TempDir::new().unwrap();
-    let prev = std::env::var_os("CODEXIZE_ROOT");
-    // SAFETY: serialized via test_fs_lock; restored unconditionally.
-    unsafe {
-        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
-    }
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe {
-        match prev {
-            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
-            None => std::env::remove_var("CODEXIZE_ROOT"),
-        }
-    }
-    outcome.unwrap()
-}
-
-#[test]
-fn run_succeeds_on_zero_exit_with_no_required_artifacts() {
-    with_temp_codexize_root(|| {
-        // `true` is a POSIX no-op that exits 0 with no output.
-        let result = run(
-            "test-runner-true".to_string(),
-            "audit".to_string(),
-            "auditor".to_string(),
-            vec![],
-            vec!["true".to_string()],
-        );
-        assert!(result.is_ok(), "true should succeed: {:?}", result.err());
-        // The runner writes a per-role log alongside the session dir.
-        let log_path = state::session_dir("test-runner-true").join("auditor.log");
-        assert!(log_path.exists(), "expected log at {log_path:?}");
-    });
-}
-
-#[test]
-fn run_returns_err_when_required_artifact_missing() {
-    with_temp_codexize_root(|| {
-        let dir = tempfile::TempDir::new().unwrap();
-        let missing = dir.path().join("never-created.toml");
-        let result = run(
-            "test-runner-missing".to_string(),
-            "audit".to_string(),
-            "auditor".to_string(),
-            vec![missing.to_string_lossy().into_owned()],
-            vec!["true".to_string()],
-        );
-        let err = result.expect_err("missing artifact must error");
-        let msg = format!("{:#}", err);
-        assert!(
-            msg.contains("required artifacts are missing"),
-            "missing-artifact error context: {msg}"
-        );
-    });
-}
-
-#[test]
-fn run_returns_err_when_command_exits_nonzero() {
-    with_temp_codexize_root(|| {
-        // `false` exits with status 1.
-        let result = run(
-            "test-runner-false".to_string(),
-            "audit".to_string(),
-            "auditor".to_string(),
-            vec![],
-            vec!["false".to_string()],
-        );
-        let err = result.expect_err("nonzero exit must error");
-        let msg = format!("{:#}", err);
-        assert!(
-            msg.contains("agent command failed"),
-            "exit-status error context: {msg}"
-        );
-    });
 }
 
 #[test]
@@ -526,14 +408,14 @@ fn launch_test_run(dir: &Path) -> AgentRun {
     }
 }
 
-fn wait_for_window_to_finish(window_name: &str) {
+fn wait_for_run_label_to_finish(window_name: &str) {
     for _ in 0..200 {
-        if !window_is_active(window_name) {
+        if !run_label_is_active(window_name) {
             return;
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    panic!("managed ACP window did not finish: {window_name}");
+    panic!("managed ACP run label did not finish: {window_name}");
 }
 
 #[test]
@@ -541,7 +423,7 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("status.txt");
+
     let artifacts_dir = dir.path().join("artifacts");
     with_test_env(
         dir.path(),
@@ -554,7 +436,6 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "run-1",
                 &artifacts_dir,
                 None,
@@ -574,7 +455,7 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir.path().join("artifacts").join("status.txt");
+
     let artifacts_dir = dir.path().join("artifacts");
     with_test_env(
         dir.path(),
@@ -587,7 +468,6 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "run-2",
                 &artifacts_dir,
                 None,
@@ -603,16 +483,11 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
 }
 
 #[test]
-fn acp_launch_writes_finish_stamp_and_status_on_success() {
+fn acp_launch_writes_finish_stamp_on_success() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("coder_summary.toml");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
@@ -634,21 +509,13 @@ fn acp_launch_writes_finish_stamp_and_status_on_success() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
             .expect("launch ACP run");
 
-            wait_for_window_to_finish("[Coder]");
-
-            assert_eq!(
-                fs::read_to_string(&status_path)
-                    .expect("read status")
-                    .trim(),
-                "0"
-            );
+            wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 0);
             assert_eq!(stamp.head_state, "stable");
@@ -670,7 +537,6 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
         .join("sessions")
         .join(session_id)
         .join("artifacts");
-    let status_path = artifacts_dir.join("run-status").join("coder.txt");
     let mut state = crate::state::SessionState::new(session_id.to_string());
     let run_id = state.create_run_record(
         "coder".to_string(),
@@ -700,14 +566,13 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 None,
             )
             .expect("launch ACP run");
 
-            wait_for_window_to_finish("[Coder]");
+            wait_for_run_label_to_finish("[Coder]");
 
             let messages =
                 crate::state::SessionState::load_messages(session_id).expect("load messages");
@@ -730,11 +595,6 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("coder_summary.toml");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
@@ -752,21 +612,13 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
             .expect("launch ACP run");
 
-            wait_for_window_to_finish("[Coder]");
-
-            assert_eq!(
-                fs::read_to_string(&status_path)
-                    .expect("read status")
-                    .trim(),
-                "1"
-            );
+            wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 1);
             assert!(!artifact_path.exists(), "artifact should be absent");
@@ -780,11 +632,6 @@ fn acp_launch_marks_early_process_exit_as_failed() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
     with_test_env(
@@ -801,21 +648,13 @@ fn acp_launch_marks_early_process_exit_as_failed() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 None,
             )
             .expect("launch ACP run");
 
-            wait_for_window_to_finish("[Coder]");
-
-            assert_eq!(
-                fs::read_to_string(&status_path)
-                    .expect("read status")
-                    .trim(),
-                "1"
-            );
+            wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 1);
         },
@@ -828,11 +667,6 @@ fn acp_launch_records_cause_when_transport_init_fails() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
     let cause_path = artifacts_dir.join("run-finish").join("coder-run.cause.txt");
@@ -850,21 +684,13 @@ fn acp_launch_records_cause_when_transport_init_fails() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 None,
             )
             .expect("launch ACP run");
 
-            wait_for_window_to_finish("[Coder]");
-
-            assert_eq!(
-                fs::read_to_string(&status_path)
-                    .expect("read status")
-                    .trim(),
-                "1"
-            );
+            wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 1);
             let cause = fs::read_to_string(&cause_path).expect("read launch cause");
@@ -882,11 +708,6 @@ fn acp_launch_enforces_single_active_run() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     with_test_env(
         dir.path(),
@@ -902,7 +723,6 @@ fn acp_launch_enforces_single_active_run() {
                 "[Coder 1]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-one",
                 &artifacts_dir,
                 None,
@@ -913,7 +733,6 @@ fn acp_launch_enforces_single_active_run() {
                 "[Coder 2]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-two",
                 &artifacts_dir,
                 None,
@@ -925,8 +744,8 @@ fn acp_launch_enforces_single_active_run() {
                 "unexpected error: {msg}"
             );
 
-            cancel_windows_matching("[Coder 1]");
-            wait_for_window_to_finish("[Coder 1]");
+            cancel_run_labels_matching("[Coder 1]");
+            wait_for_run_label_to_finish("[Coder 1]");
         },
     );
 }
@@ -937,11 +756,6 @@ fn acp_launch_cleans_up_child_on_cancel() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("coder.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let stamp_path = artifacts_dir.join("run-finish").join("coder-run.toml");
     with_test_env(
@@ -958,22 +772,14 @@ fn acp_launch_cleans_up_child_on_cancel() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "coder-run",
                 &artifacts_dir,
                 None,
             )
             .expect("launch ACP run");
 
-            cancel_windows_matching("[Coder]");
-            wait_for_window_to_finish("[Coder]");
-
-            assert_eq!(
-                fs::read_to_string(&status_path)
-                    .expect("read status")
-                    .trim(),
-                "143"
-            );
+            cancel_run_labels_matching("[Coder]");
+            wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
             assert_eq!(stamp.exit_code, 143);
             assert_eq!(stamp.signal_received, "TERM");
@@ -987,11 +793,6 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
     init_git_repo(dir.path());
     let script = write_test_acp_script(dir.path());
     let run = launch_test_run(dir.path());
-    let status_path = dir
-        .path()
-        .join("artifacts")
-        .join("run-status")
-        .join("stage.txt");
     let artifacts_dir = dir.path().join("artifacts");
     let artifact_path = artifacts_dir.join("stage.toml");
     let log_path = dir.path().join("agent-pids.log");
@@ -1014,25 +815,23 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
                 "[Stage 1]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "stage-one",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
             .expect("first launch");
-            wait_for_window_to_finish("[Stage 1]");
+            wait_for_run_label_to_finish("[Stage 1]");
 
             launch_noninteractive(
                 "[Stage 2]",
                 &run,
                 VendorKind::Codex,
-                &status_path,
                 "stage-two",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
             .expect("second launch");
-            wait_for_window_to_finish("[Stage 2]");
+            wait_for_run_label_to_finish("[Stage 2]");
 
             let pids = fs::read_to_string(&log_path)
                 .expect("read pid log")

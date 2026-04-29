@@ -6,26 +6,8 @@ use crate::{
     tasks,
 };
 use anyhow::Context;
-pub(super) fn kill_window(base: &str) {
-    crate::runner::cancel_windows_matching(base);
-    // Windows are now named "[Base] <model>", so match by prefix: exact match
-    // or the base followed by a space. The base ends with `]`, which prevents
-    // `[Builder r1]` from accidentally matching `[Builder r10]`, etc.
-    let prefix = format!("{base} ");
-    let Ok(output) = std::process::Command::new("tmux")
-        .args(["list-windows", "-F", "#{window_name}"])
-        .output()
-    else {
-        return;
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for name in stdout.lines() {
-        if name == base || name.starts_with(&prefix) {
-            let _ = std::process::Command::new("tmux")
-                .args(["kill-window", "-t", name])
-                .output();
-        }
-    }
+pub(super) fn cancel_run_label(base: &str) {
+    crate::runner::cancel_run_labels_matching(base);
 }
 
 pub(super) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {

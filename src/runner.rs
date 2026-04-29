@@ -1,4 +1,3 @@
-use crate::state;
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use crate::{
     acp::{
@@ -12,7 +11,6 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
     sync::{
@@ -137,7 +135,6 @@ struct ManagedAcpLaunch {
     resolved: crate::acp::AcpResolvedLaunch,
     window_name: String,
     session_id: Option<String>,
-    status_path: PathBuf,
     stamp_path: PathBuf,
     cause_path: PathBuf,
     required_artifact: Option<PathBuf>,
@@ -160,7 +157,6 @@ fn build_managed_acp_launch(
     window_name: &str,
     vendor: VendorKind,
     run: &AgentRun,
-    status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
@@ -193,7 +189,6 @@ fn build_managed_acp_launch(
         resolved,
         window_name: window_name.to_string(),
         session_id: session_id_from_artifacts_dir(artifacts_dir),
-        status_path: status_path.to_path_buf(),
         stamp_path: artifacts_dir
             .join("run-finish")
             .join(format!("{run_key}.toml")),
@@ -220,15 +215,6 @@ fn session_id_from_artifacts_dir(artifacts_dir: &Path) -> Option<String> {
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .map(str::to_string)
-}
-
-fn write_status_code(path: &Path, exit_code: i32) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create status dir {}", parent.display()))?;
-    }
-    fs::write(path, exit_code.to_string())
-        .with_context(|| format!("failed to write run status {}", path.display()))
 }
 
 fn write_launch_cause(path: &Path, cause: &str) -> Result<()> {
@@ -458,7 +444,6 @@ fn run_managed_acp_launch(
         }
     };
 
-    write_status_code(&launch.status_path, outcome.exit_code)?;
     write_finish_stamp_for_outcome(&launch.stamp_path, head_before, &outcome)?;
     Ok(outcome)
 }
@@ -482,7 +467,6 @@ fn finalize_managed_acp_launch(
         exit_code: 1,
         signal_received: String::new(),
     };
-    let _ = write_status_code(&launch.status_path, outcome.exit_code);
     let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, &outcome);
 }
 
@@ -546,7 +530,7 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
     Ok(())
 }
 
-pub fn window_is_active(window_name: &str) -> bool {
+pub fn run_label_is_active(window_name: &str) -> bool {
     cleanup_finished_acp_runs();
     active_acp_runs()
         .lock()
@@ -555,7 +539,7 @@ pub fn window_is_active(window_name: &str) -> bool {
         .is_some_and(|run| !run.finished.load(Ordering::SeqCst))
 }
 
-pub fn cancel_windows_matching(base: &str) {
+pub fn cancel_run_labels_matching(base: &str) {
     let prefix = format!("{base} ");
     let matching = {
         let guard = active_acp_runs()
@@ -578,11 +562,11 @@ pub fn cancel_windows_matching(base: &str) {
     }
 }
 
-pub fn request_window_exit(window_name: &str) {
+pub fn request_run_label_exit(window_name: &str) {
     // Until the interactive ACP command surface lands, local `/exit` requests
     // resolve by closing the managed ACP session directly so task-finish and
     // yolo cleanup still terminate the child process deterministically.
-    cancel_windows_matching(window_name);
+    cancel_run_labels_matching(window_name);
 }
 
 pub fn shutdown_all_runs() {
@@ -601,99 +585,6 @@ pub fn shutdown_all_runs() {
             let _ = handle.join();
         }
     }
-}
-
-pub fn run(
-    session_id: String,
-    phase: String,
-    role: String,
-    artifacts: Vec<String>,
-    command: Vec<String>,
-) -> Result<()> {
-    let (program, args) = command
-        .split_first()
-        .ok_or_else(|| anyhow!("no command provided to agent-run"))?;
-
-    let dir = state::session_dir(&session_id);
-    fs::create_dir_all(&dir)?;
-
-    let log_path = dir.join(format!("{role}.log"));
-    let mut log_file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-
-    writeln!(
-        log_file,
-        "--- Agent Run Started: phase={phase}, role={role} ---"
-    )?;
-    writeln!(log_file, "Command: {command:?}")?;
-    if !artifacts.is_empty() {
-        writeln!(log_file, "Required artifacts: {artifacts:?}")?;
-    }
-
-    print_title_box(&phase, &role, &command);
-
-    let mut child = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to spawn: {:?}", command))?;
-
-    // The piped stdio setup above is a documented invariant, but keep this as
-    // a recoverable error so process-boundary failures never become panics.
-    let stdout = child
-        .stdout
-        .take()
-        .context("runner stdout pipe missing after piped spawn")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("runner stderr pipe missing after piped spawn")?;
-
-    let mut log_out = log_file.try_clone()?;
-    let stdout_handle = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            println!("{line}");
-            let _ = writeln!(log_out, "[OUT] {line}");
-        }
-    });
-
-    let mut log_err = log_file.try_clone()?;
-    let stderr_handle = std::thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            let _ = writeln!(log_err, "[ERR] {line}");
-        }
-    });
-
-    let status = child.wait()?;
-    let _ = stdout_handle.join();
-    let _ = stderr_handle.join();
-
-    writeln!(log_file, "--- Agent Run Finished: status={status} ---")?;
-
-    // Validate required artifacts regardless of exit status
-    let mut missing: Vec<&str> = Vec::new();
-    for path in &artifacts {
-        if !PathBuf::from(path).exists() {
-            missing.push(path);
-            writeln!(log_file, "[MISSING ARTIFACT] {path}")?;
-        }
-    }
-
-    if !missing.is_empty() {
-        bail!(
-            "agent exited but required artifacts are missing:\n{}",
-            missing.join("\n")
-        );
-    }
-
-    if !status.success() {
-        bail!("agent command failed with status: {status}");
-    }
-
-    Ok(())
 }
 
 /// Validate that all required TOML artifacts exist and are parseable.
@@ -732,7 +623,6 @@ pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
     vendor: VendorKind,
-    status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
@@ -741,7 +631,6 @@ pub fn launch_interactive(
         window_name,
         vendor,
         run,
-        status_path,
         run_key,
         artifacts_dir,
         required_artifact,
@@ -757,7 +646,6 @@ pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
     vendor: VendorKind,
-    status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
@@ -766,7 +654,6 @@ pub fn launch_noninteractive(
         window_name,
         vendor,
         run,
-        status_path,
         run_key,
         artifacts_dir,
         required_artifact,
@@ -809,38 +696,6 @@ pub fn run_child_with_timeout(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-fn extract_model(command: &[String]) -> String {
-    let mut it = command.iter();
-    while let Some(arg) = it.next() {
-        if arg == "--model" || arg == "-m" {
-            if let Some(val) = it.next() {
-                return val.clone();
-            }
-        } else if let Some(val) = arg.strip_prefix("--model=") {
-            return val.to_string();
-        }
-    }
-    command
-        .first()
-        .and_then(|bin| std::path::Path::new(bin).file_name())
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-fn print_title_box(phase: &str, role: &str, command: &[String]) {
-    let model = extract_model(command);
-    let line = format!(" {role} · {phase} · model: {model} ");
-    let width = line.chars().count().max(40);
-    let pad = width - line.chars().count();
-    let top = format!("╭{}╮", "─".repeat(width));
-    let mid = format!("│{line}{}│", " ".repeat(pad));
-    let bot = format!("╰{}╯", "─".repeat(width));
-    println!("{top}");
-    println!("{mid}");
-    println!("{bot}");
 }
 
 #[cfg(test)]

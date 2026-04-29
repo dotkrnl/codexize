@@ -1,7 +1,7 @@
 // launch.rs
 use super::*;
 use crate::{
-    adapters::{AgentRun, EffortLevel, window_name_with_model},
+    adapters::{AgentRun, EffortLevel, run_label_with_model},
     artifacts::ArtifactKind,
     runner::{launch_interactive, launch_noninteractive},
     selection::{
@@ -21,14 +21,13 @@ use super::{models::vendor_tag, prompts::*};
 impl App {
     pub(super) fn try_test_launch(
         &mut self,
-        status_path: &std::path::Path,
         artifact_path: Option<&std::path::Path>,
         run_key: &str,
         artifacts_dir: &std::path::Path,
     ) -> Option<Result<()>> {
         #[cfg(not(test))]
         {
-            let _ = (status_path, artifact_path, run_key, artifacts_dir);
+            let _ = (artifact_path, run_key, artifacts_dir);
             None
         }
         #[cfg(test)]
@@ -44,10 +43,6 @@ impl App {
                 if let Some(error) = outcome.launch_error {
                     anyhow::bail!(error);
                 }
-                if let Some(parent) = status_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::write(status_path, outcome.exit_code.to_string())?;
                 if let (Some(path), Some(contents)) = (artifact_path, outcome.artifact_contents) {
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -193,7 +188,7 @@ impl App {
         if run.modes.interactive {
             self.palette.open();
         }
-        self.window_launched = true;
+        self.run_launched = true;
         self.live_summary_path =
             Some(self.live_summary_path_for_run(stage, task_id, round, attempt));
         self.live_summary_cached_text.clear();
@@ -315,7 +310,6 @@ impl App {
             effort,
             modes,
         };
-        let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
             None,
@@ -324,22 +318,18 @@ impl App {
             guard::GuardMode::AutoReset,
         );
         let window_name =
-            window_name_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
+            run_label_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result = if let Some(result) = self.try_test_launch(
-            &status_path,
-            Some(&plan_review_path),
-            &run_key,
-            &artifacts_dir,
-        ) {
+        let launch_result = if let Some(result) =
+            self.try_test_launch(Some(&plan_review_path), &run_key, &artifacts_dir)
+        {
             result
         } else {
             launch_noninteractive(
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_review_path),
@@ -445,7 +435,6 @@ impl App {
             effort,
             modes,
         };
-        let status_path = self.run_status_path_for("sharding", None, round, attempt);
         let dirty = self.capture_run_guard(
             "sharding",
             None,
@@ -453,12 +442,11 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name =
-            window_name_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&tasks_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -466,7 +454,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&tasks_path),
@@ -577,19 +564,17 @@ impl App {
             effort,
             modes,
         };
-
-        let status_path = self.run_status_path_for("brainstorm", None, 1, attempt);
         let guard_mode = if modes.yolo {
             guard::GuardMode::AutoReset
         } else {
             guard::GuardMode::AskOperator
         };
         let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard_mode);
-        let window_name = window_name_with_model("[Brainstorm]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model("[Brainstorm]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&spec_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&spec_path), &run_key, &artifacts_dir)
         {
             result
         } else if modes.yolo {
@@ -597,7 +582,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&spec_path),
@@ -607,7 +591,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&spec_path),
@@ -763,13 +746,12 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(
+        let window_name = run_label_with_model(
             &format!("[Spec Review {round}]"),
             &model,
             vendor_kind,
             effort,
         );
-        let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "spec-review",
             None,
@@ -780,7 +762,7 @@ impl App {
         let run_key = Self::run_key_for("spec-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&review_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -788,7 +770,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),
@@ -898,18 +879,17 @@ impl App {
 
         // YOLO planning must take the existing non-interactive runner path.
         let interactive = interactive && !modes.yolo;
-        let status_path = self.run_status_path_for("planning", None, 1, attempt);
         let guard_mode = if interactive {
             guard::GuardMode::AskOperator
         } else {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
-        let window_name = window_name_with_model("[Planning]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model("[Planning]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&plan_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&plan_path), &run_key, &artifacts_dir)
         {
             result
         } else if interactive {
@@ -917,7 +897,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
@@ -927,7 +906,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
@@ -1039,13 +1017,12 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(
+        let window_name = run_label_with_model(
             &format!("[Plan Review {round}]"),
             &model,
             vendor_kind,
             effort,
         );
-        let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
             None,
@@ -1056,7 +1033,7 @@ impl App {
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&review_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -1064,7 +1041,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),
@@ -1152,15 +1128,13 @@ impl App {
             effort,
             modes,
         };
-
-        let status_path = self.run_status_path_for("sharding", None, 1, attempt);
         let dirty =
             self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
-        let window_name = window_name_with_model("[Sharding]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model("[Sharding]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&tasks_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -1168,7 +1142,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&tasks_path),
@@ -1292,18 +1265,17 @@ impl App {
             effort,
             modes,
         };
-        let status_path = self.run_status_path_for("recovery", None, round, attempt);
         let recovery_guard_mode = if is_human_blocked {
             guard::GuardMode::AskOperator
         } else {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
-        let window_name = window_name_with_model("[Recovery]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model("[Recovery]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&tasks_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&tasks_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -1312,7 +1284,6 @@ impl App {
                     &window_name,
                     &run,
                     vendor_kind,
-                    &status_path,
                     &run_key,
                     &artifacts_dir,
                     Some(&tasks_path),
@@ -1322,7 +1293,6 @@ impl App {
                     &window_name,
                     &run,
                     vendor_kind,
-                    &status_path,
                     &run_key,
                     &artifacts_dir,
                     Some(&tasks_path),
@@ -1450,8 +1420,7 @@ impl App {
         };
 
         let window_name =
-            window_name_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
-        let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
+            run_label_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
         self.capture_run_guard(
             "coder",
             Some(task_id),
@@ -1461,21 +1430,19 @@ impl App {
         );
         let run_key = Self::run_key_for("coder", Some(task_id), r, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
-        let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, None, &run_key, &artifacts_dir)
-        {
-            result
-        } else {
-            launch_noninteractive(
-                &window_name,
-                &run,
-                vendor_kind,
-                &status_path,
-                &run_key,
-                &artifacts_dir,
-                None,
-            )
-        };
+        let launch_result =
+            if let Some(result) = self.try_test_launch(None, &run_key, &artifacts_dir) {
+                result
+            } else {
+                launch_noninteractive(
+                    &window_name,
+                    &run,
+                    vendor_kind,
+                    &run_key,
+                    &artifacts_dir,
+                    None,
+                )
+            };
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
@@ -1598,13 +1565,12 @@ impl App {
             modes,
         };
 
-        let window_name = window_name_with_model(
+        let window_name = run_label_with_model(
             &format!("[Round {r} Reviewer]"),
             &model,
             vendor_kind,
             effort,
         );
-        let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard(
             "reviewer",
             Some(task_id),
@@ -1615,7 +1581,7 @@ impl App {
         let run_key = Self::run_key_for("reviewer", Some(task_id), r, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(&status_path, Some(&review_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&review_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -1623,7 +1589,6 @@ impl App {
                 &window_name,
                 &run,
                 vendor_kind,
-                &status_path,
                 &run_key,
                 &artifacts_dir,
                 Some(&review_path),

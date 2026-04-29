@@ -985,10 +985,7 @@ fn app_new_rebuilds_failed_models_without_force_retry_runs() {
         });
         state.save().expect("save session");
 
-        let app = App::new(
-            mk_tmux(),
-            SessionState::load(session_id).expect("load session"),
-        );
+        let app = App::new(SessionState::load(session_id).expect("load session"));
 
         let key = ("coder".to_string(), Some(7), 3);
         let failed = app
@@ -1043,7 +1040,7 @@ fn non_coder_missing_stamp_warns_and_still_retries_after_timeout() {
         let _ = std::fs::remove_file(app.live_summary_path_for(&first));
 
         app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let warn = app
             .messages
@@ -1150,7 +1147,7 @@ fn app_new_rebuild_failed_models_skips_builder_failures_before_retry_reset_cutof
             mount_device_id: None,
         });
         state.save().expect("save");
-        let app = App::new(mk_tmux(), SessionState::load(session_id).expect("load"));
+        let app = App::new(SessionState::load(session_id).expect("load"));
         let key = ("coder".to_string(), Some(1), 1);
         let failed = app.failed_models.get(&key).expect("failed set");
         assert_eq!(failed.len(), 1);
@@ -1658,9 +1655,8 @@ fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
                 }]),
             },
         )));
-        std::fs::create_dir_all(app.run_status_path(&removed_run).parent().unwrap())
-            .expect("status dir");
-        std::fs::write(app.run_status_path(&removed_run), "1").expect("status");
+
+        write_finish_stamp_for_run(&app, &removed_run, 1, "");
         std::fs::write(app.live_summary_path_for(&removed_run), "old summary").expect("summary");
         app.rebuild_tree_view(None);
         app.selected = row_index(&app, "Task 1");
@@ -1808,9 +1804,8 @@ fn palette_retry_clears_brainstorm_attempt_logs_and_relaunches() {
                 }]),
             },
         )));
-        std::fs::create_dir_all(app.run_status_path(&removed_run).parent().unwrap())
-            .expect("status dir");
-        std::fs::write(app.run_status_path(&removed_run), "1").expect("status");
+
+        write_finish_stamp_for_run(&app, &removed_run, 1, "");
         std::fs::write(app.live_summary_path_for(&removed_run), "old summary").expect("summary");
         app.rebuild_tree_view(None);
         app.selected = row_index(&app, "Brainstorm");
@@ -1906,10 +1901,7 @@ fn pending_guard_resume_fail_closed_when_decision_missing() {
         state.builder.recovery_trigger_summary = Some("stale guard context".to_string());
         state.save().expect("save");
 
-        let app = App::new(
-            mk_tmux(),
-            SessionState::load(session_id).expect("load session"),
-        );
+        let app = App::new(SessionState::load(session_id).expect("load session"));
         assert_eq!(
             app.state.current_phase,
             Phase::BlockedNeedsUser,
@@ -1944,10 +1936,7 @@ fn pending_guard_resume_restores_modal_when_decision_present() {
         });
         state.save().expect("save");
 
-        let app = App::new(
-            mk_tmux(),
-            SessionState::load(session_id).expect("load session"),
-        );
+        let app = App::new(SessionState::load(session_id).expect("load session"));
         assert_eq!(app.state.current_phase, Phase::GitGuardPending);
         assert!(app.state.pending_guard_decision.is_some());
     });
@@ -1971,10 +1960,7 @@ fn pending_guard_stale_decision_cleared_on_resume() {
         });
         state.save().expect("save");
 
-        let app = App::new(
-            mk_tmux(),
-            SessionState::load(session_id).expect("load session"),
-        );
+        let app = App::new(SessionState::load(session_id).expect("load session"));
         assert!(
             app.state.pending_guard_decision.is_none(),
             "stale pending_guard_decision must be cleared on resume"

@@ -5,7 +5,6 @@ use crate::{
         Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
         SessionState,
     },
-    tmux::TmuxContext,
 };
 use ratatui::layout::Rect;
 use std::{
@@ -24,11 +23,6 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
     App {
-        tmux: TmuxContext {
-            session_name: "test".to_string(),
-            window_index: "0".to_string(),
-            window_name: "test".to_string(),
-        },
         state,
         nodes,
         visible_rows,
@@ -50,7 +44,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         input_cursor: 0,
         pending_view_path: None,
         confirm_back: false,
-        window_launched: false,
+        run_launched: false,
         quota_errors: Vec::new(),
         quota_retry_delay: Duration::from_secs(60),
         agent_line_count: 0,

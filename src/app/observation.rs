@@ -63,7 +63,7 @@ impl App {
     }
 
     pub(super) fn poll_live_summary_fallback(&mut self) {
-        if !self.window_launched {
+        if !self.run_launched {
             self.live_summary_cached_text.clear();
             self.live_summary_cached_mtime = None;
             return;
@@ -102,7 +102,7 @@ impl App {
         let Some(run) = self.running_run() else {
             return;
         };
-        if !self.window_exists(&run.window_name) {
+        if !self.active_run_exists(&run.window_name) {
             return;
         }
         let Some(path) = self.live_summary_path.clone() else {

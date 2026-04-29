@@ -31,14 +31,6 @@ pub(super) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     result.expect("test panicked")
 }
 
-pub(super) fn mk_tmux() -> TmuxContext {
-    TmuxContext {
-        session_name: "test".to_string(),
-        window_index: "0".to_string(),
-        window_name: "test".to_string(),
-    }
-}
-
 pub(super) fn mk_state_with_runs() -> SessionState {
     let mut state = SessionState::new("t".to_string());
     state.current_phase = Phase::SpecReviewRunning;
@@ -93,7 +85,6 @@ pub(super) fn mk_app(state: SessionState) -> App {
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
     let mut app = App {
-        tmux: mk_tmux(),
         state,
         nodes,
         visible_rows: Vec::new(),
@@ -115,7 +106,7 @@ pub(super) fn mk_app(state: SessionState) -> App {
         input_cursor: 0,
         pending_view_path: None,
         confirm_back: false,
-        window_launched: true,
+        run_launched: true,
         quota_errors: Vec::new(),
         quota_retry_delay: Duration::from_secs(60),
         agent_line_count: 0,
@@ -234,6 +225,25 @@ pub(super) fn write_finish_stamp(
     crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
 }
 
+pub(super) fn write_finish_stamp_for_run(
+    app: &App,
+    run: &RunRecord,
+    exit_code: i32,
+    signal_received: &str,
+) {
+    let stamp = crate::runner::FinishStamp {
+        finished_at: chrono::Utc::now().to_rfc3339(),
+        exit_code,
+        head_before: "base123".to_string(),
+        head_after: "head123".to_string(),
+        head_state: "stable".to_string(),
+        signal_received: signal_received.to_string(),
+        working_tree_clean: true,
+    };
+    crate::runner::write_finish_stamp(&app.finish_stamp_path_for(run), &stamp)
+        .expect("write finish stamp");
+}
+
 pub(super) fn build_progress_follow_app(state: SessionState, current_run_id: u64) -> App {
     let mut app = mk_app(state);
     app.current_run_id = Some(current_run_id);
@@ -345,7 +355,6 @@ pub(super) fn idle_app(state: SessionState) -> App {
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
     let mut app = App {
-        tmux: mk_tmux(),
         state,
         nodes,
         visible_rows: Vec::new(),
@@ -367,7 +376,7 @@ pub(super) fn idle_app(state: SessionState) -> App {
         input_cursor: 0,
         pending_view_path: None,
         confirm_back: false,
-        window_launched: false,
+        run_launched: false,
         quota_errors: Vec::new(),
         quota_retry_delay: Duration::from_secs(60),
         agent_line_count: 0,

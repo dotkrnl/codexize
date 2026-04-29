@@ -20,6 +20,5 @@ pub mod smoke;
 pub mod state;
 pub mod synthetic_artifacts;
 pub mod tasks;
-pub mod tmux;
 pub mod tui;
 pub mod warmup;

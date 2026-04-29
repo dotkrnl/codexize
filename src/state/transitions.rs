@@ -477,11 +477,8 @@ pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Ph
     state.current_phase = originating;
 }
 
-pub fn resume_running_runs(
-    state: &mut SessionState,
-    live_windows: &[String],
-) -> Result<Option<u64>> {
-    state.resume_running_runs(live_windows)
+pub fn resume_running_runs(state: &mut SessionState) -> Result<Option<u64>> {
+    state.resume_running_runs()
 }
 
 /// Per-stage definition of which artifacts are passed by pointer and which are

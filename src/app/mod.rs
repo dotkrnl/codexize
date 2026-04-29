@@ -45,7 +45,6 @@ use crate::{
     cache,
     selection::{CachedModel, QuotaError, VendorKind, ranking::VersionIndex},
     state::{Message, Node, SessionState},
-    tmux::TmuxContext,
 };
 
 use self::{
@@ -77,7 +76,6 @@ struct ObservedPathState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct YoloExitSnapshot {
     live_summary: ObservedPathState,
-    run_status: ObservedPathState,
     finish_stamp: ObservedPathState,
     stage_artifacts: Vec<ObservedPathState>,
 }
@@ -131,8 +129,6 @@ struct TestLaunchHarness {
 
 #[derive(Debug)]
 pub struct App {
-    #[allow(dead_code)]
-    tmux: TmuxContext,
     state: SessionState,
     nodes: Vec<Node>,
     visible_rows: Vec<VisibleNodeRow>,
@@ -163,7 +159,7 @@ pub struct App {
     input_cursor: usize,
     pending_view_path: Option<std::path::PathBuf>,
     confirm_back: bool,
-    window_launched: bool,
+    run_launched: bool,
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,
     agent_line_count: usize,

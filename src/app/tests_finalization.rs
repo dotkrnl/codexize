@@ -36,10 +36,8 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             hostname: None,
             mount_device_id: None,
         };
-        std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
-            .expect("create status dir");
 
-        std::fs::write(app.run_status_path(&run), "1").expect("write exit code");
+        write_finish_stamp_for_run(&app, &run, 1, "");
         assert_eq!(
             app.normalized_failure_reason(&run).expect("exit reason"),
             Some("exit(1)".to_string())
@@ -59,7 +57,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             },
         )
         .expect("write signal stamp");
-        std::fs::write(app.run_status_path(&run), "143").expect("write signal exit");
+        write_finish_stamp_for_run(&app, &run, 143, "");
         assert_eq!(
             app.normalized_failure_reason(&run).expect("signal reason"),
             Some("killed(15) [agent exited 143]".to_string())
@@ -83,12 +81,6 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             hostname: None,
             mount_device_id: None,
         };
-        std::fs::create_dir_all(
-            app.run_status_path(&hup_run)
-                .parent()
-                .expect("status dir for hup"),
-        )
-        .expect("create hup status dir");
         crate::runner::write_finish_stamp(
             &app.finish_stamp_path_for(&hup_run),
             &crate::runner::FinishStamp {
@@ -102,7 +94,6 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             },
         )
         .expect("write hup stamp");
-        std::fs::write(app.run_status_path(&hup_run), "129").expect("write hup exit");
         assert_eq!(
             app.normalized_failure_reason(&hup_run)
                 .expect("hup signal reason"),
@@ -127,12 +118,6 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             hostname: None,
             mount_device_id: None,
         };
-        std::fs::create_dir_all(
-            app.run_status_path(&self_exit_run)
-                .parent()
-                .expect("status dir for self-exit"),
-        )
-        .expect("create self-exit status dir");
         crate::runner::write_finish_stamp(
             &app.finish_stamp_path_for(&self_exit_run),
             &crate::runner::FinishStamp {
@@ -146,7 +131,6 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             },
         )
         .expect("write self-exit stamp");
-        std::fs::write(app.run_status_path(&self_exit_run), "129").expect("write self-exit exit");
         assert_eq!(
             app.normalized_failure_reason(&self_exit_run)
                 .expect("self-exit reason"),
@@ -161,7 +145,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
                 "self-exit diagnostic must be logged explicitly: {events_text}"
             );
 
-        std::fs::write(app.run_status_path(&run), "0").expect("write clean exit");
+        write_finish_stamp_for_run(&app, &run, 0, "");
         assert_eq!(
             app.normalized_failure_reason(&run)
                 .expect("missing artifact"),
@@ -180,7 +164,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             window_name: "[Brainstorm]".to_string(),
             ..run.clone()
         };
-        std::fs::write(app.run_status_path(&brainstorm), "0").expect("clean brainstorm exit");
+        write_finish_stamp_for_run(&app, &brainstorm, 0, "");
         std::fs::write(session_dir.join("artifacts").join("spec.md"), "")
             .expect("write empty spec");
         assert_eq!(
@@ -194,7 +178,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             window_name: "[Sharding]".to_string(),
             ..run.clone()
         };
-        std::fs::write(app.run_status_path(&sharding), "0").expect("clean sharding exit");
+        write_finish_stamp_for_run(&app, &sharding, 0, "");
         std::fs::write(
             session_dir.join("artifacts").join("tasks.toml"),
             "not valid toml = [",
@@ -235,12 +219,11 @@ fn normalize_failure_reason_artifact_present_still_fails_on_head_advance() {
             hostname: None,
             mount_device_id: None,
         };
-        std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status dir"))
-            .expect("create status dir");
+
         // Valid plan artifact so artifact_reason is None.
         std::fs::write(session_dir.join("artifacts").join("plan.md"), "# Plan\n")
             .expect("write plan");
-        std::fs::write(app.run_status_path(&run), "0").expect("write exit code");
+        write_finish_stamp_for_run(&app, &run, 0, "");
 
         // Write a guard snapshot whose HEAD differs from real HEAD so
         // verify_non_coder will return forbidden_head_advance.
@@ -275,7 +258,7 @@ fn window_disappearance_enters_drain_state_before_finalize() {
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);
         app.current_run_id = Some(run.id);
-        app.window_launched = true;
+        app.run_launched = true;
         app.models = vec![ranked_model(
             selection::VendorKind::Codex,
             "gpt-5",
@@ -284,13 +267,9 @@ fn window_disappearance_enters_drain_state_before_finalize() {
             10,
         )];
 
-        let status_path = app.run_status_path(&run);
-        std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
-        std::fs::write(&status_path, "0").expect("status");
-
         let _ = std::fs::remove_file(app.finish_stamp_path_for(&run));
 
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let persisted = app
             .state
@@ -345,7 +324,7 @@ fn same_key_retry_waits_for_stamp_or_timeout_after_live_summary_absent() {
         let _ = std::fs::remove_file(&stamp_path);
         let _ = std::fs::remove_file(app.live_summary_path_for(&first));
 
-        app.poll_agent_window();
+        app.poll_agent_run();
         assert_eq!(app.current_run_id, Some(first.id));
         let still_first = app
             .state
@@ -356,7 +335,7 @@ fn same_key_retry_waits_for_stamp_or_timeout_after_live_summary_absent() {
         assert_eq!(still_first.status, RunStatus::Running);
 
         app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let first_done = app
             .state
@@ -431,11 +410,7 @@ fn guard_warnings_emit_only_after_drain_barrier_passes() {
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);
         app.current_run_id = Some(run.id);
-        app.window_launched = true;
-
-        let status_path = app.run_status_path(&run);
-        std::fs::create_dir_all(status_path.parent().expect("status dir")).expect("status dir");
-        std::fs::write(&status_path, "0").expect("status");
+        app.run_launched = true;
 
         let _ = std::fs::remove_file(app.finish_stamp_path_for(&run));
 
@@ -447,7 +422,7 @@ fn guard_warnings_emit_only_after_drain_barrier_passes() {
         )
         .expect("guard snapshot");
 
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         assert!(
             !app.messages.iter().any(|message| {
@@ -462,7 +437,7 @@ fn guard_warnings_emit_only_after_drain_barrier_passes() {
 
         let run_key = App::run_key_for("planning", None, 1, 1);
         write_finish_stamp(&session_dir, &run_key, "head123", "stable");
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         assert!(
             app.messages.iter().any(|message| {
@@ -491,7 +466,7 @@ fn rapid_retry_cycles_do_not_attribute_stale_live_summary_to_next_attempt() {
             app.state.agent_runs.push(previous.clone());
             app.state.agent_runs.push(current.clone());
             app.current_run_id = Some(current.id);
-            app.window_launched = true;
+            app.run_launched = true;
             app.live_summary_path = Some(app.live_summary_path_for(&current));
             app.live_summary_cached_text.clear();
             app.live_summary_cached_mtime = Some(std::time::SystemTime::UNIX_EPOCH);
@@ -537,7 +512,7 @@ fn unstable_coder_stamp_finalizes_failed_unverified_without_retry() {
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);
         app.current_run_id = Some(run.id);
-        app.window_launched = true;
+        app.run_launched = true;
         app.models = vec![
             ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
             ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
@@ -551,7 +526,7 @@ fn unstable_coder_stamp_finalizes_failed_unverified_without_retry() {
         );
         let _ = std::fs::remove_file(app.live_summary_path_for(&run));
 
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let finalized = app
             .state
@@ -646,7 +621,7 @@ fn recovery_sharding_retry_uses_recovery_launcher() {
         );
         assert!(
             new_run.window_name.starts_with("[Recovery Sharding]"),
-            "retry must use the recovery-sharding window naming, got: {}",
+            "retry must use the recovery-sharding run label, got: {}",
             new_run.window_name
         );
         assert_eq!(app.state.current_phase, Phase::BuilderRecoverySharding(6));
@@ -1427,14 +1402,8 @@ fn approved_review_with_feedback_emits_advisory_message() {
 
         let mut app = idle_app(state);
         app.current_run_id = Some(1);
-        app.window_launched = true;
+        app.run_launched = true;
 
-        // Write the status file to signal success
-        let status_path = app.run_status_path_for("reviewer", Some(1), 1, 1);
-        if let Some(parent) = status_path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(&status_path, "0").unwrap();
         write_finish_stamp(
             &session_dir,
             &App::run_key_for("reviewer", Some(1), 1, 1),
@@ -1442,7 +1411,7 @@ fn approved_review_with_feedback_emits_advisory_message() {
             "stable",
         );
 
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         // The pipeline should still advance (not halted by advisory feedback)
         assert!(
@@ -1544,9 +1513,8 @@ fn normalize_failure_reason_pending_decision_parks_run() {
 
         std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
             .expect("write spec");
-        std::fs::create_dir_all(app.run_status_path(&run).parent().expect("status parent"))
-            .expect("status dir");
-        std::fs::write(app.run_status_path(&run), "0").expect("write exit code");
+
+        write_finish_stamp_for_run(&app, &run, 0, "");
         write_ask_operator_snapshot(&session_dir);
 
         let result = app.normalized_failure_reason(&run).expect("call ok");
@@ -1582,8 +1550,7 @@ fn finalize_current_run_transitions_to_git_guard_pending() {
 
         std::fs::write(session_dir.join("artifacts").join("spec.md"), "# Spec\n")
             .expect("write spec");
-        std::fs::create_dir_all(app.run_status_path(&run).parent().expect("parent")).expect("dir");
-        std::fs::write(app.run_status_path(&run), "0").expect("exit code");
+        write_finish_stamp_for_run(&app, &run, 0, "");
         write_ask_operator_snapshot(&session_dir);
 
         app.finalize_current_run(&run).expect("finalize ok");
@@ -1640,7 +1607,7 @@ fn orphan_live_summary_files_removed_at_session_start() {
         assert!(running_path.exists());
         assert!(orphan_path.exists());
 
-        let _app = App::new(mk_tmux(), state);
+        let _app = App::new(state);
 
         assert!(
             !live_txt.exists(),
@@ -1695,14 +1662,14 @@ fn resume_missing_window_honors_present_finish_stamp_for_coder() {
         );
 
         let resumed = state
-            .resume_running_runs(&[])
+            .resume_running_runs()
             .expect("resume")
             .expect("run id");
 
         let mut app = idle_app(state);
         app.current_run_id = Some(resumed);
-        app.window_launched = true;
-        app.poll_agent_window();
+        app.run_launched = true;
+        app.poll_agent_run();
 
         let run = app
             .state
@@ -1747,15 +1714,15 @@ fn resume_missing_window_missing_stamp_fails_unverified_for_coder() {
         write_review_scope(&round_dir, "base123");
 
         let resumed = state
-            .resume_running_runs(&[])
+            .resume_running_runs()
             .expect("resume")
             .expect("run id");
 
         let mut app = idle_app(state);
         app.current_run_id = Some(resumed);
-        app.window_launched = true;
+        app.run_launched = true;
         app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let run = app
             .state
@@ -1806,7 +1773,7 @@ fn resume_missing_window_missing_stamp_warns_and_finalizes_for_non_coder() {
         });
 
         let resumed = state
-            .resume_running_runs(&[])
+            .resume_running_runs()
             .expect("resume")
             .expect("run id");
 
@@ -1815,9 +1782,9 @@ fn resume_missing_window_missing_stamp_warns_and_finalizes_for_non_coder() {
             TestLaunchHarness::default(),
         )));
         app.current_run_id = Some(resumed);
-        app.window_launched = true;
+        app.run_launched = true;
         app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
-        app.poll_agent_window();
+        app.poll_agent_run();
 
         let run = app
             .state
@@ -1908,7 +1875,7 @@ fn stamp_archival_moves_old_stamps_at_session_start() {
         );
 
         // Create App which triggers archival
-        let _app = App::new(mk_tmux(), state);
+        let _app = App::new(state);
 
         let archive_dir = finish_dir.join("archive");
         if !old_stamp_path.exists() {
@@ -1982,7 +1949,7 @@ fn archived_stamps_not_consulted_by_coder_gate() {
         std::fs::create_dir_all(&round_dir).unwrap();
         std::fs::write(round_dir.join("review_scope.toml"), "base_sha = \"base\"\n").unwrap();
 
-        let app = App::new(mk_tmux(), SessionState::load(session_id).unwrap());
+        let app = App::new(SessionState::load(session_id).unwrap());
         let run = &app.state.agent_runs[0];
         let reason = app.coder_gate_reason(run, &round_dir);
 

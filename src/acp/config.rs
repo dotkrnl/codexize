@@ -41,7 +41,7 @@ impl AcpConfig {
         self.agents
             .iter()
             .filter(|(_, agent)| {
-                !agent.program.trim().is_empty() && program_exists(agent.program.as_str())
+                !agent.program.trim().is_empty() && program_is_executable(agent.program.as_str())
             })
             .map(|(vendor, _)| *vendor)
             .collect()
@@ -235,14 +235,32 @@ fn absolutize(path: &Path) -> AcpResult<PathBuf> {
     }
 }
 
-fn program_exists(program: &str) -> bool {
+pub fn program_is_executable(program: &str) -> bool {
     let candidate = Path::new(program);
     if candidate.components().count() > 1 {
-        return candidate.exists();
+        return path_is_executable(candidate);
     }
 
     let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path).any(|dir| dir.join(program).exists())
+    std::env::split_paths(&path).any(|dir| path_is_executable(&dir.join(program)))
+}
+
+fn path_is_executable(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn effort_to_str(effort: crate::adapters::EffortLevel) -> &'static str {

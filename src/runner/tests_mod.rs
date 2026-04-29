@@ -659,6 +659,72 @@ fn acp_launch_writes_finish_stamp_and_status_on_success() {
 }
 
 #[test]
+fn acp_launch_persists_agent_message_chunks_as_agent_text() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let run = launch_test_run(dir.path());
+    let session_id = "runner-agent-text";
+    let session_root = dir.path().join(".codexize");
+    let artifacts_dir = session_root
+        .join("sessions")
+        .join(session_id)
+        .join("artifacts");
+    let status_path = artifacts_dir.join("run-status").join("coder.txt");
+    let mut state = crate::state::SessionState::new(session_id.to_string());
+    let run_id = state.create_run_record(
+        "coder".to_string(),
+        Some(4),
+        5,
+        1,
+        "model-x".to_string(),
+        "codex".to_string(),
+        "[Coder]".to_string(),
+        crate::adapters::EffortLevel::Normal,
+        crate::state::LaunchModes::default(),
+    );
+    with_test_env(
+        dir.path(),
+        &[
+            ("CODEXIZE_ROOT", Some(session_root.display().to_string())),
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("success".to_string())),
+        ],
+        || {
+            state.save().expect("save session");
+
+            launch_noninteractive(
+                "[Coder]",
+                &run,
+                VendorKind::Codex,
+                &status_path,
+                "coder-run",
+                &artifacts_dir,
+                None,
+            )
+            .expect("launch ACP run");
+
+            wait_for_window_to_finish("[Coder]");
+
+            let messages =
+                crate::state::SessionState::load_messages(session_id).expect("load messages");
+            assert!(
+                messages.iter().any(|message| {
+                    message.run_id == run_id
+                        && message.kind == crate::state::MessageKind::AgentText
+                        && matches!(message.sender, crate::state::MessageSender::Agent { .. })
+                        && message.text == "done"
+                }),
+                "expected persisted AgentText message, got {messages:?}"
+            );
+        },
+    );
+}
+
+#[test]
 fn acp_launch_fails_when_required_artifact_is_missing() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());

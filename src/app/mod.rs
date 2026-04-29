@@ -216,36 +216,39 @@ fn startup_cache_has_expired_section(loaded: &cache::LoadedCache) -> bool {
 }
 
 #[doc(hidden)]
-pub fn snapshot_default_footer_keymap(width: u16) -> String {
-    let line = footer::keymap::keymap(
-        crate::state::Phase::IdeaInput,
-        None,
-        focus_caps::FocusCaps {
-            can_expand: true,
-            can_edit: true,
-            can_back: true,
-            can_input: true,
-        },
-        false,
-        width,
-    )
-    .to_string()
-    .trim_end()
-    .to_string();
-    format!("{line}\n")
-}
+pub mod snapshot_support {
+    use super::*;
 
-#[doc(hidden)]
-pub fn snapshot_warn_status_line() -> String {
-    let mut line = status_line::StatusLine::new();
-    line.push(
-        "warn: smoke snapshot".to_string(),
-        status_line::Severity::Warn,
-        Duration::from_secs(10),
-    );
-    let line = line
-        .render()
-        .map(|line| line.to_string())
-        .unwrap_or_default();
-    format!("{line}\n")
+    pub fn default_footer_keymap(width: u16) -> String {
+        let line = footer::keymap::keymap(
+            crate::state::Phase::IdeaInput,
+            None,
+            focus_caps::FocusCaps {
+                can_expand: true,
+                can_edit: true,
+                can_back: true,
+                can_input: true,
+            },
+            false,
+            width,
+        )
+        .to_string()
+        .trim_end()
+        .to_string();
+        format!("{line}\n")
+    }
+
+    pub fn warn_status_line() -> String {
+        let mut line = status_line::StatusLine::new();
+        line.push(
+            "warn: smoke snapshot".to_string(),
+            status_line::Severity::Warn,
+            Duration::from_secs(10),
+        );
+        let line = line
+            .render()
+            .map(|line| line.to_string())
+            .unwrap_or_default();
+        format!("{line}\n")
+    }
 }

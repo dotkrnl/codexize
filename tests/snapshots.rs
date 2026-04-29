@@ -40,8 +40,11 @@ fn cli_help_matches_snapshot() {
 
 #[test]
 fn footer_and_status_strings_match_snapshot() {
-    assert_snapshot("footer-keymap.txt", app::snapshot_default_footer_keymap(80));
-    assert_snapshot("status-line.txt", app::snapshot_warn_status_line());
+    assert_snapshot(
+        "footer-keymap.txt",
+        app::snapshot_support::default_footer_keymap(80),
+    );
+    assert_snapshot("status-line.txt", app::snapshot_support::warn_status_line());
 }
 
 #[test]

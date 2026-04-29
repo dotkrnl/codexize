@@ -170,33 +170,53 @@ impl Default for AcpConfig {
         // ACP directly, while Codex and Claude are commonly launched through
         // ACP bridge binaries, so keep the executable boundary explicit here.
         let definitions = [
-            AcpAgentDefinition {
-                vendor: VendorKind::Claude,
-                program: "claude-code-acp".to_string(),
-                args: Vec::new(),
-                env: BTreeMap::new(),
-            },
-            AcpAgentDefinition {
-                vendor: VendorKind::Codex,
-                program: "codex-acp".to_string(),
-                args: Vec::new(),
-                env: BTreeMap::new(),
-            },
-            AcpAgentDefinition {
-                vendor: VendorKind::Gemini,
-                program: "gemini".to_string(),
-                args: vec!["--acp".to_string()],
-                env: BTreeMap::new(),
-            },
-            AcpAgentDefinition {
-                vendor: VendorKind::Kimi,
-                program: "kimi".to_string(),
-                args: vec!["acp".to_string()],
-                env: BTreeMap::new(),
-            },
+            default_agent_definition(
+                VendorKind::Claude,
+                "claude-code-acp",
+                Vec::<String>::new(),
+            ),
+            default_agent_definition(VendorKind::Codex, "codex-acp", Vec::<String>::new()),
+            default_agent_definition(VendorKind::Gemini, "gemini", vec!["--acp".to_string()]),
+            default_agent_definition(VendorKind::Kimi, "kimi", vec!["acp".to_string()]),
         ];
         Self::from_agents(definitions)
     }
+}
+
+fn default_agent_definition(
+    vendor: VendorKind,
+    program: &str,
+    args: Vec<String>,
+) -> AcpAgentDefinition {
+    #[cfg(test)]
+    {
+        if let Some(program_override) = test_program_override(vendor) {
+            return AcpAgentDefinition {
+                vendor,
+                program: program_override,
+                args: Vec::new(),
+                env: BTreeMap::new(),
+            };
+        }
+    }
+
+    AcpAgentDefinition {
+        vendor,
+        program: program.to_string(),
+        args,
+        env: BTreeMap::new(),
+    }
+}
+
+#[cfg(test)]
+fn test_program_override(vendor: VendorKind) -> Option<String> {
+    let key = match vendor {
+        VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+        VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+        VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+        VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+    };
+    std::env::var(key).ok().filter(|value| !value.trim().is_empty())
 }
 
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {

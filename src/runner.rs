@@ -1,4 +1,10 @@
-use crate::adapters::{AgentAdapter, AgentRun, shell_escape};
+use crate::{
+    acp::{AcpConfig, AcpConnector, AcpLaunchRequest, ClientUpdate, PromptPayload, SubprocessConnector},
+    adapters::AgentRun,
+    selection::VendorKind,
+};
+#[cfg(test)]
+use crate::adapters::shell_escape;
 use crate::state;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -7,6 +13,12 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -104,7 +116,368 @@ const DEFAULT_STAMP_STABILIZE_INTERVAL_MS: u64 = 100;
 const ENV_STAMP_STABILIZE_MS: &str = "CODEXIZE_STAMP_STABILIZE_MS";
 const ENV_STAMP_STABILIZE_INTERVAL_MS: &str = "CODEXIZE_STAMP_STABILIZE_INTERVAL_MS";
 
+const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcpCancelReason {
+    Terminate,
+}
+
+#[derive(Debug)]
+struct ManagedAcpRun {
+    cancel_tx: mpsc::Sender<AcpCancelReason>,
+    finished: std::sync::Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug, Clone)]
+struct ManagedAcpLaunch {
+    resolved: crate::acp::AcpResolvedLaunch,
+    status_path: PathBuf,
+    stamp_path: PathBuf,
+    required_artifact: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct ManagedAcpOutcome {
+    exit_code: i32,
+    signal_received: String,
+}
+
+fn active_acp_runs() -> &'static Mutex<std::collections::HashMap<String, ManagedAcpRun>> {
+    static ACTIVE: OnceLock<Mutex<std::collections::HashMap<String, ManagedAcpRun>>> =
+        OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn build_managed_acp_launch(
+    vendor: VendorKind,
+    run: &AgentRun,
+    status_path: &Path,
+    run_key: &str,
+    artifacts_dir: &Path,
+    required_artifact: Option<&Path>,
+    interactive: bool,
+) -> Result<ManagedAcpLaunch> {
+    let cwd = std::env::current_dir().context("failed to capture launch cwd")?;
+    let request = AcpLaunchRequest {
+        vendor,
+        cwd,
+        prompt: PromptPayload::File(run.prompt_path.clone()),
+        model: run.model.clone(),
+        // The current launch sites already pass the codexize-computed effective
+        // effort. Task 2 keeps artifact/finalization ownership in codexize and
+        // defers the requested-vs-effective UI split to the later ACP UX work.
+        requested_effort: run.effort,
+        effective_effort: run.effort,
+        interactive,
+        modes: run.modes,
+        required_artifacts: required_artifact
+            .into_iter()
+            .map(Path::to_path_buf)
+            .collect(),
+    };
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .map_err(|err| anyhow!("{err}"))?;
+    ensure_program_exists(&resolved.spawn.program)?;
+
+    Ok(ManagedAcpLaunch {
+        resolved,
+        status_path: status_path.to_path_buf(),
+        stamp_path: artifacts_dir.join("run-finish").join(format!("{run_key}.toml")),
+        required_artifact: required_artifact.map(Path::to_path_buf),
+    })
+}
+
+fn ensure_program_exists(program: &str) -> Result<()> {
+    let candidate = Path::new(program);
+    if candidate.components().count() > 1 {
+        if candidate.exists() {
+            return Ok(());
+        }
+        bail!("ACP agent CLI not found — install it first");
+    }
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if std::env::split_paths(&path).any(|dir| dir.join(program).exists()) {
+        Ok(())
+    } else {
+        bail!("ACP agent CLI not found — install it first");
+    }
+}
+
+fn write_status_code(path: &Path, exit_code: i32) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create status dir {}", parent.display()))?;
+    }
+    fs::write(path, exit_code.to_string())
+        .with_context(|| format!("failed to write run status {}", path.display()))
+}
+
+fn git_rev_parse_head() -> Option<String> {
+    Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|text| text.trim().to_string())
+}
+
+fn working_tree_clean() -> bool {
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| output.stdout.is_empty())
+        .unwrap_or(false)
+}
+
+fn stamp_stabilize_budget() -> Duration {
+    std::env::var(ENV_STAMP_STABILIZE_MS)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_STABILIZE_BUDGET_MS))
+}
+
+fn stamp_stabilize_interval() -> Duration {
+    std::env::var(ENV_STAMP_STABILIZE_INTERVAL_MS)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_STABILIZE_INTERVAL_MS))
+}
+
+fn wait_for_stable_head() -> (String, String) {
+    let budget = stamp_stabilize_budget();
+    let interval = stamp_stabilize_interval();
+    let deadline = Instant::now() + budget;
+
+    loop {
+        let lock_path = Path::new(".git").join("index.lock");
+        while lock_path.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        let first = git_rev_parse_head().unwrap_or_default();
+        thread::sleep(interval);
+        let second = git_rev_parse_head().unwrap_or_default();
+        if first == second {
+            return (second, "stable".to_string());
+        }
+        if Instant::now() >= deadline {
+            return (second, "unstable".to_string());
+        }
+    }
+}
+
+fn write_finish_stamp_for_outcome(
+    stamp_path: &Path,
+    head_before: String,
+    outcome: &ManagedAcpOutcome,
+) -> Result<()> {
+    let (head_after, head_state) = wait_for_stable_head();
+    let stamp = FinishStamp {
+        finished_at: chrono::Utc::now().to_rfc3339(),
+        exit_code: outcome.exit_code,
+        head_before,
+        head_after,
+        head_state,
+        signal_received: outcome.signal_received.clone(),
+        working_tree_clean: working_tree_clean(),
+    };
+    write_finish_stamp(stamp_path, &stamp)
+}
+
+fn run_managed_acp_launch(
+    launch: ManagedAcpLaunch,
+    cancel_rx: mpsc::Receiver<AcpCancelReason>,
+) -> Result<ManagedAcpOutcome> {
+    let head_before = git_rev_parse_head().unwrap_or_default();
+    let connector = SubprocessConnector;
+    let mut session = connector
+        .connect(&launch.resolved)
+        .map_err(|err| anyhow!("{err}"))?;
+
+    let outcome = loop {
+        if cancel_rx.try_recv().is_ok() {
+            session.close().map_err(|err| anyhow!("{err}"))?;
+            break ManagedAcpOutcome {
+                exit_code: 143,
+                signal_received: "TERM".to_string(),
+            };
+        }
+
+        match session.try_next_update().map_err(|err| anyhow!("{err}"))? {
+            Some(ClientUpdate::PromptTurnFinished) => {
+                session.close().map_err(|err| anyhow!("{err}"))?;
+                if let Some(path) = launch.required_artifact.as_deref() {
+                    validate_toml_artifacts(&[path])?;
+                }
+                break ManagedAcpOutcome {
+                    exit_code: 0,
+                    signal_received: String::new(),
+                };
+            }
+            Some(ClientUpdate::PromptTurnFailed { .. }) => {
+                session.close().map_err(|err| anyhow!("{err}"))?;
+                break ManagedAcpOutcome {
+                    exit_code: 1,
+                    signal_received: String::new(),
+                };
+            }
+            Some(
+                ClientUpdate::AgentMessageText(_)
+                | ClientUpdate::AgentThoughtText(_)
+                | ClientUpdate::SessionInfoUpdate { .. }
+                | ClientUpdate::Unknown { .. },
+            )
+            | None => thread::sleep(ACP_POLL_INTERVAL),
+        }
+    };
+
+    write_status_code(&launch.status_path, outcome.exit_code)?;
+    write_finish_stamp_for_outcome(&launch.stamp_path, head_before, &outcome)?;
+    Ok(outcome)
+}
+
+fn finalize_managed_acp_launch(
+    launch: ManagedAcpLaunch,
+    cancel_rx: mpsc::Receiver<AcpCancelReason>,
+) {
+    if run_managed_acp_launch(launch.clone(), cancel_rx).is_ok() {
+        return;
+    }
+
+    let fallback_head_before = git_rev_parse_head().unwrap_or_default();
+    let outcome = ManagedAcpOutcome {
+        exit_code: 1,
+        signal_received: String::new(),
+    };
+    let _ = write_status_code(&launch.status_path, outcome.exit_code);
+    let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, &outcome);
+}
+
+fn cleanup_finished_acp_runs() {
+    let mut finished = Vec::new();
+    {
+        let guard = active_acp_runs()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (window_name, run) in guard.iter() {
+            if run.finished.load(Ordering::SeqCst) {
+                finished.push(window_name.clone());
+            }
+        }
+    }
+    for window_name in finished {
+        if let Some(mut run) = take_managed_acp_run(&window_name)
+            && let Some(handle) = run.join.take()
+        {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn take_managed_acp_run(window_name: &str) -> Option<ManagedAcpRun> {
+    active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(window_name)
+}
+
+fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Result<()> {
+    cleanup_finished_acp_runs();
+
+    let mut guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.values().any(|run| !run.finished.load(Ordering::SeqCst)) {
+        bail!("codexize only supports one active ACP run at a time");
+    }
+
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    let finished = std::sync::Arc::new(AtomicBool::new(false));
+    let finished_flag = std::sync::Arc::clone(&finished);
+    let launch_window = window_name.to_string();
+    let handle = thread::spawn(move || {
+        finalize_managed_acp_launch(launch, cancel_rx);
+        finished_flag.store(true, Ordering::SeqCst);
+    });
+    guard.insert(
+        launch_window,
+        ManagedAcpRun {
+            cancel_tx,
+            finished,
+            join: Some(handle),
+        },
+    );
+    Ok(())
+}
+
+pub fn window_is_active(window_name: &str) -> bool {
+    cleanup_finished_acp_runs();
+    active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(window_name)
+        .is_some_and(|run| !run.finished.load(Ordering::SeqCst))
+}
+
+pub fn cancel_windows_matching(base: &str) {
+    let prefix = format!("{base} ");
+    let matching = {
+        let guard = active_acp_runs()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard
+            .keys()
+            .filter(|name| *name == base || name.starts_with(&prefix))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    for window_name in matching {
+        if let Some(mut run) = take_managed_acp_run(&window_name) {
+            let _ = run.cancel_tx.send(AcpCancelReason::Terminate);
+            if let Some(handle) = run.join.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+pub fn request_window_exit(window_name: &str) {
+    // Until the interactive ACP command surface lands, local `/exit` requests
+    // resolve by closing the managed ACP session directly so task-finish and
+    // yolo cleanup still terminate the child process deterministically.
+    cancel_windows_matching(window_name);
+}
+
+pub fn shutdown_all_runs() {
+    let runs = {
+        let mut guard = active_acp_runs()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard).into_values().collect::<Vec<_>>()
+    };
+
+    for mut run in runs {
+        let _ = run.cancel_tx.send(AcpCancelReason::Terminate);
+        if let Some(handle) = run.join.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// Build the shell command that runs the agent and then writes a finish stamp.
+#[cfg(test)]
 fn build_shell_cmd(
     agent_cmd: &str,
     window_name: &str,
@@ -125,11 +498,13 @@ fn build_shell_cmd(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 enum ShellAgentMode {
     Foreground,
     Background,
 }
 
+#[cfg(test)]
 fn build_shell_cmd_with_mode(
     agent_cmd: &str,
     window_name: &str,
@@ -403,27 +778,28 @@ pub fn validate_toml_artifacts(paths: &[&Path]) -> Result<()> {
 /// Launch an agent interactively inside a new tmux window.
 /// All agent child-process launches must route through the runner so that
 /// finish-stamp logic is guaranteed to run.
+#[allow(clippy::too_many_arguments)]
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
-    adapter: &dyn AgentAdapter,
+    vendor: VendorKind,
     switch: bool,
     status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
+    required_artifact: Option<&Path>,
 ) -> Result<()> {
-    let prompt_path = run.prompt_path.to_string_lossy();
-    let cmd = adapter.interactive_command(&run.model, &prompt_path, run.effort);
-    launch_in_window(
-        window_name,
-        &cmd,
-        adapter,
-        switch,
-        ShellAgentMode::Foreground,
+    let _ = switch;
+    let launch = build_managed_acp_launch(
+        vendor,
+        run,
         status_path,
         run_key,
         artifacts_dir,
-    )
+        required_artifact,
+        true,
+    )?;
+    launch_managed_acp_window(window_name, launch)
 }
 
 /// Launch an agent non-interactively inside a new tmux window.
@@ -432,23 +808,22 @@ pub fn launch_interactive(
 pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
-    adapter: &dyn AgentAdapter,
+    vendor: VendorKind,
     status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
+    required_artifact: Option<&Path>,
 ) -> Result<()> {
-    let prompt_path = run.prompt_path.to_string_lossy();
-    let cmd = adapter.noninteractive_command(&run.model, &prompt_path, run.effort);
-    launch_in_window(
-        window_name,
-        &cmd,
-        adapter,
-        false,
-        ShellAgentMode::Background,
+    let launch = build_managed_acp_launch(
+        vendor,
+        run,
         status_path,
         run_key,
         artifacts_dir,
-    )
+        required_artifact,
+        false,
+    )?;
+    launch_managed_acp_window(window_name, launch)
 }
 
 pub fn run_child_with_timeout(
@@ -485,76 +860,6 @@ pub fn run_child_with_timeout(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn launch_in_window(
-    window_name: &str,
-    agent_cmd: &str,
-    adapter: &dyn AgentAdapter,
-    switch: bool,
-    mode: ShellAgentMode,
-    status_path: &Path,
-    run_key: &str,
-    artifacts_dir: &Path,
-) -> Result<()> {
-    if !adapter.detect() {
-        bail!("agent CLI not found — install it first");
-    }
-
-    let status_dir = status_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_string_lossy()
-        .into_owned();
-    let status_path_str = status_path.to_string_lossy().into_owned();
-
-    let finish_dir = artifacts_dir
-        .join("run-finish")
-        .to_string_lossy()
-        .into_owned();
-    let stamp_path = artifacts_dir
-        .join("run-finish")
-        .join(format!("{run_key}.toml"))
-        .to_string_lossy()
-        .into_owned();
-
-    let shell_cmd = match mode {
-        ShellAgentMode::Background => build_shell_cmd(
-            agent_cmd,
-            window_name,
-            &status_dir,
-            &status_path_str,
-            &finish_dir,
-            &stamp_path,
-        ),
-        ShellAgentMode::Foreground => build_shell_cmd_with_mode(
-            agent_cmd,
-            window_name,
-            &status_dir,
-            &status_path_str,
-            &finish_dir,
-            &stamp_path,
-            ShellAgentMode::Foreground,
-        ),
-    };
-
-    let args: Vec<&str> = if switch {
-        vec!["new-window", "-n", window_name, &shell_cmd]
-    } else {
-        vec!["new-window", "-d", "-n", window_name, &shell_cmd]
-    };
-    let output = Command::new("tmux")
-        .args(&args)
-        .output()
-        .context("failed to create tmux window")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("tmux new-window failed: {}", stderr.trim());
-    }
-
-    Ok(())
 }
 
 fn extract_model(command: &[String]) -> String {

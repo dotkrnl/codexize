@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::{LiveModel, build_http_client, home_dir, parse_json_response, send_request};
+use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
 
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 
@@ -127,7 +127,7 @@ fn fetch_usage_payload(api_key: &str) -> Result<Value> {
 
     let request = client.get(&usage_url).bearer_auth(api_key);
 
-    parse_json_response(send_request(request, "Kimi")?, "Kimi")
+    fetch_json_response(request, "Kimi")
 }
 
 fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> {

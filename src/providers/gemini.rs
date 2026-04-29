@@ -1,10 +1,9 @@
-use crate::warmup;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, env, fs, time::Duration};
+use std::{collections::BTreeMap, env, fs};
 
-use super::{LiveModel, build_http_client, home_dir, parse_json_response, send_request};
+use super::{LiveModel, build_http_client, fetch_json_response, home_dir, run_provider_warmup};
 
 const QUOTA_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
 
@@ -60,14 +59,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    warmup::run(warmup::WarmupSpec {
-        program: "gemini",
-        args: &["--yolo"],
-        script: "/stats\n/exit\n",
-        env: &[],
-        settle_timeout: Duration::from_secs(2),
-    })
-    .context("Gemini dummy invoke failed")
+    run_provider_warmup("Gemini", "gemini", &["--yolo"], "/stats\n/exit\n", &[])
 }
 
 fn resolve_access_token() -> Result<String> {
@@ -127,8 +119,7 @@ fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
         .bearer_auth(token)
         .json(&json!({ "project": project_id }));
 
-    let response = send_request(request, "Gemini")?;
-    let payload = parse_json_response(response, "Gemini")?;
+    let payload = fetch_json_response(request, "Gemini")?;
     if payload.get("error").is_some() {
         bail!("Gemini quota response contained an error");
     }

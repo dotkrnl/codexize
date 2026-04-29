@@ -180,6 +180,7 @@ impl App {
         let _ = self
             .state
             .log_event(format!("yolo_auto_approved: gate={gate}"));
+        crate::runner::request_window_exit(&run.window_name);
         #[cfg(not(test))]
         {
             let _ = std::process::Command::new("tmux")

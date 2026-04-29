@@ -1,9 +1,6 @@
 // observation.rs
 use super::*;
-use crate::{
-    state::{Message, MessageKind, MessageSender},
-    tmux,
-};
+use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
 use notify::Watcher;
@@ -105,7 +102,7 @@ impl App {
         let Some(run) = self.running_run() else {
             return;
         };
-        if !tmux::window_exists(&run.window_name) {
+        if !self.window_exists(&run.window_name) {
             return;
         }
         let Some(path) = self.live_summary_path.clone() else {

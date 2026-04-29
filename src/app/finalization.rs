@@ -94,7 +94,7 @@ impl App {
         if self.test_launch_harness.is_some() {
             return false;
         }
-        tmux::window_exists(window_name)
+        crate::runner::window_is_active(window_name) || tmux::window_exists(window_name)
     }
 
     pub(super) fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {

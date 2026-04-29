@@ -356,6 +356,7 @@ impl App {
                 && let Event::Key(key) = event::read()?
                 && self.handle_key(key)
             {
+                crate::runner::shutdown_all_runs();
                 return Ok(());
             }
         }

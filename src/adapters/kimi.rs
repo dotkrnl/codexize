@@ -1,5 +1,4 @@
-use super::{AgentAdapter, EffortLevel};
-use std::process::Command;
+use super::{AgentAdapter, CliBinaryAdapter, EffortLevel, prompt_file_subshell};
 
 const KIMI_READY_MAX_POLLS: u32 = 50;
 const KIMI_READY_POLL_INTERVAL: f32 = 0.2;
@@ -8,13 +7,15 @@ const KIMI_READY_SETTLE_DELAY: f32 = 1.0;
 
 pub struct KimiAdapter;
 
+impl CliBinaryAdapter for KimiAdapter {
+    fn binary_name(&self) -> &'static str {
+        "kimi"
+    }
+}
+
 impl AgentAdapter for KimiAdapter {
     fn detect(&self) -> bool {
-        Command::new("kimi")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        self.detect_cli()
     }
 
     fn interactive_command(&self, _model: &str, prompt_path: &str, effort: EffortLevel) -> String {
@@ -52,8 +53,8 @@ impl AgentAdapter for KimiAdapter {
         // Kimi without --thinking produces low-quality output, so always enable it.
         let _ = effort;
         format!(
-            r#"kimi --yolo --thinking -p "$(cat {prompt_path})""#,
-            prompt_path = super::shell_escape(prompt_path),
+            r#"kimi --yolo --thinking -p {prompt}"#,
+            prompt = prompt_file_subshell(prompt_path),
         )
     }
 }

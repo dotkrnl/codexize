@@ -1,5 +1,3 @@
-use crate::adapters::adapter_for_vendor;
-use crate::selection::VendorKind;
 use crate::state::codexize_root;
 use crate::tmux::TmuxContext;
 use crate::tui::AppTerminal;
@@ -12,12 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
-use std::{
-    fs,
-    path::Path,
-    process::Command,
-    time::{Duration, Instant},
-};
+use std::{fs, path::Path, process::Command, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scenario {
@@ -26,15 +19,6 @@ enum Scenario {
     GitExistsNotIgnored,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WaitState {
-    None,
-    GeneratingGitignore,
-    AgentFailed,
-}
-
-const AGENT_TIMEOUT: Duration = Duration::from_secs(120);
-const AGENT_FAIL_DISPLAY: Duration = Duration::from_secs(2);
 const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
 
 fn detect_git() -> bool {
@@ -197,15 +181,6 @@ fn run_git_init() -> Result<()> {
     Ok(())
 }
 
-fn default_model_for_vendor(vendor: VendorKind) -> &'static str {
-    match vendor {
-        VendorKind::Claude => "claude-sonnet-4",
-        VendorKind::Codex => "gpt-4o",
-        VendorKind::Gemini => "gemini-2.5-pro",
-        VendorKind::Kimi => "",
-    }
-}
-
 fn detect_project_type() -> Vec<&'static str> {
     let mut types = Vec::new();
 
@@ -302,147 +277,61 @@ fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     lines.join("\n")
 }
 
-fn spawn_gitignore_agent(tmux: &TmuxContext, codexize_entry: &str) -> Result<std::path::PathBuf> {
+fn spawn_gitignore_agent(_tmux: &TmuxContext, codexize_entry: &str) -> Result<std::path::PathBuf> {
     let finish_marker =
         std::env::temp_dir().join(format!("codexize-gitignore-{}.done", std::process::id()));
-
-    for vendor in [
-        VendorKind::Claude,
-        VendorKind::Codex,
-        VendorKind::Gemini,
-        VendorKind::Kimi,
-    ] {
-        let adapter = adapter_for_vendor(vendor);
-        if !adapter.detect() {
-            continue;
-        }
-
-        let model = default_model_for_vendor(vendor);
-        let prompt = format!(
-            r#"Analyze the current directory and generate a comprehensive .gitignore file.
-
-Instructions:
-1. Look at the files and directories present to identify the project type(s)
-2. Include patterns for common build artifacts, IDE files, and OS files
-3. MUST include this entry for the codexize orchestrator: {codexize_entry}
-4. Write the .gitignore file to the current directory
-
-After writing .gitignore, create an empty file at: {}
-
-Do not ask for confirmation - just analyze and write the files."#,
-            finish_marker.display()
-        );
-
-        let prompt_path = std::env::temp_dir().join(format!(
-            "codexize-gitignore-prompt-{}.md",
-            std::process::id()
-        ));
-        fs::write(&prompt_path, &prompt).context("failed to write agent prompt")?;
-
-        let agent_cmd = adapter.noninteractive_command(
-            model,
-            &prompt_path.to_string_lossy(),
-            crate::adapters::EffortLevel::Normal,
-        );
-        let shell_cmd = format!(
-            r#"{agent_cmd} && touch {finish_marker}"#,
-            agent_cmd = agent_cmd,
-            finish_marker = finish_marker.display(),
-        );
-
-        let window_name = "[Gitignore]";
-        let status = Command::new("tmux")
-            .args(["new-window", "-d", "-n", window_name, &shell_cmd])
-            .status()
-            .context("failed to create tmux window for gitignore agent")?;
-
-        if !status.success() {
-            anyhow::bail!("tmux new-window for gitignore agent failed");
-        }
-
-        let _ = tmux;
-        return Ok(finish_marker);
-    }
-
-    // No adapter found — fall back to heuristic
+    // Preflight intentionally stays deterministic here instead of opening an
+    // ACP session before codexize has created session state for a real run.
     let content = generate_heuristic_gitignore(codexize_entry);
     fs::write(".gitignore", content).context("failed to write .gitignore")?;
     fs::write(&finish_marker, "").context("failed to write finish marker")?;
     Ok(finish_marker)
 }
 
-fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario, wait_state: WaitState) {
+fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
     let area = frame.area();
     let modal_width = area.width.saturating_sub(8).clamp(30, 72);
 
     let (title, body_lines): (&str, Vec<Line>) = match scenario {
         Scenario::NoGitEmpty => {
             let title = " No git repository ";
-            let lines = if wait_state == WaitState::GeneratingGitignore {
-                vec![
-                    Line::from(""),
-                    Line::from("Generating .gitignore..."),
-                    Line::from(""),
-                ]
-            } else if wait_state == WaitState::AgentFailed {
-                vec![
-                    Line::from(""),
-                    Line::from("Agent timed out. Using built-in .gitignore."),
-                    Line::from(""),
-                ]
-            } else {
-                vec![
-                    Line::from(""),
-                    Line::from("codexize requires a git repository to"),
-                    Line::from("function. Initialize one here?"),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("[Y]", Style::default().fg(Color::Green)),
-                        Span::raw("/"),
-                        Span::styled("Enter", Style::default().fg(Color::Green)),
-                        Span::raw("  initialize git repository"),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("[Q]", Style::default().fg(Color::Red)),
-                        Span::raw("        exit codexize"),
-                    ]),
-                ]
-            };
+            let lines = vec![
+                Line::from(""),
+                Line::from("codexize requires a git repository to"),
+                Line::from("function. Initialize one here?"),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("[Y]", Style::default().fg(Color::Green)),
+                    Span::raw("/"),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw("  initialize git repository"),
+                ]),
+                Line::from(vec![
+                    Span::styled("[Q]", Style::default().fg(Color::Red)),
+                    Span::raw("        exit codexize"),
+                ]),
+            ];
             (title, lines)
         }
         Scenario::NoGitHasFiles => {
             let title = " No git repository ";
-            let lines = if wait_state == WaitState::GeneratingGitignore {
-                vec![
-                    Line::from(""),
-                    Line::from("Generating .gitignore..."),
-                    Line::from(""),
-                ]
-            } else if wait_state == WaitState::AgentFailed {
-                vec![
-                    Line::from(""),
-                    Line::from("Agent timed out. Using built-in .gitignore."),
-                    Line::from(""),
-                ]
-            } else {
-                vec![
-                    Line::from(""),
-                    Line::from("codexize requires a git repository to"),
-                    Line::from("function. Existing files detected — an agent"),
-                    Line::from("will generate .gitignore before initializing."),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("[Y]", Style::default().fg(Color::Green)),
-                        Span::raw("/"),
-                        Span::styled("Enter", Style::default().fg(Color::Green)),
-                        Span::raw("  generate .gitignore & init git"),
-                    ]),
-                    Line::from(vec![
-                        Span::styled("[Q]", Style::default().fg(Color::Red)),
-                        Span::raw("        exit codexize"),
-                    ]),
-                ]
-            };
+            let lines = vec![
+                Line::from(""),
+                Line::from("codexize requires a git repository to"),
+                Line::from("function. Existing files detected — it"),
+                Line::from("will generate .gitignore before initializing."),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("[Y]", Style::default().fg(Color::Green)),
+                    Span::raw("/"),
+                    Span::styled("Enter", Style::default().fg(Color::Green)),
+                    Span::raw("  generate .gitignore & init git"),
+                ]),
+                Line::from(vec![
+                    Span::styled("[Q]", Style::default().fg(Color::Red)),
+                    Span::raw("        exit codexize"),
+                ]),
+            ];
             (title, lines)
         }
         Scenario::GitExistsNotIgnored => {
@@ -553,41 +442,10 @@ fn run_git_init_modal(
     tmux: &TmuxContext,
     codexize_entry: &str,
 ) -> Result<()> {
-    let mut wait_state = WaitState::None;
-    let mut finish_marker: Option<std::path::PathBuf> = None;
-    let mut agent_start_time: Option<Instant> = None;
-    let mut agent_fail_display_deadline: Option<Instant> = None;
-
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario, wait_state);
+            render_preflight_modal(frame, scenario);
         })?;
-
-        if wait_state == WaitState::AgentFailed {
-            if agent_fail_display_deadline.is_some_and(|d| Instant::now() >= d) {
-                run_git_init()?;
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(200));
-            continue;
-        }
-
-        if wait_state == WaitState::GeneratingGitignore {
-            if let Some(ref marker) = finish_marker
-                && marker.exists()
-            {
-                run_git_init()?;
-                return Ok(());
-            }
-            if agent_start_time.is_some_and(|t| t.elapsed() >= AGENT_TIMEOUT) {
-                let content = generate_heuristic_gitignore(codexize_entry);
-                fs::write(".gitignore", content).context("failed to write .gitignore")?;
-                wait_state = WaitState::AgentFailed;
-                agent_fail_display_deadline = Some(Instant::now() + AGENT_FAIL_DISPLAY);
-            }
-            std::thread::sleep(Duration::from_millis(200));
-            continue;
-        }
 
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
@@ -598,14 +456,17 @@ fn run_git_init_modal(
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     if scenario == Scenario::NoGitHasFiles {
-                        wait_state = WaitState::GeneratingGitignore;
-                        agent_start_time = Some(Instant::now());
-                        finish_marker = Some(spawn_gitignore_agent(tmux, codexize_entry)?);
-                    } else {
+                        let finish_marker = spawn_gitignore_agent(tmux, codexize_entry)?;
+                        debug_assert!(
+                            finish_marker.exists(),
+                            "deterministic preflight generation should create its marker eagerly"
+                        );
                         run_git_init()?;
-                        append_to_gitignore(codexize_entry)?;
                         return Ok(());
                     }
+                    run_git_init()?;
+                    append_to_gitignore(codexize_entry)?;
+                    return Ok(());
                 }
                 KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                     std::process::exit(0);
@@ -624,7 +485,7 @@ fn run_gitignore_modal(
 ) -> Result<()> {
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario, WaitState::None);
+            render_preflight_modal(frame, scenario);
         })?;
 
         if event::poll(Duration::from_millis(100))?
@@ -762,6 +623,71 @@ mod tests {
         });
     }
 
+    #[test]
+    fn gitignore_generation_is_deterministic_without_tmux_or_agent_launch() {
+        with_temp_dir(|| {
+            fs::write("Cargo.toml", "[package]\nname = \"demo\"\n").unwrap();
+
+            let fake_bin = Path::new("fake-bin");
+            fs::create_dir_all(fake_bin).unwrap();
+            let tmux_log = Path::new("tmux.log");
+            let codex_log = Path::new("codex.log");
+            write_fake_executable(
+                &fake_bin.join("tmux"),
+                &format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> {}\nexit 0\n",
+                    tmux_log.display()
+                ),
+            );
+            write_fake_executable(
+                &fake_bin.join("codex"),
+                &format!(
+                    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s\\n' \"$*\" >> {}\nexit 0\n",
+                    codex_log.display()
+                ),
+            );
+
+            let original_path = std::env::var_os("PATH");
+            // SAFETY: serialized via test_fs_lock and restored below.
+            unsafe {
+                std::env::set_var("PATH", fake_bin);
+            }
+
+            let tmux = TmuxContext {
+                session_name: "test".to_string(),
+                window_index: "1".to_string(),
+                window_name: "preflight".to_string(),
+            };
+            let outcome = std::panic::catch_unwind(|| spawn_gitignore_agent(&tmux, ".codexize/"));
+
+            unsafe {
+                match original_path {
+                    Some(value) => std::env::set_var("PATH", value),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+
+            let finish_marker = outcome
+                .expect("gitignore generation should not panic")
+                .expect("gitignore generation should succeed");
+            let content = fs::read_to_string(".gitignore").expect("read generated gitignore");
+            assert!(content.contains(".codexize/"));
+            assert!(content.contains("target/"));
+            assert!(
+                finish_marker.exists(),
+                "expected finish marker to be written"
+            );
+            assert!(
+                !tmux_log.exists(),
+                "preflight gitignore generation must not spawn tmux"
+            );
+            assert!(
+                !codex_log.exists(),
+                "preflight gitignore generation must not launch agent CLIs"
+            );
+        });
+    }
+
     fn git_cmd(args: &[&str]) {
         let status = Command::new("git").args(args).status().unwrap();
         assert!(
@@ -802,6 +728,17 @@ mod tests {
         fs::write("README.md", "seed\n").unwrap();
         git_cmd(&["add", "README.md"]);
         git_cmd(&["commit", "-m", "seed"]);
+    }
+
+    fn write_fake_executable(path: &Path, script: &str) {
+        fs::write(path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(path, perms).unwrap();
+        }
     }
 
     #[test]

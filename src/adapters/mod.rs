@@ -121,8 +121,12 @@ mod tests {
 
     #[test]
     fn effort_suffix_normal_is_empty_for_all_vendors() {
-        for vendor in [VendorKind::Codex, VendorKind::Claude, VendorKind::Gemini, VendorKind::Kimi]
-        {
+        for vendor in [
+            VendorKind::Codex,
+            VendorKind::Claude,
+            VendorKind::Gemini,
+            VendorKind::Kimi,
+        ] {
             assert_eq!(
                 effort_suffix(vendor, EffortLevel::Normal),
                 "",
@@ -133,8 +137,14 @@ mod tests {
 
     #[test]
     fn effort_suffix_tough_maps_provider_suffix() {
-        assert_eq!(effort_suffix(VendorKind::Codex, EffortLevel::Tough), ":xhigh");
-        assert_eq!(effort_suffix(VendorKind::Claude, EffortLevel::Tough), ":max");
+        assert_eq!(
+            effort_suffix(VendorKind::Codex, EffortLevel::Tough),
+            ":xhigh"
+        );
+        assert_eq!(
+            effort_suffix(VendorKind::Claude, EffortLevel::Tough),
+            ":max"
+        );
         assert_eq!(effort_suffix(VendorKind::Gemini, EffortLevel::Tough), "");
         assert_eq!(effort_suffix(VendorKind::Kimi, EffortLevel::Tough), "");
     }
@@ -149,7 +159,10 @@ mod tests {
 
     #[test]
     fn effort_suffix_from_str_converts_known_vendors() {
-        assert_eq!(effort_suffix_from_str("codex", EffortLevel::Tough), ":xhigh");
+        assert_eq!(
+            effort_suffix_from_str("codex", EffortLevel::Tough),
+            ":xhigh"
+        );
         assert_eq!(effort_suffix_from_str("claude", EffortLevel::Tough), ":max");
         assert_eq!(effort_suffix_from_str("gemini", EffortLevel::Tough), "");
     }

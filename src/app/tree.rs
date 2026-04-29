@@ -756,8 +756,7 @@ fn attempt_run_node(run: &RunRecord) -> Node {
 }
 
 fn agent_run_node(run: &RunRecord) -> Node {
-    let effort_suffix =
-        crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
+    let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
     let label = format!(
         "{} · {}{}",
         role_label(&run.stage),

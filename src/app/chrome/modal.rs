@@ -36,8 +36,7 @@ pub fn render_modal_overlay(
             content
         } else {
             let keep = content_capacity.saturating_sub(1);
-            let mut truncated: Vec<Line<'static>> =
-                content.into_iter().take(keep).collect();
+            let mut truncated: Vec<Line<'static>> = content.into_iter().take(keep).collect();
             truncated.push(Line::from("…"));
             truncated
         };

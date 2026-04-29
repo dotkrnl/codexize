@@ -3020,7 +3020,8 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
+        let window_name =
+            window_name_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) = self.try_test_launch(
@@ -3156,7 +3157,8 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = window_name_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
+        let window_name =
+            window_name_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -4068,7 +4070,12 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(&format!("[Spec Review {round}]"), &model, vendor_kind, effort);
+        let window_name = window_name_with_model(
+            &format!("[Spec Review {round}]"),
+            &model,
+            vendor_kind,
+            effort,
+        );
         let status_path = self.run_status_path_for("spec-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "spec-review",
@@ -4336,7 +4343,12 @@ impl App {
             effort,
             modes,
         };
-        let window_name = window_name_with_model(&format!("[Plan Review {round}]"), &model, vendor_kind, effort);
+        let window_name = window_name_with_model(
+            &format!("[Plan Review {round}]"),
+            &model,
+            vendor_kind,
+            effort,
+        );
         let status_path = self.run_status_path_for("plan-review", None, round, attempt);
         let dirty = self.capture_run_guard(
             "plan-review",
@@ -4734,7 +4746,8 @@ impl App {
             modes,
         };
 
-        let window_name = window_name_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
+        let window_name =
+            window_name_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
         let status_path = self.run_status_path_for("coder", Some(task_id), r, attempt);
         self.capture_run_guard(
             "coder",
@@ -4895,7 +4908,12 @@ impl App {
             modes,
         };
 
-        let window_name = window_name_with_model(&format!("[Round {r} Reviewer]"), &model, vendor_kind, effort);
+        let window_name = window_name_with_model(
+            &format!("[Round {r} Reviewer]"),
+            &model,
+            vendor_kind,
+            effort,
+        );
         let status_path = self.run_status_path_for("reviewer", Some(task_id), r, attempt);
         let dirty = self.capture_run_guard(
             "reviewer",
@@ -7106,7 +7124,9 @@ mod tests {
         // helper falls back to that current pipeline position when no run is
         // active. Manual selection on a different row is what leaves focus
         // alone, not this resolver.
-        let target = app.progress_focus_key().expect("idle pipeline has a target");
+        let target = app
+            .progress_focus_key()
+            .expect("idle pipeline has a target");
         let row = app
             .visible_rows
             .iter()

@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use super::state::ModelRefreshState;
 use super::{
     App, ModalKind, StageId, chat_widget,
-    chrome::{UnreadBadge, bottom_rule, top_rule_with_left_spans, modal::render_modal_overlay},
+    chrome::{UnreadBadge, bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
     footer::{
@@ -2881,7 +2881,10 @@ mod tests {
         // No underline anywhere on depth-0 rows.
         for col in 0u16..80 {
             assert!(
-                !buf[(col, 0)].style().add_modifier.contains(Modifier::UNDERLINED),
+                !buf[(col, 0)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::UNDERLINED),
                 "no cell on a depth-0 row should be underlined; col={col}"
             );
         }

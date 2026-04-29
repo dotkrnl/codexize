@@ -63,8 +63,7 @@ impl AcpConnector for SubprocessConnector {
             .take()
             .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
         let mut rpc = RpcPeer::new(stdin, stdout);
-
-        let initialize = rpc.call(
+        let initialize = match rpc.call(
             "initialize",
             json!({
                 "protocolVersion": 1,
@@ -81,36 +80,61 @@ impl AcpConnector for SubprocessConnector {
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }),
-        )?;
-        let init = parse_initialize_result(initialize)?;
+        ) {
+            Ok(value) => value,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
+        let init = match parse_initialize_result(initialize) {
+            Ok(init) => init,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
         if init.protocol_version != 1 {
-            return Err(AcpError::human_block(format!(
-                "ACP agent negotiated unsupported protocol version {}",
-                init.protocol_version
-            )));
+            return cleanup_failed_connect(
+                child,
+                rpc,
+                AcpError::human_block(format!(
+                    "ACP agent negotiated unsupported protocol version {}",
+                    init.protocol_version
+                )),
+            );
         }
 
-        let new_session = rpc.call(
+        let new_session = match rpc.call(
             "session/new",
             json!({
                 "cwd": launch.session.cwd,
                 "mcpServers": []
             }),
-        )?;
-        let mut session = parse_new_session_result(new_session)?;
-        apply_session_config(
+        ) {
+            Ok(value) => value,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
+        let mut session = match parse_new_session_result(new_session) {
+            Ok(session) => session,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
+        if let Err(err) = apply_session_config(
             &mut rpc,
             &session.session_id,
             &launch.session,
             &mut session.config_options,
-        )?;
-        let prompt_response = rpc.start_request(
+        ) {
+            return cleanup_failed_connect(child, rpc, err);
+        }
+        let prompt = match prompt_blocks(&launch.session.prompt) {
+            Ok(prompt) => prompt,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
+        let prompt_response = match rpc.start_request(
             "session/prompt",
             json!({
                 "sessionId": session.session_id,
-                "prompt": prompt_blocks(&launch.session.prompt)?
+                "prompt": prompt
             }),
-        )?;
+        ) {
+            Ok(response) => response,
+            Err(err) => return cleanup_failed_connect(child, rpc, err),
+        };
 
         Ok(Box::new(SubprocessSession {
             session_id: session.session_id,
@@ -122,6 +146,17 @@ impl AcpConnector for SubprocessConnector {
             closed: false,
         }))
     }
+}
+
+fn cleanup_failed_connect(
+    mut child: Child,
+    mut rpc: RpcPeer,
+    err: AcpError,
+) -> AcpResult<Box<dyn AcpSession>> {
+    let _ = child.kill();
+    let _ = child.wait();
+    rpc.shutdown();
+    Err(err)
 }
 
 struct SubprocessSession {
@@ -191,7 +226,7 @@ impl AcpSession for SubprocessSession {
         if self.supports_close {
             let _ = self
                 .rpc
-                .call("session/close", json!({ "sessionId": self.session_id }));
+                .start_request("session/close", json!({ "sessionId": self.session_id }));
         }
 
         if let Some(child) = self.child.as_mut() {

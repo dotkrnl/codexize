@@ -1,7 +1,7 @@
 // launch.rs
 use super::*;
 use crate::{
-    adapters::{AgentRun, EffortLevel, adapter_for_vendor, window_name_with_model},
+    adapters::{AgentRun, EffortLevel, window_name_with_model},
     artifacts::ArtifactKind,
     runner::{launch_interactive, launch_noninteractive},
     selection::{
@@ -315,14 +315,14 @@ impl App {
         ) {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&plan_review_path),
             )
         };
         match launch_result {
@@ -442,14 +442,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&tasks_path),
             )
         };
         match launch_result {
@@ -565,7 +565,6 @@ impl App {
             guard::GuardMode::AskOperator
         };
         let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard_mode);
-        let adapter = adapter_for_vendor(vendor_kind);
         let window_name = window_name_with_model("[Brainstorm]", &model, vendor_kind, effort);
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
@@ -577,20 +576,22 @@ impl App {
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&spec_path),
             )
         } else {
             launch_interactive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 true,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&spec_path),
             )
         };
         match launch_result {
@@ -764,14 +765,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&review_path),
             )
         };
         match launch_result {
@@ -878,7 +879,6 @@ impl App {
 
         // YOLO planning must take the existing non-interactive runner path.
         let interactive = interactive && !modes.yolo;
-        let adapter = adapter_for_vendor(vendor_kind);
         let status_path = self.run_status_path_for("planning", None, 1, attempt);
         let guard_mode = if interactive {
             guard::GuardMode::AskOperator
@@ -897,20 +897,22 @@ impl App {
             launch_interactive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 true,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&plan_path),
             )
         } else {
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&plan_path),
             )
         };
         match launch_result {
@@ -1040,14 +1042,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&review_path),
             )
         };
         match launch_result {
@@ -1144,14 +1146,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&tasks_path),
             )
         };
         match launch_result {
@@ -1287,25 +1289,26 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             if is_human_blocked {
                 launch_interactive(
                     &window_name,
                     &run,
-                    adapter.as_ref(),
+                    vendor_kind,
                     true,
                     &status_path,
                     &run_key,
                     &artifacts_dir,
+                    Some(&tasks_path),
                 )
             } else {
                 launch_noninteractive(
                     &window_name,
                     &run,
-                    adapter.as_ref(),
+                    vendor_kind,
                     &status_path,
                     &run_key,
                     &artifacts_dir,
+                    Some(&tasks_path),
                 )
             }
         };
@@ -1446,14 +1449,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                None,
             )
         };
         match launch_result {
@@ -1599,14 +1602,14 @@ impl App {
         {
             result
         } else {
-            let adapter = adapter_for_vendor(vendor_kind);
             launch_noninteractive(
                 &window_name,
                 &run,
-                adapter.as_ref(),
+                vendor_kind,
                 &status_path,
                 &run_key,
                 &artifacts_dir,
+                Some(&review_path),
             )
         };
         match launch_result {

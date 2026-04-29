@@ -74,7 +74,10 @@ fn try_main() -> Result<()> {
     let plan = plan_launch(&cli)?;
     let mut terminal = tui::start()?;
 
-    preflight::check(&mut terminal)?;
+    if preflight::check(&mut terminal)? == preflight::PreflightOutcome::Exit {
+        tui::stop(&mut terminal)?;
+        return Ok(());
+    }
 
     let session_id = match plan {
         LaunchPlan::DirectCreate { idea, modes } => {

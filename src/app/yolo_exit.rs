@@ -2,9 +2,7 @@
 use super::*;
 use crate::{
     artifacts::ArtifactKind,
-    state::{
-        self as session_state, LaunchModes, Phase, PipelineItem, PipelineItemStatus, RunRecord,
-    },
+    state::{self as session_state, LaunchModes, Phase, RunRecord},
 };
 use std::time::Duration;
 impl App {
@@ -13,9 +11,9 @@ impl App {
     }
 
     pub(super) fn set_yolo_mode(&mut self, value: bool, source: &str) {
-        self.state.modes.yolo = value;
+        session_state::transitions::set_yolo_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
-            self.state.agent_error = Some(format!("failed to save yolo mode: {err:#}"));
+            self.record_agent_error(format!("failed to save yolo mode: {err:#}"));
             return;
         }
         let _ = self.state.log_event(format!(
@@ -53,17 +51,7 @@ impl App {
     }
 
     pub(super) fn queue_recovery_sharding_pipeline_item(&mut self, round: u32) {
-        self.state.builder.push_pipeline_item(PipelineItem {
-            id: 0,
-            stage: "sharding".to_string(),
-            task_id: None,
-            round: Some(round),
-            status: PipelineItemStatus::Pending,
-            title: Some("Recovery sharding".to_string()),
-            mode: Some("recovery".to_string()),
-            trigger: None,
-            interactive: Some(false),
-        });
+        session_state::transitions::queue_recovery_sharding(&mut self.state, round);
     }
 
     pub(super) fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
@@ -154,7 +142,7 @@ impl App {
                 .log_event(format!("yolo_toggled_resolved_gate={gate}"));
             self.pending_yolo_toggle_gate = None;
         }
-        self.state.agent_error = None;
+        self.clear_agent_error();
         let _ = self.transition_to_phase(Phase::PlanningRunning);
     }
 
@@ -166,7 +154,7 @@ impl App {
                 .log_event(format!("yolo_toggled_resolved_gate={gate}"));
             self.pending_yolo_toggle_gate = None;
         }
-        self.state.agent_error = None;
+        self.clear_agent_error();
         self.queue_view_of_current_artifact("plan.md");
         let _ = self.transition_to_phase(Phase::ShardingRunning);
     }

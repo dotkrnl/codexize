@@ -113,6 +113,32 @@ fn build_shell_cmd(
     finish_dir: &str,
     stamp_path: &str,
 ) -> String {
+    build_shell_cmd_with_mode(
+        agent_cmd,
+        window_name,
+        status_dir,
+        status_path,
+        finish_dir,
+        stamp_path,
+        ShellAgentMode::Background,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellAgentMode {
+    Foreground,
+    Background,
+}
+
+fn build_shell_cmd_with_mode(
+    agent_cmd: &str,
+    window_name: &str,
+    status_dir: &str,
+    status_path: &str,
+    finish_dir: &str,
+    stamp_path: &str,
+    mode: ShellAgentMode,
+) -> String {
     // Compute interval as a decimal string for `sleep` (e.g. "0.1").
     let interval_ms = DEFAULT_STAMP_STABILIZE_INTERVAL_MS;
     let interval_sec = format!("{:.3}", interval_ms as f64 / 1000.0)
@@ -121,6 +147,21 @@ fn build_shell_cmd(
         .to_string();
     // Reviewer note: interrupted attempts are stamped with 128+signal to keep
     // a deterministic non-zero exit code even when the child status is not recoverable.
+
+    let agent_invocation = match mode {
+        ShellAgentMode::Foreground => format!(
+            r#"{agent_cmd}
+exit_code=$?"#,
+            agent_cmd = agent_cmd,
+        ),
+        ShellAgentMode::Background => format!(
+            r#"{agent_cmd} &
+child_pid=$!
+wait "$child_pid"
+exit_code=$?"#,
+            agent_cmd = agent_cmd,
+        ),
+    };
 
     format!(
         r#"mkdir -p {status_dir} {finish_dir}
@@ -212,10 +253,7 @@ trap '' HUP
 trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 printf '\033[1;36m>>> starting %s...\033[0m\n\n' {name}
-{agent_cmd} &
-child_pid=$!
-wait "$child_pid"
-exit_code=$?
+{agent_invocation}
 finalize
 trap - EXIT HUP INT TERM
 exit $exit_code"#,
@@ -223,7 +261,7 @@ exit $exit_code"#,
         finish_dir = shell_escape(finish_dir),
         status_path = shell_escape(status_path),
         name = shell_escape(window_name),
-        agent_cmd = agent_cmd,
+        agent_invocation = agent_invocation,
         budget = DEFAULT_STAMP_STABILIZE_BUDGET_MS,
         interval = interval_ms,
         env_budget = ENV_STAMP_STABILIZE_MS,
@@ -381,6 +419,7 @@ pub fn launch_interactive(
         &cmd,
         adapter,
         switch,
+        ShellAgentMode::Foreground,
         status_path,
         run_key,
         artifacts_dir,
@@ -405,6 +444,7 @@ pub fn launch_noninteractive(
         &cmd,
         adapter,
         false,
+        ShellAgentMode::Background,
         status_path,
         run_key,
         artifacts_dir,
@@ -452,6 +492,7 @@ fn launch_in_window(
     agent_cmd: &str,
     adapter: &dyn AgentAdapter,
     switch: bool,
+    mode: ShellAgentMode,
     status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
@@ -477,14 +518,25 @@ fn launch_in_window(
         .to_string_lossy()
         .into_owned();
 
-    let shell_cmd = build_shell_cmd(
-        agent_cmd,
-        window_name,
-        &status_dir,
-        &status_path_str,
-        &finish_dir,
-        &stamp_path,
-    );
+    let shell_cmd = match mode {
+        ShellAgentMode::Background => build_shell_cmd(
+            agent_cmd,
+            window_name,
+            &status_dir,
+            &status_path_str,
+            &finish_dir,
+            &stamp_path,
+        ),
+        ShellAgentMode::Foreground => build_shell_cmd_with_mode(
+            agent_cmd,
+            window_name,
+            &status_dir,
+            &status_path_str,
+            &finish_dir,
+            &stamp_path,
+            ShellAgentMode::Foreground,
+        ),
+    };
 
     let args: Vec<&str> = if switch {
         vec!["new-window", "-n", window_name, &shell_cmd]

@@ -145,6 +145,14 @@ impl App {
                 key_hint: None,
             });
         }
+        if self.selected_task_id().is_some() {
+            commands.push(PaletteCommand {
+                name: "retry",
+                aliases: &["r"],
+                help: "Retry selected task",
+                key_hint: None,
+            });
+        }
         if self.editable_artifact().is_some() {
             commands.push(PaletteCommand {
                 name: "edit",
@@ -251,18 +259,15 @@ impl App {
         match name {
             "quit" => true,
             "back" => {
-                if self.confirm_back {
-                    self.confirm_back = false;
-                    self.status_line.borrow_mut().clear();
+                self.confirm_back = false;
+                self.status_line.borrow_mut().clear();
+                if self.can_go_back() {
                     self.go_back();
-                } else if self.can_go_back() {
-                    self.confirm_back = true;
-                    self.push_status(
-                        "Press :back again to go back".to_string(),
-                        Severity::Warn,
-                        Duration::from_secs(5),
-                    );
                 }
+                false
+            }
+            "retry" => {
+                self.retry_selected_task();
                 false
             }
             "edit" => {

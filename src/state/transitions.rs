@@ -350,6 +350,10 @@ pub fn set_retry_reset_run_id_cutoff(state: &mut SessionState, run_id: u64) {
     state.builder.retry_reset_run_id_cutoff = Some(run_id);
 }
 
+pub fn set_phase_for_operator_retry(state: &mut SessionState, phase: Phase) {
+    state.current_phase = phase;
+}
+
 pub fn increment_recovery_cycle_count(state: &mut SessionState) -> u32 {
     state.builder.recovery_cycle_count += 1;
     state.builder.recovery_cycle_count

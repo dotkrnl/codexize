@@ -4,7 +4,10 @@ use crate::{
     artifacts::{ArtifactKind, Spec},
     cache,
     selection::{self, ranking::build_version_index},
-    state::{self as session_state, MessageKind, Node, NodeStatus, Phase, RunStatus, SessionState},
+    state::{
+        self as session_state, MessageKind, Node, NodeKind, NodeStatus, Phase, PipelineItemStatus,
+        RunStatus, SessionState,
+    },
     tasks,
     tmux::TmuxContext,
     tui::AppTerminal,
@@ -25,9 +28,17 @@ use super::{
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    fs,
     rc::Rc,
     time::{Duration, Instant},
 };
+
+fn parse_task_label_id(label: &str) -> Option<u32> {
+    let rest = label.strip_prefix("Task ")?;
+    let digits = rest.split(':').next()?.split_whitespace().next()?;
+    digits.parse().ok()
+}
+
 impl App {
     pub(super) fn active_modal(&self) -> Option<ModalKind> {
         match self.state.current_phase {
@@ -884,6 +895,128 @@ impl App {
 
     pub(super) fn can_go_back(&self) -> bool {
         !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
+    }
+
+    pub(super) fn selected_task_id(&self) -> Option<u32> {
+        let row = self.visible_rows.get(self.selected)?;
+        for depth in (1..=row.path.len()).rev() {
+            let node = node_at_path(&self.nodes, &row.path[..depth])?;
+            if node.kind == NodeKind::Task {
+                return parse_task_label_id(&node.label);
+            }
+        }
+        None
+    }
+
+    pub(super) fn retry_selected_task(&mut self) {
+        let Some(task_id) = self.selected_task_id() else {
+            self.push_status(
+                "retry: select a task first".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        };
+
+        let task_rounds = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.task_id == Some(task_id))
+            .map(|run| run.round)
+            .collect::<BTreeSet<_>>();
+        let retry_round = task_rounds
+            .iter()
+            .next_back()
+            .copied()
+            .or_else(|| match self.state.current_phase {
+                Phase::ImplementationRound(round) | Phase::ReviewRound(round) => Some(round),
+                Phase::BuilderRecovery(round)
+                | Phase::BuilderRecoveryPlanReview(round)
+                | Phase::BuilderRecoverySharding(round) => Some(round),
+                _ => None,
+            })
+            .unwrap_or(1);
+        let recovery_context_matches = self.state.builder.recovery_trigger_task_id == Some(task_id);
+
+        let removed_runs = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| {
+                run.task_id == Some(task_id)
+                    || (recovery_context_matches
+                        && task_rounds.contains(&run.round)
+                        && run.task_id.is_none()
+                        && (run.stage == "recovery"
+                            || run.window_name.contains("[Recovery Plan Review]")
+                            || run.window_name.contains("[Recovery Sharding]")))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if removed_runs.is_empty() {
+            self.push_status(
+                format!("retry: no attempt logs for task {task_id}"),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+
+        let removed_ids = removed_runs
+            .iter()
+            .map(|run| run.id)
+            .collect::<BTreeSet<_>>();
+        for run in &removed_runs {
+            if run.status == RunStatus::Running {
+                kill_window(&run.window_name);
+            }
+            let _ = fs::remove_file(self.run_status_path(run));
+            let _ = fs::remove_file(self.live_summary_path_for(run));
+            let _ = fs::remove_file(self.finish_stamp_path_for(run));
+        }
+
+        self.state
+            .agent_runs
+            .retain(|run| !removed_ids.contains(&run.id));
+        let _ = self.state.remove_messages_for_runs(&removed_ids);
+        self.messages
+            .retain(|message| !removed_ids.contains(&message.run_id));
+        self.failed_models.retain(|(stage, key_task_id, _), _| {
+            *key_task_id != Some(task_id) && stage != "recovery"
+        });
+
+        if self.state.builder.pipeline_items.is_empty() {
+            self.state.builder.current_task = Some(task_id);
+            self.state.builder.pending.retain(|id| *id != task_id);
+        } else if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .find(|item| item.stage == "coder" && item.task_id == Some(task_id))
+        {
+            item.status = PipelineItemStatus::Pending;
+            item.round = None;
+            self.state.builder.sync_legacy_queue_views();
+        }
+
+        self.clear_agent_error();
+        self.current_run_id = None;
+        self.window_launched = false;
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
+        session_state::transitions::set_phase_for_operator_retry(
+            &mut self.state,
+            Phase::ImplementationRound(retry_round),
+        );
+        let _ = self.state.log_event(format!(
+            "palette_retry: task={task_id} removed_runs={}",
+            removed_ids.len()
+        ));
+        let _ = self.state.save();
+        self.rebuild_tree_view(None);
+        self.launch_coder();
     }
 
     pub(super) fn go_back(&mut self) {

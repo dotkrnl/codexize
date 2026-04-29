@@ -46,12 +46,21 @@ fn detect_git() -> bool {
 }
 
 fn detect_ignored(root: &Path) -> bool {
-    Command::new("git")
-        .args(["check-ignore", "-q"])
-        .arg(root)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let ignored = |path: &std::ffi::OsStr| {
+        Command::new("git")
+            .args(["check-ignore", "-q", "--"])
+            .arg(path)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if ignored(root.as_os_str()) {
+        return true;
+    }
+
+    let dir_form = format!("{}/", root.display());
+    ignored(std::ffi::OsStr::new(&dir_form))
 }
 
 fn has_existing_files() -> bool {
@@ -718,6 +727,16 @@ mod tests {
             let content = fs::read_to_string(".gitignore").unwrap();
             assert!(content.contains("node_modules/"));
             assert!(content.contains(".codexize/"));
+        });
+    }
+
+    #[test]
+    fn detect_ignored_accepts_required_directory_entry_before_dir_exists() {
+        with_temp_dir(|| {
+            git_cmd(&["init"]);
+            fs::write(".gitignore", ".codexize/\n").unwrap();
+
+            assert!(detect_ignored(Path::new(".codexize")));
         });
     }
 

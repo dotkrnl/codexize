@@ -1518,15 +1518,6 @@ impl App {
             false
         } else {
             let dirty = guard::git_status_dirty();
-            let track_working_tree = stage == "reviewer"
-                && read_review_scope(
-                    &session_dir
-                        .join("rounds")
-                        .join(format!("{round:03}"))
-                        .join("review_scope.toml"),
-                )
-                .map(|scope| scope.dirty_after)
-                .unwrap_or(false);
             let _ = guard::capture_non_coder(
                 &dir,
                 &format!(
@@ -1536,7 +1527,8 @@ impl App {
                         .unwrap_or_else(|| "stage".to_string())
                 ),
                 mode,
-                track_working_tree,
+                // Reviewer runs only inspect committed base..HEAD now; coder dirt fails earlier.
+                false,
             );
             dirty
         }
@@ -1631,6 +1623,12 @@ impl App {
             return Some(Self::failed_unverified_reason(
                 &stamp_path,
                 format!("head_state={}", stamp.head_state),
+            ));
+        }
+        if !stamp.working_tree_clean {
+            return Some(Self::failed_unverified_reason(
+                &stamp_path,
+                "working tree not clean on exit",
             ));
         }
         if stamp.exit_code == 0 && stamp.head_after.trim().is_empty() {
@@ -3558,11 +3556,7 @@ impl App {
             Phase::ImplementationRound(round) => {
                 let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
                 let scope = read_review_scope(&round_dir.join("review_scope.toml"))?;
-                let _ = write_review_scope_artifact(
-                    &round_dir,
-                    &scope.base_sha,
-                    guard::git_status_dirty(),
-                );
+                let _ = write_review_scope_artifact(&round_dir, &scope.base_sha);
                 self.finalize_run_record(run.id, true, None);
                 self.state.agent_error = None;
                 self.transition_to_phase(Phase::ReviewRound(round))?;
@@ -4861,30 +4855,15 @@ impl App {
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("reviewer-r{r}.md"));
-        let review_scope = match read_review_scope(&review_scope_file) {
-            Ok(scope) => scope,
-            Err(err) => {
-                self.state.agent_error = Some(format!("invalid review scope: {err:#}"));
-                let _ = self.state.save();
-                return false;
-            }
-        };
+        if let Err(err) = read_review_scope(&review_scope_file) {
+            self.state.agent_error = Some(format!("invalid review scope: {err:#}"));
+            let _ = self.state.save();
+            return false;
+        }
         let coder_summary_file = round_dir.join("coder_summary.toml");
         let coder_summary_path = coder_summary_file
             .exists()
             .then_some(coder_summary_file.as_path());
-        let dirty_state_note = coder_summary_path.and_then(|path| {
-            coder_summary::validate(path).ok().and_then(|summary| {
-                (summary.dirty_after != review_scope.dirty_after).then(|| {
-                    format!(
-                        "{} reports dirty_after = {}, but the orchestrator computed dirty_after = {} from git state. Treat review_scope.toml as canonical.",
-                        path.display(),
-                        summary.dirty_after,
-                        review_scope.dirty_after
-                    )
-                })
-            })
-        });
         let prompt = reviewer_prompt(ReviewerPromptInputs {
             session_dir: &session_dir,
             task_id,
@@ -4892,10 +4871,8 @@ impl App {
             task_file: &task_file,
             review_scope_file: &review_scope_file,
             coder_summary_file: coder_summary_path,
-            dirty_after: review_scope.dirty_after,
             review_file: &review_path,
             live_summary_path: &live_summary_path,
-            coder_summary_note: dirty_state_note.as_deref(),
         });
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             let _ = self.state.log_event(format!("error writing prompt: {e}"));
@@ -5293,15 +5270,11 @@ fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> 
     Ok(read_review_scope(path)?.base_sha.trim().to_string())
 }
 
-fn write_review_scope_artifact(
-    round_dir: &std::path::Path,
-    base_sha: &str,
-    dirty_after: bool,
-) -> std::io::Result<()> {
+fn write_review_scope_artifact(round_dir: &std::path::Path, base_sha: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(round_dir)?;
     std::fs::write(
         round_dir.join("review_scope.toml"),
-        format!("base_sha = \"{base_sha}\"\ndirty_after = {dirty_after}\n"),
+        format!("base_sha = \"{base_sha}\"\n"),
     )
 }
 
@@ -6173,20 +6146,19 @@ Hard rules:
   - No clarifying questions — work from task + spec + plan.
   - Stay in this task's scope. Follow-up work you uncover → note for the
     reviewer, don't do it yourself.
+  - Leave the working tree clean on exit. The wrapper records git cleanliness
+    after the agent exits; a dirty tree fails the run before review.
   - No force-push, no history rewrite, no branch deletes.
 
 Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
     status       = "done" | "partial"      # "partial" makes the run retry
     summary      = "One short paragraph of what you completed."
-    dirty_before = true | false             # `git status --porcelain` non-empty at start
-    dirty_after  = true | false             # you intentionally left changes uncommitted
     rebuttal     = ["[Round N, Item M] Response to prior reviewer feedback."]
                                             # only when prior feedback was wrong or already
                                             # addressed; prefix each item with [Round N, Item M]
 
 If the task was already complete and you committed nothing, status = "done"
-with the reason in summary — that's not a failure. The orchestrator
-independently checks git state, so be honest about dirty_before/after.
+with the reason in summary — that's not a failure.
 {instr}"#,
         task_id = task_id,
         round = round,
@@ -6208,10 +6180,8 @@ struct ReviewerPromptInputs<'a> {
     task_file: &'a std::path::Path,
     review_scope_file: &'a std::path::Path,
     coder_summary_file: Option<&'a std::path::Path>,
-    dirty_after: bool,
     review_file: &'a std::path::Path,
     live_summary_path: &'a std::path::Path,
-    coder_summary_note: Option<&'a str>,
 }
 
 fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
@@ -6222,10 +6192,8 @@ fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         task_file,
         review_scope_file,
         coder_summary_file,
-        dirty_after,
         review_file,
         live_summary_path,
-        coder_summary_note,
     } = inputs;
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
@@ -6254,14 +6222,7 @@ fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
             round
         )
     });
-    let dirty_scope = if dirty_after {
-        "  4. DIRTY WORKING TREE in scope: judge `git diff $BASE..HEAD` AND\n     `git diff HEAD` together (also `git status --porcelain` /\n     `git ls-files --others --exclude-standard` for staged/untracked). The\n     working tree is authoritative — on any conflict between committed and\n     uncommitted changes, what the tree currently contains is the coder's\n     intended output.\n".to_string()
-    } else {
-        "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n".to_string()
-    };
-    let coder_summary_note = coder_summary_note
-        .map(|note| format!("  Canonical dirty-state note: {note}\n"))
-        .unwrap_or_default();
+    let review_scope_text = "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n";
     let project_doc_instr = project_doc_instr();
     format!(
         r#"{project_doc_instr}You are the reviewer for task {task_id}, round {round}. NON-INTERACTIVE —
@@ -6276,7 +6237,7 @@ Inputs:
   Plan:         {plan}
   Review scope: {review_scope} (TOML with base_sha = HEAD at round start)
 {prior_reviews}
-{coder_summary_section}{coder_summary_note}
+{coder_summary_section}
 
 Review:
   1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' {review_scope})
@@ -6295,7 +6256,7 @@ Review:
      intermediate), SKIP the test-pass check — but still require the code
      to build cleanly (compiles / links / type-checks). Completion still
      matters.
-{dirty_scope}
+{review_scope_text}
 
 # IMPORTANT: emit ONLY the TOML below to {review} — no prose around it.
 # Parse failure = run failure. Use double-quoted strings; triple-quoted for
@@ -6347,8 +6308,7 @@ Rules:
         plan = plan.display(),
         review_scope = review_scope_file.display(),
         coder_summary_section = coder_summary_section,
-        coder_summary_note = coder_summary_note,
-        dirty_scope = dirty_scope,
+        review_scope_text = review_scope_text,
         review = review_file.display(),
         instr = instr,
     )
@@ -6606,8 +6566,21 @@ mod tests {
         }
     }
 
-    fn write_review_scope(round_dir: &std::path::Path, base_sha: &str, dirty_after: bool) {
-        write_review_scope_artifact(round_dir, base_sha, dirty_after).expect("write review scope");
+    fn write_review_scope(round_dir: &std::path::Path, base_sha: &str) {
+        write_review_scope_artifact(round_dir, base_sha).expect("write review scope");
+    }
+
+    #[test]
+    fn review_scope_fresh_write_omits_dirty_after() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("review-scope-fresh-schema");
+            let round_dir = session_dir.join("rounds").join("001");
+
+            write_review_scope_artifact(&round_dir, "base123").expect("write review scope");
+
+            let text = std::fs::read_to_string(round_dir.join("review_scope.toml")).unwrap();
+            assert_eq!(text, "base_sha = \"base123\"\n");
+        });
     }
 
     fn write_finish_stamp(
@@ -8175,7 +8148,7 @@ mod tests {
             let session_id = "coder-stable-advance";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
@@ -8213,7 +8186,7 @@ mod tests {
             let round_dir = session_dir.join("rounds").join("001");
             std::fs::create_dir_all(&round_dir).unwrap();
             std::fs::write(round_dir.join("task.toml"), "id = 1\n").unwrap();
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             let guard_dir = session_dir.join(".guards").join("coder-task-1-r1-a1");
             guard::capture_coder(&guard_dir, &session_dir, 1).expect("capture coder guard");
             std::fs::write(round_dir.join("task.toml"), "id = 1\n# changed by coder\n").unwrap();
@@ -8257,7 +8230,7 @@ mod tests {
             let session_id = "coder-stable-unchanged";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             write_finish_stamp(
                 &session_dir,
                 &App::run_key_for("coder", Some(1), 1, 1),
@@ -8285,7 +8258,7 @@ mod tests {
             let session_id = "coder-missing-stamp";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
@@ -8322,7 +8295,7 @@ mod tests {
             let session_id = "coder-malformed-stamp";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let run_key = App::run_key_for("coder", Some(1), 1, 1);
             let stamp_path = session_dir
@@ -8354,7 +8327,7 @@ mod tests {
             let session_id = "coder-finalize-missing-stamp";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
@@ -8509,7 +8482,7 @@ mod tests {
             let session_id = "coder-unverified-no-retry";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
@@ -8717,7 +8690,7 @@ mod tests {
             let session_id = "coder-unstable-stamp-no-retry";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let mut state = SessionState::new(session_id.to_string());
             state.current_phase = Phase::ImplementationRound(1);
@@ -9205,7 +9178,7 @@ mod tests {
             std::fs::write(artifacts.join("tasks.toml"), "[[tasks]]\nid = 1\n").expect("tasks");
             std::fs::write(
                 round_dir.join("coder_summary.toml"),
-                "status = \"done\"\nsummary = \"ok\"\ndirty_before = false\ndirty_after = false\n",
+                "status = \"done\"\nsummary = \"ok\"\n",
             )
             .expect("coder summary");
             std::fs::write(
@@ -11313,7 +11286,7 @@ estimated_tokens = 1
             });
 
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             write_finish_stamp(
                 &session_dir,
                 &App::run_key_for("coder", Some(1), 1, 1),
@@ -11371,7 +11344,7 @@ estimated_tokens = 1
             });
 
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
 
             let resumed = state
                 .resume_running_runs(&[])
@@ -11630,7 +11603,7 @@ estimated_tokens = 1
             let session_id = "coder-summary-done";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             write_finish_stamp(
                 &session_dir,
                 &App::run_key_for("coder", Some(1), 1, 1),
@@ -11641,8 +11614,6 @@ estimated_tokens = 1
                 round_dir.join("coder_summary.toml"),
                 r#"status = "done"
 summary = "Already complete"
-dirty_before = false
-dirty_after = false
 "#,
             )
             .unwrap();
@@ -11664,7 +11635,7 @@ dirty_after = false
             let session_id = "coder-summary-partial";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             write_finish_stamp(
                 &session_dir,
                 &App::run_key_for("coder", Some(1), 1, 1),
@@ -11675,8 +11646,6 @@ dirty_after = false
                 round_dir.join("coder_summary.toml"),
                 r#"status = "partial"
 summary = "Still working"
-dirty_before = false
-dirty_after = false
 "#,
             )
             .unwrap();
@@ -11701,7 +11670,7 @@ dirty_after = false
             let session_id = "coder-summary-invalid";
             let session_dir = session_state::session_dir(session_id);
             let round_dir = session_dir.join("rounds").join("001");
-            write_review_scope(&round_dir, "base123", false);
+            write_review_scope(&round_dir, "base123");
             write_finish_stamp(
                 &session_dir,
                 &App::run_key_for("coder", Some(1), 1, 1),
@@ -11712,8 +11681,6 @@ dirty_after = false
                 round_dir.join("coder_summary.toml"),
                 r#"status = "done"
 summary = "   "
-dirty_before = false
-dirty_after = false
 "#,
             )
             .unwrap();
@@ -11733,9 +11700,43 @@ dirty_after = false
     }
 
     #[test]
-    fn reviewer_prompt_scopes_dirty_working_tree_and_coder_summary() {
+    fn coder_gate_rejects_dirty_working_tree_finish_stamp() {
         with_temp_root(|| {
-            let session_dir = session_state::session_dir("reviewer-prompt-dirty");
+            let session_id = "coder-dirty-finish-stamp";
+            let session_dir = session_state::session_dir(session_id);
+            let round_dir = session_dir.join("rounds").join("001");
+            write_review_scope(&round_dir, "base123");
+            let stamp = crate::runner::FinishStamp {
+                finished_at: chrono::Utc::now().to_rfc3339(),
+                exit_code: 0,
+                head_before: "base123".to_string(),
+                head_after: "head456".to_string(),
+                head_state: "stable".to_string(),
+                signal_received: String::new(),
+                working_tree_clean: false,
+            };
+            let stamp_path = session_dir
+                .join("artifacts")
+                .join("run-finish")
+                .join(format!("{}.toml", App::run_key_for("coder", Some(1), 1, 1)));
+            crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
+
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::ImplementationRound(1);
+            state.builder.current_task = Some(1);
+            let run = make_coder_run(1, 1, 1);
+            state.agent_runs.push(run.clone());
+            let app = idle_app(state);
+
+            let reason = app.coder_gate_reason(&run, &round_dir).unwrap();
+            assert!(reason.contains("working tree not clean on exit"));
+        });
+    }
+
+    #[test]
+    fn reviewer_prompt_always_scopes_base_to_head() {
+        with_temp_root(|| {
+            let session_dir = session_state::session_dir("reviewer-prompt-base-head");
             let task_file = session_dir.join("rounds/001/task.toml");
             let scope_file = session_dir.join("rounds/001/review_scope.toml");
             let summary_file = session_dir.join("rounds/001/coder_summary.toml");
@@ -11750,15 +11751,14 @@ dirty_after = false
                 task_file: &task_file,
                 review_scope_file: &scope_file,
                 coder_summary_file: Some(&summary_file),
-                dirty_after: true,
                 review_file: &review_file,
                 live_summary_path: &live_summary,
-                coder_summary_note: None,
             });
 
-            assert!(prompt.contains("DIRTY WORKING TREE"));
-            assert!(prompt.contains("git diff HEAD"));
-            assert!(prompt.contains("git ls-files --others --exclude-standard"));
+            assert!(!prompt.contains("DIRTY WORKING TREE"));
+            assert!(!prompt.contains("git diff HEAD"));
+            assert!(!prompt.contains("git ls-files --others --exclude-standard"));
+            assert!(prompt.contains("review only `base..HEAD`"));
             assert!(prompt.contains("Coder summary:"));
             assert!(prompt.contains("Coder rebuttal (round 2):"));
         });

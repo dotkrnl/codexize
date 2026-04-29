@@ -14,8 +14,6 @@ pub enum CoderStatus {
 pub struct CoderSummary {
     pub status: CoderStatus,
     pub summary: String,
-    pub dirty_before: bool,
-    pub dirty_after: bool,
     #[serde(default)]
     pub rebuttal: Vec<String>,
 }
@@ -49,7 +47,22 @@ mod tests {
     }
 
     #[test]
-    fn coder_summary_done_passes_validation() {
+    fn coder_summary_done_new_schema_passes_validation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = write_summary(
+            &dir,
+            r#"status = "done"
+summary = "Task already complete"
+rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
+"#,
+        );
+        let summary = validate(&path).unwrap();
+        assert_eq!(summary.status, CoderStatus::Done);
+        assert_eq!(summary.rebuttal.len(), 1);
+    }
+
+    #[test]
+    fn coder_summary_legacy_dirty_fields_parse() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = write_summary(
             &dir,
@@ -62,7 +75,6 @@ rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
         );
         let summary = validate(&path).unwrap();
         assert_eq!(summary.status, CoderStatus::Done);
-        assert!(summary.dirty_after);
         assert_eq!(summary.rebuttal.len(), 1);
     }
 
@@ -73,8 +85,6 @@ rebuttal = ["[Round 1, Item 2] Already addressed in the latest diff."]
             &dir,
             r#"status = "done"
 summary = "   "
-dirty_before = false
-dirty_after = false
 "#,
         );
         let err = validate(&path).unwrap_err();
@@ -88,8 +98,6 @@ dirty_after = false
             &dir,
             r#"status = "partial"
 summary = "Need another round"
-dirty_before = false
-dirty_after = false
 rebuttal = ["  "]
 "#,
         );

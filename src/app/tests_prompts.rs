@@ -303,3 +303,23 @@ fn review_prompts_protect_authoritative_user_requirements() {
         assert!(plan_prompt.contains("it must be raised to the\noperator, not patched"));
     });
 }
+
+#[test]
+fn live_summary_instruction_requires_immediate_creation_and_current_updates() {
+    let path = std::path::Path::new("artifacts/live_summary.test.txt");
+    let prompt = live_summary_instruction(path);
+
+    assert!(prompt.contains("Immediately create artifacts/live_summary.test.txt"));
+    assert!(prompt.contains("every 2–3 min and on each sub-goal change"));
+    assert!(prompt.contains("Keep this file current until you exit."));
+}
+
+#[test]
+fn interactive_live_summary_instruction_requires_immediate_creation() {
+    let path = std::path::Path::new("artifacts/live_summary.interactive.txt");
+    let prompt = live_summary_instruction_interactive(path);
+
+    assert!(prompt.contains("Immediately create artifacts/live_summary.interactive.txt"));
+    assert!(prompt.contains("every 2–3 min"));
+    assert!(prompt.contains("Keep this file current until you exit."));
+}

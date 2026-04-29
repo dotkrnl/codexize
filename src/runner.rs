@@ -775,7 +775,7 @@ pub fn validate_toml_artifacts(paths: &[&Path]) -> Result<()> {
     }
 }
 
-/// Launch an agent interactively inside a new tmux window.
+/// Launch an agent interactively inside the managed ACP runtime boundary.
 /// All agent child-process launches must route through the runner so that
 /// finish-stamp logic is guaranteed to run.
 #[allow(clippy::too_many_arguments)]
@@ -783,13 +783,11 @@ pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
     vendor: VendorKind,
-    switch: bool,
     status_path: &Path,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
 ) -> Result<()> {
-    let _ = switch;
     let launch = build_managed_acp_launch(
         vendor,
         run,
@@ -802,7 +800,7 @@ pub fn launch_interactive(
     launch_managed_acp_window(window_name, launch)
 }
 
-/// Launch an agent non-interactively inside a new tmux window.
+/// Launch an agent non-interactively inside the managed ACP runtime boundary.
 /// All agent child-process launches must route through the runner so that
 /// finish-stamp logic is guaranteed to run.
 pub fn launch_noninteractive(

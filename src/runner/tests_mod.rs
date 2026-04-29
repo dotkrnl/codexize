@@ -241,6 +241,45 @@ fn shell_cmd_contains_stabilization_loop() {
 }
 
 #[test]
+fn interactive_shell_cmd_runs_agent_in_foreground() {
+    let cmd = build_shell_cmd_with_mode(
+        "codex -m gpt-5 prompt",
+        "[Test]",
+        "/tmp/status",
+        "/tmp/status/run.txt",
+        "/tmp/artifacts/run-finish",
+        "/tmp/artifacts/run-finish/test-key.toml",
+        ShellAgentMode::Foreground,
+    );
+
+    assert!(
+        !cmd.contains("codex -m gpt-5 prompt &"),
+        "interactive commands must keep terminal ownership by running in the foreground"
+    );
+    assert!(
+        cmd.contains("codex -m gpt-5 prompt\nexit_code=$?"),
+        "wrapper should capture the foreground agent exit status"
+    );
+}
+
+#[test]
+fn noninteractive_shell_cmd_keeps_background_child_for_signal_forwarding() {
+    let cmd = build_shell_cmd(
+        "codex exec prompt",
+        "[Test]",
+        "/tmp/status",
+        "/tmp/status/run.txt",
+        "/tmp/artifacts/run-finish",
+        "/tmp/artifacts/run-finish/test-key.toml",
+    );
+
+    assert!(
+        cmd.contains("codex exec prompt &\nchild_pid=$!\nwait \"$child_pid\""),
+        "non-interactive commands should keep the signal-forwarding child wrapper"
+    );
+}
+
+#[test]
 fn shell_cmd_escapes_paths() {
     let cmd = build_shell_cmd(
         "echo hello",

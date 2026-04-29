@@ -1,3 +1,11 @@
+//! Intent-named mutation helpers for live session state.
+//!
+//! `execute_transition` is the only helper in this module that validates,
+//! logs, and persists internally with `SessionState::save`. The remaining
+//! helpers perform in-memory mutations only; their callers own persistence so
+//! they can batch related state changes into a single save at the workflow
+//! boundary.
+
 use super::{
     BuilderState, LaunchModes, Modes, PendingGuardDecision, Phase, PipelineItem,
     PipelineItemStatus, RunStatus, SessionState,
@@ -460,6 +468,8 @@ pub fn clear_pending_guard_decision(state: &mut SessionState) {
 pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Phase) {
     // The guard modal is an interstitial persisted phase; on "keep", finalization
     // must resume the original running phase before applying its normal successor.
+    // Phase::can_transition_to intentionally does not list GitGuardPending back
+    // to the paused running phases, so this restore cannot use execute_transition.
     state.current_phase = originating;
 }
 

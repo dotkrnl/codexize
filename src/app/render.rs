@@ -657,7 +657,7 @@ impl App {
         let is_focused = index == self.selected;
         let depth = self.visible_rows[index].depth;
 
-        // Structural focus marker: `▌` in the gutter for the selected row.
+        // Structural focus marker: `▌` follows the persistent section color gutter.
         let focus_glyph = if is_focused { "▌" } else { " " };
 
         // Thin tree glyphs for indentation.
@@ -688,8 +688,8 @@ impl App {
         };
 
         let mut spans = vec![
-            Span::styled(focus_glyph, Style::default()),
             Span::styled(" ", color_block_style),
+            Span::styled(focus_glyph, Style::default()),
             Span::styled(indent, dim),
             Span::raw(" "),
             Span::raw(marker.to_string()),
@@ -2418,7 +2418,7 @@ mod tests {
             lines,
             vec![
                 "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
-                "▌  ▾ Implementation · running",
+                " ▌ ▾ Implementation · running",
                 "  └─ ▾ Builder · running",
                 "XX:XX:XX ⠋ Wiring full-screen tests",
                 "",
@@ -2742,8 +2742,8 @@ mod tests {
             !pinned_style.add_modifier.contains(Modifier::UNDERLINED),
             "pinned running stage header should not be underlined"
         );
-        // The status color block lives at col 1 and should carry the running bg.
-        let block_style = buf[(1, 0)].style();
+        // The status color block lives at col 0 and should carry the running bg.
+        let block_style = buf[(0, 0)].style();
         assert_eq!(
             block_style.bg,
             Some(Color::Cyan),
@@ -2849,9 +2849,9 @@ mod tests {
         assert!(lines[4].contains("Tail"));
     }
 
-    /// Depth-0 row layout: `[focus][color block] > Title · status`.
-    /// - col 0: focus glyph (no bg)
-    /// - col 1: status color block (carries status bg when present)
+    /// Depth-0 row layout: `[color block][focus] > Title · status`.
+    /// - col 0: status color block
+    /// - col 1: focus glyph `▌` or blank (no bg)
     /// - col 2: gap (no bg)
     /// - col 3: chevron `▾`/`▸` (no bg)
     /// - col 4: gap (no bg)
@@ -2888,16 +2888,16 @@ mod tests {
                 "no cell on a depth-0 row should be underlined; col={col}"
             );
         }
-        // Focus glyph (col 0) never carries the status bg.
-        assert!(
-            buf[(0, 0)].style().bg != Some(expected_bg),
-            "focus glyph cell must not carry the status highlight bg"
-        );
-        // Color block (col 1) carries the status bg.
+        // Color block (col 0) carries the status bg.
         assert_eq!(
-            buf[(1, 0)].style().bg,
+            buf[(0, 0)].style().bg,
             Some(expected_bg),
-            "color block at col 1 should carry the status highlight bg"
+            "color block at col 0 should carry the status highlight bg"
+        );
+        // Focus glyph (col 1) never carries the status bg.
+        assert!(
+            buf[(1, 0)].style().bg != Some(expected_bg),
+            "focus glyph cell must not carry the status highlight bg"
         );
         // Chevron (col 3) and label (cols 5..=9 for "Stage") do NOT carry the bg.
         for col in [2u16, 3, 4, 5, 6, 7, 8, 9] {

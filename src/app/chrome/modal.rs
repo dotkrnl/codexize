@@ -15,7 +15,7 @@ pub fn render_modal_overlay(
     keymap_line: Line<'static>,
 ) {
     // 3. Dim the background behind the modal.
-    let dim = Paragraph::new("").style(Style::default().bg(Color::Black));
+    let dim = Paragraph::new("").style(Style::default().bg(Color::DarkGray));
     frame.render_widget(dim, terminal_area);
 
     let terminal_width = terminal_area.width;

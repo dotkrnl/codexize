@@ -81,17 +81,18 @@ impl App {
         let modal = self.active_modal();
 
         let caps = self.focus_caps();
+        let input_surface_active = self.input_mode || self.interactive_run_active();
         let keymap_line = keymap(
             self.state.current_phase,
             modal,
             caps,
-            self.input_mode,
+            input_surface_active,
             width,
         );
 
         // Sheet content is owned by the input-mode path only. Modal content
         // is computed independently inside the overlay branch below.
-        let sheet_content: Option<Vec<Line<'static>>> = if self.input_mode {
+        let sheet_content: Option<Vec<Line<'static>>> = if input_surface_active {
             Some(self.input_sheet_content(width))
         } else {
             None

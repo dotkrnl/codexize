@@ -186,7 +186,7 @@ impl App {
         }
         self.current_run_id = Some(run_id);
         if run.modes.interactive {
-            self.palette.open();
+            self.input_mode = true;
         }
         self.run_launched = true;
         self.live_summary_path =

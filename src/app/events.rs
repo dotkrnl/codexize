@@ -33,16 +33,21 @@ impl App {
             return false;
         }
 
-        if self.input_mode {
+        if self.palette.open {
+            return self.handle_palette_key(key);
+        }
+
+        if self.interactive_run_active() {
+            if key.code == KeyCode::Char(':') {
+                self.palette.open();
+                return false;
+            }
+            self.input_mode = true;
             return self.handle_input_key(key);
         }
 
-        if self.interactive_run_active() && !self.palette.open {
-            self.palette.open();
-        }
-
-        if self.palette.open {
-            return self.handle_palette_key(key);
+        if self.input_mode {
+            return self.handle_input_key(key);
         }
 
         if let Some(modal) = self.active_modal() {
@@ -327,7 +332,7 @@ impl App {
         }
     }
 
-    fn interactive_run_active(&self) -> bool {
+    pub(super) fn interactive_run_active(&self) -> bool {
         let Some(run_id) = self.current_run_id else {
             return false;
         };
@@ -449,17 +454,20 @@ impl App {
     fn handle_input_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc => {
-                self.input_mode = false;
+                if !self.interactive_run_active() {
+                    self.input_mode = false;
+                }
                 return false;
             }
             KeyCode::Enter => {
+                let keep_input_open = self.interactive_run_active();
                 let trimmed = self.input_buffer.trim().to_string();
                 if !trimmed.is_empty() {
-                    if trimmed == "/exit" && self.interactive_run_active() {
+                    if trimmed == "/exit" && keep_input_open {
                         self.exit_interactive_run_locally();
                         self.input_buffer.clear();
                         self.input_cursor = 0;
-                        self.input_mode = false;
+                        self.input_mode = true;
                         return false;
                     }
 
@@ -486,7 +494,7 @@ impl App {
                     self.input_buffer.clear();
                     self.input_cursor = 0;
                 }
-                self.input_mode = false;
+                self.input_mode = keep_input_open;
                 return false;
             }
             _ => {}

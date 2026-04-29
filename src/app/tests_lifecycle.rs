@@ -1632,6 +1632,72 @@ fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
 }
 
 #[test]
+fn palette_retry_is_available_from_builder_loop_focus() {
+    with_temp_root(|| {
+        let session_id = "palette-retry-loop-focus";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "claude-sonnet".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            1,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            },
+        )));
+        app.rebuild_tree_view(None);
+        app.selected = row_index(&app, "Loop");
+
+        assert!(
+            app.palette_commands()
+                .iter()
+                .any(|command| command.name == "retry"),
+            ":retry should be available when the current builder task is selected by context"
+        );
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "retry".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert_eq!(app.state.agent_runs.len(), 1);
+        assert_eq!(app.state.agent_runs[0].attempt, 1);
+        assert_eq!(app.state.agent_runs[0].status, RunStatus::Running);
+    });
+}
+
+#[test]
 fn pending_guard_resume_fail_closed_when_decision_missing() {
     with_temp_root(|| {
         let session_id = "pending-guard-resume-fail";

@@ -905,7 +905,24 @@ impl App {
                 return parse_task_label_id(&node.label);
             }
         }
-        None
+        row.backing_leaf_run_id
+            .and_then(|run_id| {
+                self.state
+                    .agent_runs
+                    .iter()
+                    .find(|run| run.id == run_id)
+                    .and_then(|run| run.task_id)
+            })
+            .or_else(|| {
+                self.current_run_id.and_then(|run_id| {
+                    self.state
+                        .agent_runs
+                        .iter()
+                        .find(|run| run.id == run_id)
+                        .and_then(|run| run.task_id)
+                })
+            })
+            .or_else(|| self.state.builder.current_task_id())
     }
 
     pub(super) fn retry_selected_task(&mut self) {

@@ -9,7 +9,18 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
-use std::{fs, path::Path, process::Command, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    process::{Command, Stdio},
+    time::Duration,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightOutcome {
+    Continue,
+    Exit,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scenario {
@@ -18,6 +29,14 @@ enum Scenario {
     GitExistsNotIgnored,
     CodexAcpMissing,
     ClaudeAcpMissing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModalAction {
+    Accept,
+    Skip,
+    Exit,
+    Ignore,
 }
 
 const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
@@ -192,6 +211,9 @@ fn install_claude_acp() -> Result<()> {
             root.to_string_lossy().as_ref(),
             "@agentclientprotocol/claude-agent-acp",
         ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .context("failed to run npm install for Claude ACP")?;
     if !status.success() {
@@ -203,6 +225,9 @@ fn install_claude_acp() -> Result<()> {
 fn install_codex_acp() -> Result<()> {
     let status = Command::new("brew")
         .args(["install", "codex-acp"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .context("failed to run brew install codex-acp")?;
     if !status.success() {
@@ -479,7 +504,7 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
     frame.render_widget(paragraph, rect);
 }
 
-pub fn check(terminal: &mut AppTerminal) -> Result<()> {
+pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     let has_git = detect_git();
     let root = codexize_root();
     let codexize_entry = match std::env::current_dir() {
@@ -494,7 +519,11 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
         if detect_ignored(&root) {
             return run_acp_install_modals_if_missing(terminal);
         }
-        run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?;
+        if run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?
+            == PreflightOutcome::Exit
+        {
+            return Ok(PreflightOutcome::Exit);
+        }
         return run_acp_install_modals_if_missing(terminal);
     }
 
@@ -504,7 +533,9 @@ pub fn check(terminal: &mut AppTerminal) -> Result<()> {
         Scenario::NoGitEmpty
     };
 
-    run_git_init_modal(terminal, scenario, &codexize_entry)?;
+    if run_git_init_modal(terminal, scenario, &codexize_entry)? == PreflightOutcome::Exit {
+        return Ok(PreflightOutcome::Exit);
+    }
     run_acp_install_modals_if_missing(terminal)
 }
 
@@ -512,7 +543,7 @@ fn run_git_init_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
     codexize_entry: &str,
-) -> Result<()> {
+) -> Result<PreflightOutcome> {
     loop {
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario);
@@ -524,8 +555,8 @@ fn run_git_init_modal(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            match classify_required_modal_key(key.code) {
+                ModalAction::Accept => {
                     if scenario == Scenario::NoGitHasFiles {
                         let finish_marker = generate_gitignore_preflight_file(codexize_entry)?;
                         debug_assert!(
@@ -533,16 +564,14 @@ fn run_git_init_modal(
                             "deterministic preflight generation should create its marker eagerly"
                         );
                         run_git_init()?;
-                        return Ok(());
+                        return Ok(PreflightOutcome::Continue);
                     }
                     run_git_init()?;
                     append_to_gitignore(codexize_entry)?;
-                    return Ok(());
+                    return Ok(PreflightOutcome::Continue);
                 }
-                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                    std::process::exit(0);
-                }
-                _ => {}
+                ModalAction::Exit => return Ok(PreflightOutcome::Exit),
+                ModalAction::Ignore | ModalAction::Skip => {}
             }
         }
     }
@@ -552,7 +581,7 @@ fn run_gitignore_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
     codexize_entry: &str,
-) -> Result<()> {
+) -> Result<PreflightOutcome> {
     loop {
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario);
@@ -564,32 +593,28 @@ fn run_gitignore_modal(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            match classify_gitignore_modal_key(key.code) {
+                ModalAction::Accept => {
                     append_to_gitignore(codexize_entry)?;
                     maybe_auto_commit_gitignore(|_| {});
-                    return Ok(());
+                    return Ok(PreflightOutcome::Continue);
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') => {
-                    return Ok(());
-                }
-                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                    std::process::exit(0);
-                }
-                _ => {}
+                ModalAction::Skip => return Ok(PreflightOutcome::Continue),
+                ModalAction::Exit => return Ok(PreflightOutcome::Exit),
+                ModalAction::Ignore => {}
             }
         }
     }
 }
 
-fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
+fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     if crate::acp::should_offer_codex_acp_install() {
         run_acp_install_modal(terminal, Scenario::CodexAcpMissing, install_codex_acp)?;
     }
     if crate::acp::should_offer_claude_acp_install() {
         run_acp_install_modal(terminal, Scenario::ClaudeAcpMissing, install_claude_acp)?;
     }
-    Ok(())
+    Ok(PreflightOutcome::Continue)
 }
 
 fn run_acp_install_modal(
@@ -608,21 +633,44 @@ fn run_acp_install_modal(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            match classify_optional_modal_key(key.code) {
+                ModalAction::Accept => {
                     install()?;
                     return Ok(());
                 }
-                KeyCode::Char('n')
-                | KeyCode::Char('N')
-                | KeyCode::Char('q')
-                | KeyCode::Char('Q')
-                | KeyCode::Esc => {
-                    return Ok(());
-                }
-                _ => {}
+                ModalAction::Skip | ModalAction::Exit => return Ok(()),
+                ModalAction::Ignore => {}
             }
         }
+    }
+}
+
+fn classify_required_modal_key(key: KeyCode) -> ModalAction {
+    match key {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
+        _ => ModalAction::Ignore,
+    }
+}
+
+fn classify_gitignore_modal_key(key: KeyCode) -> ModalAction {
+    match key {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('n') | KeyCode::Char('N') => ModalAction::Skip,
+        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
+        _ => ModalAction::Ignore,
+    }
+}
+
+fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
+    match key {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
+        KeyCode::Char('n')
+        | KeyCode::Char('N')
+        | KeyCode::Char('q')
+        | KeyCode::Char('Q')
+        | KeyCode::Esc => ModalAction::Skip,
+        _ => ModalAction::Ignore,
     }
 }
 
@@ -724,6 +772,20 @@ mod tests {
         }
 
         assert_eq!(root, home.path().join(".codexize").join("acp"));
+    }
+
+    #[test]
+    fn preflight_exit_keys_request_normal_shutdown() {
+        assert_eq!(
+            classify_required_modal_key(KeyCode::Char('q')),
+            ModalAction::Exit
+        );
+        assert_eq!(classify_required_modal_key(KeyCode::Esc), ModalAction::Exit);
+        assert_eq!(
+            classify_optional_modal_key(KeyCode::Char('q')),
+            ModalAction::Skip
+        );
+        assert_eq!(classify_optional_modal_key(KeyCode::Esc), ModalAction::Skip);
     }
 
     #[test]

@@ -288,6 +288,7 @@ mod tests {
             modes: LaunchModes {
                 yolo: true,
                 cheap: true,
+                interactive: false,
             },
             required_artifacts: vec![PathBuf::from("artifacts/summary.toml")],
         }

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::state::{NodeStatus, Phase};
+use crate::state::{NodeStatus, Phase, RunStatus};
 
 use super::palette::{self, PaletteCommand};
 use super::status_line::Severity;
@@ -35,6 +35,10 @@ impl App {
 
         if self.input_mode {
             return self.handle_input_key(key);
+        }
+
+        if self.interactive_run_active() && !self.palette.open {
+            self.palette.open();
         }
 
         if self.palette.open {
@@ -136,6 +140,12 @@ impl App {
                 help: "Toggle YOLO mode",
                 key_hint: None,
             },
+            PaletteCommand {
+                name: "texts",
+                aliases: &["text", "messages"],
+                help: "Toggle non-interactive agent text",
+                key_hint: None,
+            },
         ];
         if self.can_go_back() || self.confirm_back {
             commands.push(PaletteCommand {
@@ -167,13 +177,27 @@ impl App {
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc => {
-                self.palette.close();
+                if self.interactive_run_active() {
+                    self.palette.buffer.clear();
+                    self.palette.cursor = 0;
+                } else {
+                    self.palette.close();
+                }
                 false
             }
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
-                self.palette.close();
-                self.execute_palette_input(&input)
+                if self.interactive_run_active() {
+                    self.palette.buffer.clear();
+                    self.palette.cursor = 0;
+                } else {
+                    self.palette.close();
+                }
+                let should_quit = self.execute_palette_input(&input);
+                if self.interactive_run_active() {
+                    self.palette.open();
+                }
+                should_quit
             }
             KeyCode::Tab => {
                 let commands = self.palette_commands();
@@ -225,6 +249,11 @@ impl App {
     }
 
     fn execute_palette_input(&mut self, input: &str) -> bool {
+        if input.trim() == "/exit" && self.interactive_run_active() {
+            self.exit_interactive_run_locally();
+            return false;
+        }
+
         let commands = self.palette_commands();
         match palette::resolve(input, &commands) {
             palette::MatchResult::Exact { command, args }
@@ -290,7 +319,53 @@ impl App {
                 }
                 false
             }
+            "texts" => {
+                self.toggle_noninteractive_texts();
+                false
+            }
             _ => false,
+        }
+    }
+
+    fn interactive_run_active(&self) -> bool {
+        let Some(run_id) = self.current_run_id else {
+            return false;
+        };
+        self.state.agent_runs.iter().any(|run| {
+            run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
+        })
+    }
+
+    fn exit_interactive_run_locally(&mut self) {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        if let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) {
+            // `/exit` is a local codexize control for interactive ACP runs,
+            // not agent prompt text, so the runner is cancelled by run window.
+            crate::runner::request_window_exit(&run.window_name);
+        }
+    }
+
+    fn toggle_noninteractive_texts(&mut self) {
+        self.state.show_noninteractive_texts = !self.state.show_noninteractive_texts;
+        let label = if self.state.show_noninteractive_texts {
+            "showing non-interactive agent text"
+        } else {
+            "hiding non-interactive agent text"
+        };
+        let _ = self.state.log_event(format!(
+            "show_noninteractive_texts={}",
+            self.state.show_noninteractive_texts
+        ));
+        if let Err(err) = self.state.save() {
+            self.push_status(
+                format!("texts: failed to save setting: {err}"),
+                Severity::Error,
+                Duration::from_secs(5),
+            );
+        } else {
+            self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
         }
     }
 
@@ -380,6 +455,14 @@ impl App {
             KeyCode::Enter => {
                 let trimmed = self.input_buffer.trim().to_string();
                 if !trimmed.is_empty() {
+                    if trimmed == "/exit" && self.interactive_run_active() {
+                        self.exit_interactive_run_locally();
+                        self.input_buffer.clear();
+                        self.input_cursor = 0;
+                        self.input_mode = false;
+                        return false;
+                    }
+
                     if trimmed == "/exit" {
                         return true;
                     }

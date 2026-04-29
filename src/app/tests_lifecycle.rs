@@ -1464,6 +1464,63 @@ fn pending_guard_modal_keep_key_dispatches_to_keep() {
 }
 
 #[test]
+fn palette_texts_command_toggles_persisted_noninteractive_text_visibility() {
+    with_temp_root(|| {
+        let session_id = "palette-texts-toggle";
+        let state = SessionState::new(session_id.to_string());
+        state.save().expect("save initial state");
+        let mut app = idle_app(state);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "text".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert!(app.state.show_noninteractive_texts);
+        let saved = SessionState::load(session_id).expect("load saved state");
+        assert!(saved.show_noninteractive_texts);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "messages".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert!(!app.state.show_noninteractive_texts);
+        let saved = SessionState::load(session_id).expect("load saved state");
+        assert!(!saved.show_noninteractive_texts);
+    });
+}
+
+#[test]
+fn interactive_exit_is_handled_locally_without_quitting_tui() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-exit-local".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+        app.palette.open();
+
+        for c in "/exit".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert_eq!(app.current_run_id, Some(7));
+        assert!(
+            app.palette.open,
+            "interactive command surface stays focused"
+        );
+        assert!(app.palette.buffer.is_empty());
+    });
+}
+
+#[test]
 fn pending_guard_modal_quit_keys_follow_quit_path() {
     with_temp_root(|| {
         let mut app = mk_app(make_pending_guard_state("pending-guard-key-quit", 32));

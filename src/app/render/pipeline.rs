@@ -215,6 +215,11 @@ impl App {
                 .messages
                 .iter()
                 .filter(|m| m.run_id == id)
+                .filter(|m| {
+                    m.kind.visible_with_agent_text_filter(
+                        run.modes.interactive || self.state.show_noninteractive_texts,
+                    )
+                })
                 .cloned()
                 .collect();
             let running_tail =

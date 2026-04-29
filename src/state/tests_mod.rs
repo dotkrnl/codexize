@@ -41,6 +41,7 @@ fn session_modes_round_trip() {
         LaunchModes {
             yolo: true,
             cheap: true,
+            interactive: false,
         }
     );
 }
@@ -50,6 +51,7 @@ fn effort_for_uses_tough_only_for_yolo_idea_and_planning() {
     let modes = LaunchModes {
         yolo: true,
         cheap: false,
+        interactive: false,
     };
 
     assert_eq!(
@@ -67,6 +69,7 @@ fn effort_for_preserves_requested_effort_for_build_and_review_under_yolo() {
     let modes = LaunchModes {
         yolo: true,
         cheap: false,
+        interactive: false,
     };
 
     for requested in [EffortLevel::Low, EffortLevel::Normal, EffortLevel::Tough] {
@@ -86,6 +89,7 @@ fn effort_for_cheap_mode_wins_over_yolo_for_all_phases() {
     let modes = LaunchModes {
         yolo: true,
         cheap: true,
+        interactive: false,
     };
 
     for phase in crate::selection::SelectionPhase::ALL {
@@ -689,6 +693,7 @@ fn test_agent_runs_roundtrip() {
         modes: LaunchModes {
             yolo: true,
             cheap: true,
+            interactive: false,
         },
         hostname: None,
         mount_device_id: None,
@@ -704,6 +709,7 @@ fn test_agent_runs_roundtrip() {
         LaunchModes {
             yolo: true,
             cheap: true,
+            interactive: false,
         }
     );
 }

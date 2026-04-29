@@ -1,4 +1,5 @@
 pub mod chat_widget;
+mod chat_widget_view_model;
 pub mod chrome;
 mod clock;
 mod events;
@@ -15,6 +16,7 @@ mod observation;
 pub(crate) mod palette;
 mod prompts;
 mod render;
+mod render_view_model;
 mod sheet;
 mod state;
 mod status_line;

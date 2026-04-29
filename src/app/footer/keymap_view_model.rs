@@ -2,7 +2,7 @@ use ratatui::{style::Style, text::Span};
 
 use super::keymap::{
     Capability, DISABLED_DIM, ENABLED_ACTION, ENABLED_GLYPH, ENABLED_GLYPH_PRIMARY, KeyBinding,
-    SEP_CATEGORY, category_width, measure_system,
+    SEP_CATEGORY, SEP_INNER,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +12,45 @@ pub(super) enum WidthTier {
     DropActionsLabels,
     DropNavLabels,
     FirstKeyOnly,
+}
+
+pub(super) fn binding_enabled(
+    binding: &KeyBinding,
+    caps: &dyn Fn(Option<Capability>) -> bool,
+) -> bool {
+    binding.capability.map(|c| caps(Some(c))).unwrap_or(true)
+}
+
+pub(super) fn binding_width(
+    binding: &KeyBinding,
+    show_label: bool,
+    caps: &dyn Fn(Option<Capability>) -> bool,
+) -> usize {
+    let mut len = binding.glyph.chars().count();
+    if show_label && binding_enabled(binding, caps) {
+        len += 1 + binding.action.chars().count();
+    }
+    len
+}
+
+pub(super) fn category_width(
+    bindings: &[KeyBinding],
+    show_labels: bool,
+    caps: &dyn Fn(Option<Capability>) -> bool,
+) -> usize {
+    let mut len = 0;
+    for (i, b) in bindings.iter().enumerate() {
+        if i > 0 {
+            len += SEP_INNER.chars().count();
+        }
+        len += binding_width(b, show_labels, caps);
+    }
+    len
+}
+
+pub(super) fn measure_system(system: &[KeyBinding], show_label: bool) -> usize {
+    let dummy_caps: &dyn Fn(Option<Capability>) -> bool = &|_| true;
+    category_width(system, show_label, dummy_caps)
 }
 
 pub(super) fn measure_full_width(
@@ -180,6 +219,42 @@ mod tests {
         let nav = [binding("↑↓", "move", false, None)];
         let actions = [binding("Enter", "open", true, Some(Capability::Input))];
         assert!(measure_full_width(&nav, &actions, true, &|_| true) > 0);
+    }
+
+    #[test]
+    fn binding_enabled_uses_capability_callback() {
+        let expand_binding = binding("Space", "expand", false, Some(Capability::Expand));
+
+        assert!(!binding_enabled(&expand_binding, &|_| false));
+        assert!(binding_enabled(
+            &binding("Esc", "quit", false, None),
+            &|_| false
+        ));
+    }
+
+    #[test]
+    fn binding_width_counts_enabled_label_only() {
+        let binding = binding("Space", "expand", false, Some(Capability::Expand));
+
+        assert_eq!(
+            binding_width(&binding, true, &|_| true),
+            "Space expand".len()
+        );
+        assert_eq!(binding_width(&binding, true, &|_| false), "Space".len());
+    }
+
+    #[test]
+    fn category_width_omits_disabled_labels() {
+        let bindings = [binding("Space", "expand", false, Some(Capability::Expand))];
+
+        assert_eq!(category_width(&bindings, true, &|_| false), "Space".len());
+    }
+
+    #[test]
+    fn measure_system_assumes_system_bindings_enabled() {
+        let system = [binding("Esc", "quit", false, None)];
+
+        assert_eq!(measure_system(&system, true), "Esc quit".len());
     }
 
     #[test]

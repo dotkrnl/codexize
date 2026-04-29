@@ -255,7 +255,7 @@ fn merge_quota_payload(
 
 fn parse_vendor_str(s: &str) -> Option<VendorKind> {
     match s {
-        "claude" => Some(VendorKind::Claude),
+        "anthropic" | "claude" => Some(VendorKind::Claude),
         "codex" | "openai" => Some(VendorKind::Codex),
         "gemini" | "google" => Some(VendorKind::Gemini),
         "kimi" | "moonshotai" => Some(VendorKind::Kimi),
@@ -414,6 +414,22 @@ mod tests {
         assert_eq!(models[0].vendor, VendorKind::Codex);
         assert_eq!(models[0].name, "gpt-5.5");
         assert_eq!(models[0].quota_percent, Some(70));
+    }
+
+    #[test]
+    fn available_claude_keeps_anthropic_dashboard_entries() {
+        let dashboard = vec![make_entry("claude-sonnet-4-6", "anthropic", 85.0, 82.0)];
+        let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+        let available = BTreeSet::from([VendorKind::Claude]);
+
+        let (models, errors) =
+            assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
+
+        assert!(errors.is_empty());
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].vendor, VendorKind::Claude);
+        assert_eq!(models[0].name, "claude-sonnet-4-6");
+        assert_eq!(models[0].quota_percent, Some(80));
     }
 
     #[test]

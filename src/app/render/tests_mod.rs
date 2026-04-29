@@ -1185,6 +1185,37 @@ fn spec_review_modal_is_centered_with_content_driven_height() {
 }
 
 #[test]
+fn modal_dialog_uses_black_background_and_light_text() {
+    let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+    app.state.current_phase = Phase::SpecReviewPaused;
+
+    let width = 100;
+    let height = 30;
+    let buf = render_full_frame_buf(&mut app, width, height);
+    let dialog = expected_dialog_rect(width, height, 1);
+
+    for y in dialog.y..dialog.y + dialog.height {
+        for x in dialog.x..dialog.x + dialog.width {
+            let cell = &buf[(x, y)];
+            assert_eq!(
+                cell.bg,
+                Color::Black,
+                "dialog cell ({x},{y}) should have black background"
+            );
+            if cell.symbol().trim().is_empty() {
+                continue;
+            }
+            assert!(
+                !matches!(cell.fg, Color::Black | Color::DarkGray),
+                "visible dialog text at ({x},{y}) should be light, got {:?} for {:?}",
+                cell.fg,
+                cell.symbol()
+            );
+        }
+    }
+}
+
+#[test]
 fn stage_error_modal_wraps_long_text_inside_centered_dialog() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
     app.state.current_phase = Phase::SpecReviewRunning;

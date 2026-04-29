@@ -444,6 +444,60 @@ text = "agent started · gpt-5 (openai)"
 }
 
 #[test]
+fn test_agent_text_messages_roundtrip_as_distinct_kind() {
+    with_temp_root(|| {
+        let state = SessionState::new("test-agent-text-msg".to_string());
+        state.save().unwrap();
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id: 7,
+            kind: MessageKind::AgentText,
+            sender: MessageSender::Agent {
+                model: "gpt-5".to_string(),
+                vendor: "openai".to_string(),
+            },
+            text: "raw ACP text".to_string(),
+        };
+
+        state.append_message(&msg).unwrap();
+
+        let loaded = SessionState::load_messages("test-agent-text-msg").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].kind, MessageKind::AgentText);
+        assert_eq!(loaded[0].text, "raw ACP text");
+    });
+}
+
+#[test]
+fn test_show_noninteractive_texts_defaults_and_serializes_false() {
+    with_temp_root(|| {
+        let state = SessionState::new("test-text-toggle-default".to_string());
+
+        state.save().unwrap();
+
+        let session_toml =
+            std::fs::read_to_string(session_dir("test-text-toggle-default").join("session.toml"))
+                .unwrap();
+        assert!(
+            session_toml.contains("show_noninteractive_texts = false"),
+            "session.toml must persist the default toggle value: {session_toml}"
+        );
+        let loaded = SessionState::load("test-text-toggle-default").unwrap();
+        assert!(!loaded.show_noninteractive_texts);
+    });
+}
+
+#[test]
+fn test_noninteractive_text_filter_only_hides_agent_text() {
+    assert!(!MessageKind::AgentText.visible_with_agent_text_filter(false));
+    assert!(MessageKind::AgentText.visible_with_agent_text_filter(true));
+    assert!(MessageKind::Started.visible_with_agent_text_filter(false));
+    assert!(MessageKind::Summary.visible_with_agent_text_filter(false));
+    assert!(MessageKind::SummaryWarn.visible_with_agent_text_filter(false));
+    assert!(MessageKind::End.visible_with_agent_text_filter(false));
+}
+
+#[test]
 fn test_load_messages_rejects_old_jsonl() {
     with_temp_root(|| {
         let state = SessionState::new("test-corrupt-msg".to_string());

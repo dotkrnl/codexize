@@ -52,6 +52,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
             symbol: "◐",
             color: Color::Cyan,
         },
+        MessageKind::AgentText => SymbolStyle {
+            symbol: "▸",
+            color: Color::White,
+        },
         MessageKind::Summary => SymbolStyle {
             symbol: "✓",
             color: Color::Green,

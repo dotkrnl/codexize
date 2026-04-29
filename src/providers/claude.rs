@@ -1,9 +1,8 @@
-use crate::warmup;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use std::{process::Command, time::Duration};
+use std::process::Command;
 
-use super::{LiveModel, build_http_client, parse_json_response, send_request};
+use super::{LiveModel, build_http_client, fetch_json_response, run_provider_warmup};
 
 const BASE_URL: &str = "https://api.anthropic.com";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
@@ -50,14 +49,13 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    warmup::run(warmup::WarmupSpec {
-        program: "claude",
-        args: &["--dangerously-skip-permissions"],
-        script: "/stats\n/exit\n",
-        env: &[("CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP", "1")],
-        settle_timeout: Duration::from_secs(2),
-    })
-    .context("Claude dummy invoke failed")
+    run_provider_warmup(
+        "Claude",
+        "claude",
+        &["--dangerously-skip-permissions"],
+        "/stats\n/exit\n",
+        &[("CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP", "1")],
+    )
 }
 
 fn resolve_access_token() -> Result<String> {
@@ -111,7 +109,7 @@ fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
         .header("anthropic-beta", BETA_HEADER)
         .header("anthropic-version", "2023-06-01");
 
-    parse_json_response(send_request(request, "Claude")?, "Claude")
+    fetch_json_response(request, "Claude")
 }
 
 #[cfg(test)]

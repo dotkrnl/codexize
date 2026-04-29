@@ -1,15 +1,11 @@
-use crate::warmup;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::Value;
-use std::{
-    collections::BTreeMap,
-    env, fs,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::BTreeMap, env, fs, path::PathBuf};
 
-use super::{LiveModel, build_http_client, parse_json_response, percent_to_u8, send_request};
+use super::{
+    LiveModel, build_http_client, fetch_json_response, home_dir, percent_to_u8, run_provider_warmup,
+};
 
 const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 
@@ -99,14 +95,7 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
 }
 
 fn dummy_invoke() -> Result<()> {
-    warmup::run(warmup::WarmupSpec {
-        program: "codex",
-        args: &[],
-        script: "/status\n/exit\n",
-        env: &[],
-        settle_timeout: Duration::from_secs(2),
-    })
-    .context("Codex dummy invoke failed")
+    run_provider_warmup("Codex", "codex", &[], "/status\n/exit\n", &[])
 }
 
 fn read_config() -> Result<CodexConfig> {
@@ -188,7 +177,7 @@ fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
         request = request.header("chatgpt-account-id", account_id);
     }
 
-    parse_json_response(send_request(request, "Codex")?, "Codex")
+    fetch_json_response(request, "Codex")
 }
 
 fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate_limit: &Value) {
@@ -228,6 +217,5 @@ fn codex_home() -> Result<PathBuf> {
         return Ok(PathBuf::from(path));
     }
 
-    let home = env::var_os("HOME").context("HOME is not set")?;
-    Ok(Path::new(&home).join(".codex"))
+    Ok(home_dir()?.join(".codex"))
 }

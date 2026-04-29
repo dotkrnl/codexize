@@ -1,11 +1,14 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::model_names;
+pub use crate::dashboard_view_model::synthesize_sibling;
+use crate::dashboard_view_model::{
+    InventoryEntry, ScoreEntry, inv_only, merge, scores_only, value_to_f64, value_to_string,
+};
 
 /// Counter events emitted by ingestion. Production callers stream them
 /// to stderr; tests read the in-memory log to assert labels without a
@@ -105,25 +108,6 @@ pub fn load_models() -> Result<Vec<DashboardModel>> {
             anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
         }
     }
-}
-
-// A lightweight model entry from the /api/models inventory
-struct InventoryEntry {
-    name: String,
-    vendor: String,
-    display_order: usize,
-}
-
-// A model entry from the dashboard with score data
-struct ScoreEntry {
-    name: String,
-    vendor: String,
-    overall_score: f64,
-    current_score: f64,
-    standard_error: f64,
-    axes: Vec<(String, f64)>,
-    axis_provenance: BTreeMap<String, String>,
-    display_order: usize,
 }
 
 fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
@@ -238,262 +222,16 @@ fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
     Ok(entries)
 }
 
-// Merge inventory (full model list) with score data.
-// Inventory drives the universe; scores enrich it where available.
-fn merge(inventory: Vec<InventoryEntry>, scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
-    let score_map: HashMap<String, &ScoreEntry> =
-        scores.iter().map(|s| (s.name.clone(), s)).collect();
-
-    // Also build a map keyed by score display_order for final sort
-    let mut models: Vec<DashboardModel> = inventory
-        .into_iter()
-        .map(|inv| {
-            if let Some(sc) = score_map.get(&inv.name) {
-                DashboardModel {
-                    name: inv.name,
-                    vendor: if !inv.vendor.is_empty() {
-                        inv.vendor
-                    } else {
-                        sc.vendor.clone()
-                    },
-                    overall_score: sc.overall_score,
-                    current_score: sc.current_score,
-                    standard_error: sc.standard_error,
-                    axes: sc.axes.clone(),
-                    axis_provenance: sc.axis_provenance.clone(),
-                    display_order: sc.display_order,
-                    fallback_from: None,
-                }
-            } else if let Some(sc) = sibling_score(&inv.name, &scores) {
-                DashboardModel {
-                    name: inv.name,
-                    vendor: if !inv.vendor.is_empty() {
-                        inv.vendor
-                    } else {
-                        sc.vendor.clone()
-                    },
-                    overall_score: sc.overall_score,
-                    current_score: sc.current_score,
-                    standard_error: sc.standard_error,
-                    axes: sc.axes.clone(),
-                    axis_provenance: sc.axis_provenance.clone(),
-                    display_order: sc.display_order,
-                    fallback_from: Some(sc.name.clone()),
-                }
-            } else {
-                // Model is in the inventory but not yet scored — include with zeroed scores
-                DashboardModel {
-                    name: inv.name,
-                    vendor: inv.vendor,
-                    overall_score: 0.0,
-                    current_score: 0.0,
-                    standard_error: 0.0,
-                    axes: Vec::new(),
-                    axis_provenance: BTreeMap::new(),
-                    display_order: inv.display_order + 10_000,
-                    fallback_from: None,
-                }
-            }
-        })
-        .collect();
-
-    // Also add scored models not in the inventory (edge case)
-    let inv_names: std::collections::HashSet<String> =
-        models.iter().map(|m| m.name.clone()).collect();
-    for sc in &scores {
-        if !inv_names.contains(&sc.name) {
-            models.push(DashboardModel {
-                name: sc.name.clone(),
-                vendor: sc.vendor.clone(),
-                overall_score: sc.overall_score,
-                current_score: sc.current_score,
-                standard_error: sc.standard_error,
-                axes: sc.axes.clone(),
-                axis_provenance: sc.axis_provenance.clone(),
-                display_order: sc.display_order,
-                fallback_from: None,
-            });
-        }
-    }
-
-    models.sort_by_key(|m| m.display_order);
-    models
-}
-
-// Fallback when inventory is unavailable: scores only
-fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
-    scores
-        .into_iter()
-        .map(|sc| DashboardModel {
-            name: sc.name,
-            vendor: sc.vendor,
-            overall_score: sc.overall_score,
-            current_score: sc.current_score,
-            standard_error: sc.standard_error,
-            axes: sc.axes,
-            axis_provenance: sc.axis_provenance,
-            display_order: sc.display_order,
-            fallback_from: None,
-        })
-        .collect()
-}
-
-// Fallback when scores are unavailable: inventory only, zeroed scores
-fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
-    inventory
-        .into_iter()
-        .map(|inv| DashboardModel {
-            name: inv.name,
-            vendor: inv.vendor,
-            overall_score: 0.0,
-            current_score: 0.0,
-            standard_error: 0.0,
-            axes: Vec::new(),
-            axis_provenance: BTreeMap::new(),
-            display_order: inv.display_order,
-            fallback_from: None,
-        })
-        .collect()
-}
-
-// Strip a trailing point-version segment (e.g. "gpt-5.5" -> "gpt-5",
-// "claude-sonnet-4.6" -> "claude-sonnet-4"). Returns None when the last
-// `.`-separated segment isn't purely numeric, so we don't fall back across
-// major versions.
-fn version_stem(name: &str) -> Option<&str> {
-    let (prefix, tail) = name.rsplit_once('.')?;
-    if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
-        Some(prefix)
-    } else {
-        None
-    }
-}
-
-// Find the best-scoring sibling with the same version stem — e.g. use
-// gpt-5.4's score for gpt-5.5 until the ranking API catches up. Returns
-// None when there is no sibling (no fallback applied).
-fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEntry> {
-    let stem = version_stem(name)?;
-    scores
-        .iter()
-        .filter(|sc| sc.name != name && version_stem(&sc.name) == Some(stem))
-        .max_by(|a, b| {
-            a.overall_score
-                .partial_cmp(&b.overall_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-}
-
-// Synthesize a DashboardModel for a name absent from the ranking API by
-// borrowing a sibling's numbers — preferring an explicit hardcoded mapping
-// (e.g. gemini-3-flash-preview → gemini-2.5-flash), then falling back to the
-// best-scoring same-stem sibling. Used by the selection layer to keep
-// live-quota-only models in the candidate pool. The synthesized model
-// carries `fallback_from = Some(sibling.name)` so the UI surfaces the
-// fallback only for models that actually survive selection; once the real
-// score lands in `existing`, the caller finds an exact match and never
-// calls this.
-pub fn synthesize_sibling(
-    name: &str,
-    vendor: &str,
-    existing: &[DashboardModel],
-) -> Option<DashboardModel> {
-    let sibling = explicit_fallback(name, existing).or_else(|| {
-        let stem = version_stem(name)?;
-        existing
-            .iter()
-            .filter(|m| m.name != name && version_stem(&m.name) == Some(stem))
-            .max_by(|a, b| {
-                a.overall_score
-                    .partial_cmp(&b.overall_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    })?;
-
-    Some(DashboardModel {
-        name: name.to_string(),
-        vendor: if !vendor.is_empty() {
-            vendor.to_string()
-        } else {
-            sibling.vendor.clone()
-        },
-        overall_score: sibling.overall_score,
-        current_score: sibling.current_score,
-        standard_error: sibling.standard_error,
-        axes: sibling.axes.clone(),
-        axis_provenance: sibling.axis_provenance.clone(),
-        display_order: sibling.display_order,
-        fallback_from: Some(sibling.name.clone()),
-    })
-}
-
-fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
-    let target = model_names::EXPLICIT_SCORE_FALLBACKS
-        .iter()
-        .find(|(from, _)| *from == name)
-        .map(|(_, to)| *to)?;
-    existing.iter().find(|m| m.name == target)
-}
-
-/// Walk `historyMap[modelId]` newest-first, collecting the first numeric
-/// value seen for each lowercased axis key.  Drops `contextwindow` and
-/// skips unparseable values rather than coercing them to 0.0.
 #[allow(clippy::type_complexity)]
 fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, String>)> {
-    let entries = value.as_array()?;
-    let mut axes: BTreeMap<String, f64> = BTreeMap::new();
-    let mut provenance: BTreeMap<String, String> = BTreeMap::new();
-
-    for entry in entries.iter().rev() {
-        let suite = entry
-            .get("suite")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let Some(entry_axes) = entry.get("axes").and_then(Value::as_object) else {
-            continue;
-        };
-        for (k, v) in entry_axes {
-            let key = k.to_ascii_lowercase();
-            if key == "contextwindow" {
-                provenance
-                    .entry(key)
-                    .or_insert_with(|| "dropped:contextwindow".to_string());
-                record_axis_dropped("contextwindow");
-                continue;
-            }
-            if axes.contains_key(&key) {
-                continue;
-            }
-            match value_to_f64(Some(v)) {
-                Some(num) => {
-                    axes.insert(key.clone(), num);
-                    provenance.insert(key, format!("suite:{suite}"));
-                }
-                None => {
-                    record_axis_parse_fail(&suite, &key);
-                }
-            }
+    let (axes, provenance, events) = crate::dashboard_view_model::merged_axes(value)?;
+    for event in events {
+        match event {
+            IngestEvent::AxisDropped { reason } => record_axis_dropped(&reason),
+            IngestEvent::AxisParseFail { suite, axis } => record_axis_parse_fail(&suite, &axis),
         }
     }
-
-    Some((axes.into_iter().collect(), provenance))
-}
-
-fn value_to_f64(value: Option<&Value>) -> Option<f64> {
-    match value {
-        Some(Value::Number(n)) => n.as_f64(),
-        Some(Value::String(s)) => s.parse().ok(),
-        Some(Value::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
-        _ => None,
-    }
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
+    Some((axes, provenance))
 }
 
 #[cfg(test)]

@@ -1500,7 +1500,6 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
         state.agent_runs.push(run);
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
-        app.palette.open();
 
         for c in "/exit".chars() {
             app.handle_key(key(crossterm::event::KeyCode::Char(c)));
@@ -1509,11 +1508,59 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
 
         assert!(!should_quit);
         assert_eq!(app.current_run_id, Some(7));
-        assert!(
-            app.palette.open,
-            "interactive command surface stays focused"
-        );
+        assert!(app.input_mode, "interactive input surface stays focused");
+        assert!(!app.palette.open);
+        assert!(app.input_buffer.is_empty());
+    });
+}
+
+#[test]
+fn interactive_palette_opens_only_after_colon() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-palette-colon".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char('h')));
+        assert!(app.input_mode);
+        assert_eq!(app.input_buffer, "h");
+        assert!(!app.palette.open);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        assert!(app.palette.open);
         assert!(app.palette.buffer.is_empty());
+    });
+}
+
+#[test]
+fn interactive_palette_closes_when_colon_suffix_is_removed() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-palette-remove-colon".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        for c in "hello".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+
+        assert!(app.palette.open);
+        assert_eq!(app.input_buffer, "hello");
+        assert!(app.palette.buffer.is_empty());
+
+        app.handle_key(key(crossterm::event::KeyCode::Backspace));
+
+        assert!(!app.palette.open);
+        assert!(app.input_mode);
+        assert_eq!(app.input_buffer, "hello");
     });
 }
 

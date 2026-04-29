@@ -1024,6 +1024,31 @@ fn palette_overlay_grows_beyond_two_rows_when_room() {
     assert!(text.contains("yolo"));
 }
 
+#[test]
+fn interactive_run_shows_input_sheet_without_palette_overlay() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![message(7, "waiting")],
+    );
+    app.current_run_id = Some(7);
+    app.state.current_phase = Phase::BrainstormRunning;
+
+    let lines = render_full_frame(&mut app, 80, 24);
+    let text = lines.join("\n");
+
+    assert!(
+        text.contains("describe what you want to build"),
+        "interactive run should keep the input sheet visible: {text}"
+    );
+    assert!(
+        !text.contains("Esc close  Tab complete  Enter run"),
+        "palette instructions should stay hidden until ':' opens the palette: {text}"
+    );
+}
+
 fn impl_round_2_running_app() -> App {
     let nodes = vec![node(
         "Implementation",

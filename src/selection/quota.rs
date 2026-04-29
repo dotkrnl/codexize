@@ -12,14 +12,20 @@ pub fn load_quota_maps() -> (
     BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
     Vec<QuotaError>,
 ) {
+    let vendors = crate::adapters::all_vendors();
+    load_quota_maps_for(vendors)
+}
+
+pub fn load_quota_maps_for(
+    vendors: impl IntoIterator<Item = VendorKind>,
+) -> (
+    BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+    Vec<QuotaError>,
+) {
     let (tx, rx) = mpsc::channel();
+    let vendors = vendors.into_iter().collect::<Vec<_>>();
     thread::scope(|scope| {
-        for vendor in [
-            VendorKind::Codex,
-            VendorKind::Claude,
-            VendorKind::Gemini,
-            VendorKind::Kimi,
-        ] {
+        for vendor in vendors {
             let tx = tx.clone();
             scope.spawn(move || {
                 let _ = tx.send((vendor, load_quota_map_for_vendor(vendor)));
@@ -241,6 +247,14 @@ fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_quota_maps_for_empty_vendor_set_skips_all_probes() {
+        let (maps, errors) = load_quota_maps_for([]);
+
+        assert!(maps.is_empty());
+        assert!(errors.is_empty());
+    }
 
     #[test]
     fn kimi_quota_takes_min_across_windows() {

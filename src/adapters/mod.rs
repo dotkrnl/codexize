@@ -1,6 +1,7 @@
 use crate::selection::VendorKind;
 use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 mod common;
@@ -46,6 +47,36 @@ pub fn adapter_for_vendor(vendor: VendorKind) -> Box<dyn AgentAdapter> {
         VendorKind::Kimi => Box::new(KimiAdapter),
         VendorKind::Gemini => Box::new(GeminiAdapter),
     }
+}
+
+pub fn all_vendors() -> [VendorKind; 4] {
+    [
+        VendorKind::Codex,
+        VendorKind::Claude,
+        VendorKind::Gemini,
+        VendorKind::Kimi,
+    ]
+}
+
+pub fn detect_available_vendors() -> BTreeSet<VendorKind> {
+    #[cfg(test)]
+    if let Ok(raw) = std::env::var("CODEXIZE_TEST_AVAILABLE_VENDORS") {
+        return raw
+            .split(',')
+            .filter_map(|name| match name.trim() {
+                "claude" => Some(VendorKind::Claude),
+                "codex" | "openai" => Some(VendorKind::Codex),
+                "gemini" | "google" => Some(VendorKind::Gemini),
+                "kimi" | "moonshotai" => Some(VendorKind::Kimi),
+                _ => None,
+            })
+            .collect();
+    }
+
+    all_vendors()
+        .into_iter()
+        .filter(|vendor| adapter_for_vendor(*vendor).detect())
+        .collect()
 }
 
 #[cfg(test)]

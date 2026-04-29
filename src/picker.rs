@@ -156,8 +156,6 @@ impl SessionPicker {
             width,
         );
 
-        let bottom_rule = bottom_rule(width, None);
-
         let status_content = if degenerate {
             None
         } else {
@@ -189,13 +187,17 @@ impl SessionPicker {
             y += body_h;
         }
 
-        let bottom_rect = Rect::new(area.x, y, width, 1);
-        frame.render_widget(Paragraph::new(vec![bottom_rule]), bottom_rect);
-        y += 1;
+        if !self.input_mode {
+            let bottom_rule = bottom_rule(width, None);
+            let bottom_rect = Rect::new(area.x, y, width, 1);
+            frame.render_widget(Paragraph::new(vec![bottom_rule]), bottom_rect);
+            y += 1;
+        }
 
         if let Some(kind) = self.confirm_modal {
             self.draw_modal(frame, area, kind);
         } else if self.input_mode {
+            // Reuse the chrome divider row so bottom_sheet supplies the only input divider.
             let remain = area.height.saturating_sub(y - area.y);
             let input_rect = Rect::new(area.x, y, width, remain);
             self.draw_input(frame, input_rect);
@@ -1740,6 +1742,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn input_mode_renders_single_divider_above_input_sheet() {
+        let mut picker = picker_with_entries(vec![dummy_entry("alpha", "only idea")], 0);
+        picker.input_mode = true;
+
+        let backend = ratatui::backend::TestBackend::new(80, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal.draw(|frame| picker.draw(frame)).unwrap();
+        let buf = terminal.backend().buffer();
+
+        let divider_rows = (0..8)
+            .filter(|&y| {
+                let row: String = (0..80).map(|x| buf[(x, y)].symbol()).collect();
+                row.chars().all(|c| c == '─')
+            })
+            .count();
+
+        assert_eq!(
+            divider_rows, 1,
+            "exactly one divider row should render above the input sheet"
+        );
     }
 
     #[test]

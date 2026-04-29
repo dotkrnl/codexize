@@ -7,13 +7,14 @@ use ratatui::{
 };
 
 use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
+use crate::tui::wrap_input;
 use chrono::Offset;
 use std::collections::BTreeSet;
 
 #[cfg(test)]
 use super::state::ModelRefreshState;
 use super::{
-    App, ModalKind, StageId, chat_widget,
+    App, ModalKind, chat_widget,
     chrome::{UnreadBadge, bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans},
     clock::{Clock, WallClock},
     focus_caps::FocusCaps,
@@ -22,12 +23,14 @@ use super::{
         format_running_transcript_leaf, keymap,
     },
     models_area,
-    render_view_model::is_last_sibling,
+    render_view_model::{
+        guard_content, is_last_sibling, modal_border_style, modal_title, skip_to_impl_content,
+        spinner_frame, stage_error_content, status_highlight_bg,
+    },
     sheet::bottom_sheet,
 };
-use crate::tui::wrap_input;
 
-const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+pub use super::render_view_model::sanitize_live_summary;
 
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
@@ -93,47 +96,6 @@ impl Widget for PipelineWidget<'_> {
             );
         }
     }
-}
-
-fn spinner_frame(count: usize) -> &'static str {
-    SPINNER[count % SPINNER.len()]
-}
-
-fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
-    match status {
-        NodeStatus::Running => Some(Color::Cyan),
-        NodeStatus::Done => Some(Color::Green),
-        NodeStatus::Failed => Some(Color::Red),
-        NodeStatus::FailedUnverified => Some(Color::LightYellow),
-        NodeStatus::Pending | NodeStatus::WaitingUser | NodeStatus::Skipped => None,
-    }
-}
-
-fn strip_ansi_codes(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&c) = chars.peek() {
-                    chars.next();
-                    if c.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}
-
-pub fn sanitize_live_summary(text: &str) -> String {
-    let stripped = strip_ansi_codes(text);
-    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
-    collapsed.chars().take(500).collect()
 }
 
 impl App {
@@ -994,128 +956,6 @@ impl App {
         }
         lines
     }
-}
-
-fn skip_to_impl_content(
-    rationale: Option<&str>,
-    kind: Option<crate::artifacts::SkipToImplKind>,
-    width: u16,
-) -> Vec<Line<'static>> {
-    use crate::artifacts::SkipToImplKind;
-
-    let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
-    let header = if is_nothing {
-        "The brainstorm agent found nothing to implement."
-    } else {
-        "The brainstorm agent proposes skipping directly to implementation."
-    };
-
-    let rationale_text = rationale
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("(no rationale provided)");
-    let rationale_lines = wrap_input(rationale_text, width.max(1) as usize);
-
-    let mut lines = vec![
-        Line::from(Span::styled(
-            header.to_string(),
-            Style::default().fg(Color::White),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Rationale: ".to_string(),
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-    ];
-    for line in rationale_lines {
-        lines.push(Line::from(line));
-    }
-
-    lines
-}
-
-fn guard_content(decision: Option<&crate::state::PendingGuardDecision>) -> Vec<Line<'static>> {
-    let (captured_short, current_short) = decision
-        .map(|d| {
-            let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
-            let cur = d.current_head.get(..7).unwrap_or(&d.current_head);
-            (cap.to_string(), cur.to_string())
-        })
-        .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
-
-    vec![
-        Line::from(Span::styled(
-            "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
-            Style::default().fg(Color::White),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Before: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(captured_short),
-            Span::raw("  →  "),
-            Span::styled("After: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(current_short),
-        ]),
-    ]
-}
-
-fn stage_error_title(stage_id: StageId) -> &'static str {
-    match stage_id {
-        StageId::Brainstorm => "Brainstorm failed",
-        StageId::SpecReview => "Spec review failed",
-        StageId::Planning => "Planning failed",
-        StageId::PlanReview => "Plan review failed",
-        StageId::Sharding => "Sharding failed",
-        StageId::Implementation => "Implementation failed",
-        StageId::Review => "Review failed",
-    }
-}
-
-fn modal_border_style(kind: ModalKind) -> Style {
-    use ratatui::style::{Color, Modifier};
-    match kind {
-        ModalKind::StageError(_) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ModalKind::SkipToImpl | ModalKind::GitGuard => Style::default().fg(Color::Yellow),
-        ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
-            Style::default().fg(Color::Cyan)
-        }
-    }
-}
-
-fn modal_title(kind: ModalKind) -> Option<&'static str> {
-    match kind {
-        ModalKind::SkipToImpl => Some("Skip to implementation?"),
-        ModalKind::GitGuard => Some("Git guard"),
-        ModalKind::SpecReviewPaused => Some("Spec review complete"),
-        ModalKind::PlanReviewPaused => Some("Plan review complete"),
-        ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),
-    }
-}
-
-fn stage_error_content(stage_id: StageId, error: Option<&str>, width: u16) -> Vec<Line<'static>> {
-    let title = stage_error_title(stage_id);
-    let error_text = error
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("(no error details)");
-    let truncated: String = error_text.chars().take(300).collect();
-    let wrapped = wrap_input(&truncated, width.max(1) as usize);
-
-    let mut lines = vec![
-        Line::from(Span::styled(
-            title.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    for line in wrapped {
-        lines.push(Line::from(Span::styled(
-            line,
-            Style::default().fg(Color::White),
-        )));
-    }
-
-    lines
 }
 
 #[cfg(test)]

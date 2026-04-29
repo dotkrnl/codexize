@@ -990,7 +990,6 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
                 "[Coder]",
                 &run,
                 VendorKind::Codex,
-                false,
                 &status_path,
                 "run-1",
                 &artifacts_dir,

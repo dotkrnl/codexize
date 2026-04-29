@@ -279,12 +279,16 @@ pub fn run(
         .spawn()
         .with_context(|| format!("failed to spawn: {:?}", command))?;
 
-    // SAFETY: `Command::stdout(Stdio::piped())` at :268 guarantees
-    // `child.stdout` is `Some` per std's documented invariant; same for
-    // `child.stderr` via :269. Taking each pipe once here is therefore
-    // unconditionally safe.
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    // The piped stdio setup above is a documented invariant, but keep this as
+    // a recoverable error so process-boundary failures never become panics.
+    let stdout = child
+        .stdout
+        .take()
+        .context("runner stdout pipe missing after piped spawn")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("runner stderr pipe missing after piped spawn")?;
 
     let mut log_out = log_file.try_clone()?;
     let stdout_handle = std::thread::spawn(move || {

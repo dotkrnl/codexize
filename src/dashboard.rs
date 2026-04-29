@@ -26,15 +26,21 @@ fn ingest_events() -> &'static Mutex<Vec<IngestEvent>> {
 pub fn ingest_events_snapshot() -> Vec<IngestEvent> {
     // SAFETY: `ingest_events()` guards a `Vec<IngestEvent>` whose only
     // mutators are `push`/`clear` — neither can panic — so the mutex
-    // cannot be poisoned and `lock().unwrap()` is unreachable.
-    ingest_events().lock().unwrap().clone()
+    // poison branch is only defensive for future mutators.
+    ingest_events()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
 }
 
 #[cfg(test)]
 fn clear_ingest_events() {
     // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
     // panicking mutators, so the mutex cannot be poisoned here.
-    ingest_events().lock().unwrap().clear();
+    ingest_events()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clear();
 }
 
 fn record_axis_dropped(reason: &str) {
@@ -42,7 +48,7 @@ fn record_axis_dropped(reason: &str) {
     // panicking mutators, so the mutex cannot be poisoned here.
     ingest_events()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|err| err.into_inner())
         .push(IngestEvent::AxisDropped {
             reason: reason.to_string(),
         });
@@ -53,7 +59,7 @@ fn record_axis_parse_fail(suite: &str, axis: &str) {
     // panicking mutators, so the mutex cannot be poisoned here.
     ingest_events()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|err| err.into_inner())
         .push(IngestEvent::AxisParseFail {
             suite: suite.to_string(),
             axis: axis.to_string(),

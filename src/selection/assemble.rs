@@ -2,7 +2,7 @@ use super::quota;
 use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, QuotaError, VendorKind};
 use super::vendor;
-use crate::adapters;
+use crate::acp::AcpConfig;
 use crate::cache::{self, DashboardEntry, LoadedCache, QuotaPayload};
 use crate::dashboard;
 use std::cmp::Ordering;
@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// Performs Kimi collapse and sibling synthesis before returning.
 pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load();
-    assemble_from_cache_with_available(loaded, &adapters::detect_available_vendors())
+    assemble_from_cache_with_available(loaded, &AcpConfig::default().available_vendors())
 }
 
 /// Build the canonical model universe purely from cached data, performing no
@@ -27,7 +27,7 @@ pub fn assemble_from_cached_only() -> Vec<CachedModel> {
 }
 
 pub fn assemble_from_loaded(loaded: &LoadedCache) -> Vec<CachedModel> {
-    assemble_from_loaded_with_available(loaded, &adapters::detect_available_vendors())
+    assemble_from_loaded_with_available(loaded, &AcpConfig::default().available_vendors())
 }
 
 fn assemble_from_loaded_with_available(
@@ -58,7 +58,14 @@ fn assemble_from_loaded_with_available(
 
 #[cfg(test)]
 fn assemble_from_cache(loaded: LoadedCache) -> (Vec<CachedModel>, Vec<QuotaError>) {
-    let available_vendors = adapters::all_vendors().into_iter().collect::<BTreeSet<_>>();
+    let available_vendors = [
+        VendorKind::Codex,
+        VendorKind::Claude,
+        VendorKind::Gemini,
+        VendorKind::Kimi,
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
     assemble_from_cache_with_available(loaded, &available_vendors)
 }
 
@@ -433,6 +440,72 @@ mod tests {
     }
 
     #[test]
+    fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
+        let loaded = loaded_cache_with(
+            vec![
+                make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
+                make_entry("gpt-5.5", "openai", 80.0, 78.0),
+            ],
+            make_quota_payload(&[
+                ("claude", "claude-sonnet-4-6", Some(80)),
+                ("openai", "gpt-5.5", Some(70)),
+            ]),
+        );
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let original_available = std::env::var_os("CODEXIZE_TEST_AVAILABLE_VENDORS");
+        let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");
+        let original_codex = std::env::var_os("CODEXIZE_TEST_ACP_CODEX_PROGRAM");
+        let original_gemini = std::env::var_os("CODEXIZE_TEST_ACP_GEMINI_PROGRAM");
+        let original_kimi = std::env::var_os("CODEXIZE_TEST_ACP_KIMI_PROGRAM");
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            std::env::set_var("CODEXIZE_TEST_AVAILABLE_VENDORS", "claude");
+            std::env::set_var(
+                "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+                "/definitely/missing/claude",
+            );
+            std::env::set_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM", "/bin/sh");
+            std::env::set_var(
+                "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+                "/definitely/missing/gemini",
+            );
+            std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", "/definitely/missing/kimi");
+        }
+
+        let outcome = std::panic::catch_unwind(|| assemble_from_loaded(&loaded));
+
+        unsafe {
+            match original_available {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_AVAILABLE_VENDORS", value),
+                None => std::env::remove_var("CODEXIZE_TEST_AVAILABLE_VENDORS"),
+            }
+            match original_claude {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM"),
+            }
+            match original_codex {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM"),
+            }
+            match original_gemini {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_GEMINI_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_GEMINI_PROGRAM"),
+            }
+            match original_kimi {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM"),
+            }
+        }
+
+        let models = outcome.expect("assemble_from_loaded should not panic");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].vendor, VendorKind::Codex);
+        assert_eq!(models[0].name, "gpt-5.5");
+    }
+
+    #[test]
     fn stale_on_error_fallback_uses_expired_dashboard() {
         // Fresh (non-expired) dashboard should be used directly without fetching
         let loaded = LoadedCache {
@@ -476,7 +549,14 @@ mod tests {
     fn assemble_from_loaded_uses_provided_snapshot_without_reloading() {
         let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
         let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
-        let available = adapters::all_vendors().into_iter().collect::<BTreeSet<_>>();
+        let available = [
+            VendorKind::Codex,
+            VendorKind::Claude,
+            VendorKind::Gemini,
+            VendorKind::Kimi,
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
 
         let models =
             assemble_from_loaded_with_available(&loaded_cache_with(dashboard, quotas), &available);
@@ -610,14 +690,17 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let temp = tempfile::TempDir::new().unwrap();
         let original = std::env::var_os("HOME");
-        let original_available = std::env::var_os("CODEXIZE_TEST_AVAILABLE_VENDORS");
+        let original_claude = std::env::var_os("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM");
+        let original_codex = std::env::var_os("CODEXIZE_TEST_ACP_CODEX_PROGRAM");
+        let original_gemini = std::env::var_os("CODEXIZE_TEST_ACP_GEMINI_PROGRAM");
+        let original_kimi = std::env::var_os("CODEXIZE_TEST_ACP_KIMI_PROGRAM");
         // SAFETY: serialized via test_fs_lock; restored unconditionally.
         unsafe {
             std::env::set_var("HOME", temp.path());
-            std::env::set_var(
-                "CODEXIZE_TEST_AVAILABLE_VENDORS",
-                "claude,codex,gemini,kimi",
-            );
+            std::env::set_var("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM", "/bin/sh");
+            std::env::set_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM", "/bin/sh");
+            std::env::set_var("CODEXIZE_TEST_ACP_GEMINI_PROGRAM", "/bin/sh");
+            std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", "/bin/sh");
         }
         cache::save_dashboard(&dashboard).unwrap();
         cache::save_quotas(&quotas).unwrap();
@@ -627,9 +710,21 @@ mod tests {
                 Some(value) => std::env::set_var("HOME", value),
                 None => std::env::remove_var("HOME"),
             }
-            match original_available {
-                Some(value) => std::env::set_var("CODEXIZE_TEST_AVAILABLE_VENDORS", value),
-                None => std::env::remove_var("CODEXIZE_TEST_AVAILABLE_VENDORS"),
+            match original_claude {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_CLAUDE_PROGRAM"),
+            }
+            match original_codex {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_CODEX_PROGRAM"),
+            }
+            match original_gemini {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_GEMINI_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_GEMINI_PROGRAM"),
+            }
+            match original_kimi {
+                Some(value) => std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", value),
+                None => std::env::remove_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM"),
             }
         }
         outcome.unwrap()

@@ -37,6 +37,16 @@ impl AcpConfig {
         }
     }
 
+    pub fn available_vendors(&self) -> std::collections::BTreeSet<VendorKind> {
+        self.agents
+            .iter()
+            .filter(|(_, agent)| {
+                !agent.program.trim().is_empty() && program_exists(agent.program.as_str())
+            })
+            .map(|(vendor, _)| *vendor)
+            .collect()
+    }
+
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
         let Some(agent) = self.agents.get(&request.vendor) else {
             return Err(AcpError::human_block(format!(
@@ -170,11 +180,7 @@ impl Default for AcpConfig {
         // ACP directly, while Codex and Claude are commonly launched through
         // ACP bridge binaries, so keep the executable boundary explicit here.
         let definitions = [
-            default_agent_definition(
-                VendorKind::Claude,
-                "claude-code-acp",
-                Vec::<String>::new(),
-            ),
+            default_agent_definition(VendorKind::Claude, "claude-code-acp", Vec::<String>::new()),
             default_agent_definition(VendorKind::Codex, "codex-acp", Vec::<String>::new()),
             default_agent_definition(VendorKind::Gemini, "gemini", vec!["--acp".to_string()]),
             default_agent_definition(VendorKind::Kimi, "kimi", vec!["acp".to_string()]),
@@ -216,7 +222,9 @@ fn test_program_override(vendor: VendorKind) -> Option<String> {
         VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
         VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
     };
-    std::env::var(key).ok().filter(|value| !value.trim().is_empty())
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {
@@ -225,6 +233,16 @@ fn absolutize(path: &Path) -> AcpResult<PathBuf> {
     } else {
         Ok(std::env::current_dir()?.join(path))
     }
+}
+
+fn program_exists(program: &str) -> bool {
+    let candidate = Path::new(program);
+    if candidate.components().count() > 1 {
+        return candidate.exists();
+    }
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path).any(|dir| dir.join(program).exists())
 }
 
 fn effort_to_str(effort: crate::adapters::EffortLevel) -> &'static str {
@@ -312,5 +330,29 @@ mod tests {
                 .map(String::as_str),
             Some("code")
         );
+    }
+
+    #[test]
+    fn available_vendors_follow_configured_programs() {
+        let config = AcpConfig::from_agents([
+            AcpAgentDefinition {
+                vendor: VendorKind::Claude,
+                program: "/definitely/missing/claude-acp".to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+            },
+            AcpAgentDefinition {
+                vendor: VendorKind::Codex,
+                program: "/bin/sh".to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+            },
+        ]);
+
+        let available = config.available_vendors();
+
+        assert_eq!(available.len(), 1);
+        assert!(available.contains(&VendorKind::Codex));
+        assert!(!available.contains(&VendorKind::Claude));
     }
 }

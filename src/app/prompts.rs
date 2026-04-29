@@ -750,7 +750,9 @@ Hard requirements:
           reviewer flagged Y. Replaced by tasks 9-10.
   - Write `{recovery}` as TOML in this exact shape:
         status        = "approved" | "revise"           # what the recovery did
-        trigger       = "human_blocked" | "agent_pivot" # mirror the originating verdict
+        trigger       = "human_blocked" | "agent_pivot" # next recovery trigger;
+                                                        # use human_blocked when
+                                                        # operator judgement is required
         interactive   = true | false                    # whether the operator was consulted
         summary       = "One paragraph describing the decision."
         feedback      = ["one item per remediation step (optional)"]
@@ -816,8 +818,8 @@ Routing downstream:
   - approved / refine → pipeline continues to sharding (refine carryover
     has no consumer here, so it behaves like approved).
   - revise / human_blocked / agent_pivot → recovery re-runs with your
-    feedback (recovery cycle counter increments toward the 3-cycle
-    circuit breaker that forces human_blocked).
+    feedback. If the recovery artifact requested `trigger = "human_blocked"`,
+    the retry is interactive so the operator can decide.
 {instr}"#,
         spec = spec_path.display(),
         plan = plan_path.display(),

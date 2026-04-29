@@ -323,9 +323,12 @@ estimated_tokens = 10
         .expect("tasks");
         std::fs::write(
             round_dir.join("recovery.toml"),
-            r#"status = "agent_pivot"
+            r#"status = "approved"
+trigger = "agent_pivot"
+interactive = false
 summary = "recovered queue"
 feedback = ["split task 2"]
+changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
 "#,
         )
         .expect("recovery");

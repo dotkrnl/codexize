@@ -1,7 +1,9 @@
 // finalization.rs
 use super::*;
 use crate::{
-    artifacts::{ArtifactKind, SkipToImplProposal},
+    artifacts::{
+        ArtifactKind, RecoveryArtifact, ReviewStatus as RecoveryStatus, SkipToImplProposal,
+    },
     coder_summary, review,
     selection::{
         self, VendorKind,
@@ -468,9 +470,10 @@ impl App {
                 {
                     Some(format!("artifact_invalid: {err}"))
                 } else {
-                    tasks::validate(&tasks_path)
-                        .err()
-                        .map(|err| format!("artifact_invalid: {err}"))
+                    match tasks::validate(&tasks_path) {
+                        Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
+                        Err(err) => Some(format!("artifact_invalid: {err}")),
+                    }
                 };
                 (true, reason)
             }
@@ -608,6 +611,79 @@ impl App {
             guard_reason = None;
         }
         Ok(guard_reason.or(artifact_reason))
+    }
+
+    fn recovery_artifact_failure_reason(
+        &mut self,
+        recovery_path: &std::path::Path,
+    ) -> Option<String> {
+        let text = match std::fs::read_to_string(recovery_path) {
+            Ok(text) => text,
+            Err(err) => return Some(format!("artifact_invalid: {err}")),
+        };
+        let artifact: RecoveryArtifact = match toml::from_str(&text) {
+            Ok(artifact) => artifact,
+            Err(err) => return Some(format!("artifact_invalid: {err}")),
+        };
+        if artifact.summary.trim().is_empty() {
+            return Some("artifact_invalid: recovery summary is empty".to_string());
+        }
+        if artifact.status != RecoveryStatus::Approved && artifact.feedback.is_empty() {
+            return Some(format!(
+                "artifact_invalid: recovery status={:?} requires at least one feedback item",
+                artifact.status
+            ));
+        }
+
+        let requested_trigger = match (artifact.status, artifact.trigger) {
+            (RecoveryStatus::HumanBlocked, _) | (_, RecoveryStatus::HumanBlocked) => {
+                Some("human_blocked")
+            }
+            (RecoveryStatus::AgentPivot, _) | (_, RecoveryStatus::AgentPivot) => {
+                Some("agent_pivot")
+            }
+            _ => None,
+        };
+        if let Some(trigger) = requested_trigger {
+            self.update_running_recovery_trigger(trigger);
+        }
+
+        match artifact.status {
+            RecoveryStatus::Approved => None,
+            RecoveryStatus::Revise => Some(format!(
+                "recovery_requested_revise: {}",
+                artifact.summary.trim()
+            )),
+            RecoveryStatus::HumanBlocked => Some(format!(
+                "recovery_requested_human_blocked: {}",
+                artifact.summary.trim()
+            )),
+            RecoveryStatus::AgentPivot => Some(format!(
+                "recovery_requested_agent_pivot: {}",
+                artifact.summary.trim()
+            )),
+        }
+    }
+
+    fn update_running_recovery_trigger(&mut self, trigger: &str) {
+        let interactive = trigger == "human_blocked";
+        let title = if interactive {
+            "Human-blocked recovery"
+        } else {
+            "Agent pivot recovery"
+        };
+        if let Some(item) = self
+            .state
+            .builder
+            .pipeline_items
+            .iter_mut()
+            .rev()
+            .find(|item| item.stage == "recovery" && item.status == PipelineItemStatus::Running)
+        {
+            item.trigger = Some(trigger.to_string());
+            item.interactive = Some(interactive);
+            item.title = Some(title.to_string());
+        }
     }
 
     pub(super) fn append_system_message(&mut self, run_id: u64, kind: MessageKind, text: String) {

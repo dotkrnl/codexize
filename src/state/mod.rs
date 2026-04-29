@@ -93,11 +93,18 @@ pub struct RunRecord {
 pub enum MessageKind {
     Started,
     Brief,
+    AgentText,
     Summary,
     /// A summary that flags non-success verdicts (e.g., reviewer asked
     /// for revisions). Rendered as a warning rather than green success.
     SummaryWarn,
     End,
+}
+
+impl MessageKind {
+    pub fn visible_with_agent_text_filter(self, show_agent_text: bool) -> bool {
+        !matches!(self, Self::AgentText) || show_agent_text
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -254,6 +261,8 @@ pub struct SessionState {
     #[serde(default)]
     pub selected_model: Option<String>,
     #[serde(default)]
+    pub show_noninteractive_texts: bool,
+    #[serde(default)]
     pub agent_error: Option<String>,
     /// Builder loop state (empty until sharding completes)
     #[serde(default)]
@@ -279,6 +288,7 @@ impl SessionState {
             idea_text: None,
             title: None,
             selected_model: None,
+            show_noninteractive_texts: false,
             agent_error: None,
             builder: BuilderState::default(),
             archived: false,

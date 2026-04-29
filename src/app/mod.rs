@@ -1351,6 +1351,7 @@ impl App {
                     head_after: "test-after".to_string(),
                     head_state: "stable".to_string(),
                     signal_received: String::new(),
+                    working_tree_clean: true,
                 };
                 let _ = crate::runner::write_finish_stamp(&stamp_path, &stamp);
                 Ok(())
@@ -6622,6 +6623,7 @@ mod tests {
             head_after: head_after.to_string(),
             head_state: head_state.to_string(),
             signal_received: String::new(),
+            working_tree_clean: true,
         };
         let stamp_path = session_dir
             .join("artifacts")
@@ -7887,6 +7889,7 @@ mod tests {
                     head_after: "after".to_string(),
                     head_state: "stable".to_string(),
                     signal_received: String::new(),
+                    working_tree_clean: true,
                 },
             )
             .expect("write signal stamp");
@@ -7929,6 +7932,7 @@ mod tests {
                     head_after: "after".to_string(),
                     head_state: "stable".to_string(),
                     signal_received: "HUP".to_string(),
+                    working_tree_clean: true,
                 },
             )
             .expect("write hup stamp");
@@ -7972,6 +7976,7 @@ mod tests {
                     head_after: "after".to_string(),
                     head_state: "stable".to_string(),
                     signal_received: String::new(),
+                    working_tree_clean: true,
                 },
             )
             .expect("write self-exit stamp");
@@ -11503,6 +11508,7 @@ estimated_tokens = 1
                 head_after: "bbb".to_string(),
                 head_state: "stable".to_string(),
                 signal_received: String::new(),
+                working_tree_clean: true,
             };
             let old_stamp_path = finish_dir.join("old-stamp.toml");
             write_finish_stamp(&old_stamp_path, &old_stamp).unwrap();
@@ -11514,6 +11520,7 @@ estimated_tokens = 1
                 head_after: "ddd".to_string(),
                 head_state: "stable".to_string(),
                 signal_received: String::new(),
+                working_tree_clean: true,
             };
             let recent_stamp_path = finish_dir.join("recent-stamp.toml");
             write_finish_stamp(&recent_stamp_path, &recent_stamp).unwrap();
@@ -11592,6 +11599,7 @@ estimated_tokens = 1
                 head_after: "advanced".to_string(),
                 head_state: "stable".to_string(),
                 signal_received: String::new(),
+                working_tree_clean: true,
             };
             write_finish_stamp(&archived_stamp_path, &archived_stamp).unwrap();
 

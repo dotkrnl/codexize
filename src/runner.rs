@@ -64,6 +64,8 @@ pub struct FinishStamp {
     pub head_state: String,
     #[serde(default)]
     pub signal_received: String,
+    #[serde(default)]
+    pub working_tree_clean: bool,
 }
 
 /// Atomic write of a finish stamp: write to a temp file in the same directory,
@@ -149,6 +151,7 @@ finalize() {{
     fi
     last_head=""
     head_state="unstable"
+    working_tree_clean=false
     i=0
     while [ "$i" -lt "$iterations" ]; do
         while [ -f .git/index.lock ]; do
@@ -168,6 +171,10 @@ finalize() {{
         last_head="$h2"
     done
 
+    if git_status=$(git status --porcelain 2>/dev/null) && [ -z "$git_status" ]; then
+        working_tree_clean=true
+    fi
+
     finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     cat > "$tmp_stamp" << STAMPEOF
 finished_at = "{finished_at_placeholder}"
@@ -176,6 +183,7 @@ head_before = "{head_before_placeholder}"
 head_after = "{head_after_placeholder}"
 head_state = "{head_state_placeholder}"
 signal_received = "{signal_received_placeholder}"
+working_tree_clean = {working_tree_clean_placeholder}
 STAMPEOF
     mv "$tmp_stamp" "$stamp_file"
 }}
@@ -228,6 +236,7 @@ exit $exit_code"#,
         head_after_placeholder = "$last_head",
         head_state_placeholder = "$head_state",
         signal_received_placeholder = "$trapped_signal",
+        working_tree_clean_placeholder = "$working_tree_clean",
         stamp_path = shell_escape(stamp_path),
     )
 }
@@ -612,6 +621,7 @@ mod tests {
             head_after: "def456".to_string(),
             head_state: "stable".to_string(),
             signal_received: String::new(),
+            working_tree_clean: true,
         };
         write_finish_stamp(&path, &stamp).unwrap();
         assert!(path.exists());
@@ -637,6 +647,7 @@ mod tests {
             head_after: "def456".to_string(),
             head_state: "stable".to_string(),
             signal_received: String::new(),
+            working_tree_clean: true,
         };
         let result = write_finish_stamp(&path, &stamp);
         assert!(result.is_err());
@@ -678,6 +689,7 @@ head_state = "unstable"
         assert_eq!(stamp.head_before, "000000");
         assert_eq!(stamp.head_after, "111111");
         assert_eq!(stamp.head_state, "unstable");
+        assert!(!stamp.working_tree_clean);
     }
 
     #[test]
@@ -721,6 +733,22 @@ extra_field = "ignored"
         .unwrap();
         let stamp = read_finish_stamp(&path).unwrap();
         assert_eq!(stamp.head_state, "stable");
+    }
+
+    #[test]
+    fn finish_stamp_serialization_includes_working_tree_clean() {
+        let stamp = FinishStamp {
+            finished_at: "2026-04-26T10:00:00Z".to_string(),
+            exit_code: 0,
+            head_before: "abc123".to_string(),
+            head_after: "def456".to_string(),
+            head_state: "stable".to_string(),
+            signal_received: String::new(),
+            working_tree_clean: true,
+        };
+
+        let text = toml::to_string_pretty(&stamp).unwrap();
+        assert!(text.contains("working_tree_clean = true"));
     }
 
     #[test]
@@ -796,6 +824,11 @@ extra_field = "ignored"
             .stderr(Stdio::null())
             .status()
             .expect("git commit");
+        fs::write(
+            dir.path().join(".git").join("info").join("exclude"),
+            "/status\n/run-finish\n",
+        )
+        .unwrap();
 
         let cmd = build_shell_cmd(
             "true",
@@ -823,6 +856,7 @@ extra_field = "ignored"
         assert_eq!(stamp.head_state, "stable");
         assert!(!stamp.head_before.is_empty());
         assert_eq!(stamp.head_before, stamp.head_after);
+        assert!(stamp.working_tree_clean);
 
         // Status file should also contain the exit code.
         let status_text = fs::read_to_string(&status_path).unwrap();
@@ -901,6 +935,68 @@ exit 1
         assert_eq!(stamp.exit_code, 0);
         assert_eq!(stamp.head_state, "unstable");
         assert!(!stamp.head_after.is_empty());
+        assert!(!stamp.working_tree_clean);
+    }
+
+    #[test]
+    fn shell_cmd_marks_dirty_repo_in_finish_stamp() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let status_dir = dir.path().join("status");
+        let status_path = status_dir.join("run.txt");
+        let finish_dir = dir.path().join("run-finish");
+        let stamp_path = finish_dir.join("test.toml");
+
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git init");
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "file.txt"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git add");
+        std::process::Command::new("git")
+            .args(["commit", "-m", "test", "--no-gpg-sign"])
+            .current_dir(dir.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git commit");
+        fs::write(
+            dir.path().join(".git").join("info").join("exclude"),
+            "/status\n/run-finish\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("dirty.txt"), "untracked").unwrap();
+
+        let cmd = build_shell_cmd(
+            "true",
+            "[Test]",
+            &status_dir.to_string_lossy(),
+            &status_path.to_string_lossy(),
+            &finish_dir.to_string_lossy(),
+            &stamp_path.to_string_lossy(),
+        );
+
+        let output = std::process::Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(dir.path())
+            .output()
+            .expect("bash");
+        assert!(
+            output.status.success(),
+            "bash failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stamp = read_finish_stamp(&stamp_path).unwrap();
+        assert!(!stamp.working_tree_clean);
     }
 
     #[test]

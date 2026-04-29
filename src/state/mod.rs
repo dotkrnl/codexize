@@ -1545,62 +1545,66 @@ text = "agent started · gpt-5 (openai)"
 
     #[test]
     fn test_resume_one_running_live_window() {
-        let mut state = SessionState::new("test-resume".to_string());
-        state.agent_runs.push(RunRecord {
-            id: 1,
-            stage: "brainstorm".to_string(),
-            task_id: None,
-            round: 1,
-            attempt: 1,
-            model: "claude-opus-4-7".to_string(),
-            vendor: "anthropic".to_string(),
-            window_name: "[Brainstorm]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: None,
-            status: RunStatus::Running,
-            error: None,
-            effort: EffortLevel::Normal,
-            modes: crate::state::LaunchModes::default(),
-            hostname: None,
-            mount_device_id: None,
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-resume".to_string());
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "claude-opus-4-7".to_string(),
+                vendor: "anthropic".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let live_windows = vec!["[Brainstorm]".to_string()];
+            let result = state.resume_running_runs(&live_windows);
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), Some(1));
+            assert_eq!(state.agent_runs[0].status, RunStatus::Running);
         });
-
-        let live_windows = vec!["[Brainstorm]".to_string()];
-        let result = state.resume_running_runs(&live_windows);
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Some(1));
-        assert_eq!(state.agent_runs[0].status, RunStatus::Running);
     }
 
     #[test]
     fn test_resume_one_running_missing_window() {
-        let mut state = SessionState::new("test-resume-missing".to_string());
-        state.agent_runs.push(RunRecord {
-            id: 1,
-            stage: "brainstorm".to_string(),
-            task_id: None,
-            round: 1,
-            attempt: 1,
-            model: "claude-opus-4-7".to_string(),
-            vendor: "anthropic".to_string(),
-            window_name: "[Brainstorm]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: None,
-            status: RunStatus::Running,
-            error: None,
-            effort: EffortLevel::Normal,
-            modes: crate::state::LaunchModes::default(),
-            hostname: None,
-            mount_device_id: None,
+        with_temp_root(|| {
+            let mut state = SessionState::new("test-resume-missing".to_string());
+            state.agent_runs.push(RunRecord {
+                id: 1,
+                stage: "brainstorm".to_string(),
+                task_id: None,
+                round: 1,
+                attempt: 1,
+                model: "claude-opus-4-7".to_string(),
+                vendor: "anthropic".to_string(),
+                window_name: "[Brainstorm]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: None,
+                status: RunStatus::Running,
+                error: None,
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            });
+
+            let live_windows = vec![]; // No live windows
+            let result = state.resume_running_runs(&live_windows);
+
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), Some(1));
+            assert_eq!(state.agent_runs[0].status, RunStatus::Running);
         });
-
-        let live_windows = vec![]; // No live windows
-        let result = state.resume_running_runs(&live_windows);
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Some(1));
-        assert_eq!(state.agent_runs[0].status, RunStatus::Running);
     }
 
     #[test]

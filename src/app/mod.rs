@@ -7136,50 +7136,52 @@ mod tests {
 
     #[test]
     fn progress_focus_key_skips_finalized_run_when_id_still_set() {
-        // Regression: `go_back` finalizes the active run before
-        // `transition_to_phase` clears `current_run_id`. The refocus inside
-        // `transition_to_phase` would otherwise see a non-running run id
-        // and pin focus on the just-aborted row instead of the rewound
-        // stage. The status check belongs in `progress_focus_key` so any
-        // future call site that finalizes-then-transitions stays correct.
-        let mut state = coder_round_state("pf-finalized-stale");
-        state.agent_runs.push(make_coder_run(10, 1, 1));
+        with_temp_root(|| {
+            // Regression: `go_back` finalizes the active run before
+            // `transition_to_phase` clears `current_run_id`. The refocus inside
+            // `transition_to_phase` would otherwise see a non-running run id
+            // and pin focus on the just-aborted row instead of the rewound
+            // stage. The status check belongs in `progress_focus_key` so any
+            // future call site that finalizes-then-transitions stays correct.
+            let mut state = coder_round_state("pf-finalized-stale");
+            state.agent_runs.push(make_coder_run(10, 1, 1));
 
-        let mut app = build_progress_follow_app(state, 10);
-        let coder_node = app
-            .node_for_row(app.selected)
-            .expect("baseline coder row exists");
-        assert_eq!(
-            coder_node.run_id.or(coder_node.leaf_run_id),
-            Some(10),
-            "baseline: progress focus lands on the running coder row"
-        );
+            let mut app = build_progress_follow_app(state, 10);
+            let coder_node = app
+                .node_for_row(app.selected)
+                .expect("baseline coder row exists");
+            assert_eq!(
+                coder_node.run_id.or(coder_node.leaf_run_id),
+                Some(10),
+                "baseline: progress focus lands on the running coder row"
+            );
 
-        // Mirror the first half of `go_back`: finalize the run while
-        // `current_run_id` still points at it.
-        app.finalize_run_record(10, false, Some("aborted by user".to_string()));
-        assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
-        assert_eq!(
-            app.current_run_id,
-            Some(10),
-            "stale id intentionally retained to mirror the rewind window"
-        );
+            // Mirror the first half of `go_back`: finalize the run while
+            // `current_run_id` still points at it.
+            app.finalize_run_record(10, false, Some("aborted by user".to_string()));
+            assert_eq!(app.state.agent_runs[0].status, RunStatus::Failed);
+            assert_eq!(
+                app.current_run_id,
+                Some(10),
+                "stale id intentionally retained to mirror the rewind window"
+            );
 
-        // The next refocus event must skip the just-aborted run.
-        let target = app
-            .progress_focus_key()
-            .expect("falls back to the active top-level stage");
-        let target_idx = app
-            .visible_rows
-            .iter()
-            .position(|row| row.key == target)
-            .expect("target row visible");
-        let target_node = app.node_for_row(target_idx).expect("target node");
-        assert_ne!(
-            target_node.run_id.or(target_node.leaf_run_id),
-            Some(10),
-            "stale current_run_id pointing at a non-Running run must not steer focus"
-        );
+            // The next refocus event must skip the just-aborted run.
+            let target = app
+                .progress_focus_key()
+                .expect("falls back to the active top-level stage");
+            let target_idx = app
+                .visible_rows
+                .iter()
+                .position(|row| row.key == target)
+                .expect("target row visible");
+            let target_node = app.node_for_row(target_idx).expect("target node");
+            assert_ne!(
+                target_node.run_id.or(target_node.leaf_run_id),
+                Some(10),
+                "stale current_run_id pointing at a non-Running run must not steer focus"
+            );
+        });
     }
 
     #[test]
@@ -9406,77 +9408,81 @@ feedback = ["split task 2"]
 
     #[test]
     fn recovery_retry_exhaustion_falls_back_to_blocked() {
-        let mut state = SessionState::new("recovery-retry-cap".to_string());
-        state.current_phase = Phase::BuilderRecovery(2);
-        state.builder.recovery_trigger_task_id = Some(7);
-        state.builder.recovery_prev_max_task_id = Some(9);
-        state.builder.recovery_prev_task_ids = vec![7, 8, 9];
-        state.builder.recovery_trigger_summary = Some("stale trigger".to_string());
-        let mut app = idle_app(state);
-        app.models = vec![ranked_model(
-            selection::VendorKind::Claude,
-            "claude-sonnet",
-            1,
-            10,
-            10,
-        )];
-        let failed = RunRecord {
-            id: 21,
-            stage: "recovery".to_string(),
-            task_id: None,
-            round: 2,
-            attempt: 3,
-            model: "claude-sonnet".to_string(),
-            vendor: "claude".to_string(),
-            window_name: "[Recovery]".to_string(),
-            started_at: chrono::Utc::now(),
-            ended_at: Some(chrono::Utc::now()),
-            status: RunStatus::Failed,
-            error: Some("artifact_invalid: x".to_string()),
-            effort: EffortLevel::Normal,
-            modes: crate::state::LaunchModes::default(),
-            hostname: None,
-            mount_device_id: None,
-        };
-        let handled = app.maybe_auto_retry(&failed);
-        assert!(handled);
-        assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
-        assert!(
-            app.state
-                .agent_error
-                .as_deref()
-                .unwrap_or_default()
-                .starts_with("builder recovery retry exhausted")
-        );
-        assert_eq!(app.state.builder.recovery_trigger_task_id, Some(7));
-        assert_eq!(app.state.builder.recovery_prev_max_task_id, Some(9));
-        assert_eq!(app.state.builder.recovery_prev_task_ids, vec![7, 8, 9]);
-        assert_eq!(
-            app.state.builder.recovery_trigger_summary.as_deref(),
-            Some("stale trigger")
-        );
+        with_temp_root(|| {
+            let mut state = SessionState::new("recovery-retry-cap".to_string());
+            state.current_phase = Phase::BuilderRecovery(2);
+            state.builder.recovery_trigger_task_id = Some(7);
+            state.builder.recovery_prev_max_task_id = Some(9);
+            state.builder.recovery_prev_task_ids = vec![7, 8, 9];
+            state.builder.recovery_trigger_summary = Some("stale trigger".to_string());
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet",
+                1,
+                10,
+                10,
+            )];
+            let failed = RunRecord {
+                id: 21,
+                stage: "recovery".to_string(),
+                task_id: None,
+                round: 2,
+                attempt: 3,
+                model: "claude-sonnet".to_string(),
+                vendor: "claude".to_string(),
+                window_name: "[Recovery]".to_string(),
+                started_at: chrono::Utc::now(),
+                ended_at: Some(chrono::Utc::now()),
+                status: RunStatus::Failed,
+                error: Some("artifact_invalid: x".to_string()),
+                effort: EffortLevel::Normal,
+                modes: crate::state::LaunchModes::default(),
+                hostname: None,
+                mount_device_id: None,
+            };
+            let handled = app.maybe_auto_retry(&failed);
+            assert!(handled);
+            assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+            assert!(
+                app.state
+                    .agent_error
+                    .as_deref()
+                    .unwrap_or_default()
+                    .starts_with("builder recovery retry exhausted")
+            );
+            assert_eq!(app.state.builder.recovery_trigger_task_id, Some(7));
+            assert_eq!(app.state.builder.recovery_prev_max_task_id, Some(9));
+            assert_eq!(app.state.builder.recovery_prev_task_ids, vec![7, 8, 9]);
+            assert_eq!(
+                app.state.builder.recovery_trigger_summary.as_deref(),
+                Some("stale trigger")
+            );
+        });
     }
 
     #[test]
     fn failed_recovery_entry_clears_recovery_context() {
-        let mut state = SessionState::new("recovery-entry-fail".to_string());
-        state.current_phase = Phase::IdeaInput;
-        state.builder.current_task = Some(3);
-        let mut app = idle_app(state);
+        with_temp_root(|| {
+            let mut state = SessionState::new("recovery-entry-fail".to_string());
+            state.current_phase = Phase::IdeaInput;
+            state.builder.current_task = Some(3);
+            let mut app = idle_app(state);
 
-        let entered = app.enter_builder_recovery(
-            1,
-            Some(3),
-            Some("cannot enter from idea".to_string()),
-            "agent_pivot",
-        );
+            let entered = app.enter_builder_recovery(
+                1,
+                Some(3),
+                Some("cannot enter from idea".to_string()),
+                "agent_pivot",
+            );
 
-        assert!(entered);
-        assert!(app.state.agent_error.is_some());
-        assert_eq!(app.state.builder.recovery_trigger_task_id, None);
-        assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
-        assert!(app.state.builder.recovery_prev_task_ids.is_empty());
-        assert_eq!(app.state.builder.recovery_trigger_summary, None);
+            assert!(entered);
+            assert!(app.state.agent_error.is_some());
+            assert_eq!(app.state.builder.recovery_trigger_task_id, None);
+            assert_eq!(app.state.builder.recovery_prev_max_task_id, None);
+            assert!(app.state.builder.recovery_prev_task_ids.is_empty());
+            assert_eq!(app.state.builder.recovery_trigger_summary, None);
+        });
     }
 
     #[test]

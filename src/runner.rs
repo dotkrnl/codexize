@@ -415,6 +415,10 @@ fn run_managed_acp_launch(
         match event {
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
                 flush_agent_text_turn(&launch, &mut agent_text);
+                if launch.resolved.interactive {
+                    thread::sleep(ACP_POLL_INTERVAL);
+                    continue;
+                }
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 if let Some(path) = launch.required_artifact.as_deref() {
                     validate_toml_artifacts(&[path])?;

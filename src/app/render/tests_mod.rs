@@ -1083,6 +1083,10 @@ fn render_full_frame(app: &mut App, w: u16, h: u16) -> Vec<String> {
     (0..h).map(|y| line_text(&buf, y, w)).collect()
 }
 
+fn full_frame_text(app: &mut App, w: u16, h: u16) -> String {
+    render_full_frame(app, w, h).join("\n")
+}
+
 fn render_full_frame_buf(app: &mut App, w: u16, h: u16) -> Buffer {
     let backend = ratatui::backend::TestBackend::new(w, h);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -1309,6 +1313,109 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
     assert_eq!(
         rule_rows, 1,
         "only the app chrome bottom rule should separate body from input sheet: {lines:#?}"
+    );
+}
+
+#[test]
+fn split_run_renders_tree_above_transcript_on_tall_terminals() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Done)],
+        vec![message(1, "split transcript body")],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let lines = render_full_frame(&mut app, 80, 90);
+    let tree_y = lines
+        .iter()
+        .position(|line| line.contains("Root"))
+        .expect("tree row should remain visible above the split");
+    let split_y = lines
+        .iter()
+        .position(|line| line.contains("Split transcript body"))
+        .expect("run transcript should render in the split");
+
+    assert!(
+        tree_y < split_y,
+        "tall split layout should render tree before split transcript: {lines:#?}"
+    );
+}
+
+#[test]
+fn split_run_uses_full_body_and_hides_tree_at_small_terminal_height() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Done)],
+        vec![message(1, "full body split transcript")],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let text = full_frame_text(&mut app, 80, super::super::RESPONSIVE_HEIGHT_THRESHOLD);
+
+    assert!(text.contains("Full body split transcript"), "{text}");
+    assert!(
+        !text.contains("Root") && !text.contains("Task A") && !text.contains("Builder"),
+        "tree rows should be hidden in full-body split mode: {text}"
+    );
+}
+
+#[test]
+fn split_run_reuses_chat_filtering_for_transcripts() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Done)],
+        vec![
+            message(1, "visible split summary"),
+            agent_text(1, "hidden noninteractive text"),
+            agent_thought(1, "hidden thought text"),
+        ],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let text = full_frame_text(&mut app, 80, 90);
+
+    assert!(text.contains("Visible split summary"), "{text}");
+    assert!(!text.contains("hidden noninteractive text"), "{text}");
+    assert!(!text.contains("hidden thought text"), "{text}");
+}
+
+#[test]
+fn idea_split_renders_captured_text_from_target_not_selected_row() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Done)],
+        Vec::new(),
+    );
+    app.state.idea_text = Some("captured idea belongs in split".to_string());
+    app.state.current_phase = Phase::SpecReviewPaused;
+    app.selected = 2;
+    app.split_target = Some(super::super::split::SplitTarget::Idea);
+
+    let text = full_frame_text(&mut app, 80, 90);
+
+    assert!(text.contains("captured idea belongs in split"), "{text}");
+}
+
+#[test]
+fn idea_input_split_suppresses_competing_bottom_sheet() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Running)],
+        Vec::new(),
+    );
+    app.state.current_phase = Phase::IdeaInput;
+    app.selected = 2;
+    app.split_target = Some(super::super::split::SplitTarget::Idea);
+    app.input_mode = true;
+    app.input_buffer = "draft the split idea".to_string();
+    app.input_cursor = app.input_buffer.chars().count();
+
+    let text = full_frame_text(&mut app, 80, 90);
+
+    assert!(text.contains("draft the split idea"), "{text}");
+    assert!(
+        !text.contains("> draft the split idea"),
+        "Idea split input must not also render the footer input sheet: {text}"
     );
 }
 

@@ -1,0 +1,3 @@
+status       = "done"
+summary      = "Moved transcript, Idea, and input detail ownership out of expanded tree rows and into the split-view path, wired split-mode key handling and footer hints, added synchronization coverage for forced-open interactive and Idea input states, and cleaned the repo back to a clippy-clean state required by the task. Focused split, render, lifecycle, and keymap tests passed; the repo-wide `cargo test` command still stalled immediately after launching the library test binary in this environment."
+rebuttal     = []

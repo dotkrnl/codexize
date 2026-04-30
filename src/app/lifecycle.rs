@@ -641,6 +641,8 @@ impl App {
                 )
                 .len()
             }
+            // Idea content currently does not participate in transcript-style
+            // scrolling, so rebuild/sync clamps it as a fixed viewport.
             SplitTarget::Idea => 0,
         }
     }

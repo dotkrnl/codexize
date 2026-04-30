@@ -605,8 +605,9 @@ impl App {
         if self.split_fullscreen {
             return self.body_inner_height;
         }
-        self.body_inner_height
-            .saturating_sub(self.body_inner_height / 3)
+        let content_height = self.body_inner_height.saturating_sub(1);
+        let tree_height = (content_height / 3).max(1).min(content_height);
+        content_height.saturating_sub(tree_height)
     }
 
     pub(super) fn current_split_content_height(&self) -> usize {
@@ -638,7 +639,9 @@ impl App {
                     &msgs,
                     run,
                     &local_offset,
-                    self.split_running_tail_line(run),
+                    (!run.modes.interactive)
+                        .then(|| self.split_running_tail_line(run))
+                        .flatten(),
                     self.body_inner_width.max(1),
                 )
                 .len()

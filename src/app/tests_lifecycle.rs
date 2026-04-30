@@ -2928,6 +2928,42 @@ fn split_follow_tail_reaches_latest_message_lines() {
 }
 
 #[test]
+fn split_viewport_height_accounts_for_separator_row() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-viewport-separator".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(RunRecord {
+            id: 7,
+            stage: "brainstorm".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "m".to_string(),
+            vendor: "v".to_string(),
+            window_name: "[Brainstorm]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        let mut app = idle_app(state);
+        app.split_target = Some(super::split::SplitTarget::Run(7));
+        app.body_inner_height = 10;
+        app.split_fullscreen = false;
+
+        assert_eq!(
+            app.split_viewport_height(),
+            6,
+            "non-fullscreen split viewport should match render allocation after the separator row"
+        );
+    });
+}
+
+#[test]
 fn split_follow_tail_keeps_live_running_tail_visible() {
     with_temp_root(|| {
         let mut state = SessionState::new("split-tail-visible-running".to_string());

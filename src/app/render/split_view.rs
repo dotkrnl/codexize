@@ -55,7 +55,9 @@ impl SplitWidget<'_> {
             run,
             self.app.split_scroll_offset,
             local_offset,
-            self.app.split_running_tail_line(run),
+            (!run.modes.interactive)
+                .then(|| self.app.split_running_tail_line(run))
+                .flatten(),
         )
         .render(area, buf);
     }

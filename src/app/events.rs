@@ -71,6 +71,16 @@ impl App {
             return false;
         }
 
+        if self.can_focus_input()
+            && matches!(key.code, KeyCode::Char(c) if c != ':')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            self.input_mode = true;
+            return self.handle_input_key(key);
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 if self.has_running_agent() {

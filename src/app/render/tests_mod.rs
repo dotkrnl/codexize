@@ -859,21 +859,26 @@ fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
 }
 
 #[test]
-fn running_tail_stops_after_ten_seconds_without_transcript_activity() {
+fn running_tail_shows_stalled_after_ten_seconds_without_transcript_activity() {
     let mut run = run_record(7, RunStatus::Running);
     run.started_at = chrono::Utc::now() - chrono::Duration::seconds(11);
     let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
     app.agent_last_change = Some(Instant::now() - Duration::from_secs(11));
+    app.spinner_tick = 1;
 
     let lines = render_lines(&app, 8);
 
     assert!(
-        !lines
+        lines
             .iter()
-            .any(|line| line.contains("⠋") || line.contains("⠙")),
-        "stalled runs should not keep spinning: {lines:#?}"
+            .any(|line| line.contains("⠋") && line.contains("stalled")),
+        "stalled runs should keep a visible stalled spinner row: {lines:#?}"
     );
-    assert!(!app.live_summary_spinner_visible_for_height(8));
+    assert!(
+        !lines.iter().any(|line| line.contains("⠙")),
+        "stalled spinner should be frozen rather than animated: {lines:#?}"
+    );
+    assert!(app.live_summary_spinner_visible_for_height(8));
 }
 
 #[test]

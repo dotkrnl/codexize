@@ -25,7 +25,7 @@ use super::{
     focus_caps::FocusCaps,
     footer::{
         CachedSummaryFetcher, TranscriptLeafMarker, extract_short_title,
-        format_running_transcript_leaf, keymap,
+        format_running_transcript_leaf, format_stalled_transcript_leaf, keymap,
     },
     models_area,
     render_view_model::{

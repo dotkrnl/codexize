@@ -180,6 +180,35 @@ pub fn format_running_transcript_leaf<C: Clock>(
     Line::from(spans)
 }
 
+/// Format a stalled transcript-style leaf row.
+///
+/// The row keeps the same spinner-shaped marker as active rows, but freezes it
+/// and labels the state so lack of transcript activity is visible without
+/// implying the run completed.
+pub fn format_stalled_transcript_leaf<C: Clock>(
+    _marker: TranscriptLeafMarker,
+    clock: &C,
+    fetcher: &impl LiveSummaryFetcher,
+) -> Line<'static> {
+    let timestamp = clock.timestamp_string();
+    let body = capitalize_first(&fetcher.fetch());
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", timestamp),
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!("{} ", SPINNER[0]),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("stalled", Style::default().fg(Color::Yellow)),
+        Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+        Span::styled(body, Style::default().fg(Color::DarkGray)),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

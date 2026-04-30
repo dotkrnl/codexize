@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::process::Command;
 
@@ -22,6 +23,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         .context("Claude usage response was not an object")?;
 
     let mut min_remaining: Option<u8> = None;
+    let mut earliest_reset: Option<DateTime<Utc>> = None;
 
     for (_name, value) in object {
         let Some(obj) = value.as_object() else {
@@ -36,6 +38,13 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         };
         let remaining = (100.0 - utilization).round().clamp(0.0, 100.0) as u8;
         min_remaining = Some(min_remaining.map_or(remaining, |prev| prev.min(remaining)));
+
+        if let Some(ts) = obj.get("resets_at").and_then(Value::as_str)
+            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        {
+            let dt_utc = dt.with_timezone(&Utc);
+            earliest_reset = Some(earliest_reset.map_or(dt_utc, |earliest| earliest.min(dt_utc)));
+        }
     }
 
     let Some(remaining) = min_remaining else {
@@ -45,6 +54,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
     Ok(vec![LiveModel {
         name: "claude-shared".to_string(),
         quota_percent: Some(remaining),
+        quota_resets_at: earliest_reset,
     }])
 }
 
@@ -129,6 +139,14 @@ mod tests {
         assert_eq!(models[0].name, "claude-shared");
         // min(100-17, 100-32, 100-7) = min(83, 68, 93) = 68
         assert_eq!(models[0].quota_percent, Some(68));
+        assert_eq!(
+            models[0].quota_resets_at,
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-04-26T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            )
+        );
     }
 
     #[test]

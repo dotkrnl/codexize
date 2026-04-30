@@ -280,6 +280,7 @@ mod tests {
                 axes: entry.axes,
                 axis_provenance: entry.axis_provenance,
                 quota_percent: Some(80),
+                quota_resets_at: None,
                 display_order: entry.display_order,
                 fallback_from: None,
             })

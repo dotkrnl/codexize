@@ -26,6 +26,7 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
         ],
         axis_provenance: std::collections::BTreeMap::new(),
         quota_percent: Some(100),
+        quota_resets_at: None,
         display_order,
         fallback_from: None,
     }

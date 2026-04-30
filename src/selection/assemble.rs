@@ -3,7 +3,7 @@ use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, QuotaError, VendorKind};
 use super::vendor;
 use crate::acp::AcpConfig;
-use crate::cache::{self, DashboardEntry, LoadedCache, QuotaPayload};
+use crate::cache::{self, DashboardEntry, LoadedCache, QuotaPayload, ResetPayload};
 use crate::dashboard;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -44,6 +44,13 @@ fn assemble_from_loaded_with_available(
             data: section.data.clone(),
             expired: false,
         });
+    let quota_resets = loaded
+        .quota_resets
+        .as_ref()
+        .map(|section| crate::cache::LoadedSection {
+            data: section.data.clone(),
+            expired: false,
+        });
     let dashboard = loaded
         .dashboard
         .as_ref()
@@ -51,8 +58,14 @@ fn assemble_from_loaded_with_available(
             data: section.data.clone(),
             expired: false,
         });
-    let (models, _) =
-        assemble_from_cache_with_available(LoadedCache { dashboard, quotas }, available_vendors);
+    let (models, _) = assemble_from_cache_with_available(
+        LoadedCache {
+            dashboard,
+            quotas,
+            quota_resets,
+        },
+        available_vendors,
+    );
     models
 }
 
@@ -81,6 +94,10 @@ fn assemble_from_cache_with_available(
     let (cached_quota, quota_expired) = match loaded.quotas {
         Some(section) => (section.data, section.expired),
         None => (BTreeMap::new(), true),
+    };
+    let (cached_resets, resets_expired) = match loaded.quota_resets {
+        Some(section) => (section.data, section.expired),
+        None => (BTreeMap::new(), false),
     };
 
     let mut quota_errors = Vec::new();
@@ -122,21 +139,36 @@ fn assemble_from_cache_with_available(
     // Quota refresh (independent of dashboard outcome).
     // On per-vendor error, preserve that vendor's expired cached data so
     // a single failing vendor cannot wipe out previously-known quotas.
-    let quota_payload = if quota_expired {
-        let (fresh_quotas, fresh_errors) =
+    // Old v3 caches can have fresh quotas but no reset section, so treat the
+    // missing parallel payload as stale whenever there is quota data to pair.
+    let reset_missing = !cached_quota.is_empty() && cached_resets.is_empty();
+    let quota_payload;
+    let reset_payload;
+    if quota_expired || resets_expired || reset_missing {
+        let (fresh_quotas, fresh_resets, fresh_errors) =
             quota::load_quota_maps_for(available_vendors.iter().copied());
         quota_errors.extend(fresh_errors);
-        let merged = merge_quota_payload(&cached_quota, fresh_quotas);
-        let _ = cache::save_quotas(&merged);
-        merged
+        quota_payload = merge_quota_payload(&cached_quota, fresh_quotas);
+        reset_payload = merge_reset_payload(&cached_resets, fresh_resets);
+        let _ = cache::save_quotas(&quota_payload);
+        let _ = cache::save_quota_resets(&reset_payload);
     } else {
-        cached_quota
-    };
+        quota_payload = cached_quota;
+        reset_payload = cached_resets;
+    }
 
     // Parse quota payload into typed map.
     // Keys may come from vendor_kind_to_str ("openai", "google", "moonshotai")
     // or from str_to_vendor-compatible strings ("codex", "gemini", "kimi").
     let parsed_quotas: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = quota_payload
+        .into_iter()
+        .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
+        .filter(|(vendor, _)| available_vendors.contains(vendor))
+        .collect();
+    let parsed_resets: BTreeMap<
+        VendorKind,
+        BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
+    > = reset_payload
         .into_iter()
         .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
         .filter(|(vendor, _)| available_vendors.contains(vendor))
@@ -191,6 +223,12 @@ fn assemble_from_cache_with_available(
                 .copied()
                 .flatten()
                 .or_else(|| quota::find_quota_by_heuristic(&m.name, vendor, &parsed_quotas));
+            let quota_resets_at = parsed_resets
+                .get(&vendor)
+                .and_then(|by_model| by_model.get(&m.name))
+                .copied()
+                .flatten()
+                .or_else(|| quota::find_reset_by_heuristic(&m.name, vendor, &parsed_resets));
 
             Some(CachedModel {
                 vendor,
@@ -201,6 +239,7 @@ fn assemble_from_cache_with_available(
                 axes: m.axes,
                 axis_provenance: m.axis_provenance,
                 quota_percent,
+                quota_resets_at,
                 display_order: m.display_order,
                 fallback_from: m.fallback_from,
             })
@@ -244,6 +283,28 @@ fn merge_quota_payload(
 ) -> QuotaPayload {
     let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
     let mut merged: QuotaPayload = BTreeMap::new();
+
+    for (vendor_str, models) in cached {
+        let preserve = match parse_vendor_str(vendor_str) {
+            Some(kind) => !succeeded.contains(&kind),
+            None => true,
+        };
+        if preserve {
+            merged.insert(vendor_str.clone(), models.clone());
+        }
+    }
+    for (vendor, models) in fresh {
+        merged.insert(vendor::vendor_kind_to_str(vendor).to_string(), models);
+    }
+    merged
+}
+
+fn merge_reset_payload(
+    cached: &ResetPayload,
+    fresh: BTreeMap<VendorKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
+) -> ResetPayload {
+    let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
+    let mut merged: ResetPayload = BTreeMap::new();
 
     for (vendor_str, models) in cached {
         let preserve = match parse_vendor_str(vendor_str) {
@@ -305,7 +366,35 @@ mod tests {
         payload
     }
 
+    fn make_reset_payload(entries: &[(&str, &str, Option<&str>)]) -> ResetPayload {
+        let mut payload: ResetPayload = BTreeMap::new();
+        for (vendor, name, reset) in entries {
+            payload.entry(vendor.to_string()).or_default().insert(
+                name.to_string(),
+                reset.map(|value| {
+                    chrono::DateTime::parse_from_rfc3339(value)
+                        .unwrap()
+                        .with_timezone(&chrono::Utc)
+                }),
+            );
+        }
+        payload
+    }
+
+    fn empty_resets_for_quotas(quotas: &QuotaPayload) -> ResetPayload {
+        quotas
+            .iter()
+            .map(|(vendor, models)| {
+                (
+                    vendor.clone(),
+                    models.keys().map(|name| (name.clone(), None)).collect(),
+                )
+            })
+            .collect()
+    }
+
     fn loaded_cache_with(dashboard: Vec<DashboardEntry>, quotas: QuotaPayload) -> LoadedCache {
+        let resets = empty_resets_for_quotas(&quotas);
         LoadedCache {
             dashboard: Some(cache::LoadedSection {
                 data: dashboard,
@@ -313,6 +402,31 @@ mod tests {
             }),
             quotas: Some(cache::LoadedSection {
                 data: quotas,
+                expired: false,
+            }),
+            quota_resets: Some(cache::LoadedSection {
+                data: resets,
+                expired: false,
+            }),
+        }
+    }
+
+    fn loaded_cache_with_resets(
+        dashboard: Vec<DashboardEntry>,
+        quotas: QuotaPayload,
+        resets: ResetPayload,
+    ) -> LoadedCache {
+        LoadedCache {
+            dashboard: Some(cache::LoadedSection {
+                data: dashboard,
+                expired: false,
+            }),
+            quotas: Some(cache::LoadedSection {
+                data: quotas,
+                expired: false,
+            }),
+            quota_resets: Some(cache::LoadedSection {
+                data: resets,
                 expired: false,
             }),
         }
@@ -350,6 +464,28 @@ mod tests {
         let codex = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
         assert_eq!(codex.vendor, VendorKind::Codex);
         assert_eq!(codex.quota_percent, Some(70));
+    }
+
+    #[test]
+    fn assemble_merges_cached_quota_resets() {
+        let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+        let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+        let resets =
+            make_reset_payload(&[("claude", "claude-sonnet-4-6", Some("2026-04-30T12:00:00Z"))]);
+
+        let (models, errors) =
+            assemble_from_cache(loaded_cache_with_resets(dashboard, quotas, resets));
+
+        assert!(errors.is_empty());
+        assert_eq!(models.len(), 1);
+        assert_eq!(
+            models[0].quota_resets_at,
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-04-30T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            )
+        );
     }
 
     #[test]
@@ -517,6 +653,10 @@ mod tests {
                 data: make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]),
                 expired: false,
             }),
+            quota_resets: Some(cache::LoadedSection {
+                data: make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]),
+                expired: false,
+            }),
         };
 
         let (models, errors) = assemble_from_cache(loaded);
@@ -536,6 +676,10 @@ mod tests {
             }),
             quotas: Some(cache::LoadedSection {
                 data: make_quota_payload(&[("claude", "claude-sonnet", Some(80))]),
+                expired: false,
+            }),
+            quota_resets: Some(cache::LoadedSection {
+                data: make_reset_payload(&[("claude", "claude-sonnet", None)]),
                 expired: false,
             }),
         };
@@ -704,6 +848,7 @@ mod tests {
         }
         cache::save_dashboard(&dashboard).unwrap();
         cache::save_quotas(&quotas).unwrap();
+        cache::save_quota_resets(&empty_resets_for_quotas(&quotas)).unwrap();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         unsafe {
             match original {

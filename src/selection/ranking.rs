@@ -278,6 +278,7 @@ mod tests {
             ],
             axis_provenance: BTreeMap::new(),
             quota_percent: Some(80),
+            quota_resets_at: None,
             display_order: 1,
             fallback_from: None,
         }

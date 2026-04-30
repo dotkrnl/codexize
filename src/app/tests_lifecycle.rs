@@ -22,6 +22,7 @@ fn startup_refresh_remains_fetching_when_quotas_expired() {
             data: std::collections::BTreeMap::new(),
             expired: true,
         }),
+        quota_resets: None,
     };
 
     assert!(startup_cache_has_expired_section(&loaded));

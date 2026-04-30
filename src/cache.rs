@@ -22,6 +22,8 @@ pub struct CacheFile {
     pub version: u32,
     pub dashboard: Option<Section<Vec<DashboardEntry>>>,
     pub quotas: Option<Section<QuotaPayload>>,
+    #[serde(default)]
+    pub quota_resets: Option<Section<ResetPayload>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -49,10 +51,13 @@ pub struct DashboardEntry {
 
 /// Per-vendor map of model name → optional quota percentage.
 pub type QuotaPayload = BTreeMap<String, BTreeMap<String, Option<u8>>>;
+/// Per-vendor map of model name → optional quota reset timestamp.
+pub type ResetPayload = BTreeMap<String, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>;
 
 pub struct LoadedCache {
     pub dashboard: Option<LoadedSection<Vec<DashboardEntry>>>,
     pub quotas: Option<LoadedSection<QuotaPayload>>,
+    pub quota_resets: Option<LoadedSection<ResetPayload>>,
 }
 
 pub struct LoadedSection<T> {
@@ -94,6 +99,10 @@ pub fn save_quotas(payload: &QuotaPayload) -> Result<()> {
     save_quotas_at(&default_cache_dir(), payload)
 }
 
+pub fn save_quota_resets(payload: &ResetPayload) -> Result<()> {
+    save_quota_resets_at(&default_cache_dir(), payload)
+}
+
 // ---------------------------------------------------------------------------
 // Path-parameterized implementations
 // ---------------------------------------------------------------------------
@@ -102,6 +111,7 @@ fn load_at(dir: &Path) -> LoadedCache {
     let empty = LoadedCache {
         dashboard: None,
         quotas: None,
+        quota_resets: None,
     };
     let text = match fs::read_to_string(dir.join("models.json")) {
         Ok(t) => t,
@@ -121,6 +131,10 @@ fn load_at(dir: &Path) -> LoadedCache {
             data: s.data,
         }),
         quotas: file.quotas.map(|s| LoadedSection {
+            expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
+            data: s.data,
+        }),
+        quota_resets: file.quota_resets.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
             data: s.data,
         }),
@@ -151,6 +165,18 @@ fn save_quotas_at(dir: &Path, payload: &QuotaPayload) -> Result<()> {
     })
 }
 
+fn save_quota_resets_at(dir: &Path, payload: &ResetPayload) -> Result<()> {
+    let lock = dir.join("models.json.lock");
+    cache_lock::with_lock(&lock, || {
+        let mut file = load_raw_or_default(dir);
+        file.quota_resets = Some(Section {
+            fetched_at: now_secs(),
+            data: payload.clone(),
+        });
+        atomic_write(dir, &file)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -163,6 +189,7 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
                 version: CACHE_VERSION,
                 dashboard: None,
                 quotas: None,
+                quota_resets: None,
             };
         }
     };
@@ -172,6 +199,7 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
             version: CACHE_VERSION,
             dashboard: None,
             quotas: None,
+            quota_resets: None,
         },
     }
 }
@@ -225,6 +253,21 @@ mod tests {
         payload
     }
 
+    fn sample_resets() -> ResetPayload {
+        let mut inner = BTreeMap::new();
+        inner.insert(
+            "claude-sonnet".to_string(),
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-04-30T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
+        );
+        let mut payload = BTreeMap::new();
+        payload.insert("claude".to_string(), inner);
+        payload
+    }
+
     #[test]
     fn save_and_load_dashboard() {
         let dir = TempDir::new().unwrap();
@@ -248,6 +291,52 @@ mod tests {
             q.data.get("claude").unwrap().get("claude-sonnet").unwrap(),
             &Some(75)
         );
+    }
+
+    #[test]
+    fn save_and_load_quota_resets() {
+        let dir = TempDir::new().unwrap();
+        save_quota_resets_at(dir.path(), &sample_resets()).unwrap();
+        let loaded = load_at(dir.path());
+        let resets = loaded.quota_resets.unwrap();
+        assert!(!resets.expired);
+        assert_eq!(
+            resets
+                .data
+                .get("claude")
+                .unwrap()
+                .get("claude-sonnet")
+                .unwrap(),
+            sample_resets()
+                .get("claude")
+                .unwrap()
+                .get("claude-sonnet")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn old_v3_cache_without_quota_resets_loads() {
+        let dir = TempDir::new().unwrap();
+        let file = serde_json::json!({
+            "version": CACHE_VERSION,
+            "dashboard": null,
+            "quotas": {
+                "fetched_at": now_secs(),
+                "data": sample_quotas()
+            }
+        });
+        fs::create_dir_all(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            serde_json::to_string(&file).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_at(dir.path());
+
+        assert!(loaded.quotas.is_some());
+        assert!(loaded.quota_resets.is_none());
     }
 
     #[test]

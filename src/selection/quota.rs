@@ -3,12 +3,17 @@ use crate::{
     model_names,
     providers::{self, LiveModel},
 };
+use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
 
 type VendorQuotaMap = BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>;
-type QuotaLoadResult = (VendorQuotaMap, Vec<QuotaError>);
+type VendorResetMap = BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>;
+type ModelQuotaMap = BTreeMap<String, Option<u8>>;
+type ModelResetMap = BTreeMap<String, Option<DateTime<Utc>>>;
+type ModelQuotaAndResetMaps = (ModelQuotaMap, ModelResetMap);
+type QuotaLoadResult = (VendorQuotaMap, VendorResetMap, Vec<QuotaError>);
 
 pub fn load_quota_maps() -> QuotaLoadResult {
     let vendors = crate::adapters::all_vendors();
@@ -27,20 +32,22 @@ pub fn load_quota_maps_for(vendors: impl IntoIterator<Item = VendorKind>) -> Quo
         }
         drop(tx);
         let mut maps = BTreeMap::new();
+        let mut reset_maps = BTreeMap::new();
         let mut errors = Vec::new();
         for (vendor, result) in rx {
             match result {
-                Ok(map) => {
+                Ok((map, reset_map)) => {
                     maps.insert(vendor, map);
+                    reset_maps.insert(vendor, reset_map);
                 }
                 Err(e) => errors.push(QuotaError { vendor, message: e }),
             }
         }
-        (maps, errors)
+        (maps, reset_maps, errors)
     })
 }
 
-fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<BTreeMap<String, Option<u8>>, String> {
+fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndResetMaps, String> {
     match vendor {
         VendorKind::Codex => providers::codex::load_live_models()
             .map(live_map_codex)
@@ -107,7 +114,24 @@ pub fn find_quota_by_heuristic(
     }
 }
 
-fn live_map_codex(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
+pub fn find_reset_by_heuristic(
+    model_name: &str,
+    vendor: VendorKind,
+    resets: &BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>,
+) -> Option<DateTime<Utc>> {
+    let vendor_resets = resets.get(&vendor)?;
+
+    match vendor {
+        VendorKind::Claude => vendor_resets
+            .get(model_name)
+            .copied()
+            .flatten()
+            .or_else(|| vendor_resets.values().find_map(|reset| *reset)),
+        _ => vendor_resets.get(model_name).copied().flatten(),
+    }
+}
+
+fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let raw = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
@@ -162,13 +186,19 @@ fn live_map_codex(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
             .or_insert_with(|| if has_spark { spark } else { shared });
     }
 
-    mapped
+    let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
+    (mapped, resets)
 }
 
-fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let raw = models
         .into_iter()
-        .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
+        .map(|model| {
+            (
+                model.name.to_ascii_lowercase(),
+                (model.quota_percent, model.quota_resets_at),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
 
     // Find shared quota from any Claude model or fallback keys
@@ -177,18 +207,21 @@ fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
         .find(|(name, _)| {
             name.contains("sonnet") || name.contains("opus") || name.contains("haiku")
         })
-        .and_then(|(_, quota)| *quota)
-        .or_else(|| raw.get("seven_day").copied().flatten())
-        .or_else(|| raw.get("five_hour").copied().flatten())
-        .or_else(|| raw.values().find_map(|q| *q));
+        .and_then(|(_, (quota, _))| *quota)
+        .or_else(|| raw.get("seven_day").and_then(|(quota, _)| *quota))
+        .or_else(|| raw.get("five_hour").and_then(|(quota, _)| *quota))
+        .or_else(|| raw.values().find_map(|(quota, _)| *quota));
+    let shared_reset = raw.values().filter_map(|(_, reset)| *reset).min();
 
     // Map all known Claude models to shared quota
     let mut mapped = BTreeMap::new();
+    let mut resets = BTreeMap::new();
 
     // Add models we found in live probe
     for name in raw.keys() {
         if name.starts_with("claude-") {
             mapped.insert(name.clone(), shared);
+            resets.insert(name.clone(), shared_reset);
         }
     }
 
@@ -207,12 +240,15 @@ fn live_map_claude(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
     ] {
         let model_name = known_model.to_string();
         mapped.entry(model_name).or_insert(shared);
+        resets
+            .entry(known_model.to_string())
+            .or_insert(shared_reset);
     }
 
-    mapped
+    (mapped, resets)
 }
 
-fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let mut mapped: BTreeMap<String, Option<u8>> = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
@@ -228,14 +264,18 @@ fn live_map_direct(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
         mapped.entry(known.to_string()).or_insert(shared);
     }
 
-    mapped
+    let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
+    (mapped, resets)
 }
 
-fn live_map_kimi(models: Vec<LiveModel>) -> BTreeMap<String, Option<u8>> {
+fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     // Kimi only has one effective model (kimi-latest); expose it under that
     // canonical name regardless of what the API returns.
     let quota = models.into_iter().filter_map(|m| m.quota_percent).min();
-    BTreeMap::from([("kimi-latest".to_string(), quota)])
+    (
+        BTreeMap::from([("kimi-latest".to_string(), quota)]),
+        BTreeMap::from([("kimi-latest".to_string(), None)]),
+    )
 }
 
 #[cfg(test)]
@@ -244,9 +284,10 @@ mod tests {
 
     #[test]
     fn load_quota_maps_for_empty_vendor_set_skips_all_probes() {
-        let (maps, errors) = load_quota_maps_for([]);
+        let (maps, reset_maps, errors) = load_quota_maps_for([]);
 
         assert!(maps.is_empty());
+        assert!(reset_maps.is_empty());
         assert!(errors.is_empty());
     }
 
@@ -256,18 +297,21 @@ mod tests {
             LiveModel {
                 name: "kimi-k1.6".to_string(),
                 quota_percent: Some(80),
+                quota_resets_at: None,
             },
             LiveModel {
                 name: "kimi-k2".to_string(),
                 quota_percent: Some(20),
+                quota_resets_at: None,
             },
         ]);
 
         assert_eq!(
-            mapped.get("kimi-latest"),
+            mapped.0.get("kimi-latest"),
             Some(&Some(20)),
             "should use the minimum quota across all windows"
         );
+        assert_eq!(mapped.1.get("kimi-latest"), Some(&None));
     }
 
     #[test]
@@ -275,10 +319,11 @@ mod tests {
         let mapped = live_map_kimi(vec![LiveModel {
             name: "kimi-k1.6".to_string(),
             quota_percent: None,
+            quota_resets_at: None,
         }]);
 
         assert_eq!(
-            mapped.get("kimi-latest"),
+            mapped.0.get("kimi-latest"),
             Some(&None),
             "should return None when no quotas are available"
         );
@@ -289,6 +334,7 @@ mod tests {
         let mapped = live_map_direct(vec![LiveModel {
             name: "gemini-3-pro-preview".to_string(),
             quota_percent: Some(42),
+            quota_resets_at: None,
         }]);
 
         for name in [
@@ -298,7 +344,8 @@ mod tests {
             "gemini-2.5-pro",
             "gemini-2.5-flash",
         ] {
-            assert_eq!(mapped.get(name), Some(&Some(42)), "{name} missing");
+            assert_eq!(mapped.0.get(name), Some(&Some(42)), "{name} missing");
+            assert_eq!(mapped.1.get(name), Some(&None), "{name} reset missing");
         }
     }
 }

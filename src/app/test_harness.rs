@@ -310,6 +310,7 @@ pub(super) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selecti
         ],
         axis_provenance: std::collections::BTreeMap::new(),
         quota_percent: Some(80),
+        quota_resets_at: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -349,6 +350,7 @@ pub(super) fn ranked_model(
         ],
         axis_provenance: std::collections::BTreeMap::new(),
         quota_percent: Some(80),
+        quota_resets_at: None,
         display_order: 0,
         fallback_from: None,
     }

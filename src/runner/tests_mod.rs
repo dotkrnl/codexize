@@ -277,6 +277,93 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
 }
 
 #[test]
+fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-trim-stream";
+    let mut state = SessionState::new(session_id.to_string());
+    state.agent_runs.push(crate::state::RunRecord {
+        id: 7,
+        stage: "brainstorm".to_string(),
+        task_id: None,
+        round: 1,
+        attempt: 1,
+        model: "model".to_string(),
+        vendor: "vendor".to_string(),
+        window_name: "[Trim]".to_string(),
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        status: RunStatus::Running,
+        error: None,
+        effort: crate::adapters::EffortLevel::Normal,
+        modes: crate::state::LaunchModes::default(),
+        hostname: None,
+        mount_device_id: None,
+    });
+    state.save().unwrap();
+    let launch = ManagedAcpLaunch {
+        resolved: crate::acp::AcpResolvedLaunch {
+            vendor: VendorKind::Codex,
+            interactive: true,
+            spawn: crate::acp::AcpSpawnSpec {
+                program: "true".to_string(),
+                args: Vec::new(),
+                env: std::collections::BTreeMap::new(),
+            },
+            session: crate::acp::AcpSessionSpec {
+                cwd: std::env::current_dir().unwrap(),
+                prompt: PromptPayload::Text("prompt".to_string()),
+                model: "model".to_string(),
+                requested_effort: crate::adapters::EffortLevel::Normal,
+                effective_effort: crate::adapters::EffortLevel::Normal,
+                reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
+                permission_mode: crate::acp::AcpPermissionMode::Ask,
+                interactive: true,
+                modes: crate::state::LaunchModes::default(),
+                required_artifacts: Vec::new(),
+                metadata: std::collections::BTreeMap::new(),
+            },
+        },
+        window_name: "[Trim]".to_string(),
+        session_id: Some(session_id.to_string()),
+        stamp_path: temp.path().join("stamp.toml"),
+        cause_path: temp.path().join("cause.txt"),
+        required_artifact: None,
+    };
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text(
+        &launch,
+        "  \n**thinking**  \n\n   \n\n next  \n",
+        MessageKind::AgentThought,
+    );
+    stream.finish_turn(&launch, MessageKind::AgentThought);
+
+    let messages = SessionState::load_messages(session_id).unwrap();
+    assert_eq!(
+        messages
+            .into_iter()
+            .map(|message| message.text)
+            .collect::<Vec<_>>(),
+        vec!["**thinking**".to_string(), "next".to_string()]
+    );
+
+    unsafe {
+        match prev {
+            Some(value) => std::env::set_var("CODEXIZE_ROOT", value),
+            None => std::env::remove_var("CODEXIZE_ROOT"),
+        }
+    }
+}
+
+#[test]
 fn finish_stamp_parses_old_stamp_without_signal_received() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("stamp.toml");

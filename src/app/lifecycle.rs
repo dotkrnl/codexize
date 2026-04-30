@@ -623,8 +623,10 @@ impl App {
                     .iter()
                     .filter(|m| m.run_id == run_id)
                     .filter(|m| {
-                        m.kind.visible_with_filters(
-                            run.modes.interactive || self.state.show_noninteractive_texts,
+                        crate::app::split::run_split_message_visible(
+                            run,
+                            m.kind,
+                            self.state.show_noninteractive_texts,
                             self.state.show_thinking_texts,
                         )
                     })
@@ -1571,6 +1573,9 @@ impl App {
                 "run finalization failed for {}: {err}",
                 run.window_name
             ));
+        }
+        if run.modes.interactive && self.split_target == Some(SplitTarget::Run(run.id)) {
+            self.close_split();
         }
         self.rebuild_tree_view(None);
     }

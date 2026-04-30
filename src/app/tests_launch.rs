@@ -24,6 +24,38 @@ fn brainstorm_selection_uses_idea_task_kind() {
 }
 
 #[test]
+fn interactive_launch_opens_matching_run_split_immediately() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-launch-split".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut app = idle_app(state);
+        app.split_target = Some(super::split::SplitTarget::Idea);
+
+        app.start_run_tracking(
+            "brainstorm",
+            None,
+            1,
+            "model".to_string(),
+            "vendor".to_string(),
+            "[Brainstorm]".to_string(),
+            EffortLevel::Normal,
+            crate::state::LaunchModes::default(),
+        );
+
+        let run_id = app.current_run_id.expect("run id");
+        assert_eq!(
+            app.split_target,
+            Some(super::split::SplitTarget::Run(run_id)),
+            "interactive launch should replace any open split with the new run split"
+        );
+        assert!(
+            !app.input_mode,
+            "launch auto-open should not focus input until the run is waiting for input"
+        );
+    });
+}
+
+#[test]
 fn coder_retry_loop_uses_distinct_models_until_success() {
     with_temp_root(|| {
         let session_id = "coder-retry-loop";

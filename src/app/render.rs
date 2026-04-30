@@ -81,6 +81,8 @@ impl App {
         let caps = self.focus_caps();
         let split_open = self.is_split_open();
         let split_owns_input = self.split_owns_input();
+        let split_owned_footer_input_active =
+            split_owns_input && self.interactive_run_waiting_for_input();
 
         let input_surface_active = !split_owns_input
             && (if self.interactive_run_active() {
@@ -99,11 +101,12 @@ impl App {
 
         // Sheet content is owned by the input-mode path only. Modal content
         // is computed independently inside the overlay branch below.
-        let sheet_content: Option<Vec<Line<'static>>> = if input_surface_active {
-            Some(self.input_sheet_content(width))
-        } else {
-            None
-        };
+        let sheet_content: Option<Vec<Line<'static>>> =
+            if input_surface_active || split_owned_footer_input_active {
+                Some(self.input_sheet_content(width))
+            } else {
+                None
+            };
 
         // Footer height: only the input-mode sheet (when active) plus the
         // always-present keymap+status lines contribute. Modal state is
@@ -162,11 +165,25 @@ impl App {
                 if self.split_fullscreen {
                     frame.render_widget(SplitWidget { app: self }, body_area);
                 } else {
-                    let tree_h = body_h / 3;
-                    let split_h = body_h.saturating_sub(tree_h);
+                    let separator_h = 1;
+                    let content_h = body_h.saturating_sub(separator_h);
+                    let tree_h = (content_h / 3).max(1).min(content_h);
+                    let split_h = content_h.saturating_sub(tree_h);
                     let tree_area = ratatui::layout::Rect::new(area.x, y, width, tree_h);
-                    let split_area = ratatui::layout::Rect::new(area.x, y + tree_h, width, split_h);
+                    let separator_area =
+                        ratatui::layout::Rect::new(area.x, y + tree_h, width, separator_h);
+                    let split_area = ratatui::layout::Rect::new(
+                        area.x,
+                        y + tree_h + separator_h,
+                        width,
+                        split_h,
+                    );
                     frame.render_widget(PipelineWidget { app: self }, tree_area);
+                    let separator = Line::from(Span::styled(
+                        "─".repeat(width as usize),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                    frame.render_widget(Paragraph::new(vec![separator]), separator_area);
                     frame.render_widget(SplitWidget { app: self }, split_area);
                 }
             } else {

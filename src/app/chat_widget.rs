@@ -583,9 +583,6 @@ fn render_messages(
             let mut first_spans = first_line.spans;
             if renders_markdown && first_spans.len() >= 2 {
                 first_spans.truncate(2);
-                if is_interactive_acp_output {
-                    first_spans.push(Span::raw("  "));
-                }
                 if msg.kind == MessageKind::AgentThought {
                     first_spans.extend(capitalize_first_span(first));
                 } else {
@@ -607,11 +604,7 @@ fn render_messages(
             };
             for chunk in rest {
                 if renders_markdown {
-                    let mut spans = vec![Span::raw(if is_interactive_acp_output {
-                        format!("{indent}  ")
-                    } else {
-                        indent.clone()
-                    })];
+                    let mut spans = vec![Span::raw(indent.clone())];
                     spans.extend(chunk.iter().cloned());
                     lines.push(RenderedLine { spans });
                     continue;
@@ -976,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_acp_agent_outputs_get_padding_and_extra_indent() {
+    fn interactive_acp_agent_outputs_get_padding_without_extra_indent() {
         let msgs = vec![
             make_msg(MessageKind::UserInput, "please continue"),
             make_msg(MessageKind::AgentThought, "thinking"),
@@ -990,9 +983,9 @@ mod tests {
 
         assert!(texts[0].contains("› please continue"));
         assert_eq!(texts[1], "");
-        assert!(texts[2].contains("·   Thinking"), "{texts:?}");
+        assert!(texts[2].contains("· Thinking"), "{texts:?}");
         assert_eq!(texts[3], "");
-        assert!(texts[4].contains("▸   answer"), "{texts:?}");
+        assert!(texts[4].contains("▸ answer"), "{texts:?}");
         assert_eq!(texts[5], "");
         assert!(
             texts

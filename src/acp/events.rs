@@ -72,6 +72,10 @@ impl AcpTextAccumulator {
         self.ready.pop_front()
     }
 
+    pub fn current_text(&self) -> Option<&str> {
+        (!self.buffer.is_empty()).then_some(self.buffer.as_str())
+    }
+
     pub fn next_ready(&mut self) -> Option<String> {
         self.ready.pop_front()
     }
@@ -84,6 +88,13 @@ impl AcpTextAccumulator {
     }
 
     fn flush_ready_blocks(&mut self) {
+        while let Some(split_at) = self.buffer.find("\n\n") {
+            let block = self.buffer[..split_at].to_string();
+            self.buffer = self.buffer[split_at + 2..].to_string();
+            if !block.is_empty() {
+                self.ready.push_back(block);
+            }
+        }
         while self.buffer.chars().count() >= self.max_chars {
             let split_at = self
                 .buffer
@@ -193,5 +204,23 @@ mod tests {
 
         assert!(accumulator.push("").is_none());
         assert!(accumulator.finish_prompt_turn().is_none());
+    }
+
+    #[test]
+    fn text_accumulator_keeps_partial_text_live_and_splits_paragraphs() {
+        let mut accumulator = AcpTextAccumulator::with_max_chars(80);
+
+        assert!(accumulator.push("thinking").is_none());
+        assert_eq!(accumulator.current_text(), Some("thinking"));
+
+        assert_eq!(
+            accumulator.push(" aloud\n\nnext thought"),
+            Some("thinking aloud".to_string())
+        );
+        assert_eq!(accumulator.current_text(), Some("next thought"));
+        assert_eq!(
+            accumulator.finish_prompt_turn(),
+            Some("next thought".to_string())
+        );
     }
 }

@@ -75,9 +75,8 @@ impl App {
             if saw_change {
                 self.read_live_summary_pipeline();
             }
-        } else {
-            self.poll_live_summary_fallback();
         }
+        self.poll_live_summary_fallback();
     }
 
     pub(super) fn poll_live_summary_fallback(&mut self) {

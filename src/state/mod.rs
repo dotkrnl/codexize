@@ -132,7 +132,7 @@ pub enum MessageSender {
     Agent { model: String, vendor: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {
     pub ts: chrono::DateTime<chrono::Utc>,
     pub run_id: u64,
@@ -401,6 +401,31 @@ impl SessionState {
         fs::write(&path, text)
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
+    }
+
+    /// Update the text for an existing message identified by its timestamp.
+    pub fn update_message_text(
+        &self,
+        ts: chrono::DateTime<chrono::Utc>,
+        text: &str,
+    ) -> Result<bool> {
+        let dir = session_dir(&self.session_id);
+        fs::create_dir_all(&dir)?;
+        reject_old_artifact(&dir.join("messages.jsonl"))?;
+        let path = dir.join("messages.toml");
+
+        let mut file = read_messages_file(&path)?;
+        let Some(message) = file.messages.iter_mut().find(|message| message.ts == ts) else {
+            return Ok(false);
+        };
+        if message.text == text {
+            return Ok(true);
+        }
+        message.text = text.to_string();
+        let serialized = toml::to_string_pretty(&file).context("failed to serialize messages")?;
+        fs::write(&path, serialized)
+            .with_context(|| format!("failed to write messages to {}", path.display()))?;
+        Ok(true)
     }
 
     /// Load all messages for a session from messages.toml.

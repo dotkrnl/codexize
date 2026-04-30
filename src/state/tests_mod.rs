@@ -473,6 +473,32 @@ fn test_agent_text_messages_roundtrip_as_distinct_kind() {
 }
 
 #[test]
+fn test_update_message_text_rewrites_existing_timestamped_message() {
+    with_temp_root(|| {
+        let state = SessionState::new("test-update-live-message".to_string());
+        state.save().unwrap();
+        let ts = chrono::Utc::now();
+        let msg = Message {
+            ts,
+            run_id: 7,
+            kind: MessageKind::AgentThought,
+            sender: MessageSender::Agent {
+                model: "model".to_string(),
+                vendor: "vendor".to_string(),
+            },
+            text: "partial".to_string(),
+        };
+        state.append_message(&msg).unwrap();
+
+        assert!(state.update_message_text(ts, "partial plus more").unwrap());
+
+        let loaded = SessionState::load_messages("test-update-live-message").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].text, "partial plus more");
+    });
+}
+
+#[test]
 fn test_show_noninteractive_texts_defaults_and_serializes_false() {
     with_temp_root(|| {
         let state = SessionState::new("test-text-toggle-default".to_string());

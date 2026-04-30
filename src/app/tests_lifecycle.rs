@@ -1559,6 +1559,7 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
 
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
         for c in "/exit".chars() {
             app.handle_key(key(crossterm::event::KeyCode::Char(c)));
         }
@@ -1566,8 +1567,8 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
 
         assert!(!should_quit);
         assert_eq!(app.current_run_id, Some(7));
-        assert!(app.input_mode, "interactive input surface stays focused");
-        assert!(!app.palette.open);
+        assert!(!app.input_mode);
+        assert!(app.palette.open);
         assert!(app.input_buffer.is_empty());
     });
 }
@@ -1584,8 +1585,8 @@ fn interactive_palette_opens_only_after_colon() {
         app.current_run_id = Some(7);
 
         app.handle_key(key(crossterm::event::KeyCode::Char('h')));
-        assert!(app.input_mode);
-        assert_eq!(app.input_buffer, "h");
+        assert!(!app.input_mode);
+        assert!(app.input_buffer.is_empty());
         assert!(!app.palette.open);
 
         app.handle_key(key(crossterm::event::KeyCode::Char(':')));
@@ -1660,20 +1661,17 @@ fn interactive_palette_closes_when_colon_suffix_is_removed() {
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
 
-        for c in "hello".chars() {
-            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
-        }
         app.handle_key(key(crossterm::event::KeyCode::Char(':')));
 
         assert!(app.palette.open);
-        assert_eq!(app.input_buffer, "hello");
+        assert!(app.input_buffer.is_empty());
         assert!(app.palette.buffer.is_empty());
 
         app.handle_key(key(crossterm::event::KeyCode::Backspace));
 
         assert!(!app.palette.open);
-        assert!(app.input_mode);
-        assert_eq!(app.input_buffer, "hello");
+        assert!(!app.input_mode);
+        assert!(app.input_buffer.is_empty());
     });
 }
 

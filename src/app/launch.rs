@@ -185,9 +185,7 @@ impl App {
             self.messages.push(started);
         }
         self.current_run_id = Some(run_id);
-        if run.modes.interactive {
-            self.input_mode = true;
-        }
+        self.input_mode = false;
         self.run_launched = true;
         self.live_summary_path =
             Some(self.live_summary_path_for_run(stage, task_id, round, attempt));

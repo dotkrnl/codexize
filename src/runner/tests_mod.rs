@@ -449,6 +449,16 @@ fn wait_until_run_label_active(window_name: &str) {
     panic!("managed ACP run label did not become active: {window_name}");
 }
 
+fn wait_until_run_label_waiting_for_input(window_name: &str) {
+    for _ in 0..200 {
+        if run_label_is_waiting_for_input(window_name) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("managed ACP run label did not wait for input: {window_name}");
+}
+
 fn wait_for_path(path: &Path) {
     for _ in 0..200 {
         if path.exists() {
@@ -686,12 +696,66 @@ fn interactive_acp_input_is_sent_as_followup_prompt() {
 
             wait_until_run_label_active("[Brainstorm]");
             wait_for_path(&prompt_done_path);
+            wait_until_run_label_waiting_for_input("[Brainstorm]");
 
+            assert!(
+                !send_run_label_input("[Brainstorm]", "   ".to_string()),
+                "blank input must not advance an interactive turn"
+            );
             assert!(send_run_label_input(
                 "[Brainstorm]",
                 "hello from operator".to_string()
             ));
             wait_for_file_to_contain(&prompt_log_path, "hello from operator");
+
+            request_run_label_exit("[Brainstorm]");
+            wait_for_run_label_to_finish("[Brainstorm]");
+        },
+    );
+}
+
+#[test]
+fn interactive_acp_input_is_rejected_until_prompt_turn_finishes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let mut run = launch_test_run(dir.path());
+    run.modes.interactive = true;
+    let artifacts_dir = dir.path().join("artifacts");
+    with_test_env(
+        dir.path(),
+        &[
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("sleep_forever".to_string())),
+            ("CODEXIZE_STAMP_STABILIZE_MS", Some("100".to_string())),
+            (
+                "CODEXIZE_STAMP_STABILIZE_INTERVAL_MS",
+                Some("10".to_string()),
+            ),
+        ],
+        || {
+            launch_interactive(
+                "[Brainstorm]",
+                &run,
+                VendorKind::Codex,
+                "interactive-not-ready-run",
+                &artifacts_dir,
+                None,
+            )
+            .expect("launch interactive ACP run");
+
+            wait_until_run_label_active("[Brainstorm]");
+            assert!(
+                !run_label_is_waiting_for_input("[Brainstorm]"),
+                "run should not be waiting while the initial prompt is still in flight"
+            );
+            assert!(
+                !send_run_label_input("[Brainstorm]", "too early".to_string()),
+                "input must not be queued before the agent asks for it"
+            );
 
             request_run_label_exit("[Brainstorm]");
             wait_for_run_label_to_finish("[Brainstorm]");

@@ -81,7 +81,11 @@ impl App {
         let modal = self.active_modal();
 
         let caps = self.focus_caps();
-        let input_surface_active = self.input_mode || self.interactive_run_active();
+        let input_surface_active = if self.interactive_run_active() {
+            self.interactive_run_waiting_for_input()
+        } else {
+            self.input_mode
+        };
         let keymap_line = keymap(
             self.state.current_phase,
             modal,

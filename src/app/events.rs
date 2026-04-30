@@ -42,8 +42,12 @@ impl App {
                 self.palette.open();
                 return false;
             }
-            self.input_mode = true;
-            return self.handle_input_key(key);
+            if self.interactive_run_waiting_for_input() {
+                self.input_mode = true;
+                return self.handle_input_key(key);
+            }
+            self.input_mode = false;
+            return false;
         }
 
         if self.input_mode {
@@ -286,7 +290,15 @@ impl App {
             palette::MatchResult::Exact { command, args }
             | palette::MatchResult::UniquePrefix { command, args } => {
                 if self.interactive_run_active() && command.name == "quit" {
-                    self.send_interactive_input(input.trim().to_string());
+                    if self.interactive_run_waiting_for_input() {
+                        self.send_interactive_input(input.trim().to_string());
+                    } else {
+                        self.push_status(
+                            "interactive agent is not ready for input".to_string(),
+                            Severity::Warn,
+                            Duration::from_secs(3),
+                        );
+                    }
                     return false;
                 }
                 let _ = self.state.log_event(format!(
@@ -305,7 +317,7 @@ impl App {
                 false
             }
             palette::MatchResult::Unknown { input: cmd } => {
-                if self.interactive_run_active() {
+                if self.interactive_run_waiting_for_input() {
                     self.send_interactive_input(cmd);
                     return false;
                 }
@@ -385,6 +397,18 @@ impl App {
         };
         self.state.agent_runs.iter().any(|run| {
             run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
+        })
+    }
+
+    pub(super) fn interactive_run_waiting_for_input(&self) -> bool {
+        let Some(run_id) = self.current_run_id else {
+            return false;
+        };
+        self.state.agent_runs.iter().any(|run| {
+            run.id == run_id
+                && run.status == RunStatus::Running
+                && run.modes.interactive
+                && crate::runner::run_label_is_waiting_for_input(&run.window_name)
         })
     }
 
@@ -537,15 +561,20 @@ impl App {
     }
 
     fn handle_input_key(&mut self, key: KeyEvent) -> bool {
+        if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
+            self.input_mode = false;
+            return false;
+        }
+
         match key.code {
             KeyCode::Esc => {
-                if !self.interactive_run_active() {
+                if !self.interactive_run_waiting_for_input() {
                     self.input_mode = false;
                 }
                 return false;
             }
             KeyCode::Enter => {
-                let keep_input_open = self.interactive_run_active();
+                let keep_input_open = self.interactive_run_waiting_for_input();
                 let trimmed = self.input_buffer.trim().to_string();
                 if !trimmed.is_empty() {
                     if trimmed == "/exit" && keep_input_open {

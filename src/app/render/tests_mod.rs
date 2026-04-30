@@ -1056,7 +1056,7 @@ fn palette_overlay_grows_beyond_two_rows_when_room() {
 }
 
 #[test]
-fn interactive_run_shows_input_sheet_without_palette_overlay() {
+fn interactive_run_does_not_show_input_sheet_until_waiting() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -1071,8 +1071,8 @@ fn interactive_run_shows_input_sheet_without_palette_overlay() {
     let text = lines.join("\n");
 
     assert!(
-        text.contains("type to agents..."),
-        "interactive run should keep the input sheet visible: {text}"
+        !text.contains("type to agents..."),
+        "interactive run should not show the input sheet before waiting for input: {text}"
     );
     assert!(
         !text.contains("Esc close  Tab complete  Enter run"),
@@ -1081,7 +1081,7 @@ fn interactive_run_shows_input_sheet_without_palette_overlay() {
 }
 
 #[test]
-fn interactive_run_input_sheet_uses_agent_placeholder() {
+fn interactive_run_input_sheet_content_uses_agent_placeholder() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -1092,7 +1092,11 @@ fn interactive_run_input_sheet_uses_agent_placeholder() {
     app.current_run_id = Some(1);
     app.state.current_phase = Phase::BrainstormRunning;
 
-    let lines = render_full_frame(&mut app, 80, 24);
+    let lines = app
+        .input_sheet_content(80)
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
     let text = lines.join("\n");
 
     assert!(
@@ -1122,6 +1126,7 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
     );
     app.current_run_id = Some(7);
     app.state.current_phase = Phase::BrainstormRunning;
+    app.input_mode = true;
 
     let lines = render_full_frame(&mut app, 80, 24);
     let full_rule = "─".repeat(80);
@@ -1134,7 +1139,7 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
 }
 
 #[test]
-fn interactive_waiting_for_input_hides_running_spinner_tail() {
+fn interactive_run_keeps_spinner_tail_until_waiting_for_input() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -1143,7 +1148,6 @@ fn interactive_waiting_for_input_hides_running_spinner_tail() {
         vec![agent_text(1, "Do you approve?")],
     );
     app.current_run_id = Some(1);
-    app.input_mode = true;
     app.run_launched = true;
     app.state.current_phase = Phase::BrainstormRunning;
 
@@ -1155,8 +1159,8 @@ fn interactive_waiting_for_input_hides_running_spinner_tail() {
         "interactive response should render: {lines:#?}"
     );
     assert!(
-        !text.contains("⠋") && !text.contains("⠙"),
-        "interactive waiting state should not show spinner tail: {lines:#?}"
+        text.contains("⠋") || text.contains("⠙"),
+        "interactive run should keep spinner tail until the runner reports waiting: {lines:#?}"
     );
 }
 

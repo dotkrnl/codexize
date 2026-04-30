@@ -340,6 +340,7 @@ extract_id() {
 mode="${ACP_TEST_MODE:-success}"
 artifact="${ACP_TEST_ARTIFACT:-}"
 log_path="${ACP_TEST_LOG:-}"
+prompt_done_path="${ACP_TEST_PROMPT_DONE:-}"
 
 while IFS= read -r line; do
     id="$(extract_id "$line")"
@@ -374,6 +375,9 @@ while IFS= read -r line; do
             fi
             printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":"done"}}}}\n'
             printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+            if [ -n "$prompt_done_path" ]; then
+                printf 'done\n' > "$prompt_done_path"
+            fi
             ;;
         *'"method":"session/close"'*)
             printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
@@ -416,6 +420,26 @@ fn wait_for_run_label_to_finish(window_name: &str) {
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("managed ACP run label did not finish: {window_name}");
+}
+
+fn wait_until_run_label_active(window_name: &str) {
+    for _ in 0..200 {
+        if run_label_is_active(window_name) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("managed ACP run label did not become active: {window_name}");
+}
+
+fn wait_for_path(path: &Path) {
+    for _ in 0..200 {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("path did not appear: {}", path.display());
 }
 
 #[test]
@@ -521,6 +545,68 @@ fn acp_launch_writes_finish_stamp_on_success() {
             assert_eq!(stamp.head_state, "stable");
             assert!(stamp.working_tree_clean);
             assert!(artifact_path.exists(), "expected validated artifact");
+        },
+    );
+}
+
+#[test]
+fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let mut run = launch_test_run(dir.path());
+    run.modes.interactive = true;
+    let artifacts_dir = dir.path().join("artifacts");
+    let stamp_path = artifacts_dir
+        .join("run-finish")
+        .join("interactive-run.toml");
+    let prompt_done_path = artifacts_dir.join("prompt-done.txt");
+    with_test_env(
+        dir.path(),
+        &[
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("success".to_string())),
+            (
+                "ACP_TEST_PROMPT_DONE",
+                Some(prompt_done_path.display().to_string()),
+            ),
+            ("CODEXIZE_STAMP_STABILIZE_MS", Some("100".to_string())),
+            (
+                "CODEXIZE_STAMP_STABILIZE_INTERVAL_MS",
+                Some("10".to_string()),
+            ),
+        ],
+        || {
+            launch_interactive(
+                "[Brainstorm]",
+                &run,
+                VendorKind::Codex,
+                "interactive-run",
+                &artifacts_dir,
+                None,
+            )
+            .expect("launch interactive ACP run");
+
+            wait_until_run_label_active("[Brainstorm]");
+            wait_for_path(&prompt_done_path);
+            std::thread::sleep(Duration::from_millis(300));
+
+            assert!(
+                run_label_is_active("[Brainstorm]"),
+                "interactive run must stay active after ACP end_turn"
+            );
+            assert!(
+                !stamp_path.exists(),
+                "interactive run must not write a finish stamp before local /exit"
+            );
+
+            request_run_label_exit("[Brainstorm]");
+            wait_for_run_label_to_finish("[Brainstorm]");
+            let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp after exit");
+            assert_eq!(stamp.exit_code, 143);
         },
     );
 }

@@ -103,6 +103,7 @@ pub enum MessageKind {
     Started,
     Brief,
     AgentText,
+    AgentThought,
     Summary,
     /// A summary that flags non-success verdicts (e.g., reviewer asked
     /// for revisions). Rendered as a warning rather than green success.
@@ -111,8 +112,16 @@ pub enum MessageKind {
 }
 
 impl MessageKind {
+    pub fn visible_with_filters(self, show_agent_text: bool, show_thinking_text: bool) -> bool {
+        match self {
+            Self::AgentText => show_agent_text,
+            Self::AgentThought => show_thinking_text,
+            _ => true,
+        }
+    }
+
     pub fn visible_with_agent_text_filter(self, show_agent_text: bool) -> bool {
-        !matches!(self, Self::AgentText) || show_agent_text
+        self.visible_with_filters(show_agent_text, false)
     }
 }
 
@@ -272,6 +281,8 @@ pub struct SessionState {
     #[serde(default)]
     pub show_noninteractive_texts: bool,
     #[serde(default)]
+    pub show_thinking_texts: bool,
+    #[serde(default)]
     pub agent_error: Option<String>,
     /// Builder loop state (empty until sharding completes)
     #[serde(default)]
@@ -298,6 +309,7 @@ impl SessionState {
             title: None,
             selected_model: None,
             show_noninteractive_texts: false,
+            show_thinking_texts: false,
             agent_error: None,
             builder: BuilderState::default(),
             archived: false,

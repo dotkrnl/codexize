@@ -33,6 +33,7 @@ pub enum AcpLifecycleEvent {
 pub struct AcpTextEvent {
     pub text: String,
     pub interactive: bool,
+    pub thought: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,10 +106,16 @@ impl Default for AcpTextAccumulator {
 
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
     match update {
-        ClientUpdate::AgentMessageText(text) => {
-            Some(AcpRuntimeEvent::Text(AcpTextEvent { text, interactive }))
-        }
-        ClientUpdate::AgentThoughtText(_) => None,
+        ClientUpdate::AgentMessageText(text) => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text,
+            interactive,
+            thought: false,
+        })),
+        ClientUpdate::AgentThoughtText(text) => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text,
+            interactive,
+            thought: true,
+        })),
         ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
             AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
         }),
@@ -136,6 +143,7 @@ mod tests {
             AcpRuntimeEvent::Text(AcpTextEvent {
                 text: "hello".to_string(),
                 interactive: true,
+                thought: false,
             })
         );
     }
@@ -144,7 +152,14 @@ mod tests {
     fn thought_chunks_are_ignored() {
         let event = translate_update(ClientUpdate::AgentThoughtText("internal".to_string()), true);
 
-        assert!(event.is_none());
+        assert_eq!(
+            event,
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text: "internal".to_string(),
+                interactive: true,
+                thought: true,
+            }))
+        );
     }
 
     #[test]

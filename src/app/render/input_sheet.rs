@@ -39,11 +39,8 @@ impl App {
             found
         };
 
+        let prompt_span = Span::styled("> ", Style::default().fg(Color::DarkGray));
         let mut lines = Vec::new();
-        lines.push(Line::from(Span::styled(
-            "> ",
-            Style::default().fg(Color::DarkGray),
-        )));
 
         for (idx, chunk) in wrapped.iter().enumerate() {
             let show_cursor_here = idx == cursor_pos.0;
@@ -56,7 +53,11 @@ impl App {
                     .map(|(i, _)| i)
                     .unwrap_or(chunk.len());
                 let (left, right) = (&chunk[..byte], &chunk[byte..]);
-                lines.push(Line::from(vec![
+                let mut spans = Vec::new();
+                if idx == 0 {
+                    spans.push(prompt_span.clone());
+                }
+                spans.extend([
                     Span::styled(left.to_string(), text_style),
                     Span::styled(
                         "▌".to_string(),
@@ -65,9 +66,17 @@ impl App {
                             .add_modifier(Modifier::SLOW_BLINK),
                     ),
                     Span::styled(right.to_string(), text_style),
-                ]));
+                ]);
+                lines.push(Line::from(spans));
             } else {
-                lines.push(Line::from(Span::styled(chunk.clone(), text_style)));
+                if idx == 0 {
+                    lines.push(Line::from(vec![
+                        prompt_span.clone(),
+                        Span::styled(chunk.clone(), text_style),
+                    ]));
+                } else {
+                    lines.push(Line::from(Span::styled(chunk.clone(), text_style)));
+                }
             }
         }
 

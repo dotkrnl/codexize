@@ -486,8 +486,13 @@ fn test_show_noninteractive_texts_defaults_and_serializes_false() {
             session_toml.contains("show_noninteractive_texts = false"),
             "session.toml must persist the default toggle value: {session_toml}"
         );
+        assert!(
+            session_toml.contains("show_thinking_texts = false"),
+            "session.toml must persist the default verbose toggle value: {session_toml}"
+        );
         let loaded = SessionState::load("test-text-toggle-default").unwrap();
         assert!(!loaded.show_noninteractive_texts);
+        assert!(!loaded.show_thinking_texts);
     });
 }
 
@@ -495,6 +500,8 @@ fn test_show_noninteractive_texts_defaults_and_serializes_false() {
 fn test_noninteractive_text_filter_only_hides_agent_text() {
     assert!(!MessageKind::AgentText.visible_with_agent_text_filter(false));
     assert!(MessageKind::AgentText.visible_with_agent_text_filter(true));
+    assert!(!MessageKind::AgentThought.visible_with_filters(true, false));
+    assert!(MessageKind::AgentThought.visible_with_filters(false, true));
     assert!(MessageKind::Started.visible_with_agent_text_filter(false));
     assert!(MessageKind::Summary.visible_with_agent_text_filter(false));
     assert!(MessageKind::SummaryWarn.visible_with_agent_text_filter(false));

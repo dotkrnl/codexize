@@ -216,8 +216,9 @@ impl App {
                 .iter()
                 .filter(|m| m.run_id == id)
                 .filter(|m| {
-                    m.kind.visible_with_agent_text_filter(
+                    m.kind.visible_with_filters(
                         run.modes.interactive || self.state.show_noninteractive_texts,
+                        self.state.show_thinking_texts,
                     )
                 })
                 .cloned()
@@ -273,6 +274,14 @@ impl App {
         suppressed_container_runs: &BTreeSet<u64>,
     ) -> Option<RunningTailLine> {
         if run.status != RunStatus::Running {
+            return None;
+        }
+        if run.modes.interactive
+            && self.input_mode
+            && self.messages.iter().any(|message| {
+                message.run_id == run.id && message.kind == crate::state::MessageKind::AgentText
+            })
+        {
             return None;
         }
         let row = self.visible_rows.get(index)?;

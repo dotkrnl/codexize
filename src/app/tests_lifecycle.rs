@@ -925,6 +925,44 @@ fn event_poll_duration_uses_fast_cadence_only_for_visible_live_summary_spinner()
 }
 
 #[test]
+fn update_agent_progress_reloads_persisted_interactive_agent_text() {
+    with_temp_root(|| {
+        let session_id = "interactive-output-reload";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run.clone());
+        state.save().expect("save state");
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        let msg = Message {
+            ts: chrono::Utc::now(),
+            run_id: 7,
+            kind: MessageKind::AgentText,
+            sender: crate::state::MessageSender::Agent {
+                model: run.model,
+                vendor: run.vendor,
+            },
+            text: "question for operator".to_string(),
+        };
+        SessionState::load(session_id)
+            .expect("load state")
+            .append_message(&msg)
+            .expect("append message");
+
+        app.update_agent_progress();
+
+        assert!(app.messages.iter().any(|message| {
+            message.run_id == 7
+                && message.kind == MessageKind::AgentText
+                && message.text == "question for operator"
+        }));
+    });
+}
+
+#[test]
 fn app_new_rebuilds_failed_models_without_force_retry_runs() {
     with_temp_root(|| {
         let session_id = "rebuild-failed-models";
@@ -1491,6 +1529,26 @@ fn palette_texts_command_toggles_persisted_noninteractive_text_visibility() {
 }
 
 #[test]
+fn palette_verbose_command_toggles_persisted_thinking_visibility() {
+    with_temp_root(|| {
+        let session_id = "palette-verbose-toggle";
+        let state = SessionState::new(session_id.to_string());
+        state.save().expect("save initial state");
+        let mut app = idle_app(state);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "verbose".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert!(app.state.show_thinking_texts);
+        let saved = SessionState::load(session_id).expect("load saved state");
+        assert!(saved.show_thinking_texts);
+    });
+}
+
+#[test]
 fn interactive_exit_is_handled_locally_without_quitting_tui() {
     with_temp_root(|| {
         let mut state = SessionState::new("interactive-exit-local".to_string());
@@ -1531,6 +1589,46 @@ fn interactive_palette_opens_only_after_colon() {
         assert!(!app.palette.open);
 
         app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        assert!(app.palette.open);
+        assert!(app.palette.buffer.is_empty());
+    });
+}
+
+#[test]
+fn interactive_palette_treats_q_as_input_text() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-palette-q-text".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('q')));
+
+        assert!(app.palette.open);
+        assert_eq!(app.palette.buffer, "q");
+    });
+}
+
+#[test]
+fn interactive_palette_enter_sends_plain_text_to_agent() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-palette-send-text".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('q')));
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
         assert!(app.palette.open);
         assert!(app.palette.buffer.is_empty());
     });

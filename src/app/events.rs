@@ -161,6 +161,12 @@ impl App {
                 help: "Toggle non-interactive agent text",
                 key_hint: None,
             },
+            PaletteCommand {
+                name: "verbose",
+                aliases: &["thinking", "thoughts"],
+                help: "Toggle thinking text",
+                key_hint: None,
+            },
         ];
         if self.can_go_back() || self.confirm_back {
             commands.push(PaletteCommand {
@@ -192,13 +198,19 @@ impl App {
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                if self.interactive_run_active() {
+                if self.interactive_run_active() && key.code == KeyCode::Esc {
                     self.palette.buffer.clear();
                     self.palette.cursor = 0;
-                } else {
+                    false
+                } else if !self.interactive_run_active() {
                     self.palette.close();
+                    false
+                } else {
+                    self.insert_palette_char(match key.code {
+                        KeyCode::Char(c) => c,
+                        _ => return false,
+                    })
                 }
-                false
             }
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
@@ -273,6 +285,10 @@ impl App {
         match palette::resolve(input, &commands) {
             palette::MatchResult::Exact { command, args }
             | palette::MatchResult::UniquePrefix { command, args } => {
+                if self.interactive_run_active() && command.name == "quit" {
+                    self.send_interactive_input(input.trim().to_string());
+                    return false;
+                }
                 let _ = self.state.log_event(format!(
                     "palette_invoked: command={} args={args}",
                     command.name
@@ -289,6 +305,10 @@ impl App {
                 false
             }
             palette::MatchResult::Unknown { input: cmd } => {
+                if self.interactive_run_active() {
+                    self.send_interactive_input(cmd);
+                    return false;
+                }
                 self.push_status(
                     format!("palette: unknown command \"{cmd}\""),
                     Severity::Warn,
@@ -338,8 +358,25 @@ impl App {
                 self.toggle_noninteractive_texts();
                 false
             }
+            "verbose" => {
+                self.toggle_thinking_texts();
+                false
+            }
             _ => false,
         }
+    }
+
+    fn insert_palette_char(&mut self, c: char) -> bool {
+        let byte = self
+            .palette
+            .buffer
+            .char_indices()
+            .nth(self.palette.cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.palette.buffer.len());
+        self.palette.buffer.insert(byte, c);
+        self.palette.cursor += 1;
+        false
     }
 
     pub(super) fn interactive_run_active(&self) -> bool {
@@ -398,6 +435,28 @@ impl App {
         } else {
             self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
         }
+    }
+
+    fn toggle_thinking_texts(&mut self) {
+        self.state.show_thinking_texts = !self.state.show_thinking_texts;
+        let label = if self.state.show_thinking_texts {
+            "showing thinking text"
+        } else {
+            "hiding thinking text"
+        };
+        let _ = self.state.log_event(format!(
+            "show_thinking_texts={}",
+            self.state.show_thinking_texts
+        ));
+        if let Err(err) = self.state.save() {
+            self.push_status(
+                format!("verbose: failed to save setting: {err}"),
+                Severity::Error,
+                Duration::from_secs(5),
+            );
+            return;
+        }
+        self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
     }
 
     fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {

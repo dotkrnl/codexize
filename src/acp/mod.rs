@@ -362,6 +362,7 @@ mod tests {
             Some(AcpRuntimeEvent::Text(AcpTextEvent {
                 text,
                 interactive: false,
+                thought: false,
             })) if text == "hello"
         ));
 

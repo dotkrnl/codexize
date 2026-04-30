@@ -65,14 +65,14 @@ impl App {
             return false;
         }
 
-        // Global intercept for Ctrl+C to kill a running agent before any
-        // mode-specific key handling gets a chance to treat it as quit.
-        if key.code == KeyCode::Char('c')
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.has_running_agent()
-        {
-            self.stop_running_agent();
-            return false;
+        // Keep Ctrl+C global so palette/input/modal states cannot swallow an
+        // operator stop, but preserve the historical quit path when idle.
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if self.has_running_agent() {
+                self.stop_running_agent();
+                return false;
+            }
+            return true;
         }
 
         if self.palette.open {

@@ -23,8 +23,16 @@ pub(super) enum ProbColumn {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResetColumn {
+    Shown,
+    Hidden,
+}
+
 const NAME_WIDTH_MIN: usize = 8;
 const ELLIPSIS: &str = "...";
+pub(super) const VERY_WIDE_THRESHOLD: u16 = 140;
+pub(super) const RESET_TIME_MAX_WIDTH: usize = 12;
 
 pub(super) fn choose_mode(
     visible_count: u16,
@@ -54,8 +62,9 @@ pub(super) fn name_budget_for(
     vendor_width: usize,
     quota: QuotaColumn,
     prob_col: ProbColumn,
+    reset_col: ResetColumn,
 ) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
+    let fixed = full_row_fixed_width(vendor_width, quota, prob_col, reset_col);
     (width as usize).saturating_sub(fixed)
 }
 
@@ -161,7 +170,12 @@ pub(super) fn name_width_min() -> usize {
     NAME_WIDTH_MIN
 }
 
-fn full_row_fixed_width(vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
+pub(super) fn full_row_fixed_width(
+    vendor_width: usize,
+    quota: QuotaColumn,
+    prob_col: ProbColumn,
+    reset_col: ResetColumn,
+) -> usize {
     let probs = match prob_col {
         ProbColumn::IpbrVerbose => 40,
         ProbColumn::Ipbr => 15,
@@ -173,7 +187,11 @@ fn full_row_fixed_width(vendor_width: usize, quota: QuotaColumn, prob_col: ProbC
         QuotaColumn::Expanded => 10,
         QuotaColumn::Narrow => 4,
     };
-    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs
+    let reset_width = match reset_col {
+        ResetColumn::Shown => 1 + RESET_TIME_MAX_WIDTH,
+        ResetColumn::Hidden => 0,
+    };
+    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs + reset_width
 }
 
 fn name_style() -> Style {
@@ -207,8 +225,28 @@ mod tests {
     #[test]
     fn name_budget_for_subtracts_fixed_columns() {
         assert_eq!(
-            name_budget_for(45, 6, QuotaColumn::Narrow, ProbColumn::TopRank),
+            name_budget_for(
+                45,
+                6,
+                QuotaColumn::Narrow,
+                ProbColumn::TopRank,
+                ResetColumn::Hidden
+            ),
             27
+        );
+    }
+
+    #[test]
+    fn very_wide_reset_column_consumes_reserved_width() {
+        assert_eq!(
+            name_budget_for(
+                140,
+                6,
+                QuotaColumn::Expanded,
+                ProbColumn::IpbrVerbose,
+                ResetColumn::Shown
+            ),
+            66
         );
     }
 

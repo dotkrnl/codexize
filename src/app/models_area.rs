@@ -8,8 +8,10 @@
 //! `- 11` here means a single change site if the chrome reservation ever
 //! shifts.
 
+use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
 use crate::model_names;
@@ -22,8 +24,9 @@ use crate::selection::{
 
 use super::models::{vendor_color, vendor_prefix};
 use super::models_area_view_model::{
-    ProbColumn, QuotaColumn, choose_mode, format_name_with_freshness, name_budget_for,
-    name_width_min, probability_color, probability_percent,
+    ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, ResetColumn, VERY_WIDE_THRESHOLD, choose_mode,
+    format_name_with_freshness, name_budget_for, name_width_min, probability_color,
+    probability_percent,
 };
 
 pub use super::models_area_view_model::ModelsAreaMode;
@@ -92,7 +95,7 @@ fn choose_layout(
     width: u16,
     vendor_width: usize,
     max_req_name_width: usize,
-) -> (QuotaColumn, ProbColumn) {
+) -> (QuotaColumn, ProbColumn, ResetColumn) {
     let layouts = [
         (QuotaColumn::Expanded, ProbColumn::IpbrVerbose),
         (QuotaColumn::Narrow, ProbColumn::IpbrVerbose),
@@ -104,83 +107,43 @@ fn choose_layout(
         (QuotaColumn::Narrow, ProbColumn::None),
     ];
 
-    for &(quota, prob) in &layouts {
-        if name_budget_for(width, vendor_width, quota, prob) >= max_req_name_width {
-            return (quota, prob);
+    if width >= VERY_WIDE_THRESHOLD {
+        for &(quota, prob) in &layouts {
+            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
+                >= max_req_name_width
+            {
+                return (quota, prob, ResetColumn::Shown);
+            }
         }
     }
 
     for &(quota, prob) in &layouts {
-        if name_budget_for(width, vendor_width, quota, prob) >= name_width_min() {
-            return (quota, prob);
+        if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden)
+            >= max_req_name_width
+        {
+            return (quota, prob, ResetColumn::Hidden);
         }
     }
 
-    (QuotaColumn::Narrow, ProbColumn::None)
-}
-
-// ---------------------------------------------------------------------------
-// Probability column helpers
-// ---------------------------------------------------------------------------
-
-fn probability_span(label: &str, pct: u8, max_pct: u8, is_top_rank: bool) -> Span<'static> {
-    let mut style = Style::default().fg(probability_color(pct, max_pct));
-    if is_top_rank {
-        style = style.add_modifier(Modifier::BOLD);
+    if width >= VERY_WIDE_THRESHOLD {
+        for &(quota, prob) in &layouts {
+            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
+                >= name_width_min()
+            {
+                return (quota, prob, ResetColumn::Shown);
+            }
+        }
     }
-    Span::styled(format!("{label}{pct:>2}"), style)
-}
 
-fn probability_unavailable_span(label: &str) -> Span<'static> {
-    Span::styled(format!("{label}--"), Style::default().fg(Color::Red))
-}
-
-// ---------------------------------------------------------------------------
-// Full table mode
-// ---------------------------------------------------------------------------
-
-const STATUS_DOT: &str = "●";
-
-fn vendor_label(vendor: VendorKind) -> &'static str {
-    match vendor {
-        VendorKind::Claude => "claude",
-        VendorKind::Codex => "codex",
-        VendorKind::Gemini => "gemini",
-        VendorKind::Kimi => "kimi",
+    for &(quota, prob) in &layouts {
+        if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden)
+            >= name_width_min()
+        {
+            return (quota, prob, ResetColumn::Hidden);
+        }
     }
-}
 
-/// Width of the vendor-tag column (padded).
-fn vendor_column_width() -> usize {
-    6
-}
-
-/// Width consumed by everything except the model-name column.
-///
-/// Layout: `{vendor:vw} {dot} {quota:>4} {name + freshness} {probs}`
-///
-/// Counting separators (one space between each visible column):
-///   vw + 1 + 1 + 1 + 4 + 1 + probs_width + (1 if probs)
-fn full_row_fixed_width(vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
-    let probs = match prob_col {
-        ProbColumn::IpbrVerbose => 40,
-        ProbColumn::Ipbr => 15,
-        ProbColumn::TopRank => 3,
-        ProbColumn::None => 0,
-    };
-    let prob_separator = if probs == 0 { 0 } else { 1 };
-    let quota_width = match quota {
-        QuotaColumn::Expanded => 10,
-        QuotaColumn::Narrow => 4,
-    };
-    // vendor + sp + dot + sp + quota + sp + name (variable) + prob_sep + probs
-    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs
-}
-
-fn name_budget(width: u16, vendor_width: usize, quota: QuotaColumn, prob_col: ProbColumn) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
-    let raw = (width as usize).saturating_sub(fixed);
-    raw.max(name_width_min()) // no upper clamp; fills remaining space
+    (QuotaColumn::Narrow, ProbColumn::None, ResetColumn::Hidden)
 }
 
 fn render_full_table(
@@ -207,8 +170,9 @@ fn render_full_table(
         .unwrap_or(0);
 
     let vendor_width = vendor_column_width();
-    let (quota_col, prob_col) = choose_layout(width, vendor_width, max_req_name_width);
-    let name_width = name_budget(width, vendor_width, quota_col, prob_col);
+    let (quota_col, prob_col, reset_col) = choose_layout(width, vendor_width, max_req_name_width);
+    let name_width =
+        name_budget_for(width, vendor_width, quota_col, prob_col, reset_col).max(name_width_min());
 
     // Probabilities are normalised against the global total over every
     // assembled model (not just the visible subset) so that filtering does
@@ -457,10 +421,96 @@ fn render_full_table(
             ProbColumn::None => {}
         }
 
+        if let ResetColumn::Shown = reset_col {
+            spans.push(Span::raw(" "));
+            if let Some(quota_resets_at) = model.quota_resets_at {
+                let text = format_reset_time(quota_resets_at);
+                let pad = RESET_TIME_MAX_WIDTH.saturating_sub(text.width());
+                if pad > 0 {
+                    spans.push(Span::raw(" ".repeat(pad)));
+                }
+                spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
+            } else {
+                // Keep the column reserved so rows stay aligned even when only
+                // some providers currently expose reset timestamps.
+                spans.push(Span::raw(" ".repeat(RESET_TIME_MAX_WIDTH)));
+            }
+        }
+
         lines.push(Line::from(spans));
     }
 
     lines
+}
+
+fn format_reset_time(dt: DateTime<Utc>) -> String {
+    let dur = dt.signed_duration_since(Utc::now());
+    if dur.num_seconds() <= 0 {
+        return "expired".to_string();
+    }
+
+    let days = dur.num_days();
+    let hours = dur.num_hours() % 24;
+    let mins = dur.num_minutes() % 60;
+    let text = if days > 0 {
+        format!("in {days}d {hours}h")
+    } else if hours > 0 {
+        format!("in {hours}h {mins}m")
+    } else {
+        format!("in {mins}m")
+    };
+
+    if text.width() <= RESET_TIME_MAX_WIDTH {
+        return text;
+    }
+
+    let mut truncated = String::new();
+    let mut width = 0;
+    for ch in text.chars() {
+        let ch_width = ch.width().unwrap_or(0);
+        if width + ch_width > RESET_TIME_MAX_WIDTH {
+            break;
+        }
+        truncated.push(ch);
+        width += ch_width;
+    }
+    truncated
+}
+
+// ---------------------------------------------------------------------------
+// Probability column helpers
+// ---------------------------------------------------------------------------
+
+fn probability_span(label: &str, pct: u8, max_pct: u8, is_top_rank: bool) -> Span<'static> {
+    let mut style = Style::default().fg(probability_color(pct, max_pct));
+    if is_top_rank {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    Span::styled(format!("{label}{pct:>2}"), style)
+}
+
+fn probability_unavailable_span(label: &str) -> Span<'static> {
+    Span::styled(format!("{label}--"), Style::default().fg(Color::Red))
+}
+
+// ---------------------------------------------------------------------------
+// Full table mode
+// ---------------------------------------------------------------------------
+
+const STATUS_DOT: &str = "●";
+
+fn vendor_label(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Claude => "claude",
+        VendorKind::Codex => "codex",
+        VendorKind::Gemini => "gemini",
+        VendorKind::Kimi => "kimi",
+    }
+}
+
+/// Width of the vendor-tag column (padded).
+fn vendor_column_width() -> usize {
+    6
 }
 
 #[allow(clippy::too_many_arguments)]

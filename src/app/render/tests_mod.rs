@@ -1040,12 +1040,59 @@ fn interactive_run_shows_input_sheet_without_palette_overlay() {
     let text = lines.join("\n");
 
     assert!(
-        text.contains("describe what you want to build"),
+        text.contains("type to agents..."),
         "interactive run should keep the input sheet visible: {text}"
     );
     assert!(
         !text.contains("Esc close  Tab complete  Enter run"),
         "palette instructions should stay hidden until ':' opens the palette: {text}"
+    );
+}
+
+#[test]
+fn interactive_run_input_sheet_uses_agent_placeholder() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![message(7, "waiting")],
+    );
+    app.current_run_id = Some(7);
+    app.state.current_phase = Phase::BrainstormRunning;
+
+    let lines = render_full_frame(&mut app, 80, 24);
+    let text = lines.join("\n");
+
+    assert!(
+        text.contains("type to agents..."),
+        "input sheet should use the agent-directed placeholder: {text}"
+    );
+    assert!(
+        !text.contains("describe what you want to build"),
+        "old placeholder should not render: {text}"
+    );
+}
+
+#[test]
+fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![message(7, "waiting")],
+    );
+    app.current_run_id = Some(7);
+    app.state.current_phase = Phase::BrainstormRunning;
+
+    let lines = render_full_frame(&mut app, 80, 24);
+    let full_rule = "─".repeat(80);
+    let rule_rows = lines.iter().filter(|line| **line == full_rule).count();
+
+    assert_eq!(
+        rule_rows, 1,
+        "only the app chrome bottom rule should separate body from input sheet: {lines:#?}"
     );
 }
 

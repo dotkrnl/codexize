@@ -67,6 +67,43 @@ pub fn bottom_sheet(
     result
 }
 
+/// Renders bottom-sheet content when the surrounding chrome already provides
+/// the divider rule.
+pub fn bottom_sheet_without_rule(
+    content_lines: Vec<Line<'static>>,
+    controls_line: Line<'static>,
+    available_height: u16,
+) -> Vec<Line<'static>> {
+    let available = available_height as usize;
+
+    if available == 0 {
+        return vec![];
+    }
+
+    if available == 1 {
+        return vec![controls_line];
+    }
+
+    let available_for_content = available - 1;
+
+    if content_lines.len() <= available_for_content {
+        let mut result = content_lines;
+        result.push(controls_line);
+        return result;
+    }
+
+    let mut truncated_content: Vec<Line<'static>> = content_lines
+        .into_iter()
+        .take(available_for_content.saturating_sub(1))
+        .collect();
+    truncated_content.push(Line::from(Span::styled(
+        "…",
+        Style::default().fg(Color::DarkGray),
+    )));
+    truncated_content.push(controls_line);
+    truncated_content
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

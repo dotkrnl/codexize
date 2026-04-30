@@ -390,7 +390,7 @@ impl App {
                 top,
                 Style::default().fg(frame_color),
             )));
-            let placeholder = "describe what you want to build";
+            let placeholder = "type to agents...";
             let (text, text_style) = if self.input_buffer.is_empty() {
                 (
                     placeholder.to_string(),

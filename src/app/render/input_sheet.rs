@@ -3,7 +3,7 @@ use super::*;
 impl App {
     pub(super) fn input_sheet_content(&self, width: u16) -> Vec<Line<'static>> {
         let inner_width = (width as usize).saturating_sub(4).max(1);
-        let placeholder = "describe what you want to build";
+        let placeholder = "type to agents...";
         let (text, text_style) = if self.input_buffer.is_empty() {
             (
                 placeholder.to_string(),

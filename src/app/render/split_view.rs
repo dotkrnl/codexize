@@ -1,6 +1,5 @@
 use super::*;
 use crate::app::chat_widget::ChatWidget;
-use crate::app::clock::WallClock;
 use crate::app::split::SplitTarget;
 use crate::state::Phase;
 use ratatui::buffer::Buffer;
@@ -47,19 +46,6 @@ impl SplitWidget<'_> {
             .cloned()
             .collect();
 
-        // Resolve the selected row to check if we should suppress container
-        // placeholders or show the leaf tail.
-        let suppressed_container_runs = self
-            .app
-            .visible_live_summary_tail_runs(area.height as usize, self.app.viewport_top);
-
-        let running_tail = self.app.running_tail_for_row(
-            self.app.selected,
-            run,
-            &WallClock::new(),
-            &suppressed_container_runs,
-        );
-
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
 
         ChatWidget::new(
@@ -67,7 +53,7 @@ impl SplitWidget<'_> {
             run,
             self.app.split_scroll_offset,
             local_offset,
-            running_tail.map(|t| t.line),
+            self.app.split_running_tail_line(run),
         )
         .render(area, buf);
     }

@@ -2643,6 +2643,7 @@ fn split_scroll_detach_preserves_offset_across_new_content() {
             expected_tail.saturating_sub(1),
             "Up should detach from the tail"
         );
+        let detached_offset = app.split_scroll_offset;
 
         app.messages.push(Message {
             ts: chrono::Utc::now(),
@@ -2654,7 +2655,7 @@ fn split_scroll_detach_preserves_offset_across_new_content() {
         app.clamp_split_scroll(app.current_split_content_height());
 
         assert_eq!(
-            app.split_scroll_offset, 4,
+            app.split_scroll_offset, detached_offset,
             "new transcript content must not yank a detached split viewport back toward the tail"
         );
     });
@@ -2834,6 +2835,63 @@ fn split_follow_tail_reaches_latest_message_lines() {
         assert!(
             window.offset > 0,
             "tail-follow should not reset new targets to the transcript top when content overflows"
+        );
+    });
+}
+
+#[test]
+fn split_follow_tail_keeps_live_running_tail_visible() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-tail-visible-running".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.body_inner_height = 9;
+        app.body_inner_width = 80;
+        app.selected = row_index(&app, "Brainstorm");
+        app.open_split_target(super::split::SplitTarget::Run(7));
+
+        for idx in 0..10 {
+            app.messages.push(Message {
+                ts: chrono::Utc::now(),
+                run_id: 7,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: format!("line {idx}"),
+            });
+        }
+
+        let run = app
+            .state
+            .agent_runs
+            .iter()
+            .find(|run| run.id == 7)
+            .expect("run");
+        let local_offset = chrono::Local::now().fixed_offset().offset().to_owned();
+        let rendered_total = crate::app::chat_widget::message_lines(
+            &app.messages,
+            run,
+            &local_offset,
+            Some(ratatui::text::Line::from("LIVE-TAIL")),
+            app.body_inner_width.max(1),
+        )
+        .len();
+
+        app.clamp_split_scroll(app.current_split_content_height());
+        let window = crate::app::chat_widget_view_model::chat_scroll_window(
+            rendered_total,
+            app.split_viewport_height(),
+            app.split_scroll_offset,
+        )
+        .expect("scroll window");
+
+        assert_eq!(
+            window.visible_end, rendered_total,
+            "tail-follow should keep the rendered live tail visible for running transcripts"
+        );
+        assert!(
+            !window.show_below_indicator,
+            "follow-tail should not leave newer rendered transcript lines below the split viewport"
         );
     });
 }

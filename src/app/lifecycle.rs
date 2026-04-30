@@ -636,7 +636,7 @@ impl App {
                     &msgs,
                     run,
                     &local_offset,
-                    None,
+                    self.split_running_tail_line(run),
                     self.body_inner_width.max(1),
                 )
                 .len()

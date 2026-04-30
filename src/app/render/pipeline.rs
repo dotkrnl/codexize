@@ -165,6 +165,22 @@ impl App {
             .visible_live_summary_tail_runs(area_h, viewport_top)
             .is_empty()
     }
+
+    pub(crate) fn split_running_tail_line(&self, run: &RunRecord) -> Option<Line<'static>> {
+        // The split still derives the tail shape from the selected pipeline row.
+        // Keep lifecycle line counts on the same path until split targets carry
+        // their own row identity.
+        let suppressed_container_runs =
+            self.visible_live_summary_tail_runs(self.split_viewport_height(), self.viewport_top);
+        self.running_tail_for_row(
+            self.selected,
+            run,
+            &crate::app::clock::WallClock::new(),
+            &suppressed_container_runs,
+        )
+        .map(|tail| tail.line)
+    }
+
     pub(super) fn node_header(
         &self,
         index: usize,

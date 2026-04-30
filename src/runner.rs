@@ -134,6 +134,7 @@ struct ManagedAcpRun {
     cancel_tx: mpsc::Sender<AcpCancelReason>,
     input_tx: mpsc::Sender<AcpInput>,
     finished: std::sync::Arc<AtomicBool>,
+    waiting_for_input: std::sync::Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
 
@@ -405,6 +406,7 @@ fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
     input_rx: mpsc::Receiver<AcpInput>,
+    waiting_for_input: std::sync::Arc<AtomicBool>,
 ) -> Result<ManagedAcpOutcome> {
     let head_before = git_rev_parse_head().unwrap_or_default();
     let connector = SubprocessConnector;
@@ -418,6 +420,7 @@ fn run_managed_acp_launch(
 
     let outcome = loop {
         if cancel_rx.try_recv().is_ok() {
+            waiting_for_input.store(false, Ordering::SeqCst);
             flush_text_turn(&launch, &mut thought_text, MessageKind::AgentThought);
             flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
             session.close().map_err(|err| anyhow!("{err}"))?;
@@ -434,6 +437,7 @@ fn run_managed_acp_launch(
         }
 
         if waiting_for_interactive_prompt && let Some(text) = pending_input.pop_front() {
+            waiting_for_input.store(false, Ordering::SeqCst);
             session
                 .submit_prompt(&text)
                 .map_err(|err| anyhow!("{err}"))?;
@@ -451,7 +455,9 @@ fn run_managed_acp_launch(
                 flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
                 if launch.resolved.interactive {
                     waiting_for_interactive_prompt = true;
+                    waiting_for_input.store(true, Ordering::SeqCst);
                     if let Some(text) = pending_input.pop_front() {
+                        waiting_for_input.store(false, Ordering::SeqCst);
                         session
                             .submit_prompt(&text)
                             .map_err(|err| anyhow!("{err}"))?;
@@ -460,6 +466,7 @@ fn run_managed_acp_launch(
                     thread::sleep(ACP_POLL_INTERVAL);
                     continue;
                 }
+                waiting_for_input.store(false, Ordering::SeqCst);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 if let Some(path) = launch.required_artifact.as_deref() {
                     validate_toml_artifacts(&[path])?;
@@ -472,6 +479,7 @@ fn run_managed_acp_launch(
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
                 flush_text_turn(&launch, &mut thought_text, MessageKind::AgentThought);
                 flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
+                waiting_for_input.store(false, Ordering::SeqCst);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 break ManagedAcpOutcome {
                     exit_code: 1,
@@ -505,13 +513,21 @@ fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
     input_rx: mpsc::Receiver<AcpInput>,
+    waiting_for_input: std::sync::Arc<AtomicBool>,
 ) {
-    match run_managed_acp_launch(launch.clone(), cancel_rx, input_rx) {
+    match run_managed_acp_launch(
+        launch.clone(),
+        cancel_rx,
+        input_rx,
+        std::sync::Arc::clone(&waiting_for_input),
+    ) {
         Ok(_) => {
+            waiting_for_input.store(false, Ordering::SeqCst);
             let _ = fs::remove_file(&launch.cause_path);
             return;
         }
         Err(err) => {
+            waiting_for_input.store(false, Ordering::SeqCst);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
         }
     }
@@ -568,10 +584,12 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
     let (cancel_tx, cancel_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
+    let waiting_for_input = std::sync::Arc::new(AtomicBool::new(false));
     let finished_flag = std::sync::Arc::clone(&finished);
+    let waiting_for_input_flag = std::sync::Arc::clone(&waiting_for_input);
     let launch_window = window_name.to_string();
     let handle = thread::spawn(move || {
-        finalize_managed_acp_launch(launch, cancel_rx, input_rx);
+        finalize_managed_acp_launch(launch, cancel_rx, input_rx, waiting_for_input_flag);
         finished_flag.store(true, Ordering::SeqCst);
     });
     guard.insert(
@@ -580,6 +598,7 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
             cancel_tx,
             input_tx,
             finished,
+            waiting_for_input,
             join: Some(handle),
         },
     );
@@ -593,6 +612,18 @@ pub fn run_label_is_active(window_name: &str) -> bool {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(window_name)
         .is_some_and(|run| !run.finished.load(Ordering::SeqCst))
+}
+
+pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
+    cleanup_finished_acp_runs();
+    active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(window_name)
+        .is_some_and(|run| {
+            !run.finished.load(Ordering::SeqCst)
+                && run.waiting_for_input.load(Ordering::SeqCst)
+        })
 }
 
 pub fn cancel_run_labels_matching(base: &str) {
@@ -626,13 +657,19 @@ pub fn request_run_label_exit(window_name: &str) {
 }
 
 pub fn send_run_label_input(window_name: &str, text: String) -> bool {
+    if text.trim().is_empty() {
+        return false;
+    }
     cleanup_finished_acp_runs();
     let guard = active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard
         .get(window_name)
-        .filter(|run| !run.finished.load(Ordering::SeqCst))
+        .filter(|run| {
+            !run.finished.load(Ordering::SeqCst)
+                && run.waiting_for_input.load(Ordering::SeqCst)
+        })
         .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
 }
 

@@ -277,7 +277,7 @@ impl App {
             return None;
         }
         if run.modes.interactive
-            && self.input_mode
+            && self.interactive_run_waiting_for_input()
             && self.messages.iter().any(|message| {
                 message.run_id == run.id && message.kind == crate::state::MessageKind::AgentText
             })

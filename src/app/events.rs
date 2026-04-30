@@ -65,6 +65,23 @@ impl App {
             return false;
         }
 
+        // Global intercept for Ctrl+C to kill running agent
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            let run_to_stop = self.running_run().or_else(|| {
+                self.state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.status == RunStatus::Running)
+            });
+            if let Some(run) = run_to_stop {
+                if self.active_run_exists(&run.window_name) {
+                    self.stop_running_agent();
+                    return false;
+                }
+            }
+            return true;
+        }
+
         if self.palette.open {
             return self.handle_palette_key(key);
         }
@@ -137,7 +154,6 @@ impl App {
                     true
                 }
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char(':') => {
                 self.palette.open();
                 false
@@ -549,7 +565,6 @@ impl App {
     fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
@@ -568,7 +583,6 @@ impl App {
     fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
@@ -588,7 +602,6 @@ impl App {
     fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Enter => {
                 match stage_id {
                     StageId::Brainstorm => {
@@ -755,7 +768,6 @@ impl App {
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Err(err) = self.accept_skip_to_implementation() {
                     self.record_agent_error(format!(
@@ -779,7 +791,6 @@ impl App {
     fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {
                     self.record_agent_error(format!("guard reset failed: {err:#}"));

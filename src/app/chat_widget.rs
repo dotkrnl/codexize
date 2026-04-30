@@ -558,6 +558,8 @@ fn render_messages(
                 Style::default().fg(Color::Yellow)
             } else if hints.is_summary {
                 Style::default().fg(Color::Green)
+            } else if hints.is_dim {
+                Style::default().fg(Color::DarkGray)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -868,6 +870,28 @@ mod tests {
                     && span.style.fg == Some(Color::Magenta)),
             "user input body should use a distinct color: {:?}",
             lines[0].spans
+        );
+    }
+
+    #[test]
+    fn thinking_continuation_lines_stay_dim() {
+        let msgs = vec![make_msg(
+            MessageKind::AgentThought,
+            "first thinking line\nsecond thinking line",
+        )];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+
+        assert_eq!(line_text(&lines[1]).trim(), "second thinking line");
+        assert!(
+            lines[1]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("second thinking line")
+                    && span.style.fg == Some(Color::DarkGray)),
+            "thinking continuation should keep thinking color: {:?}",
+            lines[1].spans
         );
     }
 

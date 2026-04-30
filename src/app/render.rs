@@ -32,7 +32,7 @@ use super::{
         guard_content, is_last_sibling, modal_border_style, modal_title, skip_to_impl_content,
         spinner_frame, stage_error_content, status_highlight_bg,
     },
-    sheet::bottom_sheet,
+    sheet::bottom_sheet_without_rule,
 };
 
 pub use super::render_view_model::sanitize_live_summary;
@@ -102,8 +102,9 @@ impl App {
         // always-present keymap+status lines contribute. Modal state is
         // overlaid and does not change body height.
         let footer_h = if let Some(ref content) = sheet_content {
-            // Sheet = rule + content + controls. Min: rule + controls = 2.
-            let desired = (content.len() as u16).saturating_add(2);
+            // The app chrome already draws the divider rule above the sheet,
+            // so footer rows are just content + controls.
+            let desired = (content.len() as u16).saturating_add(1);
             let max_for_sheet = if degenerate {
                 // Degenerate: sheet wins over body entirely.
                 term_h.saturating_sub(models_h).saturating_sub(2) // top + bottom rule
@@ -176,7 +177,7 @@ impl App {
                 modal_keymap,
             );
         } else if let Some(content) = sheet_content {
-            let sheet_lines = bottom_sheet(content, keymap_line, footer_h, width);
+            let sheet_lines = bottom_sheet_without_rule(content, keymap_line, footer_h);
             for line in sheet_lines {
                 if y >= area.y + area.height {
                     break;

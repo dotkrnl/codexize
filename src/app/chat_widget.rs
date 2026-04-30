@@ -53,6 +53,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
             symbol: "◐",
             color: Color::Cyan,
         },
+        MessageKind::UserInput => SymbolStyle {
+            symbol: "›",
+            color: Color::Magenta,
+        },
         MessageKind::AgentText => SymbolStyle {
             symbol: "▸",
             color: Color::White,
@@ -497,6 +501,36 @@ fn render_messages(
             continue;
         }
 
+        if msg.kind == MessageKind::UserInput {
+            let wrapped = wrap_text(&msg.text, content_width);
+            let body_style = Style::default().fg(Color::Magenta);
+            if let Some((first, rest)) = wrapped.split_first() {
+                lines.push(RenderedLine {
+                    spans: vec![
+                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
+                        Span::styled(first.clone(), body_style),
+                    ],
+                });
+                for chunk in rest {
+                    lines.push(RenderedLine {
+                        spans: vec![
+                            Span::raw(indent.clone()),
+                            Span::styled(chunk.clone(), body_style),
+                        ],
+                    });
+                }
+            } else {
+                lines.push(RenderedLine {
+                    spans: vec![
+                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
+                    ],
+                });
+            }
+            continue;
+        }
+
         let hints = kind_to_hints(msg.kind, run.status);
         let markdown_lines = if msg.kind == MessageKind::AgentText {
             render_agent_markdown(&msg.text, content_width)
@@ -724,6 +758,13 @@ mod tests {
     }
 
     #[test]
+    fn symbol_user_input() {
+        let s = message_symbol(MessageKind::UserInput, RunStatus::Running);
+        assert_eq!(s.symbol, "›");
+        assert_eq!(s.color, Color::Magenta);
+    }
+
+    #[test]
     fn symbol_end_done() {
         let s = message_symbol(MessageKind::End, RunStatus::Done);
         assert_eq!(s.symbol, "●");
@@ -800,6 +841,34 @@ mod tests {
             .map(|s| s.content.to_string())
             .collect();
         assert_eq!(last_text, "LIVE-TAIL");
+    }
+
+    #[test]
+    fn message_lines_renders_user_input_with_distinct_style() {
+        let msgs = vec![make_msg(MessageKind::UserInput, "please continue")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let text = line_text(&lines[0]);
+
+        assert!(text.contains("› please continue"));
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content == "› " && span.style.fg == Some(Color::Magenta)),
+            "user input should use a distinct prompt icon: {:?}",
+            lines[0].spans
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content == "please continue"
+                    && span.style.fg == Some(Color::Magenta)),
+            "user input body should use a distinct color: {:?}",
+            lines[0].spans
+        );
     }
 
     #[test]

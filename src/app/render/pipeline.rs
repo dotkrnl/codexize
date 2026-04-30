@@ -64,6 +64,12 @@ impl Widget for PipelineWidget<'_> {
 }
 
 impl App {
+    pub(super) fn live_agent_spinner_active(&self) -> bool {
+        self.agent_last_change
+            .map(|last| last.elapsed() <= std::time::Duration::from_secs(10))
+            .unwrap_or(true)
+    }
+
     fn pipeline_render_lines(
         &self,
         suppressed_container_runs: &BTreeSet<u64>,
@@ -106,6 +112,9 @@ impl App {
     }
 
     pub(super) fn live_summary_spinner_visible_for_height(&self, area_h: usize) -> bool {
+        if !self.live_agent_spinner_active() {
+            return false;
+        }
         let viewport_top = self
             .viewport_top
             .min(self.max_viewport_top_for_height(area_h));
@@ -276,11 +285,25 @@ impl App {
         if run.status != RunStatus::Running {
             return None;
         }
+        if !self.live_agent_spinner_active() {
+            return None;
+        }
         if run.modes.interactive
             && self.interactive_run_waiting_for_input()
-            && self.messages.iter().any(|message| {
-                message.run_id == run.id && message.kind == crate::state::MessageKind::AgentText
-            })
+            && self
+                .messages
+                .iter()
+                .rev()
+                .find(|message| {
+                    message.run_id == run.id
+                        && matches!(
+                            message.kind,
+                            crate::state::MessageKind::AgentText
+                                | crate::state::MessageKind::AgentThought
+                                | crate::state::MessageKind::UserInput
+                        )
+                })
+                .is_some_and(|message| message.kind == crate::state::MessageKind::AgentText)
         {
             return None;
         }
@@ -325,7 +348,10 @@ impl App {
         let gutter = "│ ".repeat(depth);
         let dim = Style::default().fg(Color::DarkGray);
 
-        if node.status == NodeStatus::Running && self.run_launched {
+        if node.status == NodeStatus::Running
+            && self.run_launched
+            && self.live_agent_spinner_active()
+        {
             let spin = spinner_frame(self.spinner_tick);
             lines.push(Line::from(vec![
                 Span::styled(format!(" {gutter}  "), dim),

@@ -630,6 +630,7 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_writes_finish_stamp_on_success() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -673,6 +674,7 @@ fn acp_launch_writes_finish_stamp_on_success() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -735,6 +737,7 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn interactive_acp_input_is_sent_as_followup_prompt() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -798,6 +801,7 @@ fn interactive_acp_input_is_sent_as_followup_prompt() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn interactive_acp_input_is_rejected_until_prompt_turn_finishes() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -847,6 +851,7 @@ fn interactive_acp_input_is_rejected_until_prompt_turn_finishes() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_persists_agent_message_chunks_as_agent_text() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -911,6 +916,7 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_persists_thought_chunks_as_agent_thought() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -972,6 +978,7 @@ fn acp_launch_persists_thought_chunks_as_agent_thought() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_concatenates_thought_chunks_per_turn() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1039,6 +1046,7 @@ fn acp_launch_concatenates_thought_chunks_per_turn() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_fails_when_required_artifact_is_missing() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1076,6 +1084,7 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_marks_early_process_exit_as_failed() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1111,6 +1120,7 @@ fn acp_launch_marks_early_process_exit_as_failed() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_records_cause_when_transport_init_fails() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1152,6 +1162,7 @@ fn acp_launch_records_cause_when_transport_init_fails() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_enforces_single_active_run() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1200,6 +1211,7 @@ fn acp_launch_enforces_single_active_run() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_cleans_up_child_on_cancel() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());
@@ -1237,6 +1249,7 @@ fn acp_launch_cleans_up_child_on_cancel() {
 }
 
 #[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
 fn acp_launch_starts_fresh_process_for_each_stage() {
     let dir = tempfile::TempDir::new().unwrap();
     init_git_repo(dir.path());

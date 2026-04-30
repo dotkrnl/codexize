@@ -470,6 +470,7 @@ impl App {
 
     /// Clamp the split scroll offset to a maximum value. Called after
     /// terminal resize and after content changes.
+    #[allow(dead_code)]
     pub(super) fn clamp_split_scroll(&mut self, _content_height: usize) {
         // REVIEWER: clamping against actual split content height will be
         // wired once split rendering is implemented in a later task.

@@ -223,7 +223,7 @@ fn render_lines(app: &App, height: u16) -> Vec<String> {
 }
 
 #[test]
-fn renders_depth_indented_visible_rows_and_inline_transcript() {
+fn renders_depth_indented_visible_rows_without_inline_transcript() {
     let app = test_app(
         nested_transcript_tree(),
         vec![run_record(1, RunStatus::Running)],
@@ -248,9 +248,10 @@ fn renders_depth_indented_visible_rows_and_inline_transcript() {
             .any(|line| line.contains("└─ ▾ Builder") && line.contains("running"))
     );
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|line| line.contains("Coder transcript body"))
+            .any(|line| line.contains("Coder transcript body")),
+        "transcript messages must not render inside the tree body"
     );
 }
 
@@ -269,7 +270,7 @@ fn expanded_structural_parents_do_not_render_duplicate_child_list_body() {
 }
 
 #[test]
-fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
+fn noninteractive_agent_text_is_never_visible_in_tree_body() {
     let app = test_app(
         nested_transcript_tree(),
         vec![run_record(1, RunStatus::Running)],
@@ -282,14 +283,16 @@ fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
     let lines = render_lines(&app, 20);
 
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|line| line.contains("Summary stays visible"))
+            .any(|line| line.contains("Summary stays visible")),
+        "agent transcript must not render inside the tree body"
     );
     assert!(
         !lines
             .iter()
-            .any(|line| line.contains("raw noninteractive text"))
+            .any(|line| line.contains("raw noninteractive text")),
+        "agent transcript must not render inside the tree body"
     );
 
     let mut app = app;
@@ -297,14 +300,15 @@ fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
     let lines = render_lines(&app, 12);
 
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|line| line.contains("raw noninteractive text"))
+            .any(|line| line.contains("raw noninteractive text")),
+        "agent transcript must not render inside the tree body even when toggled on"
     );
 }
 
 #[test]
-fn interactive_agent_text_is_always_visible() {
+fn interactive_agent_text_is_never_visible_in_tree_body() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let app = test_app(
@@ -316,14 +320,15 @@ fn interactive_agent_text_is_always_visible() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|line| line.contains("live interactive text"))
+            .any(|line| line.contains("live interactive text")),
+        "interactive agent text must not render inside the tree body"
     );
 }
 
 #[test]
-fn user_input_messages_are_visible_with_distinct_icon() {
+fn user_input_messages_are_not_visible_in_tree_body() {
     let app = test_app(
         nested_transcript_tree(),
         vec![run_record(1, RunStatus::Running)],
@@ -333,13 +338,13 @@ fn user_input_messages_are_visible_with_distinct_icon() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines.iter().any(|line| line.contains("› please continue")),
-        "user input should render in the transcript: {lines:#?}"
+        !lines.iter().any(|line| line.contains("› please continue")),
+        "user input must not render inside the tree body: {lines:#?}"
     );
 }
 
 #[test]
-fn thinking_text_is_visible_only_in_verbose_mode() {
+fn thinking_text_is_never_visible_in_tree_body() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -349,15 +354,21 @@ fn thinking_text_is_visible_only_in_verbose_mode() {
     );
 
     let lines = render_lines(&app, 8);
-    assert!(!lines.iter().any(|line| line.contains("Internal chain")));
+    assert!(
+        !lines.iter().any(|line| line.contains("Internal chain")),
+        "thinking text must not render inside the tree body"
+    );
 
     app.state.show_thinking_texts = true;
     let lines = render_lines(&app, 8);
-    assert!(lines.iter().any(|line| line.contains("Internal chain")));
+    assert!(
+        !lines.iter().any(|line| line.contains("Internal chain")),
+        "thinking text must not render inside the tree body even in verbose mode"
+    );
 }
 
 #[test]
-fn collapsed_absorbed_simple_stage_renders_direct_transcript() {
+fn collapsed_absorbed_simple_stage_does_not_render_transcript_in_tree() {
     let app = test_app(
         vec![node(
             "Brainstorm",
@@ -379,14 +390,15 @@ fn collapsed_absorbed_simple_stage_renders_direct_transcript() {
             .any(|line| line.contains("Brainstorm") && line.contains("done"))
     );
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|line| line.contains("Absorbed transcript body"))
+            .any(|line| line.contains("Absorbed transcript body")),
+        "absorbed transcript must not render inside the tree body"
     );
 }
 
 #[test]
-fn multiple_open_transcripts_share_body_height_in_visible_order() {
+fn multiple_open_agent_rows_have_empty_bodies_in_tree() {
     let nodes = vec![node(
         "Root",
         NodeKind::Stage,
@@ -425,25 +437,28 @@ fn multiple_open_transcripts_share_body_height_in_visible_order() {
     );
 
     let lines = render_lines(&app, 9);
-    let first_body = lines
+    let first_header = lines
         .iter()
-        .position(|line| line.contains("First transcript"))
-        .expect("first body rendered");
+        .position(|line| line.contains("First") && line.contains("running"))
+        .expect("first header rendered");
     let second_header = lines
         .iter()
         .position(|line| line.contains("Second") && line.contains("running"))
         .expect("second header rendered");
-    let second_body = lines
-        .iter()
-        .position(|line| line.contains("Second transcript"))
-        .expect("second body rendered");
 
-    assert!(first_body < second_header);
-    assert!(second_header < second_body);
+    assert!(first_header < second_header);
+    assert!(
+        !lines.iter().any(|line| line.contains("First transcript")),
+        "first transcript must not render inside the tree body"
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("Second transcript")),
+        "second transcript must not render inside the tree body"
+    );
 }
 
 #[test]
-fn failed_unverified_render_shows_distinct_status_and_stamp_hint() {
+fn failed_unverified_render_shows_distinct_status_without_transcript_in_tree() {
     let app = test_app(
             vec![node(
                 "Builder",
@@ -470,7 +485,10 @@ fn failed_unverified_render_shows_distinct_status_and_stamp_hint() {
             .iter()
             .any(|line| line.contains("Builder") && line.contains("failed-unverified"))
     );
-    assert!(lines.iter().any(|line| line.contains("run-finish")));
+    assert!(
+        !lines.iter().any(|line| line.contains("run-finish")),
+        "transcript detail must not render inside the tree body"
+    );
 }
 
 #[test]
@@ -506,7 +524,47 @@ fn header_only_viewports_render_headers_without_body() {
 }
 
 fn tall_app() -> App {
-    let nodes = nested_transcript_tree();
+    // Use a large structural tree (many children under one root) so the body
+    // is tall even though transcript messages no longer render in the tree.
+    let mut children = Vec::new();
+    for i in 0..25 {
+        children.push(node(
+            &format!("Filler {i}"),
+            NodeKind::Task,
+            NodeStatus::Done,
+            Vec::new(),
+            None,
+            None,
+        ));
+    }
+    // One expandable child with a run so unread-tracking tests still have a
+    // rendered-line anchor in `first_unread_rendered_line`.
+    children.push(node(
+        "Builder",
+        NodeKind::Mode,
+        NodeStatus::Running,
+        Vec::new(),
+        Some(1),
+        None,
+    ));
+    for i in 25..50 {
+        children.push(node(
+            &format!("Filler {i}"),
+            NodeKind::Task,
+            NodeStatus::Done,
+            Vec::new(),
+            None,
+            None,
+        ));
+    }
+    let nodes = vec![node(
+        "Root",
+        NodeKind::Stage,
+        NodeStatus::Running,
+        children,
+        None,
+        None,
+    )];
     let mut messages = Vec::new();
     for i in 0..50 {
         messages.push(message(1, &format!("message {i}")));
@@ -606,7 +664,13 @@ fn unread_badge_hides_once_first_unread_line_is_visible() {
     app.scroll_viewport(2, true);
 
     let lines = render_lines(&app, app.body_inner_height as u16 + 2);
-    assert!(lines.iter().any(|line| line.contains("New unread")));
+    // Messages no longer render in the tree body, so the unread text is not
+    // visible in the pipeline widget. The badge still hides because the
+    // computed line for the unread message falls inside the viewport.
+    assert!(
+        !lines.iter().any(|line| line.contains("New unread")),
+        "message text must not render inside the tree body"
+    );
     assert!(
         app.unread_badge().is_none(),
         "badge should be hidden when unread is visible"
@@ -747,7 +811,7 @@ fn leaf_only_tree() -> Vec<Node> {
 }
 
 #[test]
-fn running_leaf_row_renders_live_agent_message_not_legacy_working() {
+fn running_leaf_row_does_not_render_live_agent_message_in_tree_body() {
     let mut app = test_app(
         leaf_only_tree(),
         vec![run_record(7, RunStatus::Running)],
@@ -763,17 +827,17 @@ fn running_leaf_row_renders_live_agent_message_not_legacy_working() {
         "running leaf must not emit the legacy 'working...' line"
     );
     assert!(
-        lines.iter().any(|l| l.contains("Drafting plan")),
-        "running leaf tail should surface the live-summary short title"
+        !lines.iter().any(|l| l.contains("Drafting plan")),
+        "live-summary tail must not render inside the tree body"
     );
     assert!(
-        lines.iter().any(|l| l.contains("Earlier transcript line")),
-        "historical messages must still render"
+        !lines.iter().any(|l| l.contains("Earlier transcript line")),
+        "historical messages must not render inside the tree body"
     );
 }
 
 #[test]
-fn expanded_child_transcript_suppresses_matching_container_placeholder() {
+fn expanded_child_transcript_does_not_render_tail_or_placeholder_in_tree() {
     let mut app = test_app(
         vec![node(
             "Root",
@@ -800,17 +864,17 @@ fn expanded_child_transcript_suppresses_matching_container_placeholder() {
     let spinner_rows = lines.iter().filter(|line| line.contains("⠋")).count();
 
     assert_eq!(
-        spinner_rows, 1,
-        "visible child transcript tail should be the only spinner row: {lines:#?}"
+        spinner_rows, 0,
+        "no spinner rows should appear in the tree body: {lines:#?}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("Drafting patch")),
-        "child transcript tail should remain visible"
+        !lines.iter().any(|line| line.contains("Drafting patch")),
+        "live-summary tail must not render inside the tree body"
     );
 }
 
 #[test]
-fn container_placeholder_remains_when_child_transcript_is_not_visible() {
+fn container_placeholder_is_not_visible_in_tree_body() {
     let mut app = test_app(
         vec![node(
             "Root",
@@ -835,15 +899,15 @@ fn container_placeholder_remains_when_child_transcript_is_not_visible() {
     let lines = render_lines(&app, 2);
 
     assert!(
-        lines
+        !lines
             .iter()
             .any(|line| line.contains("⠋") && line.contains("running")),
-        "container placeholder should remain when no child tail is visible: {lines:#?}"
+        "container placeholder must not render inside the tree body: {lines:#?}"
     );
 }
 
 #[test]
-fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
+fn running_leaf_does_not_render_tail_in_tree_body() {
     let mut app = test_app(
         leaf_only_tree(),
         vec![run_record(7, RunStatus::Running)],
@@ -854,14 +918,14 @@ fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines.iter().any(|l| l.contains("Brainstorming")),
-        "leaf tail should fall back to phase label when live-summary is empty"
+        !lines.iter().any(|l| l.contains("Brainstorming")),
+        "leaf tail must not render inside the tree body"
     );
     assert!(!lines.iter().any(|l| l.contains("working...")));
 }
 
 #[test]
-fn running_tail_keeps_spinning_during_long_tool_calls() {
+fn running_tail_is_not_visible_in_tree_body_during_tool_calls() {
     let mut run = run_record(7, RunStatus::Running);
     run.started_at = chrono::Utc::now() - chrono::Duration::seconds(11);
     let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
@@ -871,15 +935,13 @@ fn running_tail_keeps_spinning_during_long_tool_calls() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("⠙") && !line.contains("stalled")),
-        "active tool-call gaps should still render as running: {lines:#?}"
+        !lines.iter().any(|line| line.contains("⠙")),
+        "running tail must not render inside the tree body: {lines:#?}"
     );
 }
 
 #[test]
-fn running_tail_shows_stalled_after_ten_minutes_without_transcript_activity() {
+fn running_tail_is_not_visible_in_tree_body_when_stalled() {
     let mut run = run_record(7, RunStatus::Running);
     run.started_at = chrono::Utc::now() - chrono::Duration::seconds(601);
     let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
@@ -889,20 +951,23 @@ fn running_tail_shows_stalled_after_ten_minutes_without_transcript_activity() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines
+        !lines
             .iter()
             .any(|line| line.contains("⠋") && line.contains("stalled")),
-        "stalled runs should keep a visible stalled spinner row: {lines:#?}"
+        "stalled tail must not render inside the tree body: {lines:#?}"
     );
     assert!(
         !lines.iter().any(|line| line.contains("⠙")),
-        "stalled spinner should be frozen rather than animated: {lines:#?}"
+        "stalled spinner must not render inside the tree body: {lines:#?}"
     );
-    assert!(app.live_summary_spinner_visible_for_height(8));
+    // live_summary_spinner_visible_for_height depends on tails being present
+    // in the tree body, so it returns false now. This is expected intermediate
+    // behaviour until the split renderer is fully wired.
+    assert!(!app.live_summary_spinner_visible_for_height(8));
 }
 
 #[test]
-fn running_tail_spins_when_transcript_activity_is_recent() {
+fn running_tail_is_not_visible_in_tree_body_when_active() {
     let mut app = test_app(
         leaf_only_tree(),
         vec![run_record(7, RunStatus::Running)],
@@ -913,15 +978,15 @@ fn running_tail_spins_when_transcript_activity_is_recent() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines
+        !lines
             .iter()
             .any(|line| line.contains("⠋") || line.contains("⠙")),
-        "recent transcript activity should keep the spinner visible: {lines:#?}"
+        "running tail must not render inside the tree body: {lines:#?}"
     );
 }
 
 #[test]
-fn running_tail_spins_for_recently_started_run_even_after_stale_activity() {
+fn running_tail_is_not_visible_in_tree_body_for_recent_run() {
     let mut run = run_record(7, RunStatus::Running);
     run.started_at = chrono::Utc::now();
     let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
@@ -931,15 +996,15 @@ fn running_tail_spins_for_recently_started_run_even_after_stale_activity() {
     let lines = render_lines(&app, 8);
 
     assert!(
-        lines
+        !lines
             .iter()
             .any(|line| line.contains("⠋") || line.contains("⠙")),
-        "recently started active runs should still spin: {lines:#?}"
+        "running tail must not render inside the tree body: {lines:#?}"
     );
 }
 
 #[test]
-fn running_tail_omitted_when_run_completes() {
+fn running_tail_and_transcript_are_not_visible_in_tree_body_when_run_completes() {
     let app = test_app(
         leaf_only_tree(),
         vec![run_record(7, RunStatus::Done)],
@@ -948,7 +1013,10 @@ fn running_tail_omitted_when_run_completes() {
 
     let lines = render_lines(&app, 8);
 
-    assert!(lines.iter().any(|l| l.contains("Final summary")));
+    assert!(
+        !lines.iter().any(|l| l.contains("Final summary")),
+        "transcript messages must not render inside the tree body"
+    );
     assert!(!lines.iter().any(|l| l.contains("working...")));
 }
 
@@ -1245,7 +1313,7 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
 }
 
 #[test]
-fn interactive_run_keeps_spinner_tail_until_waiting_for_input() {
+fn interactive_run_does_not_show_transcript_or_spinner_in_tree_body() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -1261,12 +1329,12 @@ fn interactive_run_keeps_spinner_tail_until_waiting_for_input() {
     let text = lines.join("\n");
 
     assert!(
-        text.contains("Do you approve?"),
-        "interactive response should render: {lines:#?}"
+        !text.contains("Do you approve?"),
+        "interactive response must not render inside the tree body: {lines:#?}"
     );
     assert!(
-        text.contains("⠋") || text.contains("⠙"),
-        "interactive run should keep spinner tail until the runner reports waiting: {lines:#?}"
+        !text.contains("⠋") && !text.contains("⠙"),
+        "spinner tail must not render inside the tree body: {lines:#?}"
     );
 }
 
@@ -1636,13 +1704,15 @@ fn full_screen_implementation_round_2_with_active_live_summary() {
         " ".repeat(126)
     );
 
+    // Live-summary tails and transcript messages no longer render inside the
+    // tree body (moved to the split view). Only structural headers remain.
     assert_eq!(
         lines,
         vec![
             "codexize─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[Run 42] · wiring full-screen tests",
             " ▌ ▾ Implementation · running",
             "  └─ ▾ Builder · running",
-            "XX:XX:XX ⠋ Wiring full-screen tests",
+            "",
             "",
             "",
             "",
@@ -2283,4 +2353,154 @@ fn depth_1_rows_are_never_underlined() {
     ] {
         assert_depth_1_no_underline(status);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Split-view tree-body cleanup regression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn expanded_agent_row_does_not_render_transcript_messages() {
+    let app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Running)],
+        vec![
+            message(1, "summary line"),
+            agent_text(1, "raw agent text"),
+            user_input(1, "user says hello"),
+        ],
+    );
+    let lines = render_lines(&app, 12);
+    assert!(
+        !lines.iter().any(|l| l.contains("Summary line")),
+        "summary message must not render in tree body"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("raw agent text")),
+        "agent text must not render in tree body"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("user says hello")),
+        "user input must not render in tree body"
+    );
+}
+
+#[test]
+fn expanded_agent_row_does_not_render_thinking_text() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_thought(1, "deep reasoning chain")],
+    );
+    let lines = render_lines(&app, 8);
+    assert!(
+        !lines.iter().any(|l| l.contains("deep reasoning chain")),
+        "thinking text must not render in tree body"
+    );
+}
+
+#[test]
+fn expanded_agent_row_does_not_render_live_summary_tail() {
+    let mut app = test_app(
+        leaf_only_tree(),
+        vec![run_record(7, RunStatus::Running)],
+        Vec::new(),
+    );
+    app.live_summary_cached_text = "live summary tail text".to_string();
+    app.state.current_phase = Phase::BrainstormRunning;
+
+    let lines = render_lines(&app, 8);
+    assert!(
+        !lines.iter().any(|l| l.contains("Live summary tail text")),
+        "live summary tail must not render in tree body"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("⠋") || l.contains("⠙")),
+        "spinner must not render in tree body"
+    );
+}
+
+#[test]
+fn expanded_agent_row_does_not_render_running_placeholder() {
+    let app = test_app(
+        vec![node(
+            "Root",
+            NodeKind::Stage,
+            NodeStatus::Running,
+            vec![node(
+                "Builder",
+                NodeKind::Mode,
+                NodeStatus::Running,
+                Vec::new(),
+                Some(1),
+                None,
+            )],
+            None,
+            Some(1),
+        )],
+        vec![run_record(1, RunStatus::Running)],
+        Vec::new(),
+    );
+    let lines = render_lines(&app, 8);
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("running") && l.contains("⠋")),
+        "container placeholder must not render in tree body"
+    );
+}
+
+#[test]
+fn expanded_idea_row_does_not_render_captured_text() {
+    let mut state = SessionState::new("idea-test".to_string());
+    state.idea_text = Some("my brilliant idea".to_string());
+    let nodes = vec![node(
+        "Idea",
+        NodeKind::Stage,
+        NodeStatus::Done,
+        Vec::new(),
+        None,
+        None,
+    )];
+    let mut app = test_app(nodes, Vec::new(), Vec::new());
+    app.state = state;
+
+    let lines = render_lines(&app, 8);
+    assert!(
+        !lines.iter().any(|l| l.contains("my brilliant idea")),
+        "captured Idea text must not render in tree body"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("╭ idea")),
+        "Idea frame must not render in tree body"
+    );
+}
+
+#[test]
+fn expanded_idea_row_does_not_render_input_box() {
+    let nodes = vec![node(
+        "Idea",
+        NodeKind::Stage,
+        NodeStatus::WaitingUser,
+        Vec::new(),
+        None,
+        None,
+    )];
+    let mut app = test_app(nodes, Vec::new(), Vec::new());
+    app.input_mode = true;
+    app.input_buffer = "typing something".to_string();
+
+    let lines = render_lines(&app, 8);
+    assert!(
+        !lines.iter().any(|l| l.contains("typing something")),
+        "Idea input text must not render in tree body"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("╭ working") || l.contains("╭ input")),
+        "Idea input frame must not render in tree body"
+    );
 }

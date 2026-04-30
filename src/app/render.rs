@@ -19,9 +19,9 @@ mod pipeline;
 use self::pipeline::PipelineWidget;
 
 use super::{
-    App, ModalKind, chat_widget,
+    App, ModalKind,
     chrome::{UnreadBadge, bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans},
-    clock::{Clock, WallClock},
+    clock::Clock,
     focus_caps::FocusCaps,
     footer::{
         CachedSummaryFetcher, TranscriptLeafMarker, extract_short_title,

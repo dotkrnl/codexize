@@ -32,6 +32,10 @@ pub use super::models_area_view_model::ModelsAreaMode;
 /// top rule (1) + bottom rule (1) + keymap (1) + pipeline body floor (8).
 /// `models_budget = term_h - CHROME_RESERVED_LINES`.
 pub const CHROME_RESERVED_LINES: u16 = 11;
+/// Preserve the long-standing models-area compact cutoff. The split view uses
+/// a separate full-height threshold, so centralizing that value must not
+/// silently change existing models-area behavior.
+const RESPONSIVE_MODELS_AREA_THRESHOLD: u16 = 50;
 
 /// Pure renderer.
 ///
@@ -62,7 +66,7 @@ pub fn responsive_models_area(
         return (Vec::new(), prev_mode);
     }
 
-    if term_h < crate::app::RESPONSIVE_HEIGHT_THRESHOLD {
+    if term_h < RESPONSIVE_MODELS_AREA_THRESHOLD {
         let lines = render_compact_quota(models, quota_errors, width);
         return (lines, ModelsAreaMode::CompactQuota);
     }

@@ -61,7 +61,10 @@ pub fn format_historical_message(
 /// leaves (not container rows) can use `format_running_transcript_leaf`.
 /// Container rows (stages, tasks, artifacts) keep their tree-node shape
 /// with spinner + state label and should use a different rendering path.
+// TranscriptLeafMarker and the transcript leaf formatters will be used by
+// the split renderer once transcript tails move out of the tree body.
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub struct TranscriptLeafMarker(());
 
 impl TranscriptLeafMarker {
@@ -81,6 +84,7 @@ impl Default for TranscriptLeafMarker {
 ///
 /// This seam allows testing without filesystem access. The production
 /// implementation wraps the existing mtime-cached reader.
+#[allow(dead_code)]
 pub trait LiveSummaryFetcher {
     /// Fetch the current short title from the live summary file.
     ///
@@ -96,6 +100,7 @@ pub trait LiveSummaryFetcher {
 /// already performs mtime-based file reading with fallback to the last cached value
 /// on partial reads. This struct borrows that cached result at render time and
 /// extracts the short title, avoiding filesystem I/O on the render path.
+#[allow(dead_code)]
 pub struct CachedSummaryFetcher<'a> {
     cached_text: &'a str,
     phase_fallback: &'a str,
@@ -153,6 +158,7 @@ impl LiveSummaryFetcher for FixedFetcher {
 /// * `clock` - Clock providing 1 Hz truncated timestamps.
 /// * `spinner_tick` - Frame counter for spinner animation.
 /// * `fetcher` - Live summary text fetcher.
+#[allow(dead_code)]
 pub fn format_running_transcript_leaf<C: Clock>(
     _marker: TranscriptLeafMarker,
     clock: &C,
@@ -185,6 +191,7 @@ pub fn format_running_transcript_leaf<C: Clock>(
 /// The row keeps the same spinner-shaped marker as active rows, but freezes it
 /// and labels the state so lack of transcript activity is visible without
 /// implying the run completed.
+#[allow(dead_code)]
 pub fn format_stalled_transcript_leaf<C: Clock>(
     _marker: TranscriptLeafMarker,
     clock: &C,

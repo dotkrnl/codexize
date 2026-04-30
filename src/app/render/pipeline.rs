@@ -5,6 +5,7 @@ pub(super) struct PipelineWidget<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 enum PipelineLineKind {
     Other,
     RunningLeafTail { run_id: u64 },
@@ -16,6 +17,9 @@ struct PipelineLine {
     kind: PipelineLineKind,
 }
 
+// RunningTailLine and running_tail_for_row will be used by the split
+// renderer once transcript tails move out of the tree body.
+#[allow(dead_code)]
 pub(super) struct RunningTailLine {
     pub(super) line: Line<'static>,
     kind: PipelineLineKind,
@@ -231,56 +235,21 @@ impl App {
     fn node_body_lines_with_offset(
         &self,
         index: usize,
-        available_width: usize,
-        local_offset: &chrono::FixedOffset,
-        suppressed_container_runs: &BTreeSet<u64>,
+        _available_width: usize,
+        _local_offset: &chrono::FixedOffset,
+        _suppressed_container_runs: &BTreeSet<u64>,
     ) -> Vec<PipelineLine> {
         let Some(node) = self.node_for_row(index) else {
             return Vec::new();
         };
         let run_id = node.run_id.or(node.leaf_run_id);
-        if let Some(id) = run_id
-            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id)
+        if let Some(_id) = run_id
+            && let Some(_run) = self.state.agent_runs.iter().find(|r| r.id == _id)
         {
-            let msgs: Vec<_> = self
-                .messages
-                .iter()
-                .filter(|m| m.run_id == id)
-                .filter(|m| {
-                    m.kind.visible_with_filters(
-                        run.modes.interactive || self.state.show_noninteractive_texts,
-                        self.state.show_thinking_texts,
-                    )
-                })
-                .cloned()
-                .collect();
-            let running_tail =
-                self.running_tail_for_row(index, run, &WallClock::new(), suppressed_container_runs);
-            let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
-            let has_end = msgs
-                .iter()
-                .any(|m| m.kind == crate::state::MessageKind::End);
-            let mut lines: Vec<_> = chat_widget::message_lines(
-                &msgs,
-                run,
-                local_offset,
-                running_tail.map(|tail| tail.line),
-                available_width,
-            )
-            .into_iter()
-            .map(|line| PipelineLine {
-                line,
-                kind: PipelineLineKind::Other,
-            })
-            .collect();
-            if run.status == RunStatus::Running
-                && !has_end
-                && let Some(kind) = tail_kind
-                && let Some(last) = lines.last_mut()
-            {
-                last.kind = kind;
-            }
-            return lines;
+            // Transcript content (messages, thinking, tools, outputs, live
+            // tails, and running placeholders) moved to the split view; tree
+            // body stays structural-only.  See spec §3.
+            return Vec::new();
         }
         self.render_compact_node(node, index)
             .into_iter()
@@ -297,6 +266,7 @@ impl App {
     /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows use the
     /// tree-shape placeholder only when a visible child transcript tail for the
     /// same run is not already representing progress.
+    #[allow(dead_code)]
     pub(super) fn running_tail_for_row<C: Clock>(
         &self,
         index: usize,
@@ -418,135 +388,6 @@ impl App {
                     Span::styled(format!("({})", child.status.label()), child.status.style()),
                 ]));
             }
-        }
-        // Captured idea shown in the body (not the title)
-        if node.label == "Idea"
-            && node.status == NodeStatus::Done
-            && let Some(idea) = self.state.idea_text.as_deref()
-        {
-            let width = 64usize;
-            let inner_width = width.saturating_sub(4);
-            let label = " idea ";
-            let fill = width.saturating_sub(label.len() + 2);
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  ╭{label}{}╮", "─".repeat(fill)),
-                Style::default().fg(Color::DarkGray),
-            )));
-            for chunk in wrap_input(idea, inner_width) {
-                let padding = inner_width.saturating_sub(chunk.chars().count());
-                lines.push(Line::from(vec![
-                    Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(chunk, Style::default().fg(Color::White)),
-                    Span::raw(" ".repeat(padding)),
-                    Span::styled(" │", Style::default().fg(Color::DarkGray)),
-                ]));
-            }
-            lines.push(Line::from(Span::styled(
-                format!("  ╰{}╯", "─".repeat(width.saturating_sub(2))),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-        // Input box for Idea stage
-        if node.label == "Idea" && node.status == NodeStatus::WaitingUser {
-            let active = self.input_mode && index == self.selected;
-            let frame_color = if active {
-                Color::Yellow
-            } else {
-                Color::DarkGray
-            };
-            let width = 64usize;
-            lines.push(Line::from(""));
-            let label = if active { " working " } else { " input " };
-            let fill = width.saturating_sub(label.len() + 2);
-            let top = format!("  ╭{label}{}╮", "─".repeat(fill));
-            lines.push(Line::from(Span::styled(
-                top,
-                Style::default().fg(frame_color),
-            )));
-            let placeholder = "type to agents...";
-            let (text, text_style) = if self.input_buffer.is_empty() {
-                (
-                    placeholder.to_string(),
-                    Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC),
-                )
-            } else {
-                (self.input_buffer.clone(), Style::default().fg(Color::White))
-            };
-            let inner_width = width.saturating_sub(4);
-            let mut wrapped = wrap_input(&text, inner_width);
-            if wrapped.is_empty() {
-                wrapped.push(String::new());
-            }
-            // Map the char-index cursor onto (line, column) within the
-            // wrapped chunks. Placeholder text is never editable, so the
-            // cursor pins to 0 when the buffer is empty.
-            let cursor_pos = if active {
-                let target = if self.input_buffer.is_empty() {
-                    0
-                } else {
-                    self.input_cursor.min(self.input_buffer.chars().count())
-                };
-                let mut acc = 0usize;
-                let mut found = (wrapped.len().saturating_sub(1), 0usize);
-                for (idx, chunk) in wrapped.iter().enumerate() {
-                    let chunk_len = chunk.chars().count();
-                    if target <= acc + chunk_len {
-                        found = (idx, target - acc);
-                        break;
-                    }
-                    acc += chunk_len;
-                }
-                Some(found)
-            } else {
-                None
-            };
-            for (idx, chunk) in wrapped.iter().enumerate() {
-                let show_cursor_here = cursor_pos.is_some_and(|(line, _)| line == idx);
-                let split_col = cursor_pos
-                    .filter(|(line, _)| *line == idx)
-                    .map(|(_, col)| col)
-                    .unwrap_or(0);
-                let (left, right) = if show_cursor_here {
-                    let byte = chunk
-                        .char_indices()
-                        .nth(split_col)
-                        .map(|(i, _)| i)
-                        .unwrap_or(chunk.len());
-                    (&chunk[..byte], &chunk[byte..])
-                } else {
-                    (chunk.as_str(), "")
-                };
-                let cursor = if show_cursor_here { "▌" } else { "" };
-                let visible_len = chunk.chars().count() + cursor.chars().count();
-                let padding = inner_width.saturating_sub(visible_len);
-                lines.push(Line::from(vec![
-                    Span::styled("  │ ", Style::default().fg(frame_color)),
-                    Span::styled(left.to_string(), text_style),
-                    Span::styled(
-                        cursor.to_string(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ),
-                    Span::styled(right.to_string(), text_style),
-                    Span::raw(" ".repeat(padding)),
-                    Span::styled(" │", Style::default().fg(frame_color)),
-                ]));
-            }
-            let hint = if active {
-                " Enter: submit · Esc: cancel "
-            } else {
-                " Enter to type "
-            };
-            let fill = width.saturating_sub(hint.len() + 2);
-            let bottom = format!("  ╰{}{hint}╯", "─".repeat(fill));
-            lines.push(Line::from(Span::styled(
-                bottom,
-                Style::default().fg(frame_color),
-            )));
         }
         lines
     }

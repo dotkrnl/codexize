@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::state::{Message, MessageKind, MessageSender, NodeStatus, Phase, RunStatus};
 
 use super::palette::{self, PaletteCommand};
+use super::split::SplitTarget;
 use super::status_line::Severity;
 use super::{App, ExpansionOverride, ModalKind, StageId};
 
@@ -58,6 +59,45 @@ impl App {
             Severity::Warn,
             Duration::from_secs(5),
         );
+    }
+
+    /// Resolve the currently selected visible row to a split target, if any.
+    ///
+    /// Run rows (including collapsed parents that absorbed a leaf run id)
+    /// map to `Run(id)`. The Idea node maps to `Idea`. Everything else
+    /// returns `None`.
+    pub(super) fn resolve_split_target_for_selected_row(&self) -> Option<SplitTarget> {
+        let node = self.node_for_row(self.selected)?;
+        if let Some(run_id) = node.run_id.or(node.leaf_run_id) {
+            return Some(SplitTarget::Run(run_id));
+        }
+        if node.label == "Idea" {
+            return Some(SplitTarget::Idea);
+        }
+        None
+    }
+
+    /// Open the split for `target`. If the split is already showing the
+    /// same target, this is a no-op (Enter must not toggle-close).
+    /// Opening a different target resets scroll to the default tail position.
+    pub(super) fn open_split_target(&mut self, target: SplitTarget) {
+        let same_target = self.split_target == Some(target);
+        if same_target {
+            return;
+        }
+        self.split_target = Some(target);
+        self.split_scroll_offset = 0;
+    }
+
+    /// Close the split pane and return focus to the tree.
+    pub(super) fn close_split(&mut self) {
+        self.split_target = None;
+        self.split_scroll_offset = 0;
+    }
+
+    /// Returns `true` when the split is currently open.
+    pub(super) fn is_split_open(&self) -> bool {
+        self.split_target.is_some()
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -135,7 +175,23 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+            KeyCode::Esc => {
+                if self.is_split_open() {
+                    self.close_split();
+                    return false;
+                }
+                if self.has_running_agent() {
+                    self.push_status(
+                        "agent running — use :quit to exit".to_string(),
+                        Severity::Warn,
+                        Duration::from_secs(3),
+                    );
+                    false
+                } else {
+                    true
+                }
+            }
+            KeyCode::Char('q') | KeyCode::Char('Q') => {
                 if self.has_running_agent() {
                     self.push_status(
                         "agent running — use :quit to exit".to_string(),
@@ -164,6 +220,9 @@ impl App {
                 false
             }
             KeyCode::Enter => {
+                if let Some(target) = self.resolve_split_target_for_selected_row() {
+                    self.open_split_target(target);
+                }
                 if self.can_focus_input() {
                     self.input_mode = true;
                 }

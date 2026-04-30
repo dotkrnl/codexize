@@ -2456,3 +2456,194 @@ fn stage_error_enter_relaunches_from_non_current_row() {
         assert_eq!(app.state.current_phase, Phase::SpecReviewRunning);
     });
 }
+
+// ---------------------------------------------------------------------------
+// Split target ownership tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn resolve_split_target_run_row() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-run".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        let bs_idx = row_index(&app, "Brainstorm");
+        app.selected = bs_idx;
+
+        let target = app.resolve_split_target_for_selected_row();
+        assert_eq!(target, Some(super::split::SplitTarget::Run(7)));
+    });
+}
+
+#[test]
+fn resolve_split_target_idea_row() {
+    with_temp_root(|| {
+        let state = SessionState::new("split-idea".to_string());
+        let mut app = idle_app(state);
+        let idea_idx = row_index(&app, "Idea");
+        app.selected = idea_idx;
+
+        let target = app.resolve_split_target_for_selected_row();
+        assert_eq!(target, Some(super::split::SplitTarget::Idea));
+    });
+}
+
+#[test]
+fn resolve_split_target_other_row() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-none".to_string());
+        state.current_phase = Phase::SpecReviewRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        // Select "Spec Review" stage row (no run_id directly on it in this setup)
+        let sr_idx = row_index(&app, "Spec Review");
+        app.selected = sr_idx;
+
+        let target = app.resolve_split_target_for_selected_row();
+        assert_eq!(target, None);
+    });
+}
+
+#[test]
+fn enter_opens_run_split_target() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-enter-run".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        let bs_idx = row_index(&app, "Brainstorm");
+        app.selected = bs_idx;
+
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Run(7)));
+    });
+}
+
+#[test]
+fn enter_opens_idea_split_target() {
+    with_temp_root(|| {
+        let state = SessionState::new("split-enter-idea".to_string());
+        let mut app = idle_app(state);
+        let idea_idx = row_index(&app, "Idea");
+        app.selected = idea_idx;
+
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
+    });
+}
+
+#[test]
+fn enter_does_not_toggle_close_same_target() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-no-toggle".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        let bs_idx = row_index(&app, "Brainstorm");
+        app.selected = bs_idx;
+        app.split_target = Some(super::split::SplitTarget::Run(7));
+        app.split_scroll_offset = 42;
+
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Run(7)));
+        assert_eq!(
+            app.split_scroll_offset, 42,
+            "scroll must be preserved on same-target Enter"
+        );
+    });
+}
+
+#[test]
+fn enter_switches_target_resets_scroll() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-switch".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        let bs_idx = row_index(&app, "Brainstorm");
+        app.selected = bs_idx;
+        app.split_target = Some(super::split::SplitTarget::Idea);
+        app.split_scroll_offset = 42;
+
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Run(7)));
+        assert_eq!(
+            app.split_scroll_offset, 0,
+            "scroll must reset on target change"
+        );
+    });
+}
+
+#[test]
+fn esc_closes_split_when_open() {
+    with_temp_root(|| {
+        let mut app = idle_app(SessionState::new("split-esc".to_string()));
+        app.split_target = Some(super::split::SplitTarget::Idea);
+        app.split_scroll_offset = 5;
+
+        let quit = app.handle_key(key(crossterm::event::KeyCode::Esc));
+
+        assert!(!quit, "Esc must not quit while split is open");
+        assert_eq!(app.split_target, None);
+        assert_eq!(app.split_scroll_offset, 0);
+    });
+}
+
+#[test]
+fn esc_quits_when_split_closed_and_no_agent_running() {
+    with_temp_root(|| {
+        let mut app = idle_app(SessionState::new("split-esc-quit".to_string()));
+        app.split_target = None;
+
+        let quit = app.handle_key(key(crossterm::event::KeyCode::Esc));
+
+        assert!(
+            quit,
+            "Esc should quit when split is closed and no agent running"
+        );
+    });
+}
+
+#[test]
+fn rebuild_closes_invalid_run_target() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-rebuild".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.split_target = Some(super::split::SplitTarget::Run(7));
+        app.split_scroll_offset = 3;
+
+        // Remove the run without explicitly closing the split.
+        app.state.agent_runs.retain(|run| run.id != 7);
+        app.rebuild_tree_view(None);
+
+        assert_eq!(
+            app.split_target, None,
+            "split must close when run disappears"
+        );
+        assert_eq!(app.split_scroll_offset, 0);
+    });
+}
+
+#[test]
+fn rebuild_preserves_idea_target() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-idea-preserved".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.split_target = Some(super::split::SplitTarget::Idea);
+        app.split_scroll_offset = 3;
+
+        app.rebuild_tree_view(None);
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
+        assert_eq!(app.split_scroll_offset, 3);
+    });
+}

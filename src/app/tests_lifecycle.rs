@@ -1811,18 +1811,31 @@ fn interactive_run_arrows_navigate_when_input_is_not_active() {
 }
 
 #[test]
-fn pending_guard_modal_quit_keys_follow_quit_path() {
+fn pending_guard_modal_ctrl_c_stops_running_agent_without_quitting() {
     with_temp_root(|| {
         let mut app = mk_app(make_pending_guard_state("pending-guard-key-quit", 32));
-
-        assert!(app.handle_key(key(crossterm::event::KeyCode::Char('q'))));
-        assert!(app.state.pending_guard_decision.is_some());
 
         let ctrl_c = crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('c'),
             crossterm::event::KeyModifiers::CONTROL,
         );
-        assert!(app.handle_key(ctrl_c));
+        assert!(!app.handle_key(ctrl_c));
+        assert!(app.state.pending_guard_decision.is_some());
+        let events_path = session_state::session_dir(&app.state.session_id).join("events.toml");
+        let events = std::fs::read_to_string(events_path).expect("events log");
+        assert!(
+            events.contains("agent_killed_by_user: run_id=32"),
+            "Ctrl+C should always route through stop_running_agent while a run is active"
+        );
+    });
+}
+
+#[test]
+fn pending_guard_modal_q_still_follows_quit_path() {
+    with_temp_root(|| {
+        let mut app = mk_app(make_pending_guard_state("pending-guard-key-q-quit", 32));
+
+        assert!(app.handle_key(key(crossterm::event::KeyCode::Char('q'))));
         assert!(app.state.pending_guard_decision.is_some());
     });
 }

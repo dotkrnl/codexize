@@ -1311,7 +1311,7 @@ impl App {
 
     pub(super) fn update_agent_progress(&mut self) {
         if let Ok(messages) = SessionState::load_messages(&self.state.session_id)
-            && messages.len() != self.messages.len()
+            && messages != self.messages
         {
             self.messages = messages;
         }

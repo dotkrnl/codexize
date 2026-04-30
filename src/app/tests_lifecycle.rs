@@ -322,6 +322,27 @@ fn progress_follow_live_summary_refocuses_while_enabled() {
 }
 
 #[test]
+fn live_summary_process_polls_even_when_watcher_has_no_event() {
+    with_temp_root(|| {
+        let session_id = "live-summary-watch-delete";
+        let mut state = coder_round_state(session_id);
+        state.agent_runs.push(make_coder_run(10, 1, 1));
+        let mut app = build_progress_follow_app(state, 10);
+        let path = app.live_summary_path_for(&app.state.agent_runs[0]);
+        app.live_summary_path = Some(path);
+        app.live_summary_cached_text = "old summary".to_string();
+        app.live_summary_cached_mtime = Some(std::time::SystemTime::now());
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.live_summary_change_rx = Some(rx);
+
+        app.process_live_summary_changes();
+
+        assert_eq!(app.live_summary_cached_text, "");
+        assert_eq!(app.live_summary_cached_mtime, None);
+    });
+}
+
+#[test]
 fn progress_follow_disabled_by_manual_focus_movement() {
     let mut state = coder_round_state("pf-manual-up");
     state.agent_runs.push(make_coder_run(10, 1, 1));
@@ -958,6 +979,47 @@ fn update_agent_progress_reloads_persisted_interactive_agent_text() {
             message.run_id == 7
                 && message.kind == MessageKind::AgentText
                 && message.text == "question for operator"
+        }));
+    });
+}
+
+#[test]
+fn update_agent_progress_reloads_in_place_message_text_changes() {
+    with_temp_root(|| {
+        let session_id = "interactive-output-upsert-reload";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run.clone());
+        state.save().expect("save state");
+        let mut app = idle_app(state.clone());
+        app.current_run_id = Some(7);
+
+        let ts = chrono::Utc::now();
+        let msg = Message {
+            ts,
+            run_id: 7,
+            kind: MessageKind::AgentThought,
+            sender: crate::state::MessageSender::Agent {
+                model: run.model,
+                vendor: run.vendor,
+            },
+            text: "partial".to_string(),
+        };
+        state.append_message(&msg).expect("append message");
+        app.update_agent_progress();
+        assert!(app.messages.iter().any(|message| message.text == "partial"));
+
+        state
+            .update_message_text(ts, "partial plus more")
+            .expect("update message");
+        app.update_agent_progress();
+
+        assert!(app.messages.iter().any(|message| {
+            message.run_id == 7
+                && message.kind == MessageKind::AgentThought
+                && message.text == "partial plus more"
         }));
     });
 }

@@ -1831,6 +1831,34 @@ fn pending_guard_modal_ctrl_c_stops_running_agent_without_quitting() {
 }
 
 #[test]
+fn idle_ctrl_c_quits_when_no_agent_is_running() {
+    with_temp_root(|| {
+        let mut app = idle_app(SessionState::new("idle-ctrl-c-quits".to_string()));
+        let ctrl_c = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('c'),
+            crossterm::event::KeyModifiers::CONTROL,
+        );
+
+        assert!(app.handle_key(ctrl_c));
+    });
+}
+
+#[test]
+fn paused_review_modal_ctrl_c_quits_without_running_agent() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("paused-modal-ctrl-c-quits".to_string());
+        state.current_phase = Phase::SpecReviewPaused;
+        let mut app = idle_app(state);
+        let ctrl_c = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('c'),
+            crossterm::event::KeyModifiers::CONTROL,
+        );
+
+        assert!(app.handle_key(ctrl_c));
+    });
+}
+
+#[test]
 fn pending_guard_modal_q_still_follows_quit_path() {
     with_temp_root(|| {
         let mut app = mk_app(make_pending_guard_state("pending-guard-key-q-quit", 32));

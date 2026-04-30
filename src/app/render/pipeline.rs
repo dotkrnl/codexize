@@ -65,9 +65,24 @@ impl Widget for PipelineWidget<'_> {
 
 impl App {
     pub(super) fn live_agent_spinner_active(&self) -> bool {
-        self.agent_last_change
-            .map(|last| last.elapsed() <= std::time::Duration::from_secs(10))
-            .unwrap_or(true)
+        const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+        if self
+            .agent_last_change
+            .is_some_and(|last| last.elapsed() <= STALL_TIMEOUT)
+        {
+            return true;
+        }
+        self.state
+            .agent_runs
+            .iter()
+            .filter(|run| run.status == RunStatus::Running)
+            .any(|run| {
+                chrono::Utc::now()
+                    .signed_duration_since(run.started_at)
+                    .to_std()
+                    .map(|age| age <= STALL_TIMEOUT)
+                    .unwrap_or(true)
+            })
     }
 
     fn pipeline_render_lines(

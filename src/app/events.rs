@@ -218,16 +218,8 @@ impl App {
             }
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
-                if self.interactive_run_active() {
-                    self.palette.buffer.clear();
-                    self.palette.cursor = 0;
-                } else {
-                    self.palette.close();
-                }
+                self.palette.close();
                 let should_quit = self.execute_palette_input(&input);
-                if self.interactive_run_active() {
-                    self.palette.open();
-                }
                 should_quit
             }
             KeyCode::Tab => {

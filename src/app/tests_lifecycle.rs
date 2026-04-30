@@ -1537,6 +1537,21 @@ fn interactive_palette_opens_only_after_colon() {
 }
 
 #[test]
+fn idea_input_treats_q_as_text_before_global_quit() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("idea-input-q-priority".to_string());
+        state.current_phase = Phase::IdeaInput;
+        let mut app = idle_app(state);
+
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('q')));
+
+        assert!(!should_quit, "q should be consumed by the idea input box");
+        assert!(app.input_mode, "typing should focus the input box");
+        assert_eq!(app.input_buffer, "q");
+    });
+}
+
+#[test]
 fn interactive_palette_closes_when_colon_suffix_is_removed() {
     with_temp_root(|| {
         let mut state = SessionState::new("interactive-palette-remove-colon".to_string());

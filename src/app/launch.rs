@@ -165,6 +165,9 @@ impl App {
         else {
             return;
         };
+        if run.modes.interactive {
+            self.open_split_target(crate::app::split::SplitTarget::Run(run_id));
+        }
         self.prime_yolo_exit_tracking(&run);
         let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
         let started = Message {

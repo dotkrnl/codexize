@@ -151,6 +151,16 @@ fn user_input(run_id: u64, text: &str) -> Message {
     }
 }
 
+fn kind_message(run_id: u64, kind: MessageKind, text: &str) -> Message {
+    Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind,
+        sender: MessageSender::System,
+        text: text.to_string(),
+    }
+}
+
 // model_strip_* full-table rendering tests have moved to
 // src/app/models_area.rs and target the new responsive_models_area
 // entry point. The underlying model_strip / model_strip_height /
@@ -1379,6 +1389,130 @@ fn split_run_reuses_chat_filtering_for_transcripts() {
     assert!(text.contains("Visible split summary"), "{text}");
     assert!(!text.contains("hidden noninteractive text"), "{text}");
     assert!(!text.contains("hidden thought text"), "{text}");
+}
+
+#[test]
+fn interactive_run_split_renders_model_output_only() {
+    let mut run = run_record(1, RunStatus::Done);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![
+            kind_message(1, MessageKind::Started, "hidden started"),
+            kind_message(1, MessageKind::Brief, "hidden brief"),
+            user_input(1, "hidden operator input"),
+            agent_text(1, "visible model answer"),
+            agent_thought(1, "hidden model thought"),
+            message(1, "hidden summary"),
+            kind_message(1, MessageKind::SummaryWarn, "hidden warning"),
+            kind_message(1, MessageKind::End, "hidden end"),
+        ],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let text = full_frame_text(&mut app, 80, 90);
+
+    assert!(text.contains("visible model answer"), "{text}");
+    assert!(!text.contains("hidden started"), "{text}");
+    assert!(!text.contains("hidden brief"), "{text}");
+    assert!(!text.contains("hidden operator input"), "{text}");
+    assert!(!text.contains("hidden model thought"), "{text}");
+    assert!(!text.contains("hidden summary"), "{text}");
+    assert!(!text.contains("hidden warning"), "{text}");
+    assert!(!text.contains("hidden end"), "{text}");
+
+    app.state.show_thinking_texts = true;
+    let text = full_frame_text(&mut app, 80, 90);
+    assert!(text.contains("Hidden model thought"), "{text}");
+}
+
+#[test]
+fn interactive_run_split_height_uses_same_filter_as_rendering() {
+    let mut run = run_record(1, RunStatus::Done);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![
+            kind_message(1, MessageKind::Started, "hidden started"),
+            user_input(1, "hidden operator input"),
+            agent_text(1, "visible model answer"),
+            agent_thought(1, "hidden model thought"),
+            message(1, "hidden summary"),
+            kind_message(1, MessageKind::End, "hidden end"),
+        ],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+    app.body_inner_width = 80;
+
+    let run = app
+        .state
+        .agent_runs
+        .iter()
+        .find(|run| run.id == 1)
+        .expect("run");
+    let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
+    let expected = crate::app::chat_widget::message_lines(
+        &[agent_text(1, "visible model answer")],
+        run,
+        &local_offset,
+        None,
+        app.body_inner_width,
+    )
+    .len();
+
+    assert_eq!(app.current_split_content_height(), expected);
+}
+
+#[test]
+fn split_run_renders_separator_between_tree_and_transcript() {
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Done)],
+        vec![message(1, "split transcript body")],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let lines = render_full_frame(&mut app, 80, 90);
+    let rule = "─".repeat(80);
+    let tree_y = lines
+        .iter()
+        .position(|line| line.contains("Root"))
+        .expect("tree row should render above split");
+    let split_y = lines
+        .iter()
+        .position(|line| line.contains("Split transcript body"))
+        .expect("split transcript should render below separator");
+    let separator_y = lines
+        .iter()
+        .enumerate()
+        .find_map(|(idx, line)| (idx > tree_y && idx < split_y && line == &rule).then_some(idx))
+        .expect("separator row should render between main panel and split");
+
+    assert!(tree_y < separator_y && separator_y < split_y);
+}
+
+#[test]
+fn interactive_split_owned_input_still_renders_footer_sheet() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_text(7, "waiting for operator")],
+    );
+    app.current_run_id = Some(7);
+    app.state.current_phase = crate::state::Phase::BrainstormRunning;
+    app.split_target = Some(super::super::split::SplitTarget::Run(7));
+    app.input_mode = true;
+    crate::runner::request_run_label_interactive_input_for_test("[Run 7]");
+
+    let text = full_frame_text(&mut app, 80, 24);
+
+    assert!(text.contains("type to agents..."), "{text}");
+    assert!(text.contains("Esc close"), "{text}");
+    assert!(text.contains("Enter submit"), "{text}");
 }
 
 #[test]

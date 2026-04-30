@@ -2742,6 +2742,90 @@ fn esc_closes_split_when_open() {
 }
 
 #[test]
+fn poll_agent_run_closes_matching_interactive_run_split_on_exit() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-close-matching-split".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        state.agent_runs.push(RunRecord {
+            id: 42,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "m".to_string(),
+            vendor: "v".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes {
+                interactive: true,
+                ..Default::default()
+            },
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness::default(),
+        )));
+        app.current_run_id = Some(42);
+        app.run_launched = true;
+        app.split_target = Some(super::split::SplitTarget::Run(42));
+        app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+
+        app.poll_agent_run();
+
+        assert_eq!(app.split_target, None);
+    });
+}
+
+#[test]
+fn poll_agent_run_preserves_switched_split_target_on_interactive_exit() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-preserve-switched-split".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        state.agent_runs.push(RunRecord {
+            id: 42,
+            stage: "planning".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "m".to_string(),
+            vendor: "v".to_string(),
+            window_name: "[Planning]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes {
+                interactive: true,
+                ..Default::default()
+            },
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness::default(),
+        )));
+        app.current_run_id = Some(42);
+        app.run_launched = true;
+        app.split_target = Some(super::split::SplitTarget::Idea);
+        app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+
+        app.poll_agent_run();
+
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
+    });
+}
+
+#[test]
 fn esc_quits_when_split_closed_and_no_agent_running() {
     with_temp_root(|| {
         let mut app = idle_app(SessionState::new("split-esc-quit".to_string()));

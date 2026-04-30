@@ -429,16 +429,39 @@ fn planning_launch_failure_surfaces_status_line_and_agent_error() {
 }
 
 #[test]
+fn watcher_setup_allows_missing_live_summary_file_under_existing_artifacts_dir() {
+    with_temp_root(|| {
+        let session_id = "watcher-missing-live-summary";
+        let state = SessionState::new(session_id.to_string());
+        let mut app = idle_app(state);
+        let artifacts_dir = session_state::session_dir(session_id).join("artifacts");
+        std::fs::create_dir_all(&artifacts_dir).expect("artifacts dir");
+        app.live_summary_path = Some(artifacts_dir.join("live_summary.txt"));
+
+        app.setup_watcher().expect("watcher setup should succeed");
+
+        assert!(app.live_summary_watcher.is_some());
+        assert!(app.live_summary_change_rx.is_some());
+        assert!(app.status_line.borrow().render().is_none());
+        assert!(
+            !session_state::session_dir(session_id)
+                .join("events.toml")
+                .exists()
+        );
+    });
+}
+
+#[test]
 fn watcher_setup_failure_surfaces_status_line_and_keeps_poll_fallback() {
     with_temp_root(|| {
         let session_id = "watcher-setup-failure";
         let state = SessionState::new(session_id.to_string());
         let mut app = idle_app(state);
-        app.live_summary_path = Some(
-            session_state::session_dir(session_id)
-                .join("missing")
-                .join("live_summary.txt"),
-        );
+        let blocked_parent = session_state::session_dir(session_id).join("not-a-directory");
+        std::fs::create_dir_all(blocked_parent.parent().expect("session dir"))
+            .expect("session dir");
+        std::fs::write(&blocked_parent, "file").expect("blocked parent");
+        app.live_summary_path = Some(blocked_parent.join("live_summary.txt"));
 
         app.setup_watcher().expect("watcher setup should fall back");
 

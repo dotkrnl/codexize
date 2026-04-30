@@ -7,10 +7,33 @@ use notify::Watcher;
 use std::sync::mpsc;
 impl App {
     pub(super) fn setup_watcher(&mut self) -> Result<()> {
+        let Some(path) = self.live_summary_path.clone() else {
+            self.live_summary_watcher = None;
+            self.live_summary_change_rx = None;
+            return Ok(());
+        };
+        let watch_path = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        if let Err(e) = std::fs::create_dir_all(&watch_path) {
+            self.surface_boundary_error(
+                format!("watcher setup failed: {e}, falling back to poll"),
+                false,
+            );
+            self.live_summary_watcher = None;
+            self.live_summary_change_rx = None;
+            return Ok(());
+        }
+
         let (tx, rx) = mpsc::channel();
+        let watched_file = path.clone();
         let watcher_result = notify::RecommendedWatcher::new(
             move |res: Result<notify::Event, notify::Error>| {
-                if res.is_ok() {
+                if let Ok(event) = res
+                    && event.paths.iter().any(|changed| changed == &watched_file)
+                {
                     let _ = tx.send(());
                 }
             },
@@ -18,12 +41,7 @@ impl App {
         );
         match watcher_result {
             Ok(mut watcher) => {
-                let Some(path) = self.live_summary_path.clone() else {
-                    self.live_summary_watcher = None;
-                    self.live_summary_change_rx = None;
-                    return Ok(());
-                };
-                if let Err(e) = watcher.watch(&path, notify::RecursiveMode::NonRecursive) {
+                if let Err(e) = watcher.watch(&watch_path, notify::RecursiveMode::NonRecursive) {
                     self.surface_boundary_error(
                         format!("watcher setup failed: {e}, falling back to poll"),
                         false,

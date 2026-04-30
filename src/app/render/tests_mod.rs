@@ -860,11 +860,9 @@ fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
 
 #[test]
 fn running_tail_stops_after_ten_seconds_without_transcript_activity() {
-    let mut app = test_app(
-        leaf_only_tree(),
-        vec![run_record(7, RunStatus::Running)],
-        Vec::new(),
-    );
+    let mut run = run_record(7, RunStatus::Running);
+    run.started_at = chrono::Utc::now() - chrono::Duration::seconds(11);
+    let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
     app.agent_last_change = Some(Instant::now() - Duration::from_secs(11));
 
     let lines = render_lines(&app, 8);
@@ -894,6 +892,24 @@ fn running_tail_spins_when_transcript_activity_is_recent() {
             .iter()
             .any(|line| line.contains("⠋") || line.contains("⠙")),
         "recent transcript activity should keep the spinner visible: {lines:#?}"
+    );
+}
+
+#[test]
+fn running_tail_spins_for_recently_started_run_even_after_stale_activity() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.started_at = chrono::Utc::now();
+    let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
+    app.current_run_id = Some(7);
+    app.agent_last_change = Some(Instant::now() - Duration::from_secs(11));
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("⠋") || line.contains("⠙")),
+        "recently started active runs should still spin: {lines:#?}"
     );
 }
 

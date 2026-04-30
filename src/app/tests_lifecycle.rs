@@ -1549,6 +1549,34 @@ fn palette_verbose_command_toggles_persisted_thinking_visibility() {
 }
 
 #[test]
+fn interactive_palette_command_closes_after_execution() {
+    with_temp_root(|| {
+        let session_id = "interactive-palette-command-close";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        state.save().expect("save initial state");
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "verbose".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert!(app.state.show_thinking_texts);
+        assert!(
+            !app.palette.open,
+            "executed commands should close the : box"
+        );
+        assert!(app.palette.buffer.is_empty());
+    });
+}
+
+#[test]
 fn interactive_exit_is_handled_locally_without_quitting_tui() {
     with_temp_root(|| {
         let mut state = SessionState::new("interactive-exit-local".to_string());
@@ -1568,7 +1596,7 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
         assert!(!should_quit);
         assert_eq!(app.current_run_id, Some(7));
         assert!(!app.input_mode);
-        assert!(app.palette.open);
+        assert!(!app.palette.open);
         assert!(app.input_buffer.is_empty());
     });
 }
@@ -1630,7 +1658,7 @@ fn interactive_palette_enter_sends_plain_text_to_agent() {
         let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
 
         assert!(!should_quit);
-        assert!(app.palette.open);
+        assert!(!app.palette.open);
         assert!(app.palette.buffer.is_empty());
     });
 }

@@ -72,7 +72,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 if self.has_running_agent() {
                     self.push_status(
                         "agent running — use :quit to exit".to_string(),
@@ -181,7 +181,7 @@ impl App {
 
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 if self.interactive_run_active() {
                     self.palette.buffer.clear();
                     self.palette.cursor = 0;
@@ -386,7 +386,7 @@ impl App {
 
     fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
@@ -405,7 +405,7 @@ impl App {
 
     fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
@@ -425,7 +425,7 @@ impl App {
 
     fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Enter => {
                 match stage_id {
@@ -579,7 +579,7 @@ impl App {
 
     fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') => true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Err(err) = self.accept_skip_to_implementation() {
@@ -589,7 +589,7 @@ impl App {
                 }
                 false
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            KeyCode::Char('n') | KeyCode::Char('N') => {
                 if let Err(err) = self.decline_skip_to_implementation() {
                     self.record_agent_error(format!(
                         "decline skip-to-implementation failed: {err:#}"
@@ -603,7 +603,7 @@ impl App {
 
     fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char('q') => true,
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => true,
             KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
                 if let Err(err) = self.accept_guard_reset() {

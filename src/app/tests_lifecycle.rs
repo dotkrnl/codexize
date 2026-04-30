@@ -1582,6 +1582,16 @@ fn pending_guard_modal_quit_keys_follow_quit_path() {
 }
 
 #[test]
+fn pending_guard_modal_escape_matches_q_quit_path() {
+    with_temp_root(|| {
+        let mut app = mk_app(make_pending_guard_state("pending-guard-key-esc", 34));
+
+        assert!(app.handle_key(key(crossterm::event::KeyCode::Esc)));
+        assert!(app.state.pending_guard_decision.is_some());
+    });
+}
+
+#[test]
 fn pending_guard_modal_consumes_unrelated_keys() {
     with_temp_root(|| {
         let mut app = mk_app(make_pending_guard_state("pending-guard-key-consume", 33));

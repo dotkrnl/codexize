@@ -277,7 +277,7 @@ fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
     assert!(
         !lines
             .iter()
-            .any(|line| line.contains("Raw noninteractive text"))
+            .any(|line| line.contains("raw noninteractive text"))
     );
 
     let mut app = app;
@@ -287,7 +287,7 @@ fn noninteractive_agent_text_is_hidden_until_toggle_enabled() {
     assert!(
         lines
             .iter()
-            .any(|line| line.contains("Raw noninteractive text"))
+            .any(|line| line.contains("raw noninteractive text"))
     );
 }
 
@@ -306,7 +306,7 @@ fn interactive_agent_text_is_always_visible() {
     assert!(
         lines
             .iter()
-            .any(|line| line.contains("Live interactive text"))
+            .any(|line| line.contains("live interactive text"))
     );
 }
 

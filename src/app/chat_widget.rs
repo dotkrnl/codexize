@@ -1,4 +1,5 @@
 use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -207,6 +208,196 @@ fn wrap_text(text: &str, content_width: usize) -> Vec<String> {
     out
 }
 
+fn push_wrapped_span_line(
+    lines: &mut Vec<Vec<Span<'static>>>,
+    current: &mut Vec<Span<'static>>,
+    content_width: usize,
+) {
+    if current.is_empty() {
+        lines.push(Vec::new());
+        return;
+    }
+
+    lines.extend(wrap_spans(std::mem::take(current), content_width));
+}
+
+fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'static>>> {
+    if content_width == 0 {
+        return Vec::new();
+    }
+    let mut lines = vec![Vec::new()];
+    let mut current_len = 0usize;
+
+    for span in spans {
+        let style = span.style;
+        let mut remaining = span.content.to_string();
+        while !remaining.is_empty() {
+            let room = content_width.saturating_sub(current_len);
+            if room == 0 {
+                lines.push(Vec::new());
+                current_len = 0;
+                continue;
+            }
+            let remaining_len = remaining.chars().count();
+            if remaining_len <= room {
+                current_len += remaining_len;
+                lines
+                    .last_mut()
+                    .expect("line exists")
+                    .push(Span::styled(remaining, style));
+                break;
+            }
+
+            let split_at = remaining
+                .char_indices()
+                .nth(room)
+                .map(|(i, _)| i)
+                .unwrap_or(remaining.len());
+            let chunk = remaining[..split_at].to_string();
+            lines
+                .last_mut()
+                .expect("line exists")
+                .push(Span::styled(chunk, style));
+            remaining = remaining[split_at..].to_string();
+            lines.push(Vec::new());
+            current_len = 0;
+        }
+    }
+
+    lines
+}
+
+fn render_agent_markdown(text: &str, content_width: usize) -> Vec<Vec<Span<'static>>> {
+    if content_width == 0 {
+        return Vec::new();
+    }
+
+    let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
+    let base_style = Style::default().fg(Color::White);
+    let code_style = Style::default().fg(Color::Cyan);
+    let heading_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+    let mut style_stack = vec![base_style];
+    let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut list_depth = 0usize;
+    let mut in_code_block = false;
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+            }
+            Event::Start(Tag::Heading { .. }) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                style_stack.push(heading_style);
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                style_stack.pop();
+            }
+            Event::Start(Tag::Strong) => {
+                let style = *style_stack.last().unwrap_or(&base_style);
+                style_stack.push(style.add_modifier(Modifier::BOLD));
+            }
+            Event::End(TagEnd::Strong) => {
+                style_stack.pop();
+            }
+            Event::Start(Tag::Emphasis) => {
+                let style = *style_stack.last().unwrap_or(&base_style);
+                style_stack.push(style.add_modifier(Modifier::ITALIC));
+            }
+            Event::End(TagEnd::Emphasis) => {
+                style_stack.pop();
+            }
+            Event::Start(Tag::List(_)) => {
+                list_depth += 1;
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_depth = list_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                let indent = "  ".repeat(list_depth.saturating_sub(1));
+                current.push(Span::styled(format!("{indent}• "), base_style));
+            }
+            Event::End(TagEnd::Item) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+            }
+            Event::Start(Tag::CodeBlock(_)) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                in_code_block = true;
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                in_code_block = false;
+            }
+            Event::Text(value) => {
+                let style = if in_code_block {
+                    code_style
+                } else {
+                    *style_stack.last().unwrap_or(&base_style)
+                };
+                for (index, raw_line) in value.split('\n').enumerate() {
+                    if index > 0 {
+                        push_wrapped_span_line(&mut lines, &mut current, content_width);
+                    }
+                    let clean = strip_ansi(raw_line);
+                    if clean.is_empty() && in_code_block {
+                        lines.push(Vec::new());
+                    } else if in_code_block {
+                        current.push(Span::styled(format!("  {clean}"), style));
+                    } else {
+                        current.push(Span::styled(clean, style));
+                    }
+                }
+            }
+            Event::Code(value) => {
+                current.push(Span::styled(strip_ansi(&value), code_style));
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                push_wrapped_span_line(&mut lines, &mut current, content_width);
+            }
+            Event::Rule => {
+                if !current.is_empty() {
+                    push_wrapped_span_line(&mut lines, &mut current, content_width);
+                }
+                lines.push(vec![Span::styled("─".repeat(content_width), base_style)]);
+            }
+            _ => {}
+        }
+    }
+
+    if !current.is_empty() {
+        push_wrapped_span_line(&mut lines, &mut current, content_width);
+    }
+
+    if lines.is_empty() {
+        wrap_text(text, content_width)
+            .into_iter()
+            .map(|line| vec![Span::styled(line, base_style)])
+            .collect()
+    } else {
+        lines
+    }
+}
+
 struct RenderedLine {
     spans: Vec<Span<'static>>,
 }
@@ -306,15 +497,26 @@ fn render_messages(
             continue;
         }
 
-        let wrapped = wrap_text(&msg.text, content_width);
         let hints = kind_to_hints(msg.kind, run.status);
+        let markdown_lines = if msg.kind == MessageKind::AgentText {
+            render_agent_markdown(&msg.text, content_width)
+        } else {
+            wrap_text(&msg.text, content_width)
+                .into_iter()
+                .map(|line| vec![Span::raw(line)])
+                .collect()
+        };
 
-        if let Some((first, rest)) = wrapped.split_first() {
+        if let Some((first, rest)) = markdown_lines.split_first() {
+            let first_text: String = first.iter().map(|span| span.content.to_string()).collect();
             let first_line =
-                format_historical_message(&ts_str, sym.symbol, first, sym.color, hints);
-            lines.push(RenderedLine {
-                spans: first_line.spans,
-            });
+                format_historical_message(&ts_str, sym.symbol, &first_text, sym.color, hints);
+            let mut first_spans = first_line.spans;
+            if msg.kind == MessageKind::AgentText && first_spans.len() >= 2 {
+                first_spans.truncate(2);
+                first_spans.extend(first.iter().cloned());
+            }
+            lines.push(RenderedLine { spans: first_spans });
 
             let body_style = if hints.is_error {
                 Style::default().fg(Color::Red)
@@ -326,8 +528,15 @@ fn render_messages(
                 Style::default().fg(Color::White)
             };
             for chunk in rest {
+                if msg.kind == MessageKind::AgentText {
+                    let mut spans = vec![Span::raw(indent.clone())];
+                    spans.extend(chunk.iter().cloned());
+                    lines.push(RenderedLine { spans });
+                    continue;
+                }
+                let text: String = chunk.iter().map(|span| span.content.to_string()).collect();
                 lines.push(RenderedLine {
-                    spans: vec![Span::styled(format!("{}{}", indent, chunk), body_style)],
+                    spans: vec![Span::styled(format!("{}{}", indent, text), body_style)],
                 });
             }
         } else {
@@ -570,6 +779,13 @@ mod tests {
         Line::from(Span::raw(text.to_string()))
     }
 
+    fn line_text(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect()
+    }
+
     #[test]
     fn message_lines_appends_running_tail_when_active() {
         let msgs = vec![make_msg(MessageKind::Started, "agent started")];
@@ -584,6 +800,56 @@ mod tests {
             .map(|s| s.content.to_string())
             .collect();
         assert_eq!(last_text, "LIVE-TAIL");
+    }
+
+    #[test]
+    fn agent_text_renders_markdown_emphasis_without_raw_markers() {
+        let msgs = vec![make_msg(
+            MessageKind::AgentText,
+            "Here is **bold text** and `code`.",
+        )];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let text = line_text(&lines[0]);
+
+        assert!(text.contains("Here is bold text and code."));
+        assert!(!text.contains("**"));
+        assert!(!text.contains('`'));
+        assert!(
+            lines[0].spans.iter().any(|span| span.content == "bold text"
+                && span.style.add_modifier.contains(Modifier::BOLD)),
+            "bold markdown should become a bold span: {:?}",
+            lines[0].spans
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content == "code" && span.style.fg == Some(Color::Cyan)),
+            "inline code should be highlighted: {:?}",
+            lines[0].spans
+        );
+    }
+
+    #[test]
+    fn agent_text_renders_markdown_lists_and_fenced_code() {
+        let msgs = vec![make_msg(
+            MessageKind::AgentText,
+            "- first\n- second\n\n```rust\nlet answer = 42;\n```",
+        )];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line.contains("• first")));
+        assert!(texts.iter().any(|line| line.contains("• second")));
+        assert!(texts.iter().any(|line| line.contains("let answer = 42;")));
+        assert!(
+            texts.iter().all(|line| !line.contains("```")),
+            "fence markers should not render: {texts:?}"
+        );
     }
 
     #[test]

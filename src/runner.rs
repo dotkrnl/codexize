@@ -621,8 +621,7 @@ pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(window_name)
         .is_some_and(|run| {
-            !run.finished.load(Ordering::SeqCst)
-                && run.waiting_for_input.load(Ordering::SeqCst)
+            !run.finished.load(Ordering::SeqCst) && run.waiting_for_input.load(Ordering::SeqCst)
         })
 }
 
@@ -667,8 +666,7 @@ pub fn send_run_label_input(window_name: &str, text: String) -> bool {
     guard
         .get(window_name)
         .filter(|run| {
-            !run.finished.load(Ordering::SeqCst)
-                && run.waiting_for_input.load(Ordering::SeqCst)
+            !run.finished.load(Ordering::SeqCst) && run.waiting_for_input.load(Ordering::SeqCst)
         })
         .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
 }

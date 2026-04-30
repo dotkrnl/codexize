@@ -120,15 +120,12 @@ impl SessionPicker {
                             KeyAction::Quit => return Ok(None),
                         }
                     }
-                    Event::Paste(text) => {
-                        if self.input_mode {
-                            crate::input_editor::insert_str(
-                                &mut self.input_buffer,
-                                &mut self.input_cursor,
-                                &text,
-                            );
-                        }
-                    }
+                    Event::Paste(text) if self.input_mode => crate::input_editor::insert_str(
+                        &mut self.input_buffer,
+                        &mut self.input_cursor,
+                        &text,
+                    ),
+                    Event::Paste(_) => {}
                     _ => {}
                 }
             }
@@ -475,7 +472,7 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
         });
     }
 
-    entries.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_modified));
 
     Ok(entries)
 }

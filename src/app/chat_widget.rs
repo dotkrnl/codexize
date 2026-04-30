@@ -292,11 +292,10 @@ fn render_agent_markdown(
     for event in parser {
         match event {
             Event::Start(Tag::Paragraph) => {}
-            Event::End(TagEnd::Paragraph) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+            Event::End(TagEnd::Paragraph) if !current.is_empty() => {
+                push_wrapped_span_line(&mut lines, &mut current, content_width);
             }
+            Event::End(TagEnd::Paragraph) => {}
             Event::Start(Tag::Heading { .. }) => {
                 if !current.is_empty() {
                     push_wrapped_span_line(&mut lines, &mut current, content_width);
@@ -336,11 +335,10 @@ fn render_agent_markdown(
                 let indent = "  ".repeat(list_depth.saturating_sub(1));
                 current.push(Span::styled(format!("{indent}• "), base_style));
             }
-            Event::End(TagEnd::Item) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+            Event::End(TagEnd::Item) if !current.is_empty() => {
+                push_wrapped_span_line(&mut lines, &mut current, content_width);
             }
+            Event::End(TagEnd::Item) => {}
             Event::Start(Tag::CodeBlock(_)) => {
                 if !current.is_empty() {
                     push_wrapped_span_line(&mut lines, &mut current, content_width);

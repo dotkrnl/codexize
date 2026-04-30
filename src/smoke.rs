@@ -158,11 +158,10 @@ fn normalize_toml_value(key: Option<&str>, value: &mut toml::Value, replacements
                 *text = normalize_text(text.clone(), replacements);
             }
         }
-        toml::Value::Integer(_) | toml::Value::Float(_) => {
-            if is_env_key(key) {
-                *value = toml::Value::String("<ENV>".to_string());
-            }
+        toml::Value::Integer(_) | toml::Value::Float(_) if is_env_key(key) => {
+            *value = toml::Value::String("<ENV>".to_string());
         }
+        toml::Value::Integer(_) | toml::Value::Float(_) => {}
         toml::Value::Array(items) => {
             for item in items {
                 normalize_toml_value(key, item, replacements);

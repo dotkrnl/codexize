@@ -48,11 +48,9 @@ pub(super) fn assigned_revise_task_ids(
     builder: &session_state::BuilderState,
     count: usize,
 ) -> Vec<u32> {
-    let mut next_id = builder.max_task_id() + 1;
     let mut ids = Vec::with_capacity(count);
-    for _ in 0..count {
+    for next_id in builder.max_task_id() + 1..builder.max_task_id() + 1 + count as u32 {
         ids.push(next_id);
-        next_id += 1;
     }
     ids
 }
@@ -86,16 +84,16 @@ pub(super) fn rewrite_tasks_for_revise(
         rewritten.push(inserted);
     }
 
-    let mut next_pending_id = assigned_ids
+    let next_pending_id = assigned_ids
         .iter()
         .copied()
         .max()
-        .unwrap_or_else(|| parsed.tasks.iter().map(|task| task.id).max().unwrap_or(0))
-        + 1;
-    for task in parsed.tasks[current_idx + 1..].iter().cloned() {
+        .unwrap_or_else(|| parsed.tasks.iter().map(|task| task.id).max().unwrap_or(0));
+    for (next_pending_id, task) in
+        ((next_pending_id + 1)..).zip(parsed.tasks[current_idx + 1..].iter().cloned())
+    {
         let mut renumbered = task;
         renumbered.id = next_pending_id;
-        next_pending_id += 1;
         rewritten.push(renumbered);
     }
 

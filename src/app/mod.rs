@@ -19,6 +19,7 @@ mod prompts;
 mod render;
 mod render_view_model;
 mod sheet;
+mod split;
 mod state;
 mod status_line;
 #[cfg(test)]
@@ -154,6 +155,8 @@ pub struct App {
     tail_detach_baseline: Option<usize>,
     body_inner_height: usize,
     body_inner_width: usize,
+    split_target: Option<split::SplitTarget>,
+    split_scroll_offset: usize,
     input_mode: bool,
     input_buffer: String,
     input_cursor: usize,

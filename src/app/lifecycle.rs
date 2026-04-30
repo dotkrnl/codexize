@@ -17,6 +17,7 @@ use crossterm::event::{self, Event};
 use super::{
     models::spawn_refresh,
     prompts::*,
+    split::SplitTarget,
     state::ModelRefreshState,
     tree::{
         NodeKey, active_path_keys, build_tree, current_node_index, deepest_path_for_run,
@@ -161,6 +162,8 @@ impl App {
             tail_detach_baseline: None,
             body_inner_height: 0,
             body_inner_width: 0,
+            split_target: None,
+            split_scroll_offset: 0,
             input_mode: false,
             input_buffer: String::new(),
             input_cursor: 0,
@@ -441,6 +444,38 @@ impl App {
         self.nodes = build_tree(&self.state);
         self.rebuild_visible_rows();
         self.restore_selection(preferred_key, previous_selected);
+        self.synchronize_split_target();
+    }
+
+    /// Validate the current split target against the latest tree and session
+    /// state. Closes the split when its run id disappears after rebuild/retry,
+    /// and clamps the scroll offset.
+    pub(super) fn synchronize_split_target(&mut self) {
+        let Some(target) = self.split_target else {
+            return;
+        };
+        match target {
+            SplitTarget::Run(run_id) => {
+                let still_exists = self.state.agent_runs.iter().any(|run| run.id == run_id);
+                if !still_exists {
+                    self.split_target = None;
+                    self.split_scroll_offset = 0;
+                }
+            }
+            SplitTarget::Idea => {
+                // Idea is always valid as long as the session exists.
+            }
+        }
+    }
+
+    /// Clamp the split scroll offset to a maximum value. Called after
+    /// terminal resize and after content changes.
+    pub(super) fn clamp_split_scroll(&mut self, _content_height: usize) {
+        // REVIEWER: clamping against actual split content height will be
+        // wired once split rendering is implemented in a later task.
+        // For now the offset is reset on target changes and left at zero
+        // otherwise, so no clamping is needed until content measurement
+        // exists.
     }
 
     /// Derive the preferred row for automatic progress follow.

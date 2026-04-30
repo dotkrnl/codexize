@@ -39,6 +39,8 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         tail_detach_baseline: None,
         body_inner_height: 20,
         body_inner_width: 80,
+        split_target: None,
+        split_scroll_offset: 0,
         input_mode: false,
         input_buffer: String::new(),
         input_cursor: 0,

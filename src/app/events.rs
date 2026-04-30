@@ -28,6 +28,38 @@ impl App {
         }
     }
 
+    pub(super) fn stop_running_agent(&mut self) {
+        let Some(run) = self
+            .running_run()
+            .or_else(|| {
+                self.state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.status == RunStatus::Running)
+            })
+            .cloned()
+        else {
+            return;
+        };
+
+        let run_id = run.id;
+        let marker = format!("agent_killed_by_user: run_id={run_id}");
+        let events_path = crate::state::session_dir(&self.state.session_id).join("events.toml");
+        if std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(&marker)) {
+            return;
+        }
+
+        let window_name = run.window_name.clone();
+        let _ = self.state.log_event(marker);
+
+        crate::app::prompts::cancel_run_label(&window_name);
+        self.push_status(
+            "Stopping agent...".to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
+    }
+
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;

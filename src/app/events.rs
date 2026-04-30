@@ -201,19 +201,19 @@ impl App {
 
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                if self.interactive_run_active() && key.code == KeyCode::Esc {
-                    self.palette.buffer.clear();
-                    self.palette.cursor = 0;
-                    false
-                } else if !self.interactive_run_active() {
-                    self.palette.close();
-                    false
-                } else {
+            KeyCode::Esc => {
+                self.palette.close();
+                false
+            }
+            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                if self.interactive_run_active() {
                     self.insert_palette_char(match key.code {
                         KeyCode::Char(c) => c,
                         _ => return false,
                     })
+                } else {
+                    self.palette.close();
+                    false
                 }
             }
             KeyCode::Enter => {

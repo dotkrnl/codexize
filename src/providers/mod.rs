@@ -13,4 +13,5 @@ pub(crate) use common::{fetch_json_response, run_provider_warmup};
 pub struct LiveModel {
     pub name: String,
     pub quota_percent: Option<u8>,
+    pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }

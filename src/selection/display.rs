@@ -125,6 +125,7 @@ mod tests {
             ],
             axis_provenance: std::collections::BTreeMap::new(),
             quota_percent: Some(quota),
+            quota_resets_at: None,
             display_order: 0,
             fallback_from: None,
         }

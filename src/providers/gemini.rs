@@ -54,6 +54,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         .map(|(name, quota_percent)| LiveModel {
             name,
             quota_percent,
+            quota_resets_at: None,
         })
         .collect())
 }

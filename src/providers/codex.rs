@@ -81,6 +81,7 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
         models.push(LiveModel {
             name: default_model.clone(),
             quota_percent: quota.remaining_min.map(percent_to_u8),
+            quota_resets_at: None,
         });
     }
 
@@ -88,6 +89,7 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
         models.push(LiveModel {
             name,
             quota_percent: quota.remaining_min.map(percent_to_u8),
+            quota_resets_at: None,
         });
     }
 

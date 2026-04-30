@@ -26,6 +26,7 @@ pub struct CachedModel {
     pub axes: Vec<(String, f64)>,
     pub axis_provenance: BTreeMap<String, String>,
     pub quota_percent: Option<u8>,
+    pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,
     /// Sibling whose ranking-API score was borrowed because this model
     /// has no entry yet. `None` for normal models.
@@ -58,6 +59,7 @@ mod tests {
             ],
             axis_provenance: BTreeMap::new(),
             quota_percent: Some(73),
+            quota_resets_at: None,
             display_order: 2,
             fallback_from: Some("gpt-5".to_string()),
         }

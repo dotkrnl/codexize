@@ -128,6 +128,7 @@ mod tests {
             axes: Vec::new(),
             axis_provenance: BTreeMap::new(),
             quota_percent: Some(80),
+            quota_resets_at: None,
             display_order: 0,
             fallback_from: None,
         }

@@ -6,8 +6,8 @@ use crate::{
     adapters::EffortLevel,
     selection::{self},
     state::{
-        self as session_state, MessageKind, PendingGuardDecision, Phase, PipelineItem,
-        PipelineItemStatus, RunRecord, RunStatus, SessionState,
+        self as session_state, Message, MessageKind, MessageSender, PendingGuardDecision, Phase,
+        PipelineItem, PipelineItemStatus, RunRecord, RunStatus, SessionState,
     },
 };
 
@@ -2580,6 +2580,151 @@ fn enter_switches_target_resets_scroll() {
 }
 
 #[test]
+fn split_new_target_clamps_to_tail_position() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-tail-default".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.body_inner_height = 9;
+        for idx in 0..10 {
+            app.messages.push(Message {
+                ts: chrono::Utc::now(),
+                run_id: 7,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: format!("line {idx}"),
+            });
+        }
+
+        app.open_split_target(super::split::SplitTarget::Run(7));
+        let content_height = app.current_split_content_height();
+        let expected_tail = crate::app::chat_widget_view_model::max_chat_scroll_offset(
+            content_height,
+            app.split_viewport_height(),
+        );
+        app.clamp_split_scroll(content_height);
+
+        assert_eq!(
+            app.split_scroll_offset, expected_tail,
+            "new run targets should open at the tail view, not the transcript top"
+        );
+    });
+}
+
+#[test]
+fn split_scroll_detach_preserves_offset_across_new_content() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-tail-detach".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.body_inner_height = 9;
+        for idx in 0..10 {
+            app.messages.push(Message {
+                ts: chrono::Utc::now(),
+                run_id: 7,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: format!("line {idx}"),
+            });
+        }
+        app.open_split_target(super::split::SplitTarget::Run(7));
+        let content_height = app.current_split_content_height();
+        let expected_tail = crate::app::chat_widget_view_model::max_chat_scroll_offset(
+            content_height,
+            app.split_viewport_height(),
+        );
+        app.clamp_split_scroll(content_height);
+
+        app.handle_key(key(crossterm::event::KeyCode::Up));
+        assert_eq!(
+            app.split_scroll_offset,
+            expected_tail.saturating_sub(1),
+            "Up should detach from the tail"
+        );
+
+        app.messages.push(Message {
+            ts: chrono::Utc::now(),
+            run_id: 7,
+            kind: MessageKind::Summary,
+            sender: MessageSender::System,
+            text: "line 10".to_string(),
+        });
+        app.clamp_split_scroll(app.current_split_content_height());
+
+        assert_eq!(
+            app.split_scroll_offset, 4,
+            "new transcript content must not yank a detached split viewport back toward the tail"
+        );
+    });
+}
+
+#[test]
+fn split_scroll_clamps_after_viewport_growth() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-tail-clamp-grow".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        app.body_inner_height = 9;
+        for idx in 0..15 {
+            app.messages.push(Message {
+                ts: chrono::Utc::now(),
+                run_id: 7,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: format!("line {idx}"),
+            });
+        }
+        app.open_split_target(super::split::SplitTarget::Run(7));
+        let content_height = app.current_split_content_height();
+        let expected_tail = crate::app::chat_widget_view_model::max_chat_scroll_offset(
+            content_height,
+            app.split_viewport_height(),
+        );
+        app.clamp_split_scroll(content_height);
+        app.handle_key(key(crossterm::event::KeyCode::Up));
+        app.handle_key(key(crossterm::event::KeyCode::Up));
+        assert_eq!(app.split_scroll_offset, expected_tail.saturating_sub(2));
+
+        app.body_inner_height = 18;
+        let clamped_tail = crate::app::chat_widget_view_model::max_chat_scroll_offset(
+            app.current_split_content_height(),
+            app.split_viewport_height(),
+        );
+        app.clamp_split_scroll(app.current_split_content_height());
+
+        assert_eq!(
+            app.split_scroll_offset, clamped_tail,
+            "viewport changes should clamp detached offsets into the new valid range"
+        );
+    });
+}
+
+#[test]
+fn split_open_space_does_not_toggle_tree_expansion() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-space-consumed".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = idle_app(state);
+        let bs_idx = row_index(&app, "Brainstorm");
+        app.selected = bs_idx;
+        let expanded_before = app.is_expanded(bs_idx);
+        app.open_split_target(super::split::SplitTarget::Run(7));
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(' ')));
+
+        assert_eq!(
+            app.is_expanded(bs_idx),
+            expanded_before,
+            "split-open transcript mode should consume Space before tree expansion logic"
+        );
+    });
+}
+
+#[test]
 fn esc_closes_split_when_open() {
     with_temp_root(|| {
         let mut app = idle_app(SessionState::new("split-esc".to_string()));
@@ -2645,5 +2790,50 @@ fn rebuild_preserves_idea_target() {
 
         assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
         assert_eq!(app.split_scroll_offset, 3);
+    });
+}
+
+#[test]
+fn split_follow_tail_reaches_latest_message_lines() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("split-tail-visible-latest".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        if let Some(run) = state.agent_runs.iter_mut().find(|run| run.id == 7) {
+            run.status = RunStatus::Done;
+            run.ended_at = Some(chrono::Utc::now());
+        }
+        let mut app = idle_app(state);
+        app.body_inner_height = 9;
+        app.body_inner_width = 80;
+        app.open_split_target(super::split::SplitTarget::Run(7));
+
+        for idx in 0..10 {
+            app.messages.push(Message {
+                ts: chrono::Utc::now(),
+                run_id: 7,
+                kind: MessageKind::Summary,
+                sender: MessageSender::System,
+                text: format!("line {idx}"),
+            });
+        }
+
+        app.clamp_split_scroll(app.current_split_content_height());
+        let content_height = app.current_split_content_height();
+        let window = crate::app::chat_widget_view_model::chat_scroll_window(
+            content_height,
+            app.split_viewport_height(),
+            app.split_scroll_offset,
+        )
+        .expect("scroll window");
+
+        assert_eq!(
+            window.visible_end, content_height,
+            "tail-follow should keep the newest transcript line in view"
+        );
+        assert!(
+            window.offset > 0,
+            "tail-follow should not reset new targets to the transcript top when content overflows"
+        );
     });
 }

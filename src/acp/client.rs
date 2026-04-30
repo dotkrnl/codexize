@@ -655,10 +655,40 @@ fn parse_update(value: &Value) -> ClientUpdate {
                 .and_then(Value::as_str)
                 .map(str::to_string),
         },
+        kind if is_tool_update(kind) => ClientUpdate::ToolCallBrief {
+            name: brief_tool_name(value),
+        },
         other => ClientUpdate::Unknown {
             kind: other.to_string(),
         },
     }
+}
+
+fn is_tool_update(kind: &str) -> bool {
+    kind.contains("tool")
+}
+
+fn brief_tool_name(value: &Value) -> String {
+    [
+        "/toolCall/name",
+        "/toolCall/title",
+        "/tool/name",
+        "/content/name",
+        "/content/toolName",
+        "/name",
+        "/toolName",
+    ]
+    .into_iter()
+    .find_map(|path| value.pointer(path).and_then(Value::as_str))
+    .map(|name| {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            "tool".to_string()
+        } else {
+            trimmed.chars().take(64).collect()
+        }
+    })
+    .unwrap_or_else(|| "tool".to_string())
 }
 
 fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
@@ -837,6 +867,45 @@ mod tests {
         let result =
             parse_prompt_result(json!({ "stopReason": "end_turn" })).expect("stop reason parsed");
         assert_eq!(result, PromptTurnOutcome::Finished);
+    }
+
+    #[test]
+    fn parse_tool_call_update_keeps_only_tool_name() {
+        let update = parse_update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCall": {
+                "name": "exec_command",
+                "arguments": {
+                    "cmd": "cargo test --workspace"
+                }
+            }
+        }));
+
+        assert_eq!(
+            update,
+            ClientUpdate::ToolCallBrief {
+                name: "exec_command".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tool_call_update_falls_back_to_generic_label() {
+        let update = parse_update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCall": {
+                "arguments": {
+                    "cmd": "cargo test --workspace"
+                }
+            }
+        }));
+
+        assert_eq!(
+            update,
+            ClientUpdate::ToolCallBrief {
+                name: "tool".to_string()
+            }
+        );
     }
 
     #[test]

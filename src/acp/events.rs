@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 pub enum ClientUpdate {
     AgentMessageText(String),
     AgentThoughtText(String),
+    ToolCallBrief { name: String },
     SessionInfoUpdate { title: Option<String> },
     PromptTurnFinished,
     PromptTurnFailed { message: String },
@@ -127,6 +128,11 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
             interactive,
             thought: true,
         })),
+        ClientUpdate::ToolCallBrief { name } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text: format!("tool: {name}\n\n"),
+            interactive,
+            thought: true,
+        })),
         ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
             AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
         }),
@@ -168,6 +174,25 @@ mod tests {
             Some(AcpRuntimeEvent::Text(AcpTextEvent {
                 text: "internal".to_string(),
                 interactive: true,
+                thought: true,
+            }))
+        );
+    }
+
+    #[test]
+    fn tool_calls_become_brief_thought_events() {
+        let event = translate_update(
+            ClientUpdate::ToolCallBrief {
+                name: "exec_command".to_string(),
+            },
+            false,
+        );
+
+        assert_eq!(
+            event,
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text: "tool: exec_command\n\n".to_string(),
+                interactive: false,
                 thought: true,
             }))
         );

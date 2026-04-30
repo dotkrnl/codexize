@@ -87,17 +87,117 @@ impl App {
         }
         self.split_target = Some(target);
         self.split_scroll_offset = 0;
+        self.split_follow_tail = true;
     }
 
     /// Close the split pane and return focus to the tree.
     pub(super) fn close_split(&mut self) {
         self.split_target = None;
         self.split_scroll_offset = 0;
+        self.split_follow_tail = true;
     }
 
     /// Returns `true` when the split is currently open.
     pub(super) fn is_split_open(&self) -> bool {
         self.split_target.is_some()
+    }
+
+    fn scroll_split_by_lines(&mut self, delta: isize) {
+        let content_height = self.current_split_content_height();
+        if content_height == 0 {
+            self.split_scroll_offset = 0;
+            self.split_follow_tail = true;
+            return;
+        }
+
+        if delta < 0 {
+            if self.split_follow_tail {
+                self.split_follow_tail = false;
+            }
+            self.split_scroll_offset = self
+                .split_scroll_offset
+                .saturating_sub(delta.unsigned_abs());
+        } else if delta > 0 {
+            if self.split_follow_tail {
+                return;
+            }
+            self.split_scroll_offset = self.split_scroll_offset.saturating_add(delta as usize);
+        } else {
+            return;
+        }
+
+        self.clamp_split_scroll(content_height);
+    }
+
+    fn scroll_split_by_page(&mut self, delta: isize) {
+        let step = self.split_viewport_height().saturating_sub(1).max(1) as isize;
+        self.scroll_split_by_lines(delta.saturating_mul(step));
+    }
+
+    fn handle_split_key(&mut self, key: KeyEvent) -> bool {
+        if self.split_owns_input() {
+            self.input_mode = true;
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => return self.handle_input_key(key),
+                KeyCode::Up => {
+                    self.scroll_split_by_lines(-1);
+                    return false;
+                }
+                KeyCode::Down => {
+                    self.scroll_split_by_lines(1);
+                    return false;
+                }
+                KeyCode::PageUp => {
+                    self.scroll_split_by_page(-1);
+                    return false;
+                }
+                KeyCode::PageDown => {
+                    self.scroll_split_by_page(1);
+                    return false;
+                }
+                _ => {
+                    self.handle_input_key(key);
+                    return false;
+                }
+            }
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.close_split();
+                false
+            }
+            KeyCode::Char('q') | KeyCode::Char('Q') => false,
+            KeyCode::Char(':') => {
+                self.palette.open();
+                false
+            }
+            KeyCode::Up => {
+                self.scroll_split_by_lines(-1);
+                false
+            }
+            KeyCode::Down => {
+                self.scroll_split_by_lines(1);
+                false
+            }
+            KeyCode::PageUp => {
+                self.scroll_split_by_page(-1);
+                false
+            }
+            KeyCode::PageDown => {
+                self.scroll_split_by_page(1);
+                false
+            }
+            KeyCode::Enter
+            | KeyCode::Char(_)
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Home
+            | KeyCode::End => false,
+            _ => false,
+        }
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -117,6 +217,25 @@ impl App {
 
         if self.palette.open {
             return self.handle_palette_key(key);
+        }
+
+        if let Some(modal) = self.active_modal() {
+            if matches!(
+                modal,
+                ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused
+            ) && key.code == KeyCode::Char(':')
+            {
+                // Approval pauses render as modals, but YOLO must be toggleable
+                // while paused so the gate can resolve on the next loop tick.
+                self.palette.open();
+                return false;
+            }
+            self.confirm_back = false;
+            return self.handle_modal_key(modal, key);
+        }
+
+        if self.is_split_open() {
+            return self.handle_split_key(key);
         }
 
         if self.interactive_run_active() {
@@ -141,21 +260,6 @@ impl App {
 
         if self.input_mode {
             return self.handle_input_key(key);
-        }
-
-        if let Some(modal) = self.active_modal() {
-            if matches!(
-                modal,
-                ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused
-            ) && key.code == KeyCode::Char(':')
-            {
-                // Approval pauses render as modals, but YOLO must be toggleable
-                // while paused so the gate can resolve on the next loop tick.
-                self.palette.open();
-                return false;
-            }
-            self.confirm_back = false;
-            return self.handle_modal_key(modal, key);
         }
 
         if self.confirm_back && key.code != KeyCode::Char(':') {
@@ -192,10 +296,6 @@ impl App {
                 }
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
-                if self.is_split_open() {
-                    // Split mode consumes q/Q to prevent accidental quit.
-                    return false;
-                }
                 if self.has_running_agent() {
                     self.push_status(
                         "agent running — use :quit to exit".to_string(),
@@ -212,19 +312,11 @@ impl App {
                 false
             }
             KeyCode::Up => {
-                if self.is_split_open() {
-                    self.split_scroll_offset = self.split_scroll_offset.saturating_sub(1);
-                } else {
-                    self.scroll_or_move_focus(-1);
-                }
+                self.scroll_or_move_focus(-1);
                 false
             }
             KeyCode::Down => {
-                if self.is_split_open() {
-                    self.split_scroll_offset = self.split_scroll_offset.saturating_add(1);
-                } else {
-                    self.scroll_or_move_focus(1);
-                }
+                self.scroll_or_move_focus(1);
                 false
             }
             KeyCode::Char(' ') => {
@@ -241,23 +333,13 @@ impl App {
                 false
             }
             KeyCode::PageUp => {
-                if self.is_split_open() {
-                    let step = self.body_inner_height.saturating_sub(1).max(1);
-                    self.split_scroll_offset = self.split_scroll_offset.saturating_sub(step);
-                } else {
-                    let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                    self.scroll_viewport(-step, true);
-                }
+                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                self.scroll_viewport(-step, true);
                 false
             }
             KeyCode::PageDown => {
-                if self.is_split_open() {
-                    let step = self.body_inner_height.saturating_sub(1).max(1);
-                    self.split_scroll_offset = self.split_scroll_offset.saturating_add(step);
-                } else {
-                    let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                    self.scroll_viewport(step, true);
-                }
+                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                self.scroll_viewport(step, true);
                 false
             }
             _ => false,

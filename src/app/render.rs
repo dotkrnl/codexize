@@ -80,10 +80,7 @@ impl App {
 
         let caps = self.focus_caps();
         let split_open = self.is_split_open();
-        let split_owns_input = split_open
-            && (matches!(self.split_target, Some(super::split::SplitTarget::Idea))
-                && self.state.current_phase == Phase::IdeaInput
-                || self.interactive_run_waiting_for_input());
+        let split_owns_input = self.split_owns_input();
 
         let input_surface_active = !split_owns_input
             && (if self.interactive_run_active() {
@@ -135,8 +132,10 @@ impl App {
 
         self.body_inner_height = body_h as usize;
         self.body_inner_width = width as usize;
+        self.split_fullscreen = split_open && term_h <= super::RESPONSIVE_HEIGHT_THRESHOLD;
         self.latch_visible_expansions();
         self.clamp_viewport();
+        self.clamp_split_scroll(self.current_split_content_height());
         self.live_summary_spinner_visible =
             self.live_summary_spinner_visible_for_height(body_h as usize);
 
@@ -160,7 +159,7 @@ impl App {
         if body_h > 0 {
             let body_area = ratatui::layout::Rect::new(area.x, y, width, body_h);
             if split_open {
-                if term_h <= super::RESPONSIVE_HEIGHT_THRESHOLD {
+                if self.split_fullscreen {
                     frame.render_widget(SplitWidget { app: self }, body_area);
                 } else {
                     let tree_h = body_h / 3;

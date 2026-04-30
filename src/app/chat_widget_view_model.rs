@@ -18,11 +18,7 @@ pub(super) fn chat_scroll_window(
     }
 
     let has_overflow = total_lines > available_height;
-    let max_offset = if has_overflow {
-        total_lines.saturating_sub(available_height.saturating_sub(1))
-    } else {
-        0
-    };
+    let max_offset = compute_max_chat_scroll_offset(total_lines, available_height, has_overflow);
     let offset = scroll_offset.min(max_offset);
 
     let show_above_indicator = offset > 0;
@@ -41,6 +37,26 @@ pub(super) fn chat_scroll_window(
         above_count: offset,
         below_count: total_lines.saturating_sub(visible_end),
     })
+}
+
+pub(super) fn max_chat_scroll_offset(total_lines: usize, available_height: usize) -> usize {
+    compute_max_chat_scroll_offset(
+        total_lines,
+        available_height,
+        total_lines > available_height,
+    )
+}
+
+fn compute_max_chat_scroll_offset(
+    total_lines: usize,
+    available_height: usize,
+    has_overflow: bool,
+) -> usize {
+    if has_overflow {
+        total_lines.saturating_sub(available_height.saturating_sub(1))
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

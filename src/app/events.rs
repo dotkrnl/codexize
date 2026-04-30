@@ -43,11 +43,18 @@ impl App {
                 return false;
             }
             if self.interactive_run_waiting_for_input() {
-                self.input_mode = true;
-                return self.handle_input_key(key);
+                let text_entry_key = matches!(key.code, KeyCode::Enter)
+                    || (matches!(key.code, KeyCode::Char(_))
+                        && !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT));
+                if self.input_mode || text_entry_key {
+                    self.input_mode = true;
+                    return self.handle_input_key(key);
+                }
+            } else {
+                self.input_mode = false;
             }
-            self.input_mode = false;
-            return false;
         }
 
         if self.input_mode {

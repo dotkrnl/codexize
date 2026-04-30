@@ -1788,6 +1788,29 @@ fn interactive_palette_closes_when_colon_suffix_is_removed() {
 }
 
 #[test]
+fn interactive_run_arrows_navigate_when_input_is_not_active() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-run-arrows".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+        app.input_mode = false;
+        let start = app.selected;
+
+        app.handle_key(key(crossterm::event::KeyCode::Down));
+
+        assert!(
+            app.selected > start,
+            "Down should move focus while the textbox is inactive"
+        );
+        assert!(!app.input_mode);
+    });
+}
+
+#[test]
 fn pending_guard_modal_quit_keys_follow_quit_path() {
     with_temp_root(|| {
         let mut app = mk_app(make_pending_guard_state("pending-guard-key-quit", 32));

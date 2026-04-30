@@ -686,3 +686,15 @@ fn split_open_exact_string() {
     assert!(!text.contains("move"));
     assert!(!text.contains("quit"));
 }
+
+#[test]
+fn split_owned_input_advertises_submit_and_close() {
+    let caps = FocusCaps::default();
+    let line = keymap(Phase::IdeaInput, None, caps, true, true, 200);
+    let text = line_text(&line);
+
+    assert!(text.contains("Enter submit"));
+    assert!(text.contains("Esc close"));
+    assert!(!text.contains("Esc cancel"));
+    assert!(!text.contains("Esc quit"));
+}

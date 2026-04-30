@@ -188,6 +188,23 @@ fn input_bindings() -> Vec<KeyBinding> {
     ]
 }
 
+fn split_input_bindings() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding {
+            glyph: "Esc",
+            action: "close",
+            is_primary: false,
+            capability: None,
+        },
+        KeyBinding {
+            glyph: "Enter",
+            action: "submit",
+            is_primary: true,
+            capability: None,
+        },
+    ]
+}
+
 /// Split mode bindings (when not in input mode).
 fn split_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
     let nav = vec![
@@ -396,6 +413,10 @@ pub fn keymap(
 
     if width == 0 {
         return Line::from(vec![]);
+    }
+
+    if input_mode && split_open {
+        return render_keymap_line(&[&split_input_bindings()], &caps_fn, width);
     }
 
     if input_mode {

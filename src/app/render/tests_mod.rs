@@ -1466,6 +1466,45 @@ fn interactive_run_split_height_uses_same_filter_as_rendering() {
 }
 
 #[test]
+fn interactive_run_split_height_excludes_running_tail_line() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_text(1, "visible model answer")],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+    app.body_inner_height = 30;
+    app.body_inner_width = 80;
+    app.selected = 2;
+    app.live_summary_cached_text = "unique streaming tail | should stay out of split".to_string();
+
+    let run = app
+        .state
+        .agent_runs
+        .iter()
+        .find(|run| run.id == 1)
+        .expect("run");
+    assert!(
+        app.split_running_tail_line(run).is_some(),
+        "precondition: ordinary running split tail would be available"
+    );
+
+    let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
+    let expected = crate::app::chat_widget::message_lines(
+        &[agent_text(1, "visible model answer")],
+        run,
+        &local_offset,
+        None,
+        app.body_inner_width,
+    )
+    .len();
+
+    assert_eq!(app.current_split_content_height(), expected);
+}
+
+#[test]
 fn split_run_renders_separator_between_tree_and_transcript() {
     let mut app = test_app(
         nested_transcript_tree(),

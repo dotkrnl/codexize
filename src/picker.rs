@@ -149,7 +149,7 @@ impl SessionPicker {
         }
 
         match key.code {
-            KeyCode::Esc => Ok(KeyAction::Quit),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => Ok(KeyAction::Quit),
             KeyCode::Char(':') => {
                 self.palette.open();
                 self.status_line.clear();
@@ -254,7 +254,7 @@ impl SessionPicker {
                 self.confirm_modal = None;
                 Ok(KeyAction::Continue)
             }
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.confirm_modal = None;
                 Ok(KeyAction::Continue)
             }
@@ -272,7 +272,7 @@ impl SessionPicker {
 
     fn handle_palette_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
         match key.code {
-            KeyCode::Esc => {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.palette.close();
                 Ok(KeyAction::Continue)
             }

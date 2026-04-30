@@ -212,7 +212,7 @@ fn direct_n_key_enters_input_mode_outside_palette() {
 }
 
 #[test]
-fn direct_a_q_keys_remain_palette_only() {
+fn direct_a_key_remains_palette_only_and_q_quits() {
     let mut picker = test_picker("", 0);
     picker.input_mode = false;
 
@@ -234,8 +234,51 @@ fn direct_a_q_keys_remain_palette_only() {
                 crossterm::event::KeyModifiers::NONE,
             ))
             .unwrap(),
+        KeyAction::Quit
+    ));
+}
+
+#[test]
+fn picker_quit_and_cancel_keys_have_escape_q_parity() {
+    let mut picker = test_picker("", 0);
+    picker.input_mode = false;
+
+    assert!(matches!(
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char('q'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap(),
+        KeyAction::Quit
+    ));
+
+    picker.palette.open();
+    assert!(matches!(
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char('q'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap(),
         KeyAction::Continue
     ));
+    assert!(!picker.palette.open, "q should close palette like Esc");
+
+    picker.confirm_modal = Some(ConfirmKind::Archive);
+    assert!(matches!(
+        picker
+            .handle_key(KeyEvent::new(
+                KeyCode::Char('q'),
+                crossterm::event::KeyModifiers::NONE,
+            ))
+            .unwrap(),
+        KeyAction::Continue
+    ));
+    assert!(
+        picker.confirm_modal.is_none(),
+        "q should dismiss confirm modal like Esc"
+    );
 }
 
 #[test]

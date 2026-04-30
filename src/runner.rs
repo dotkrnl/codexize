@@ -430,6 +430,10 @@ impl AcpTextStream {
     }
 
     fn persist_ready(&mut self, launch: &ManagedAcpLaunch, text: String, kind: MessageKind) {
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
         if let Some(ts) = self.live_ts.take()
             && update_agent_text_block(launch, ts, &text)
         {
@@ -439,6 +443,10 @@ impl AcpTextStream {
     }
 
     fn persist_live(&mut self, launch: &ManagedAcpLaunch, text: &str, kind: MessageKind) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
         if let Some(ts) = self.live_ts
             && update_agent_text_block(launch, ts, text)
         {

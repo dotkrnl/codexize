@@ -669,6 +669,10 @@ fn is_tool_update(kind: &str) -> bool {
 }
 
 fn brief_tool_name(value: &Value) -> String {
+    if let Some(shell) = shell_tool_summary(value) {
+        return shell;
+    }
+
     [
         "/toolCall/name",
         "/toolCall/title",
@@ -689,6 +693,66 @@ fn brief_tool_name(value: &Value) -> String {
         }
     })
     .unwrap_or_else(|| "tool".to_string())
+}
+
+fn shell_tool_summary(value: &Value) -> Option<String> {
+    let name = [
+        "/toolCall/name",
+        "/tool/name",
+        "/content/name",
+        "/content/toolName",
+        "/name",
+        "/toolName",
+    ]
+    .into_iter()
+    .find_map(|path| value.pointer(path).and_then(Value::as_str))
+    .unwrap_or_default();
+    if !matches!(
+        name,
+        "exec_command" | "bash" | "shell" | "run_shell_command" | "terminal"
+    ) {
+        return None;
+    }
+
+    let cmd = [
+        "/toolCall/arguments/cmd",
+        "/toolCall/arguments/command",
+        "/tool/arguments/cmd",
+        "/tool/arguments/command",
+        "/content/arguments/cmd",
+        "/content/arguments/command",
+        "/arguments/cmd",
+        "/arguments/command",
+    ]
+    .into_iter()
+    .find_map(|path| value.pointer(path).and_then(Value::as_str))?;
+    let detail = shell_command_detail(cmd);
+    if detail.is_empty() {
+        Some("bash".to_string())
+    } else {
+        Some(format!("bash ({detail})"))
+    }
+}
+
+fn shell_command_detail(cmd: &str) -> String {
+    let mut words = cmd.split_whitespace();
+    let Some(first) = words.next() else {
+        return String::new();
+    };
+    match first {
+        "cat" => "cat file".to_string(),
+        "sed" => "sed file".to_string(),
+        "rg" => "rg search".to_string(),
+        "cargo" => words
+            .next()
+            .map(|subcommand| format!("cargo {subcommand}"))
+            .unwrap_or_else(|| "cargo".to_string()),
+        "git" => words
+            .next()
+            .map(|subcommand| format!("git {subcommand}"))
+            .unwrap_or_else(|| "git".to_string()),
+        other => other.chars().take(48).collect(),
+    }
 }
 
 fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
@@ -870,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_tool_call_update_keeps_only_tool_name() {
+    fn parse_tool_call_update_summarizes_shell_command_when_available() {
         let update = parse_update(&json!({
             "sessionUpdate": "tool_call",
             "toolCall": {
@@ -884,7 +948,27 @@ mod tests {
         assert_eq!(
             update,
             ClientUpdate::ToolCallBrief {
-                name: "exec_command".to_string()
+                name: "bash (cargo test)".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_shell_tool_call_update_summarizes_command() {
+        let update = parse_update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCall": {
+                "name": "exec_command",
+                "arguments": {
+                    "cmd": "cat src/main.rs"
+                }
+            }
+        }));
+
+        assert_eq!(
+            update,
+            ClientUpdate::ToolCallBrief {
+                name: "bash (cat file)".to_string()
             }
         );
     }

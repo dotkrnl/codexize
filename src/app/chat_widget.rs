@@ -271,17 +271,18 @@ fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'
     lines
 }
 
-fn render_agent_markdown(text: &str, content_width: usize) -> Vec<Vec<Span<'static>>> {
+fn render_agent_markdown(
+    text: &str,
+    content_width: usize,
+    base_style: Style,
+) -> Vec<Vec<Span<'static>>> {
     if content_width == 0 {
         return Vec::new();
     }
 
     let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
-    let base_style = Style::default().fg(Color::White);
     let code_style = Style::default().fg(Color::Cyan);
-    let heading_style = Style::default()
-        .fg(Color::White)
-        .add_modifier(Modifier::BOLD);
+    let heading_style = base_style.add_modifier(Modifier::BOLD);
     let mut style_stack = vec![base_style];
     let mut lines: Vec<Vec<Span<'static>>> = Vec::new();
     let mut current: Vec<Span<'static>> = Vec::new();
@@ -404,6 +405,31 @@ fn render_agent_markdown(text: &str, content_width: usize) -> Vec<Vec<Span<'stat
 
 struct RenderedLine {
     spans: Vec<Span<'static>>,
+}
+
+fn push_blank_line_if_needed(lines: &mut Vec<RenderedLine>) {
+    if lines
+        .last()
+        .is_none_or(|line| !line.spans.iter().all(|span| span.content.is_empty()))
+    {
+        lines.push(RenderedLine { spans: Vec::new() });
+    }
+}
+
+fn capitalize_first_span(spans: &[Span<'static>]) -> Vec<Span<'static>> {
+    let mut capitalized = spans.to_vec();
+    for span in &mut capitalized {
+        if span.content.is_empty() {
+            continue;
+        }
+        let mut chars = span.content.chars();
+        if let Some(first) = chars.next() {
+            let text = first.to_uppercase().collect::<String>() + chars.as_str();
+            span.content = text.into();
+        }
+        break;
+    }
+    capitalized
 }
 
 /// Render an agent run's transcript as a list of lines.
@@ -532,8 +558,19 @@ fn render_messages(
         }
 
         let hints = kind_to_hints(msg.kind, run.status);
-        let markdown_lines = if msg.kind == MessageKind::AgentText {
-            render_agent_markdown(&msg.text, content_width)
+        let markdown_style = if hints.is_dim {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let renders_markdown =
+            matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
+        let is_interactive_acp_output = run.modes.interactive && renders_markdown;
+        if is_interactive_acp_output {
+            push_blank_line_if_needed(&mut lines);
+        }
+        let markdown_lines = if renders_markdown {
+            render_agent_markdown(&msg.text, content_width, markdown_style)
         } else {
             wrap_text(&msg.text, content_width)
                 .into_iter()
@@ -546,9 +583,16 @@ fn render_messages(
             let first_line =
                 format_historical_message(&ts_str, sym.symbol, &first_text, sym.color, hints);
             let mut first_spans = first_line.spans;
-            if msg.kind == MessageKind::AgentText && first_spans.len() >= 2 {
+            if renders_markdown && first_spans.len() >= 2 {
                 first_spans.truncate(2);
-                first_spans.extend(first.iter().cloned());
+                if is_interactive_acp_output {
+                    first_spans.push(Span::raw("  "));
+                }
+                if msg.kind == MessageKind::AgentThought {
+                    first_spans.extend(capitalize_first_span(first));
+                } else {
+                    first_spans.extend(first.iter().cloned());
+                }
             }
             lines.push(RenderedLine { spans: first_spans });
 
@@ -564,8 +608,12 @@ fn render_messages(
                 Style::default().fg(Color::White)
             };
             for chunk in rest {
-                if msg.kind == MessageKind::AgentText {
-                    let mut spans = vec![Span::raw(indent.clone())];
+                if renders_markdown {
+                    let mut spans = vec![Span::raw(if is_interactive_acp_output {
+                        format!("{indent}  ")
+                    } else {
+                        indent.clone()
+                    })];
                     spans.extend(chunk.iter().cloned());
                     lines.push(RenderedLine { spans });
                     continue;
@@ -580,6 +628,9 @@ fn render_messages(
             lines.push(RenderedLine {
                 spans: first_line.spans,
             });
+        }
+        if is_interactive_acp_output {
+            push_blank_line_if_needed(&mut lines);
         }
     }
 
@@ -892,6 +943,64 @@ mod tests {
                     && span.style.fg == Some(Color::DarkGray)),
             "thinking continuation should keep thinking color: {:?}",
             lines[1].spans
+        );
+    }
+
+    #[test]
+    fn thinking_text_renders_markdown_without_raw_markers() {
+        let msgs = vec![make_msg(
+            MessageKind::AgentThought,
+            "Thinking with **bold text** and `code`.",
+        )];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let text = line_text(&lines[0]);
+
+        assert!(text.contains("Thinking with bold text and code."));
+        assert!(!text.contains("**"));
+        assert!(!text.contains('`'));
+        assert!(
+            lines[0].spans.iter().any(|span| span.content == "bold text"
+                && span.style.fg == Some(Color::DarkGray)
+                && span.style.add_modifier.contains(Modifier::BOLD)),
+            "thinking markdown should keep dim color while applying bold: {:?}",
+            lines[0].spans
+        );
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content == "code" && span.style.fg == Some(Color::Cyan)),
+            "thinking inline code should be highlighted: {:?}",
+            lines[0].spans
+        );
+    }
+
+    #[test]
+    fn interactive_acp_agent_outputs_get_padding_and_extra_indent() {
+        let msgs = vec![
+            make_msg(MessageKind::UserInput, "please continue"),
+            make_msg(MessageKind::AgentThought, "thinking"),
+            make_msg(MessageKind::AgentText, "answer"),
+        ];
+        let mut run = make_run(RunStatus::Running);
+        run.modes.interactive = true;
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert!(texts[0].contains("› please continue"));
+        assert_eq!(texts[1], "");
+        assert!(texts[2].contains("·   Thinking"), "{texts:?}");
+        assert_eq!(texts[3], "");
+        assert!(texts[4].contains("▸   answer"), "{texts:?}");
+        assert_eq!(texts[5], "");
+        assert!(
+            texts
+                .windows(2)
+                .all(|pair| !(pair[0].is_empty() && pair[1].is_empty())),
+            "ACP padding should never create consecutive blank lines: {texts:?}"
         );
     }
 

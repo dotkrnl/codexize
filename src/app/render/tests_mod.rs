@@ -137,6 +137,16 @@ fn agent_thought(run_id: u64, text: &str) -> Message {
     }
 }
 
+fn user_input(run_id: u64, text: &str) -> Message {
+    Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind: MessageKind::UserInput,
+        sender: MessageSender::System,
+        text: text.to_string(),
+    }
+}
+
 // model_strip_* full-table rendering tests have moved to
 // src/app/models_area.rs and target the new responsive_models_area
 // entry point. The underlying model_strip / model_strip_height /
@@ -307,6 +317,22 @@ fn interactive_agent_text_is_always_visible() {
         lines
             .iter()
             .any(|line| line.contains("live interactive text"))
+    );
+}
+
+#[test]
+fn user_input_messages_are_visible_with_distinct_icon() {
+    let app = test_app(
+        nested_transcript_tree(),
+        vec![run_record(1, RunStatus::Running)],
+        vec![user_input(1, "please continue")],
+    );
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        lines.iter().any(|line| line.contains("› please continue")),
+        "user input should render in the transcript: {lines:#?}"
     );
 }
 
@@ -830,6 +856,45 @@ fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
         "leaf tail should fall back to phase label when live-summary is empty"
     );
     assert!(!lines.iter().any(|l| l.contains("working...")));
+}
+
+#[test]
+fn running_tail_stops_after_ten_seconds_without_transcript_activity() {
+    let mut app = test_app(
+        leaf_only_tree(),
+        vec![run_record(7, RunStatus::Running)],
+        Vec::new(),
+    );
+    app.agent_last_change = Some(Instant::now() - Duration::from_secs(11));
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("⠋") || line.contains("⠙")),
+        "stalled runs should not keep spinning: {lines:#?}"
+    );
+    assert!(!app.live_summary_spinner_visible_for_height(8));
+}
+
+#[test]
+fn running_tail_spins_when_transcript_activity_is_recent() {
+    let mut app = test_app(
+        leaf_only_tree(),
+        vec![run_record(7, RunStatus::Running)],
+        Vec::new(),
+    );
+    app.agent_last_change = Some(Instant::now() - Duration::from_secs(9));
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("⠋") || line.contains("⠙")),
+        "recent transcript activity should keep the spinner visible: {lines:#?}"
+    );
 }
 
 #[test]

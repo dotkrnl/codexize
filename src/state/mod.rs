@@ -102,6 +102,7 @@ pub struct RunRecord {
 pub enum MessageKind {
     Started,
     Brief,
+    UserInput,
     AgentText,
     AgentThought,
     Summary,

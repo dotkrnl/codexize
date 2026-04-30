@@ -502,6 +502,7 @@ fn test_noninteractive_text_filter_only_hides_agent_text() {
     assert!(MessageKind::AgentText.visible_with_agent_text_filter(true));
     assert!(!MessageKind::AgentThought.visible_with_filters(true, false));
     assert!(MessageKind::AgentThought.visible_with_filters(false, true));
+    assert!(MessageKind::UserInput.visible_with_filters(false, false));
     assert!(MessageKind::Started.visible_with_agent_text_filter(false));
     assert!(MessageKind::Summary.visible_with_agent_text_filter(false));
     assert!(MessageKind::SummaryWarn.visible_with_agent_text_filter(false));

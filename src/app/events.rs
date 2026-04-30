@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::state::{NodeStatus, Phase, RunStatus};
+use crate::state::{Message, MessageKind, MessageSender, NodeStatus, Phase, RunStatus};
 
 use super::palette::{self, PaletteCommand};
 use super::status_line::Severity;
@@ -427,10 +427,32 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
+        let Some(run) = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .cloned()
+        else {
             return;
         };
-        if !crate::runner::send_run_label_input(&run.window_name, input) {
+        if crate::runner::send_run_label_input(&run.window_name, input.clone()) {
+            let message = Message {
+                ts: chrono::Utc::now(),
+                run_id,
+                kind: MessageKind::UserInput,
+                sender: MessageSender::System,
+                text: input,
+            };
+            if let Err(err) = self.state.append_message(&message) {
+                let _ = self.state.log_event(format!(
+                    "failed to append user input for run {run_id}: {err}"
+                ));
+            } else {
+                self.messages.push(message);
+                self.agent_last_change = Some(std::time::Instant::now());
+            }
+        } else {
             self.push_status(
                 "interactive agent is not ready for input".to_string(),
                 Severity::Warn,

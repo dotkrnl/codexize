@@ -124,6 +124,19 @@ fn agent_text(run_id: u64, text: &str) -> Message {
     }
 }
 
+fn agent_thought(run_id: u64, text: &str) -> Message {
+    Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind: MessageKind::AgentThought,
+        sender: MessageSender::Agent {
+            model: "model".to_string(),
+            vendor: "vendor".to_string(),
+        },
+        text: text.to_string(),
+    }
+}
+
 // model_strip_* full-table rendering tests have moved to
 // src/app/models_area.rs and target the new responsive_models_area
 // entry point. The underlying model_strip / model_strip_height /
@@ -295,6 +308,24 @@ fn interactive_agent_text_is_always_visible() {
             .iter()
             .any(|line| line.contains("Live interactive text"))
     );
+}
+
+#[test]
+fn thinking_text_is_visible_only_in_verbose_mode() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_thought(1, "internal chain")],
+    );
+
+    let lines = render_lines(&app, 8);
+    assert!(!lines.iter().any(|line| line.contains("Internal chain")));
+
+    app.state.show_thinking_texts = true;
+    let lines = render_lines(&app, 8);
+    assert!(lines.iter().any(|line| line.contains("Internal chain")));
 }
 
 #[test]
@@ -1026,14 +1057,14 @@ fn palette_overlay_grows_beyond_two_rows_when_room() {
 
 #[test]
 fn interactive_run_shows_input_sheet_without_palette_overlay() {
-    let mut run = run_record(7, RunStatus::Running);
+    let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
         nested_transcript_tree(),
         vec![run],
-        vec![message(7, "waiting")],
+        vec![message(1, "waiting")],
     );
-    app.current_run_id = Some(7);
+    app.current_run_id = Some(1);
     app.state.current_phase = Phase::BrainstormRunning;
 
     let lines = render_full_frame(&mut app, 80, 24);
@@ -1051,14 +1082,14 @@ fn interactive_run_shows_input_sheet_without_palette_overlay() {
 
 #[test]
 fn interactive_run_input_sheet_uses_agent_placeholder() {
-    let mut run = run_record(7, RunStatus::Running);
+    let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
         nested_transcript_tree(),
         vec![run],
-        vec![message(7, "waiting")],
+        vec![message(1, "waiting")],
     );
-    app.current_run_id = Some(7);
+    app.current_run_id = Some(1);
     app.state.current_phase = Phase::BrainstormRunning;
 
     let lines = render_full_frame(&mut app, 80, 24);
@@ -1071,6 +1102,12 @@ fn interactive_run_input_sheet_uses_agent_placeholder() {
     assert!(
         !text.contains("describe what you want to build"),
         "old placeholder should not render: {text}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("> ▌type to agents...")),
+        "prompt and placeholder should render on the same line: {lines:#?}"
     );
 }
 
@@ -1093,6 +1130,33 @@ fn interactive_run_input_sheet_does_not_render_duplicate_separator_rule() {
     assert_eq!(
         rule_rows, 1,
         "only the app chrome bottom rule should separate body from input sheet: {lines:#?}"
+    );
+}
+
+#[test]
+fn interactive_waiting_for_input_hides_running_spinner_tail() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_text(1, "Do you approve?")],
+    );
+    app.current_run_id = Some(1);
+    app.input_mode = true;
+    app.run_launched = true;
+    app.state.current_phase = Phase::BrainstormRunning;
+
+    let lines = render_full_frame(&mut app, 80, 24);
+    let text = lines.join("\n");
+
+    assert!(
+        text.contains("Do you approve?"),
+        "interactive response should render: {lines:#?}"
+    );
+    assert!(
+        !text.contains("⠋") && !text.contains("⠙"),
+        "interactive waiting state should not show spinner tail: {lines:#?}"
     );
 }
 

@@ -323,7 +323,7 @@ fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, Stri
         .map(|run| (run.id, run.model.clone(), run.vendor.clone()))
 }
 
-fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String) {
+fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String, kind: MessageKind) {
     if text.is_empty() {
         return;
     }
@@ -351,7 +351,7 @@ fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String) {
     let msg = Message {
         ts: chrono::Utc::now(),
         run_id,
-        kind: MessageKind::AgentText,
+        kind,
         sender: MessageSender::Agent { model, vendor },
         text,
     };
@@ -365,13 +365,13 @@ fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String) {
 
 fn flush_agent_text_ready(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
     while let Some(text) = accumulator.next_ready() {
-        persist_agent_text_block(launch, text);
+        persist_agent_text_block(launch, text, MessageKind::AgentText);
     }
 }
 
 fn flush_agent_text_turn(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
     while let Some(text) = accumulator.finish_prompt_turn() {
-        persist_agent_text_block(launch, text);
+        persist_agent_text_block(launch, text, MessageKind::AgentText);
     }
 }
 
@@ -468,10 +468,14 @@ fn run_managed_acp_launch(
             }
             Some(AcpRuntimeEvent::Text(text_event)) => {
                 let text = text_event.text;
-                if let Some(block) = agent_text.push(&text) {
-                    persist_agent_text_block(&launch, block);
+                if text_event.thought {
+                    persist_agent_text_block(&launch, text, MessageKind::AgentThought);
+                } else if let Some(block) = agent_text.push(&text) {
+                    persist_agent_text_block(&launch, block, MessageKind::AgentText);
+                    flush_agent_text_ready(&launch, &mut agent_text);
+                } else {
+                    flush_agent_text_ready(&launch, &mut agent_text);
                 }
-                flush_agent_text_ready(&launch, &mut agent_text);
                 thread::sleep(ACP_POLL_INTERVAL)
             }
             Some(AcpRuntimeEvent::Lifecycle(_)) | None => thread::sleep(ACP_POLL_INTERVAL),

@@ -17,6 +17,7 @@ pub struct HistoricalStyleHints {
     pub is_summary: bool,
     pub is_warning: bool,
     pub is_error: bool,
+    pub is_dim: bool,
 }
 
 /// Format a historical (completed) agent message line.
@@ -40,6 +41,8 @@ pub fn format_historical_message(
         Style::default().fg(Color::Yellow)
     } else if hints.is_summary {
         Style::default().fg(Color::Green)
+    } else if hints.is_dim {
+        Style::default().fg(Color::DarkGray)
     } else {
         Style::default().fg(Color::White)
     };

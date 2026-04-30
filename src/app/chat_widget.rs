@@ -56,6 +56,10 @@ fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
             symbol: "▸",
             color: Color::White,
         },
+        MessageKind::AgentThought => SymbolStyle {
+            symbol: "·",
+            color: Color::DarkGray,
+        },
         MessageKind::Summary => SymbolStyle {
             symbol: "✓",
             color: Color::Green,
@@ -89,6 +93,10 @@ fn kind_to_hints(kind: MessageKind, run_status: RunStatus) -> HistoricalStyleHin
         },
         MessageKind::SummaryWarn => HistoricalStyleHints {
             is_warning: true,
+            ..Default::default()
+        },
+        MessageKind::AgentThought => HistoricalStyleHints {
+            is_dim: true,
             ..Default::default()
         },
         MessageKind::End => match run_status {

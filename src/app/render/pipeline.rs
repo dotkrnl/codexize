@@ -64,7 +64,7 @@ impl Widget for PipelineWidget<'_> {
 }
 
 impl App {
-    pub(super) fn live_agent_spinner_active(&self) -> bool {
+    fn live_agent_progress_recent(&self) -> bool {
         const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
         if self
             .agent_last_change
@@ -83,6 +83,13 @@ impl App {
                     .map(|age| age <= STALL_TIMEOUT)
                     .unwrap_or(true)
             })
+    }
+
+    pub(super) fn live_agent_spinner_active(&self) -> bool {
+        self.state
+            .agent_runs
+            .iter()
+            .any(|run| run.status == RunStatus::Running)
     }
 
     fn pipeline_render_lines(
@@ -327,7 +334,13 @@ impl App {
             if suppressed_container_runs.contains(&run.id) {
                 return None;
             }
-            let spin = spinner_frame(self.spinner_tick);
+            let recent = self.live_agent_progress_recent();
+            let spin = if recent {
+                spinner_frame(self.spinner_tick)
+            } else {
+                spinner_frame(0)
+            };
+            let label = if recent { "running" } else { "stalled" };
             let dim = Style::default().fg(Color::DarkGray);
             let gutter = "│ ".repeat(row.depth);
             return Some(RunningTailLine {
@@ -339,20 +352,25 @@ impl App {
                             .fg(Color::Blue)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled("  running".to_string(), dim),
+                    Span::styled(format!("  {label}"), dim),
                 ]),
                 kind: PipelineLineKind::RunningContainerPlaceholder { run_id: run.id },
             });
         }
         let phase_label = self.state.current_phase.label();
         let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
-        Some(RunningTailLine {
-            line: format_running_transcript_leaf(
+        let line = if self.live_agent_progress_recent() {
+            format_running_transcript_leaf(
                 TranscriptLeafMarker::new(),
                 clock,
                 self.spinner_tick,
                 &fetcher,
-            ),
+            )
+        } else {
+            format_stalled_transcript_leaf(TranscriptLeafMarker::new(), clock, &fetcher)
+        };
+        Some(RunningTailLine {
+            line,
             kind: PipelineLineKind::RunningLeafTail { run_id: run.id },
         })
     }
@@ -367,7 +385,13 @@ impl App {
             && self.run_launched
             && self.live_agent_spinner_active()
         {
-            let spin = spinner_frame(self.spinner_tick);
+            let recent = self.live_agent_progress_recent();
+            let spin = if recent {
+                spinner_frame(self.spinner_tick)
+            } else {
+                spinner_frame(0)
+            };
+            let label = if recent { "running" } else { "stalled" };
             lines.push(Line::from(vec![
                 Span::styled(format!(" {gutter}  "), dim),
                 Span::styled(
@@ -376,7 +400,7 @@ impl App {
                         .fg(Color::Blue)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("  running · {} lines", self.agent_line_count), dim),
+                Span::styled(format!("  {label} · {} lines", self.agent_line_count), dim),
             ]));
         }
         if !node.children.is_empty() {

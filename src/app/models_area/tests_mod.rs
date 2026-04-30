@@ -1,5 +1,6 @@
 use super::*;
 use crate::selection::ranking::build_version_index;
+use chrono::{Duration, Utc};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Paragraph, Widget};
@@ -40,6 +41,14 @@ fn vendor_model_with_axis_score(
 ) -> CachedModel {
     let mut model = model_with_axis_score(name, axis_score, display_order);
     model.vendor = vendor;
+    model
+}
+
+fn model_with_reset(
+    mut model: CachedModel,
+    quota_resets_at: chrono::DateTime<chrono::Utc>,
+) -> CachedModel {
+    model.quota_resets_at = Some(quota_resets_at);
     model
 }
 
@@ -837,6 +846,62 @@ fn snapshot_matrix_widths() {
             );
         }
     }
+}
+
+#[test]
+fn wide_layout_shows_relative_reset_time() {
+    let models = vec![model_with_reset(
+        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        Utc::now() + Duration::hours(2),
+    )];
+    let versions = build_version_index(&models);
+
+    let (lines, mode) =
+        responsive_models_area(&models, &versions, &[], 200, 50, ModelsAreaMode::FullTable);
+
+    assert_eq!(mode, ModelsAreaMode::FullTable);
+    let row = full_buffer_line(&lines, 0, 200);
+    assert!(
+        row.contains("in "),
+        "expected relative reset time in wide layout, got: {row:?}"
+    );
+}
+
+#[test]
+fn reset_time_stays_hidden_below_very_wide_threshold() {
+    let models = vec![model_with_reset(
+        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        Utc::now() + Duration::hours(2),
+    )];
+    let versions = build_version_index(&models);
+
+    let (lines, mode) =
+        responsive_models_area(&models, &versions, &[], 139, 50, ModelsAreaMode::FullTable);
+
+    assert_eq!(mode, ModelsAreaMode::FullTable);
+    let row = full_buffer_line(&lines, 0, 139);
+    assert!(
+        !row.contains("in "),
+        "reset time should stay hidden below very-wide threshold: {row:?}"
+    );
+}
+
+#[test]
+fn wide_layout_marks_past_reset_as_expired() {
+    let models = vec![model_with_reset(
+        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        Utc::now() - Duration::hours(1),
+    )];
+    let versions = build_version_index(&models);
+
+    let (lines, _) =
+        responsive_models_area(&models, &versions, &[], 200, 50, ModelsAreaMode::FullTable);
+
+    let row = full_buffer_line(&lines, 0, 200);
+    assert!(
+        row.contains("expired"),
+        "expected expired reset text, got: {row:?}"
+    );
 }
 
 #[test]

@@ -163,7 +163,9 @@ impl App {
             body_inner_height: 0,
             body_inner_width: 0,
             split_target: None,
+            split_follow_tail: true,
             split_scroll_offset: 0,
+            split_fullscreen: false,
             input_mode: false,
             input_buffer: String::new(),
             input_cursor: 0,
@@ -464,6 +466,7 @@ impl App {
             }
             // Force input mode for interactive prompts
             self.input_mode = true;
+            self.clamp_split_scroll(self.current_split_content_height());
             return;
         }
 
@@ -474,6 +477,7 @@ impl App {
             }
             // Force input mode for Idea input
             self.input_mode = true;
+            self.clamp_split_scroll(self.current_split_content_height());
             return;
         }
 
@@ -486,23 +490,42 @@ impl App {
                 if !still_exists {
                     self.split_target = None;
                     self.split_scroll_offset = 0;
+                    self.split_follow_tail = true;
                 }
             }
             SplitTarget::Idea => {
                 // Idea is always valid as long as the session exists.
             }
         }
+        self.clamp_split_scroll(self.current_split_content_height());
     }
 
     /// Clamp the split scroll offset to a maximum value. Called after
     /// terminal resize and after content changes.
     #[allow(dead_code)]
-    pub(super) fn clamp_split_scroll(&mut self, _content_height: usize) {
-        // REVIEWER: clamping against actual split content height will be
-        // wired once split rendering is implemented in a later task.
-        // For now the offset is reset on target changes and left at zero
-        // otherwise, so no clamping is needed until content measurement
-        // exists.
+    pub(super) fn clamp_split_scroll(&mut self, content_height: usize) {
+        let viewport_height = self.split_viewport_height();
+        if viewport_height == 0 {
+            self.split_scroll_offset = 0;
+            return;
+        }
+
+        let max_offset = crate::app::chat_widget_view_model::max_chat_scroll_offset(
+            content_height,
+            viewport_height,
+        );
+        if self.split_follow_tail {
+            self.split_scroll_offset = max_offset;
+            return;
+        }
+
+        self.split_scroll_offset = self.split_scroll_offset.min(max_offset);
+        // If content shrink or a larger viewport leaves the operator at the
+        // tail anyway, re-engage follow mode so later transcript growth streams
+        // normally instead of appearing frozen at a stale offset.
+        if self.split_scroll_offset >= max_offset {
+            self.split_follow_tail = true;
+        }
     }
 
     /// Derive the preferred row for automatic progress follow.
@@ -566,6 +589,60 @@ impl App {
             && self
                 .node_for_row(self.selected)
                 .is_some_and(|node| node.label == "Idea")
+    }
+
+    pub(super) fn split_owns_input(&self) -> bool {
+        self.is_split_open()
+            && (matches!(self.split_target, Some(SplitTarget::Idea))
+                && self.state.current_phase == Phase::IdeaInput
+                || self.interactive_run_waiting_for_input())
+    }
+
+    pub(super) fn split_viewport_height(&self) -> usize {
+        if !self.is_split_open() || self.body_inner_height == 0 {
+            return 0;
+        }
+        if self.split_fullscreen {
+            return self.body_inner_height;
+        }
+        self.body_inner_height
+            .saturating_sub(self.body_inner_height / 3)
+    }
+
+    pub(super) fn current_split_content_height(&self) -> usize {
+        let Some(target) = self.split_target else {
+            return 0;
+        };
+        match target {
+            SplitTarget::Run(run_id) => {
+                let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
+                    return 0;
+                };
+                let msgs: Vec<_> = self
+                    .messages
+                    .iter()
+                    .filter(|m| m.run_id == run_id)
+                    .filter(|m| {
+                        m.kind.visible_with_filters(
+                            run.modes.interactive || self.state.show_noninteractive_texts,
+                            self.state.show_thinking_texts,
+                        )
+                    })
+                    .cloned()
+                    .collect();
+
+                let local_offset = chrono::Local::now().fixed_offset().offset().to_owned();
+                crate::app::chat_widget::message_lines(
+                    &msgs,
+                    run,
+                    &local_offset,
+                    None,
+                    self.body_inner_width.max(1),
+                )
+                .len()
+            }
+            SplitTarget::Idea => 0,
+        }
     }
 
     pub(super) fn header_y_offsets(&self) -> (Vec<usize>, usize) {

@@ -159,7 +159,14 @@ pub struct App {
     body_inner_height: usize,
     body_inner_width: usize,
     split_target: Option<split::SplitTarget>,
+    /// When true, the split transcript snaps to the latest visible tail on
+    /// content/viewport changes. Manual split scrolling flips this off until
+    /// the operator returns to the bottom of the transcript.
+    split_follow_tail: bool,
     split_scroll_offset: usize,
+    /// Cached from the last draw pass so lifecycle clamping can honor the
+    /// full-body split mode used at small terminal heights.
+    split_fullscreen: bool,
     input_mode: bool,
     input_buffer: String,
     input_cursor: usize,

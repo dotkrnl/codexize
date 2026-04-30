@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::split::SplitTarget;
 
 pub(super) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
@@ -117,7 +118,11 @@ impl App {
         lines
     }
 
-    fn visible_live_summary_tail_runs(&self, area_h: usize, viewport_top: usize) -> BTreeSet<u64> {
+    pub(super) fn visible_live_summary_tail_runs(
+        &self,
+        area_h: usize,
+        viewport_top: usize,
+    ) -> BTreeSet<u64> {
         if area_h == 0 {
             return BTreeSet::new();
         }
@@ -141,6 +146,18 @@ impl App {
         if !self.live_agent_spinner_active() {
             return false;
         }
+
+        // If the split is showing a running run, the spinner should be visible.
+        if let Some(SplitTarget::Run(run_id)) = self.split_target
+            && self
+                .state
+                .agent_runs
+                .iter()
+                .any(|run| run.id == run_id && run.status == RunStatus::Running)
+        {
+            return true;
+        }
+
         let viewport_top = self
             .viewport_top
             .min(self.max_viewport_top_for_height(area_h));
@@ -242,15 +259,20 @@ impl App {
         let Some(node) = self.node_for_row(index) else {
             return Vec::new();
         };
-        let run_id = node.run_id.or(node.leaf_run_id);
-        if let Some(_id) = run_id
+
+        if let Some(_id) = node.run_id.or(node.leaf_run_id)
             && let Some(_run) = self.state.agent_runs.iter().find(|r| r.id == _id)
         {
             // Transcript content (messages, thinking, tools, outputs, live
             // tails, and running placeholders) moved to the split view; tree
-            // body stays structural-only.  See spec §3.
+            // body stays structural-only. See spec §3.
             return Vec::new();
         }
+
+        // Detailed transcript content (messages, thinking, tools, outputs,
+        // live tails, and Idea text/input) moved to the split view. Tree
+        // bodies remain structural-only, showing compact status summaries
+        // and child links where applicable.
         self.render_compact_node(node, index)
             .into_iter()
             .map(|line| PipelineLine {

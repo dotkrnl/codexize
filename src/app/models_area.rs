@@ -62,7 +62,7 @@ pub fn responsive_models_area(
         return (Vec::new(), prev_mode);
     }
 
-    if term_h < 50 {
+    if term_h < crate::app::RESPONSIVE_HEIGHT_THRESHOLD {
         let lines = render_compact_quota(models, quota_errors, width);
         return (lines, ModelsAreaMode::CompactQuota);
     }

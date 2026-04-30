@@ -338,6 +338,7 @@ impl App {
             self.maybe_auto_launch();
             self.update_agent_progress();
             self.process_live_summary_changes();
+            self.synchronize_split_target();
             terminal.draw(|frame| self.draw(frame))?;
             self.on_frame_drawn();
 
@@ -450,7 +451,32 @@ impl App {
     /// Validate the current split target against the latest tree and session
     /// state. Closes the split when its run id disappears after rebuild/retry,
     /// and clamps the scroll offset.
+    ///
+    /// Interactive ACP prompts force-open the split for the active run and
+    /// focus the split input box without waiting for another keypress.
     pub(super) fn synchronize_split_target(&mut self) {
+        if self.interactive_run_waiting_for_input()
+            && let Some(run_id) = self.current_run_id
+        {
+            let target = SplitTarget::Run(run_id);
+            if self.split_target != Some(target) {
+                self.open_split_target(target);
+            }
+            // Force input mode for interactive prompts
+            self.input_mode = true;
+            return;
+        }
+
+        if self.state.current_phase == Phase::IdeaInput {
+            let target = SplitTarget::Idea;
+            if self.split_target != Some(target) {
+                self.open_split_target(target);
+            }
+            // Force input mode for Idea input
+            self.input_mode = true;
+            return;
+        }
+
         let Some(target) = self.split_target else {
             return;
         };

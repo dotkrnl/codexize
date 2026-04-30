@@ -33,6 +33,8 @@ mod tests_lifecycle;
 #[cfg(test)]
 mod tests_prompts;
 #[cfg(test)]
+mod tests_split_sync;
+#[cfg(test)]
 mod tests_yolo;
 mod tree;
 mod tree_view_model;
@@ -128,7 +130,8 @@ struct TestLaunchHarness {
     outcomes: std::collections::VecDeque<TestLaunchOutcome>,
 }
 
-#[derive(Debug)]
+pub const RESPONSIVE_HEIGHT_THRESHOLD: u16 = 60;
+
 pub struct App {
     state: SessionState,
     nodes: Vec<Node>,
@@ -228,11 +231,13 @@ pub mod snapshot_support {
             crate::state::Phase::IdeaInput,
             None,
             focus_caps::FocusCaps {
-                can_expand: true,
-                can_edit: true,
-                can_back: true,
-                can_input: true,
+                can_expand: false,
+                can_edit: false,
+                can_back: false,
+                can_input: false,
+                can_split: false,
             },
+            false,
             false,
             width,
         )

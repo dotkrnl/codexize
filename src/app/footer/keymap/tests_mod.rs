@@ -19,13 +19,14 @@ fn default_phase_exact_string_wide() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let text = line_text(&line);
     assert!(text.contains("↑↓ move"));
     assert!(text.contains("Space expand"));
     assert!(text.contains("PgUp/PgDn page"));
-    assert!(text.contains("Enter input"));
+    assert!(text.contains("Enter show"));
     assert!(text.contains(": palette"));
     assert!(text.contains("Esc quit"));
 }
@@ -37,6 +38,7 @@ fn spec_review_paused_exact_string() {
         Phase::SpecReviewPaused,
         Some(ModalKind::SpecReviewPaused),
         FocusCaps::default(),
+        false,
         false,
         200,
     );
@@ -52,6 +54,7 @@ fn plan_review_paused_exact_string() {
         Phase::PlanReviewPaused,
         Some(ModalKind::PlanReviewPaused),
         FocusCaps::default(),
+        false,
         false,
         200,
     );
@@ -69,6 +72,7 @@ fn stage_error_brainstorm_has_edit_idea() {
         Some(ModalKind::StageError(StageId::Brainstorm)),
         FocusCaps::default(),
         false,
+        false,
         200,
     );
     let text = line_text(&line);
@@ -83,6 +87,7 @@ fn stage_error_non_brainstorm_no_edit() {
         Phase::SpecReviewRunning,
         Some(ModalKind::StageError(StageId::SpecReview)),
         FocusCaps::default(),
+        false,
         false,
         200,
     );
@@ -100,6 +105,7 @@ fn skip_to_impl_exact_string() {
         Some(ModalKind::SkipToImpl),
         FocusCaps::default(),
         false,
+        false,
         200,
     );
     let text = line_text(&line);
@@ -116,6 +122,7 @@ fn guard_exact_string() {
         Some(ModalKind::GitGuard),
         FocusCaps::default(),
         false,
+        false,
         200,
     );
     let text = line_text(&line);
@@ -127,7 +134,14 @@ fn guard_exact_string() {
 // Input mode
 #[test]
 fn input_mode_exact_string() {
-    let line = keymap(Phase::IdeaInput, None, FocusCaps::default(), true, 200);
+    let line = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        true,
+        false,
+        200,
+    );
     let text = line_text(&line);
     assert!(text.contains("Esc cancel"));
     assert!(text.contains("Enter submit"));
@@ -142,8 +156,9 @@ fn disabled_binding_omits_action_label() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let text = line_text(&line);
     assert!(
         text.contains("Space"),
@@ -155,7 +170,7 @@ fn disabled_binding_omits_action_label() {
     );
     // Other (enabled) labels still render.
     assert!(text.contains("↑↓ move"));
-    assert!(text.contains("Enter input"));
+    assert!(text.contains("Enter show"));
 }
 
 #[test]
@@ -165,8 +180,9 @@ fn disabled_binding_uses_single_dim_color() {
         can_edit: false,
         can_back: false,
         can_input: false,
+        can_split: false,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let dim_fgs: std::collections::BTreeSet<_> = line
         .spans
         .iter()
@@ -191,12 +207,14 @@ fn disabled_label_excluded_from_width_tier() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
     let caps_enabled = FocusCaps {
         can_expand: true,
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
     let width = {
         let (nav, actions, system) = default_bindings();
@@ -207,6 +225,7 @@ fn disabled_label_excluded_from_width_tier() {
             cap.map(|c| match c {
                 Capability::Expand => caps_disabled.can_expand,
                 Capability::Input => caps_disabled.can_input,
+                Capability::Split => caps_disabled.can_split,
             })
             .unwrap_or(true)
         });
@@ -214,15 +233,15 @@ fn disabled_label_excluded_from_width_tier() {
         (left + SEP_CATEGORY.chars().count() + sys) as u16
     };
 
-    let line_dis = keymap(Phase::IdeaInput, None, caps_disabled, false, width);
+    let line_dis = keymap(Phase::IdeaInput, None, caps_disabled, false, false, width);
     let text_dis = line_text(&line_dis);
     assert!(
         text_dis.contains("↑↓ move"),
         "disabled-form should still advertise enabled labels at this width: {text_dis}"
     );
     assert!(
-        text_dis.contains("Enter input"),
-        "disabled-form should keep `Enter input` at this width: {text_dis}"
+        text_dis.contains("Enter show"),
+        "disabled-form should keep `Enter show` at this width: {text_dis}"
     );
     assert!(
         !text_dis.contains("Space expand"),
@@ -232,7 +251,7 @@ fn disabled_label_excluded_from_width_tier() {
     // Sanity: with the same caps but the Space binding enabled, that exact
     // width is too narrow for `Space expand` to fit at the Full tier — so
     // tier selection must have observed the disabled label as 0-width.
-    let line_en = keymap(Phase::IdeaInput, None, caps_enabled, false, width);
+    let line_en = keymap(Phase::IdeaInput, None, caps_enabled, false, false, width);
     let text_en = line_text(&line_en);
     // The enabled rendering at the same width may collapse to a narrower tier;
     // either way, its width must not exceed the budget.
@@ -251,8 +270,9 @@ fn dim_in_place_expand_disabled() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     assert!(
         has_dim_spans(&line),
         "should have dim spans for disabled expand"
@@ -268,8 +288,9 @@ fn dim_in_place_expand_disabled_palette_present() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     assert!(
         has_dim_spans(&line),
         "should have dim spans for disabled expand"
@@ -285,8 +306,9 @@ fn dim_in_place_all_disabled_palette_still_shows() {
         can_edit: false,
         can_back: false,
         can_input: false,
+        can_split: false,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let text = line_text(&line);
     assert!(text.contains("Space"), "Space should not dropout");
     assert!(text.contains(":"), "palette hint should not dropout");
@@ -299,8 +321,9 @@ fn dim_in_place_input_disabled() {
         can_edit: true,
         can_back: true,
         can_input: false,
+        can_split: false,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     assert!(
         has_dim_spans(&line),
         "should have dim spans for disabled input"
@@ -318,8 +341,8 @@ fn esc_quit_right_anchored_stable_across_phases() {
     let caps = FocusCaps::default();
     let width = 120u16;
 
-    let line1 = keymap(Phase::IdeaInput, None, caps, false, width);
-    let line2 = keymap(Phase::BrainstormRunning, None, caps, false, width);
+    let line1 = keymap(Phase::IdeaInput, None, caps, false, false, width);
+    let line2 = keymap(Phase::BrainstormRunning, None, caps, false, false, width);
 
     let text1 = line_text(&line1);
     let text2 = line_text(&line2);
@@ -336,11 +359,11 @@ fn esc_quit_right_anchored_stable_across_phases() {
 #[test]
 fn width_tier_drops_system_label_first() {
     let caps = FocusCaps::default();
-    let line_wide = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line_wide = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let text_wide = line_text(&line_wide);
     assert!(text_wide.contains("Esc quit"), "wide should have 'q quit'");
 
-    let line_narrow = keymap(Phase::IdeaInput, None, caps, false, 80);
+    let line_narrow = keymap(Phase::IdeaInput, None, caps, false, false, 80);
     let text_narrow = line_text(&line_narrow);
     let ends_with_esc = text_narrow.trim_end().ends_with("Esc");
     assert!(
@@ -352,7 +375,7 @@ fn width_tier_drops_system_label_first() {
 #[test]
 fn width_tier_ultra_narrow_still_renders() {
     let caps = FocusCaps::default();
-    let line = keymap(Phase::IdeaInput, None, caps, false, 20);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 20);
     let text = line_text(&line);
     assert!(
         !text.is_empty(),
@@ -362,7 +385,14 @@ fn width_tier_ultra_narrow_still_renders() {
 
 #[test]
 fn zero_width_empty() {
-    let line = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, 0);
+    let line = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        false,
+        false,
+        0,
+    );
     assert!(line.spans.is_empty());
 }
 
@@ -374,11 +404,12 @@ fn snapshot_width_200_default() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
     let text = line_text(&line);
     assert!(text.contains("↑↓ move · Space expand · PgUp/PgDn page"));
-    assert!(text.contains("Enter input · : palette"));
+    assert!(text.contains("Enter show · : palette"));
     assert!(text.ends_with("Esc quit"));
 }
 
@@ -389,8 +420,9 @@ fn snapshot_width_120_default() {
         can_edit: true,
         can_back: true,
         can_input: true,
+        can_split: true,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 120);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 120);
     let text = line_text(&line);
     assert!(text.ends_with("Esc quit") || text.ends_with("Esc"));
 }
@@ -398,7 +430,7 @@ fn snapshot_width_120_default() {
 #[test]
 fn snapshot_width_80_default() {
     let caps = FocusCaps::default();
-    let line = keymap(Phase::IdeaInput, None, caps, false, 80);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 80);
     let text = line_text(&line);
     assert!(text.contains("Esc"), "should contain Esc");
 }
@@ -406,7 +438,7 @@ fn snapshot_width_80_default() {
 #[test]
 fn snapshot_width_60_default() {
     let caps = FocusCaps::default();
-    let line = keymap(Phase::IdeaInput, None, caps, false, 60);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 60);
     let text = line_text(&line);
     assert!(text.contains("↑↓") || text.contains("Enter"));
 }
@@ -414,7 +446,7 @@ fn snapshot_width_60_default() {
 #[test]
 fn snapshot_width_40_default() {
     let caps = FocusCaps::default();
-    let line = keymap(Phase::IdeaInput, None, caps, false, 40);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 40);
     let text = line_text(&line);
     assert!(!text.is_empty());
 }
@@ -422,7 +454,7 @@ fn snapshot_width_40_default() {
 #[test]
 fn snapshot_width_30_default() {
     let caps = FocusCaps::default();
-    let line = keymap(Phase::IdeaInput, None, caps, false, 30);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 30);
     let text = line_text(&line);
     assert!(!text.is_empty());
 }
@@ -434,6 +466,7 @@ fn snapshot_pause_modal_width_80() {
         Phase::SpecReviewPaused,
         Some(ModalKind::SpecReviewPaused),
         FocusCaps::default(),
+        false,
         false,
         80,
     );
@@ -450,6 +483,7 @@ fn snapshot_guard_modal_width_80() {
         Some(ModalKind::GitGuard),
         FocusCaps::default(),
         false,
+        false,
         80,
     );
     let text = line_text(&line);
@@ -460,7 +494,14 @@ fn snapshot_guard_modal_width_80() {
 
 #[test]
 fn snapshot_input_mode_width_80() {
-    let line = keymap(Phase::IdeaInput, None, FocusCaps::default(), true, 80);
+    let line = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        true,
+        false,
+        80,
+    );
     let text = line_text(&line);
     assert!(text.contains("Esc"));
     assert!(text.contains("Enter"));
@@ -470,11 +511,19 @@ fn snapshot_input_mode_width_80() {
 #[test]
 fn esc_quit_right_anchored_stable_default_vs_pause_modal() {
     let width = 120u16;
-    let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+    let default = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        false,
+        false,
+        width,
+    );
     let modal = keymap(
         Phase::SpecReviewPaused,
         Some(ModalKind::SpecReviewPaused),
         FocusCaps::default(),
+        false,
         false,
         width,
     );
@@ -493,11 +542,19 @@ fn esc_quit_right_anchored_stable_default_vs_pause_modal() {
 #[test]
 fn esc_quit_right_anchored_stable_default_vs_guard_modal() {
     let width = 120u16;
-    let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+    let default = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        false,
+        false,
+        width,
+    );
     let modal = keymap(
         Phase::GitGuardPending,
         Some(ModalKind::GitGuard),
         FocusCaps::default(),
+        false,
         false,
         width,
     );
@@ -516,11 +573,19 @@ fn esc_quit_right_anchored_stable_default_vs_guard_modal() {
 #[test]
 fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
     let width = 120u16;
-    let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+    let default = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        false,
+        false,
+        width,
+    );
     let modal = keymap(
         Phase::SkipToImplPending,
         Some(ModalKind::SkipToImpl),
         FocusCaps::default(),
+        false,
         false,
         width,
     );
@@ -539,11 +604,19 @@ fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
 #[test]
 fn esc_quit_right_anchored_stable_default_vs_stage_error() {
     let width = 120u16;
-    let default = keymap(Phase::IdeaInput, None, FocusCaps::default(), false, width);
+    let default = keymap(
+        Phase::IdeaInput,
+        None,
+        FocusCaps::default(),
+        false,
+        false,
+        width,
+    );
     let modal = keymap(
         Phase::BrainstormRunning,
         Some(ModalKind::StageError(StageId::Brainstorm)),
         FocusCaps::default(),
+        false,
         false,
         width,
     );
@@ -567,6 +640,7 @@ fn modal_esc_quit_right_anchor_with_fill() {
         Some(ModalKind::SpecReviewPaused),
         FocusCaps::default(),
         false,
+        false,
         width,
     );
     let text = line_text(&modal);
@@ -585,8 +659,9 @@ fn verify_dim_styling_colors() {
         can_edit: false,
         can_back: false,
         can_input: false,
+        can_split: false,
     };
-    let line = keymap(Phase::IdeaInput, None, caps, false, 200);
+    let line = keymap(Phase::IdeaInput, None, caps, false, false, 200);
 
     let has_disabled_style = line.spans.iter().any(|s| s.style.fg == Some(DISABLED_DIM));
     assert!(has_disabled_style, "should have disabled styling");
@@ -597,4 +672,17 @@ fn verify_dim_styling_colors() {
             || s.style.fg == Some(ENABLED_ACTION)
     });
     assert!(has_enabled_style, "should have enabled styling too");
+}
+
+#[test]
+fn split_open_exact_string() {
+    let caps = FocusCaps::default();
+    let line = keymap(Phase::IdeaInput, None, caps, false, true, 200);
+    let text = line_text(&line);
+    assert!(text.contains("↑↓ scroll"));
+    assert!(text.contains("PgUp/PgDn page"));
+    assert!(text.contains(": palette"));
+    assert!(text.contains("Esc close"));
+    assert!(!text.contains("move"));
+    assert!(!text.contains("quit"));
 }

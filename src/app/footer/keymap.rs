@@ -22,6 +22,7 @@ pub(crate) struct KeyBinding {
 pub(crate) enum Capability {
     Expand,
     Input,
+    Split,
 }
 
 /// Colors for keymap styling.
@@ -62,9 +63,9 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
     let actions = vec![
         KeyBinding {
             glyph: "Enter",
-            action: "input",
+            action: "show",
             is_primary: true,
-            capability: Some(Capability::Input),
+            capability: Some(Capability::Split),
         },
         KeyBinding {
             glyph: ":",
@@ -185,6 +186,37 @@ fn input_bindings() -> Vec<KeyBinding> {
             capability: None,
         },
     ]
+}
+
+/// Split mode bindings (when not in input mode).
+fn split_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
+    let nav = vec![
+        KeyBinding {
+            glyph: "↑↓",
+            action: "scroll",
+            is_primary: false,
+            capability: None,
+        },
+        KeyBinding {
+            glyph: "PgUp/PgDn",
+            action: "page",
+            is_primary: false,
+            capability: None,
+        },
+    ];
+    let actions = vec![KeyBinding {
+        glyph: ":",
+        action: "palette",
+        is_primary: false,
+        capability: None,
+    }];
+    let system = vec![KeyBinding {
+        glyph: "Esc",
+        action: "close",
+        is_primary: false,
+        capability: None,
+    }];
+    (nav, actions, system)
 }
 
 fn render_category(
@@ -350,6 +382,7 @@ pub fn keymap(
     modal: Option<ModalKind>,
     caps: FocusCaps,
     input_mode: bool,
+    split_open: bool,
     width: u16,
 ) -> Line<'static> {
     let caps_fn = |cap: Option<Capability>| -> bool {
@@ -357,6 +390,7 @@ pub fn keymap(
             None => true,
             Some(Capability::Expand) => caps.can_expand,
             Some(Capability::Input) => caps.can_input,
+            Some(Capability::Split) => caps.can_split,
         }
     };
 
@@ -376,6 +410,11 @@ pub fn keymap(
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
         };
         return render_keymap_line(&[&actions, &system], &caps_fn, width);
+    }
+
+    if split_open {
+        let (nav, actions, system) = split_bindings();
+        return render_keymap_line(&[&nav, &actions, &system], &caps_fn, width);
     }
 
     let (nav, actions, system) = default_bindings();

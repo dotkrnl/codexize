@@ -139,9 +139,11 @@ fn assemble_from_cache_with_available(
     // Quota refresh (independent of dashboard outcome).
     // On per-vendor error, preserve that vendor's expired cached data so
     // a single failing vendor cannot wipe out previously-known quotas.
-    // Old v3 caches can have fresh quotas but no reset section, so treat the
-    // missing parallel payload as stale whenever there is quota data to pair.
-    let reset_missing = !cached_quota.is_empty() && cached_resets.is_empty();
+    // Old v3 caches can have fresh quotas but no reset section, and newer
+    // caches can still have partial gaps after a vendor refresh only wrote
+    // some model keys. Treat an absent reset entry as stale, but keep an
+    // explicit `None` as the provider's current "no reset time" answer.
+    let reset_missing = has_reset_coverage_gaps(&cached_quota, &cached_resets);
     let quota_payload;
     let reset_payload;
     if quota_expired || resets_expired || reset_missing {
@@ -321,6 +323,15 @@ fn merge_reset_payload(
     merged
 }
 
+fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool {
+    quotas.iter().any(|(vendor, models)| {
+        let Some(reset_models) = resets.get(vendor) else {
+            return true;
+        };
+        models.keys().any(|name| !reset_models.contains_key(name))
+    })
+}
+
 fn parse_vendor_str(s: &str) -> Option<VendorKind> {
     match s {
         "anthropic" | "claude" => Some(VendorKind::Claude),
@@ -486,6 +497,68 @@ mod tests {
                     .with_timezone(&chrono::Utc)
             )
         );
+    }
+
+    #[test]
+    fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
+        let dashboard = vec![
+            make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
+            make_entry("claude-opus-4-1", "claude", 84.0, 81.0),
+        ];
+        let quotas = make_quota_payload(&[
+            ("claude", "claude-sonnet-4-6", Some(80)),
+            ("claude", "claude-opus-4-1", Some(80)),
+        ]);
+        let resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
+        let available = BTreeSet::from([VendorKind::Claude]);
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let bin_dir = temp.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let claude_path = bin_dir.join("claude");
+        let security_path = bin_dir.join("security");
+        std::fs::write(
+            &claude_path,
+            "#!/bin/sh\nif [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n  printf '{\"orgId\":\"test-org\"}'\n  exit 0\nfi\nsleep 1\n",
+        )
+        .unwrap();
+        std::fs::write(&security_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&claude_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&security_path, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let original_path = std::env::var_os("PATH");
+
+        // SAFETY: serialized via test_fs_lock; restored unconditionally.
+        unsafe {
+            let mut paths = vec![bin_dir.clone()];
+            if let Some(value) = std::env::var_os("PATH") {
+                paths.extend(std::env::split_paths(&value));
+            }
+            let joined = std::env::join_paths(paths).unwrap();
+            std::env::set_var("PATH", joined);
+        }
+
+        let (models, errors) = assemble_from_cache_with_available(
+            loaded_cache_with_resets(dashboard, quotas, resets),
+            &available,
+        );
+
+        unsafe {
+            match original_path {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(errors.len(), 1, "partial reset gaps should trigger refresh");
+        assert_eq!(errors[0].vendor, VendorKind::Claude);
     }
 
     #[test]
@@ -822,6 +895,22 @@ mod tests {
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].quota_percent, None);
+    }
+
+    #[test]
+    fn reset_coverage_gaps_require_matching_model_keys() {
+        let quotas = make_quota_payload(&[
+            ("claude", "claude-sonnet-4-6", Some(80)),
+            ("claude", "claude-opus-4-1", Some(80)),
+        ]);
+        let partial_resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
+        let covered_resets = make_reset_payload(&[
+            ("claude", "claude-sonnet-4-6", None),
+            ("claude", "claude-opus-4-1", None),
+        ]);
+
+        assert!(has_reset_coverage_gaps(&quotas, &partial_resets));
+        assert!(!has_reset_coverage_gaps(&quotas, &covered_resets));
     }
 
     fn with_temp_home_cache<T>(

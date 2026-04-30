@@ -546,6 +546,7 @@ impl App {
                 let signal_received = crate::runner::read_finish_stamp(&stamp_path)
                     .map(|s| s.signal_received)
                     .unwrap_or_default();
+                let is_operator_killed = Self::has_operator_kill_marker(&session_dir, run.id);
                 // Reviewer note: legacy stamps also deserialize to an empty
                 // signal marker, so this branch means the wrapper recorded no
                 // trapped signal, not that we can distinguish historical gaps.
@@ -563,6 +564,9 @@ impl App {
                     "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
                     run.id, run.stage
                 ));
+                if is_operator_killed {
+                    return Ok(Some("Operator Killed".to_string()));
+                }
                 return Ok(Some(format!("killed({signal_num}) [{detail}]")));
             }
             return Ok(Some(format!("exit({code})")));
@@ -591,6 +595,32 @@ impl App {
             guard_reason = None;
         }
         Ok(guard_reason.or(artifact_reason))
+    }
+
+    fn has_operator_kill_marker(session_dir: &std::path::Path, run_id: u64) -> bool {
+        #[derive(serde::Deserialize)]
+        struct EventsFile {
+            #[serde(default)]
+            events: Vec<EventMessage>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct EventMessage {
+            message: String,
+        }
+
+        let Ok(events_text) = std::fs::read_to_string(session_dir.join("events.toml")) else {
+            return false;
+        };
+        let Ok(events_file) = toml::from_str::<EventsFile>(&events_text) else {
+            return false;
+        };
+        let marker = format!("agent_killed_by_user: run_id={run_id}");
+        // stop_running_agent stores this as an audit message, so match the parsed message exactly.
+        events_file
+            .events
+            .iter()
+            .any(|event| event.message == marker)
     }
 
     fn recovery_artifact_failure_reason(

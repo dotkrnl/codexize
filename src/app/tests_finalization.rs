@@ -62,6 +62,14 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             app.normalized_failure_reason(&run).expect("signal reason"),
             Some("killed(15) [agent exited 143]".to_string())
         );
+        app.state
+            .log_event("agent_killed_by_user: run_id=9")
+            .expect("log user kill marker");
+        assert_eq!(
+            app.normalized_failure_reason(&run)
+                .expect("operator-killed signal reason"),
+            Some("Operator Killed".to_string())
+        );
 
         let hup_run = RunRecord {
             id: 10,

@@ -363,15 +363,23 @@ fn persist_agent_text_block(launch: &ManagedAcpLaunch, text: String, kind: Messa
     }
 }
 
-fn flush_agent_text_ready(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
+fn flush_text_ready(
+    launch: &ManagedAcpLaunch,
+    accumulator: &mut AcpTextAccumulator,
+    kind: MessageKind,
+) {
     while let Some(text) = accumulator.next_ready() {
-        persist_agent_text_block(launch, text, MessageKind::AgentText);
+        persist_agent_text_block(launch, text, kind);
     }
 }
 
-fn flush_agent_text_turn(launch: &ManagedAcpLaunch, accumulator: &mut AcpTextAccumulator) {
+fn flush_text_turn(
+    launch: &ManagedAcpLaunch,
+    accumulator: &mut AcpTextAccumulator,
+    kind: MessageKind,
+) {
     while let Some(text) = accumulator.finish_prompt_turn() {
-        persist_agent_text_block(launch, text, MessageKind::AgentText);
+        persist_agent_text_block(launch, text, kind);
     }
 }
 
@@ -404,12 +412,14 @@ fn run_managed_acp_launch(
         .connect(&launch.resolved)
         .map_err(|err| anyhow!("{err}"))?;
     let mut agent_text = AcpTextAccumulator::new();
+    let mut thought_text = AcpTextAccumulator::new();
     let mut pending_input = VecDeque::new();
     let mut waiting_for_interactive_prompt = false;
 
     let outcome = loop {
         if cancel_rx.try_recv().is_ok() {
-            flush_agent_text_turn(&launch, &mut agent_text);
+            flush_text_turn(&launch, &mut thought_text, MessageKind::AgentThought);
+            flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
             session.close().map_err(|err| anyhow!("{err}"))?;
             break ManagedAcpOutcome {
                 exit_code: 143,
@@ -437,7 +447,8 @@ fn run_managed_acp_launch(
 
         match event {
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
-                flush_agent_text_turn(&launch, &mut agent_text);
+                flush_text_turn(&launch, &mut thought_text, MessageKind::AgentThought);
+                flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
                 if launch.resolved.interactive {
                     waiting_for_interactive_prompt = true;
                     if let Some(text) = pending_input.pop_front() {
@@ -459,7 +470,8 @@ fn run_managed_acp_launch(
                 };
             }
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
-                flush_agent_text_turn(&launch, &mut agent_text);
+                flush_text_turn(&launch, &mut thought_text, MessageKind::AgentThought);
+                flush_text_turn(&launch, &mut agent_text, MessageKind::AgentText);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 break ManagedAcpOutcome {
                     exit_code: 1,
@@ -469,12 +481,15 @@ fn run_managed_acp_launch(
             Some(AcpRuntimeEvent::Text(text_event)) => {
                 let text = text_event.text;
                 if text_event.thought {
-                    persist_agent_text_block(&launch, text, MessageKind::AgentThought);
+                    if let Some(block) = thought_text.push(&text) {
+                        persist_agent_text_block(&launch, block, MessageKind::AgentThought);
+                    }
+                    flush_text_ready(&launch, &mut thought_text, MessageKind::AgentThought);
                 } else if let Some(block) = agent_text.push(&text) {
                     persist_agent_text_block(&launch, block, MessageKind::AgentText);
-                    flush_agent_text_ready(&launch, &mut agent_text);
+                    flush_text_ready(&launch, &mut agent_text, MessageKind::AgentText);
                 } else {
-                    flush_agent_text_ready(&launch, &mut agent_text);
+                    flush_text_ready(&launch, &mut agent_text, MessageKind::AgentText);
                 }
                 thread::sleep(ACP_POLL_INTERVAL)
             }

@@ -332,9 +332,7 @@ fn persist_agent_text_block(
     if text.is_empty() {
         return None;
     }
-    let Some(session_id) = launch.session_id.as_deref() else {
-        return None;
-    };
+    let session_id = launch.session_id.as_deref()?;
 
     // ACP output can arrive before the app thread finishes saving the run
     // record, so transcript persistence waits briefly for that handoff.
@@ -689,6 +687,27 @@ pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
         .is_some_and(|run| {
             !run.finished.load(Ordering::SeqCst) && run.waiting_for_input.load(Ordering::SeqCst)
         })
+}
+
+#[cfg(test)]
+pub fn request_run_label_interactive_input_for_test(window_name: &str) {
+    let mut guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (cancel_tx, _) = mpsc::channel();
+    let (input_tx, _) = mpsc::channel();
+    let finished = std::sync::Arc::new(AtomicBool::new(false));
+    let waiting_for_input = std::sync::Arc::new(AtomicBool::new(true));
+    guard.insert(
+        window_name.to_string(),
+        ManagedAcpRun {
+            cancel_tx,
+            input_tx,
+            finished,
+            waiting_for_input,
+            join: None,
+        },
+    );
 }
 
 pub fn cancel_run_labels_matching(base: &str) {

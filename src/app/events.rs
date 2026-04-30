@@ -192,6 +192,10 @@ impl App {
                 }
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
+                if self.is_split_open() {
+                    // Split mode consumes q/Q to prevent accidental quit.
+                    return false;
+                }
                 if self.has_running_agent() {
                     self.push_status(
                         "agent running — use :quit to exit".to_string(),
@@ -208,11 +212,19 @@ impl App {
                 false
             }
             KeyCode::Up => {
-                self.scroll_or_move_focus(-1);
+                if self.is_split_open() {
+                    self.split_scroll_offset = self.split_scroll_offset.saturating_sub(1);
+                } else {
+                    self.scroll_or_move_focus(-1);
+                }
                 false
             }
             KeyCode::Down => {
-                self.scroll_or_move_focus(1);
+                if self.is_split_open() {
+                    self.split_scroll_offset = self.split_scroll_offset.saturating_add(1);
+                } else {
+                    self.scroll_or_move_focus(1);
+                }
                 false
             }
             KeyCode::Char(' ') => {
@@ -229,13 +241,23 @@ impl App {
                 false
             }
             KeyCode::PageUp => {
-                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                self.scroll_viewport(-step, true);
+                if self.is_split_open() {
+                    let step = self.body_inner_height.saturating_sub(1).max(1);
+                    self.split_scroll_offset = self.split_scroll_offset.saturating_sub(step);
+                } else {
+                    let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                    self.scroll_viewport(-step, true);
+                }
                 false
             }
             KeyCode::PageDown => {
-                let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
-                self.scroll_viewport(step, true);
+                if self.is_split_open() {
+                    let step = self.body_inner_height.saturating_sub(1).max(1);
+                    self.split_scroll_offset = self.split_scroll_offset.saturating_add(step);
+                } else {
+                    let step = self.body_inner_height.saturating_sub(1).max(1) as isize;
+                    self.scroll_viewport(step, true);
+                }
                 false
             }
             _ => false,
@@ -704,8 +726,9 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                if !self.interactive_run_waiting_for_input() {
-                    self.input_mode = false;
+                self.input_mode = false;
+                if self.is_split_open() {
+                    self.close_split();
                 }
                 return false;
             }

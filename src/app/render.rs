@@ -15,8 +15,10 @@ use std::collections::BTreeSet;
 use super::state::ModelRefreshState;
 mod input_sheet;
 mod pipeline;
+mod split_view;
 
 use self::pipeline::PipelineWidget;
+use self::split_view::SplitWidget;
 
 use super::{
     App, ModalKind,
@@ -74,23 +76,27 @@ impl App {
         let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
 
         // --- Determine footer zone ---
-        // Three-way branch: modal → full-screen overlay (drawn over the body
-        // after the bottom rule); input mode → bottom sheet; otherwise →
-        // status + keymap. The modal arm is an overlay, not a footer sheet,
-        // so it does not consume footer rows.
         let modal = self.active_modal();
 
         let caps = self.focus_caps();
-        let input_surface_active = if self.interactive_run_active() {
-            self.interactive_run_waiting_for_input()
-        } else {
-            self.input_mode
-        };
+        let split_open = self.is_split_open();
+        let split_owns_input = split_open
+            && (matches!(self.split_target, Some(super::split::SplitTarget::Idea))
+                && self.state.current_phase == Phase::IdeaInput
+                || self.interactive_run_waiting_for_input());
+
+        let input_surface_active = !split_owns_input
+            && (if self.interactive_run_active() {
+                self.interactive_run_waiting_for_input()
+            } else {
+                self.input_mode
+            });
         let keymap_line = keymap(
             self.state.current_phase,
             modal,
             caps,
-            input_surface_active,
+            input_surface_active || split_owns_input,
+            split_open,
             width,
         );
 
@@ -150,10 +156,23 @@ impl App {
         frame.render_widget(Paragraph::new(vec![top_rule_line]), top_rule_area);
         y += 1;
 
-        // 3. Pipeline body
+        // 3. Pipeline body & Split
         if body_h > 0 {
             let body_area = ratatui::layout::Rect::new(area.x, y, width, body_h);
-            frame.render_widget(PipelineWidget { app: self }, body_area);
+            if split_open {
+                if term_h <= super::RESPONSIVE_HEIGHT_THRESHOLD {
+                    frame.render_widget(SplitWidget { app: self }, body_area);
+                } else {
+                    let tree_h = body_h / 3;
+                    let split_h = body_h.saturating_sub(tree_h);
+                    let tree_area = ratatui::layout::Rect::new(area.x, y, width, tree_h);
+                    let split_area = ratatui::layout::Rect::new(area.x, y + tree_h, width, split_h);
+                    frame.render_widget(PipelineWidget { app: self }, tree_area);
+                    frame.render_widget(SplitWidget { app: self }, split_area);
+                }
+            } else {
+                frame.render_widget(PipelineWidget { app: self }, body_area);
+            }
             y += body_h;
         }
 
@@ -171,7 +190,14 @@ impl App {
             let dialog_w = max_w.min(80).max(max_w.min(40));
             let inner_w = dialog_w.saturating_sub(2);
             let content = self.modal_content_lines(m, inner_w);
-            let modal_keymap = keymap(self.state.current_phase, Some(m), caps, false, inner_w);
+            let modal_keymap = keymap(
+                self.state.current_phase,
+                Some(m),
+                caps,
+                false,
+                false,
+                inner_w,
+            );
             render_modal_overlay(
                 frame,
                 area,
@@ -316,6 +342,7 @@ impl App {
             can_edit: self.editable_artifact().is_some(),
             can_back: self.can_go_back(),
             can_input: self.can_focus_input(),
+            can_split: self.resolve_split_target_for_selected_row().is_some(),
         }
     }
 

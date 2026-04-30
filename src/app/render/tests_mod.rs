@@ -859,11 +859,29 @@ fn running_leaf_falls_back_to_phase_label_when_no_live_summary() {
 }
 
 #[test]
-fn running_tail_shows_stalled_after_ten_seconds_without_transcript_activity() {
+fn running_tail_keeps_spinning_during_long_tool_calls() {
     let mut run = run_record(7, RunStatus::Running);
     run.started_at = chrono::Utc::now() - chrono::Duration::seconds(11);
     let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
     app.agent_last_change = Some(Instant::now() - Duration::from_secs(11));
+    app.spinner_tick = 1;
+
+    let lines = render_lines(&app, 8);
+
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("⠙") && !line.contains("stalled")),
+        "active tool-call gaps should still render as running: {lines:#?}"
+    );
+}
+
+#[test]
+fn running_tail_shows_stalled_after_ten_minutes_without_transcript_activity() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.started_at = chrono::Utc::now() - chrono::Duration::seconds(601);
+    let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
+    app.agent_last_change = Some(Instant::now() - Duration::from_secs(601));
     app.spinner_tick = 1;
 
     let lines = render_lines(&app, 8);

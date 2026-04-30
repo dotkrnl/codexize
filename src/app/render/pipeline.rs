@@ -65,7 +65,7 @@ impl Widget for PipelineWidget<'_> {
 
 impl App {
     fn live_agent_progress_recent(&self) -> bool {
-        const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+        const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
         if self
             .agent_last_change
             .is_some_and(|last| last.elapsed() <= STALL_TIMEOUT)

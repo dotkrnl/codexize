@@ -65,21 +65,14 @@ impl App {
             return false;
         }
 
-        // Global intercept for Ctrl+C to kill running agent
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            let run_to_stop = self.running_run().or_else(|| {
-                self.state
-                    .agent_runs
-                    .iter()
-                    .find(|r| r.status == RunStatus::Running)
-            });
-            if let Some(run) = run_to_stop {
-                if self.active_run_exists(&run.window_name) {
-                    self.stop_running_agent();
-                    return false;
-                }
-            }
-            return true;
+        // Global intercept for Ctrl+C to kill a running agent before any
+        // mode-specific key handling gets a chance to treat it as quit.
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.has_running_agent()
+        {
+            self.stop_running_agent();
+            return false;
         }
 
         if self.palette.open {
@@ -191,8 +184,9 @@ impl App {
     }
 
     pub(super) fn palette_commands(&self) -> Vec<PaletteCommand> {
-        // Direct keys in the running app (see `handle_key`): only `Esc` and
-        // Ctrl-C quit the TUI, plus `:` opens the palette. Everything else
+        // Direct keys in the running app (see `handle_key`): `Esc` quits the
+        // TUI when no agent is running, while Ctrl-C stops a running agent.
+        // `:` opens the palette. Everything else
         // is palette-only, so `back`, `edit`, `cheap`, and `yolo` advertise
         // no shortcut even though they have palette aliases.
         let mut commands = vec![
@@ -280,8 +274,7 @@ impl App {
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
                 self.palette.close();
-                let should_quit = self.execute_palette_input(&input);
-                should_quit
+                self.execute_palette_input(&input)
             }
             KeyCode::Tab => {
                 let commands = self.palette_commands();

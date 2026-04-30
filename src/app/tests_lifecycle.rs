@@ -2558,7 +2558,7 @@ fn enter_does_not_toggle_close_same_target() {
 }
 
 #[test]
-fn enter_switches_target_resets_scroll() {
+fn enter_does_not_switch_target_when_split_is_already_open() {
     with_temp_root(|| {
         let mut state = SessionState::new("split-switch".to_string());
         state.current_phase = Phase::BrainstormRunning;
@@ -2571,10 +2571,10 @@ fn enter_switches_target_resets_scroll() {
 
         app.handle_key(key(crossterm::event::KeyCode::Enter));
 
-        assert_eq!(app.split_target, Some(super::split::SplitTarget::Run(7)));
+        assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
         assert_eq!(
-            app.split_scroll_offset, 0,
-            "scroll must reset on target change"
+            app.split_scroll_offset, 42,
+            "split-open Enter should be consumed before tree target resolution"
         );
     });
 }
@@ -2790,7 +2790,10 @@ fn rebuild_preserves_idea_target() {
         app.rebuild_tree_view(None);
 
         assert_eq!(app.split_target, Some(super::split::SplitTarget::Idea));
-        assert_eq!(app.split_scroll_offset, 3);
+        assert_eq!(
+            app.split_scroll_offset, 0,
+            "Idea split scroll clamps because Idea content is currently non-scrollable"
+        );
     });
 }
 

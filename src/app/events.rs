@@ -362,6 +362,22 @@ impl App {
         }
     }
 
+    fn send_interactive_input(&mut self, input: String) {
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) else {
+            return;
+        };
+        if !crate::runner::send_run_label_input(&run.window_name, input) {
+            self.push_status(
+                "interactive agent is not ready for input".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+        }
+    }
+
     fn toggle_noninteractive_texts(&mut self) {
         self.state.show_noninteractive_texts = !self.state.show_noninteractive_texts;
         let label = if self.state.show_noninteractive_texts {
@@ -475,6 +491,14 @@ impl App {
                 if !trimmed.is_empty() {
                     if trimmed == "/exit" && keep_input_open {
                         self.exit_interactive_run_locally();
+                        self.input_buffer.clear();
+                        self.input_cursor = 0;
+                        self.input_mode = true;
+                        return false;
+                    }
+
+                    if keep_input_open {
+                        self.send_interactive_input(trimmed);
                         self.input_buffer.clear();
                         self.input_cursor = 0;
                         self.input_mode = true;

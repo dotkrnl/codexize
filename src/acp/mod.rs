@@ -279,6 +279,10 @@ mod tests {
             Ok(self.updates.pop_front())
         }
 
+        fn submit_prompt(&mut self, _text: &str) -> AcpResult<()> {
+            Ok(())
+        }
+
         fn close(&mut self) -> AcpResult<()> {
             *self
                 .closed

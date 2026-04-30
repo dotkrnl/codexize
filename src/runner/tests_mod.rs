@@ -341,6 +341,7 @@ mode="${ACP_TEST_MODE:-success}"
 artifact="${ACP_TEST_ARTIFACT:-}"
 log_path="${ACP_TEST_LOG:-}"
 prompt_done_path="${ACP_TEST_PROMPT_DONE:-}"
+prompt_log_path="${ACP_TEST_PROMPT_LOG:-}"
 
 while IFS= read -r line; do
     id="$(extract_id "$line")"
@@ -362,6 +363,9 @@ while IFS= read -r line; do
             printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[]}}\n' "$id"
             ;;
         *'"method":"session/prompt"'*)
+            if [ -n "$prompt_log_path" ]; then
+                printf '%s\n' "$line" >> "$prompt_log_path"
+            fi
             if [ "$mode" = "early_exit" ]; then
                 exit 0
             fi
@@ -440,6 +444,19 @@ fn wait_for_path(path: &Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
     panic!("path did not appear: {}", path.display());
+}
+
+fn wait_for_file_to_contain(path: &Path, needle: &str) {
+    for _ in 0..200 {
+        if fs::read_to_string(path)
+            .map(|text| text.contains(needle))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("{} did not contain {needle:?}", path.display());
 }
 
 #[test]
@@ -607,6 +624,64 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
             wait_for_run_label_to_finish("[Brainstorm]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp after exit");
             assert_eq!(stamp.exit_code, 143);
+        },
+    );
+}
+
+#[test]
+fn interactive_acp_input_is_sent_as_followup_prompt() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let mut run = launch_test_run(dir.path());
+    run.modes.interactive = true;
+    let artifacts_dir = dir.path().join("artifacts");
+    let prompt_done_path = artifacts_dir.join("prompt-done.txt");
+    let prompt_log_path = artifacts_dir.join("prompt-log.jsonl");
+    with_test_env(
+        dir.path(),
+        &[
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("success".to_string())),
+            (
+                "ACP_TEST_PROMPT_DONE",
+                Some(prompt_done_path.display().to_string()),
+            ),
+            (
+                "ACP_TEST_PROMPT_LOG",
+                Some(prompt_log_path.display().to_string()),
+            ),
+            ("CODEXIZE_STAMP_STABILIZE_MS", Some("100".to_string())),
+            (
+                "CODEXIZE_STAMP_STABILIZE_INTERVAL_MS",
+                Some("10".to_string()),
+            ),
+        ],
+        || {
+            launch_interactive(
+                "[Brainstorm]",
+                &run,
+                VendorKind::Codex,
+                "interactive-input-run",
+                &artifacts_dir,
+                None,
+            )
+            .expect("launch interactive ACP run");
+
+            wait_until_run_label_active("[Brainstorm]");
+            wait_for_path(&prompt_done_path);
+
+            assert!(send_run_label_input(
+                "[Brainstorm]",
+                "hello from operator".to_string()
+            ));
+            wait_for_file_to_contain(&prompt_log_path, "hello from operator");
+
+            request_run_label_exit("[Brainstorm]");
+            wait_for_run_label_to_finish("[Brainstorm]");
         },
     );
 }

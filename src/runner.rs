@@ -9,6 +9,7 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -124,8 +125,14 @@ enum AcpCancelReason {
 }
 
 #[derive(Debug)]
+enum AcpInput {
+    Prompt(String),
+}
+
+#[derive(Debug)]
 struct ManagedAcpRun {
     cancel_tx: mpsc::Sender<AcpCancelReason>,
+    input_tx: mpsc::Sender<AcpInput>,
     finished: std::sync::Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
 }
@@ -389,6 +396,7 @@ fn write_finish_stamp_for_outcome(
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
+    input_rx: mpsc::Receiver<AcpInput>,
 ) -> Result<ManagedAcpOutcome> {
     let head_before = git_rev_parse_head().unwrap_or_default();
     let connector = SubprocessConnector;
@@ -396,6 +404,8 @@ fn run_managed_acp_launch(
         .connect(&launch.resolved)
         .map_err(|err| anyhow!("{err}"))?;
     let mut agent_text = AcpTextAccumulator::new();
+    let mut pending_input = VecDeque::new();
+    let mut waiting_for_interactive_prompt = false;
 
     let outcome = loop {
         if cancel_rx.try_recv().is_ok() {
@@ -407,6 +417,19 @@ fn run_managed_acp_launch(
             };
         }
 
+        while let Ok(input) = input_rx.try_recv() {
+            match input {
+                AcpInput::Prompt(text) => pending_input.push_back(text),
+            }
+        }
+
+        if waiting_for_interactive_prompt && let Some(text) = pending_input.pop_front() {
+            session
+                .submit_prompt(&text)
+                .map_err(|err| anyhow!("{err}"))?;
+            waiting_for_interactive_prompt = false;
+        }
+
         let event = session
             .try_next_update()
             .map_err(|err| anyhow!("{err}"))?
@@ -416,6 +439,13 @@ fn run_managed_acp_launch(
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
                 flush_agent_text_turn(&launch, &mut agent_text);
                 if launch.resolved.interactive {
+                    waiting_for_interactive_prompt = true;
+                    if let Some(text) = pending_input.pop_front() {
+                        session
+                            .submit_prompt(&text)
+                            .map_err(|err| anyhow!("{err}"))?;
+                        waiting_for_interactive_prompt = false;
+                    }
                     thread::sleep(ACP_POLL_INTERVAL);
                     continue;
                 }
@@ -455,8 +485,9 @@ fn run_managed_acp_launch(
 fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
+    input_rx: mpsc::Receiver<AcpInput>,
 ) {
-    match run_managed_acp_launch(launch.clone(), cancel_rx) {
+    match run_managed_acp_launch(launch.clone(), cancel_rx, input_rx) {
         Ok(_) => {
             let _ = fs::remove_file(&launch.cause_path);
             return;
@@ -516,17 +547,19 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
     }
 
     let (cancel_tx, cancel_rx) = mpsc::channel();
+    let (input_tx, input_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
     let finished_flag = std::sync::Arc::clone(&finished);
     let launch_window = window_name.to_string();
     let handle = thread::spawn(move || {
-        finalize_managed_acp_launch(launch, cancel_rx);
+        finalize_managed_acp_launch(launch, cancel_rx, input_rx);
         finished_flag.store(true, Ordering::SeqCst);
     });
     guard.insert(
         launch_window,
         ManagedAcpRun {
             cancel_tx,
+            input_tx,
             finished,
             join: Some(handle),
         },
@@ -571,6 +604,17 @@ pub fn request_run_label_exit(window_name: &str) {
     // resolve by closing the managed ACP session directly so task-finish and
     // yolo cleanup still terminate the child process deterministically.
     cancel_run_labels_matching(window_name);
+}
+
+pub fn send_run_label_input(window_name: &str, text: String) -> bool {
+    cleanup_finished_acp_runs();
+    let guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .get(window_name)
+        .filter(|run| !run.finished.load(Ordering::SeqCst))
+        .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
 }
 
 pub fn shutdown_all_runs() {

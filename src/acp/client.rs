@@ -19,6 +19,7 @@ type SharedWriter = Arc<Mutex<Option<ChildStdin>>>;
 pub trait AcpSession: Send {
     fn session_id(&self) -> &str;
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>>;
+    fn submit_prompt(&mut self, text: &str) -> AcpResult<()>;
     fn close(&mut self) -> AcpResult<()>;
 }
 
@@ -141,7 +142,7 @@ impl AcpConnector for SubprocessConnector {
             rpc,
             child: Some(child),
             supports_close: init.supports_close,
-            prompt_response,
+            prompt_response: Some(prompt_response),
             prompt_finished: false,
             closed: false,
         }))
@@ -164,7 +165,7 @@ struct SubprocessSession {
     rpc: RpcPeer,
     child: Option<Child>,
     supports_close: bool,
-    prompt_response: Receiver<AcpResult<Value>>,
+    prompt_response: Option<Receiver<AcpResult<Value>>>,
     prompt_finished: bool,
     closed: bool,
 }
@@ -187,9 +188,14 @@ impl AcpSession for SubprocessSession {
             }
         }
 
-        match self.prompt_response.try_recv() {
+        let Some(prompt_response) = self.prompt_response.as_ref() else {
+            return Ok(None);
+        };
+
+        match prompt_response.try_recv() {
             Ok(Ok(result)) => {
                 self.prompt_finished = true;
+                self.prompt_response = None;
                 let update = match parse_prompt_result(result) {
                     Ok(PromptTurnOutcome::Finished) => ClientUpdate::PromptTurnFinished,
                     Ok(PromptTurnOutcome::Failed { message }) => {
@@ -203,6 +209,7 @@ impl AcpSession for SubprocessSession {
             }
             Ok(Err(err)) => {
                 self.prompt_finished = true;
+                self.prompt_response = None;
                 Ok(Some(ClientUpdate::PromptTurnFailed {
                     message: err.to_string(),
                 }))
@@ -210,11 +217,31 @@ impl AcpSession for SubprocessSession {
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => {
                 self.prompt_finished = true;
+                self.prompt_response = None;
                 Ok(Some(ClientUpdate::PromptTurnFailed {
                     message: "ACP prompt turn channel disconnected".to_string(),
                 }))
             }
         }
+    }
+
+    fn submit_prompt(&mut self, text: &str) -> AcpResult<()> {
+        if !self.prompt_finished {
+            return Err(AcpError::protocol(
+                "ACP prompt turn is still running".to_string(),
+            ));
+        }
+        let prompt = prompt_blocks(&PromptPayload::Text(text.to_string()))?;
+        let prompt_response = self.rpc.start_request(
+            "session/prompt",
+            json!({
+                "sessionId": self.session_id,
+                "prompt": prompt
+            }),
+        )?;
+        self.prompt_response = Some(prompt_response);
+        self.prompt_finished = false;
+        Ok(())
     }
 
     fn close(&mut self) -> AcpResult<()> {

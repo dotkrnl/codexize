@@ -1624,6 +1624,28 @@ fn interactive_palette_opens_only_after_colon() {
 }
 
 #[test]
+fn interactive_palette_esc_closes_entry_box() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interactive-palette-esc-close".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        state.agent_runs.push(run);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('h')));
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Esc));
+
+        assert!(!should_quit);
+        assert!(!app.palette.open);
+        assert!(app.palette.buffer.is_empty());
+        assert_eq!(app.palette.cursor, 0);
+    });
+}
+
+#[test]
 fn interactive_palette_treats_q_as_input_text() {
     with_temp_root(|| {
         let mut state = SessionState::new("interactive-palette-q-text".to_string());

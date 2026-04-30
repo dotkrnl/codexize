@@ -1,1 +1,1 @@
-↑↓ move · Space expand · PgUp/PgDn page  ·  Enter input · : palette  ·  Esc quit
+↑↓ move · Space · PgUp/PgDn page  ·  Enter · : palette  ·               Esc quit

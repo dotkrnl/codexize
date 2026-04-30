@@ -2,7 +2,7 @@ use super::*;
 use crate::app::chat_widget::ChatWidget;
 use crate::app::clock::WallClock;
 use crate::app::split::SplitTarget;
-use crate::state::NodeStatus;
+use crate::state::Phase;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -73,10 +73,8 @@ impl SplitWidget<'_> {
     }
 
     fn render_idea_split(&self, area: Rect, buf: &mut Buffer) {
-        let node = self.app.node_for_row(self.app.selected);
-        let is_waiting = node.is_some_and(|n| n.status == NodeStatus::WaitingUser);
-
-        if is_waiting {
+        // Split target owns Idea content; selection may still point at a run row after force-open sync.
+        if self.app.state.current_phase == Phase::IdeaInput {
             self.render_idea_input(area, buf);
         } else if let Some(idea) = self.app.state.idea_text.as_deref() {
             self.render_idea_captured(idea, area, buf);

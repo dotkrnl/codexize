@@ -226,6 +226,12 @@ impl App {
                 help: "Toggle thinking text",
                 key_hint: None,
             },
+            PaletteCommand {
+                name: "stop",
+                aliases: &["kill", "cancel"],
+                help: "Kill the running agent and trigger auto-retry",
+                key_hint: Some("Ctrl-C"),
+            },
         ];
         if self.can_go_back() || self.confirm_back {
             commands.push(PaletteCommand {
@@ -419,6 +425,18 @@ impl App {
             }
             "verbose" => {
                 self.toggle_thinking_texts();
+                false
+            }
+            "stop" => {
+                if self.has_running_agent() {
+                    self.stop_running_agent();
+                } else {
+                    self.push_status(
+                        "No active agent run to stop.".to_string(),
+                        Severity::Info,
+                        Duration::from_secs(3),
+                    );
+                }
                 false
             }
             _ => false,

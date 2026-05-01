@@ -152,6 +152,14 @@ fn validate_staged(staging: &Path) -> Result<()> {
 /// the old. That keeps the swap point atomic from the caller's viewpoint —
 /// either the old dir is in place, or the new dir is.
 fn swap_into_place(staging: &Path, target: &Path) -> Result<()> {
+    swap_into_place_with(staging, target, |path| std::fs::remove_dir_all(path))
+}
+
+fn swap_into_place_with(
+    staging: &Path,
+    target: &Path,
+    remove_backup: fn(&Path) -> std::io::Result<()>,
+) -> Result<()> {
     let old_holder = if target.exists() {
         let bak = unique_sibling(target, "previous");
         std::fs::rename(target, &bak).with_context(|| {
@@ -180,10 +188,36 @@ fn swap_into_place(staging: &Path, target: &Path) -> Result<()> {
     }
 
     if let Some(bak) = old_holder {
-        // Spec: keep no backups. Best-effort removal — a leftover holder is
-        // a leak, not a correctness problem, and it sits adjacent to the
-        // installed target where the next run would notice it.
-        let _ = std::fs::remove_dir_all(&bak);
+        // Ambiguous edge case note: when post-promotion cleanup fails we
+        // fail the install and restore the previous target, because this task
+        // requires successful installs to leave no backup behind.
+        if let Err(cleanup_err) = remove_backup(&bak) {
+            let rollback = || -> Result<()> {
+                std::fs::remove_dir_all(target).with_context(|| {
+                    format!(
+                        "cleanup rollback could not remove promoted target {}",
+                        target.display()
+                    )
+                })?;
+                std::fs::rename(&bak, target).with_context(|| {
+                    format!(
+                        "cleanup rollback could not restore previous target {}",
+                        target.display()
+                    )
+                })?;
+                Ok(())
+            };
+            match rollback() {
+                Ok(()) => {
+                    return Err(anyhow::Error::new(cleanup_err)
+                        .context(format!("failed backup cleanup for {}", bak.display())));
+                }
+                Err(rollback_err) => {
+                    return Err(rollback_err
+                        .context(format!("failed backup cleanup for {}", bak.display())));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -453,5 +487,30 @@ mod tests {
         let upstream = make_upstream_root(true, "# body\n");
         let outcomes = install_packages(upstream.path(), "x", &[]).unwrap();
         assert!(outcomes.is_empty());
+    }
+
+    #[test]
+    fn swap_fails_when_backup_cleanup_fails_and_restores_previous_target() {
+        let dir = TempDir::new().unwrap();
+        let parent = dir.path().join("vendor").join("codex");
+        std::fs::create_dir_all(&parent).unwrap();
+        let target = parent.join("brainstorming");
+        let staging = parent.join(".brainstorming.staging.test");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(target.join(SKILL_FILE), "old").unwrap();
+        std::fs::write(staging.join(SKILL_FILE), "new").unwrap();
+
+        let err = swap_into_place_with(&staging, &target, |_bak| {
+            Err(std::io::Error::other("simulated cleanup failure"))
+        })
+        .expect_err("cleanup failure should fail install");
+        assert!(
+            err.to_string().contains("cleanup"),
+            "unexpected error: {err}"
+        );
+        let current = std::fs::read_to_string(target.join(SKILL_FILE)).unwrap();
+        assert_eq!(current, "old");
+        assert!(!staging.exists(), "staging should not remain after failure");
     }
 }

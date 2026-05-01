@@ -10,6 +10,7 @@
 pub mod discovery;
 pub mod lock;
 pub mod metadata;
+pub mod plan;
 pub mod upstream;
 
 pub use metadata::{

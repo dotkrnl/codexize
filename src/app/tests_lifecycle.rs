@@ -2593,7 +2593,7 @@ fn split_new_target_clamps_to_tail_position() {
             app.messages.push(Message {
                 ts: chrono::Utc::now(),
                 run_id: 7,
-                kind: MessageKind::Summary,
+                kind: MessageKind::UserInput,
                 sender: MessageSender::System,
                 text: format!("line {idx}"),
             });
@@ -2626,7 +2626,7 @@ fn split_scroll_detach_preserves_offset_across_new_content() {
             app.messages.push(Message {
                 ts: chrono::Utc::now(),
                 run_id: 7,
-                kind: MessageKind::Summary,
+                kind: MessageKind::UserInput,
                 sender: MessageSender::System,
                 text: format!("line {idx}"),
             });
@@ -2650,7 +2650,7 @@ fn split_scroll_detach_preserves_offset_across_new_content() {
         app.messages.push(Message {
             ts: chrono::Utc::now(),
             run_id: 7,
-            kind: MessageKind::Summary,
+            kind: MessageKind::UserInput,
             sender: MessageSender::System,
             text: "line 10".to_string(),
         });
@@ -2675,7 +2675,7 @@ fn split_scroll_clamps_after_viewport_growth() {
             app.messages.push(Message {
                 ts: chrono::Utc::now(),
                 run_id: 7,
-                kind: MessageKind::Summary,
+                kind: MessageKind::UserInput,
                 sender: MessageSender::System,
                 text: format!("line {idx}"),
             });
@@ -2902,7 +2902,7 @@ fn split_follow_tail_reaches_latest_message_lines() {
             app.messages.push(Message {
                 ts: chrono::Utc::now(),
                 run_id: 7,
-                kind: MessageKind::Summary,
+                kind: MessageKind::UserInput,
                 sender: MessageSender::System,
                 text: format!("line {idx}"),
             });
@@ -2980,7 +2980,7 @@ fn split_follow_tail_keeps_live_running_tail_visible() {
             app.messages.push(Message {
                 ts: chrono::Utc::now(),
                 run_id: 7,
-                kind: MessageKind::Summary,
+                kind: MessageKind::UserInput,
                 sender: MessageSender::System,
                 text: format!("line {idx}"),
             });

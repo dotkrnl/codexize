@@ -7,7 +7,7 @@ use crate::state::{Message, MessageKind, MessageSender, NodeStatus, Phase, RunSt
 use super::palette::{self, PaletteCommand};
 use super::split::SplitTarget;
 use super::status_line::Severity;
-use super::{App, ExpansionOverride, ModalKind, StageId};
+use super::{App, CommandReturnTarget, ExpansionOverride, ModalKind, StageId};
 
 impl App {
     /// Push a transient status-line message from a non-render call site.
@@ -102,6 +102,79 @@ impl App {
         self.split_target.is_some()
     }
 
+    fn command_return_target_for_input_surface(&self) -> Option<CommandReturnTarget> {
+        if self.state.current_phase == Phase::IdeaInput {
+            return Some(CommandReturnTarget::Idea);
+        }
+        if self.interactive_run_waiting_for_input() {
+            if self.split_owns_input() {
+                return Some(CommandReturnTarget::SplitInteractive);
+            }
+            return Some(CommandReturnTarget::FooterInteractive);
+        }
+        None
+    }
+
+    fn enter_command_mode_from_input_buffer(&mut self, target: CommandReturnTarget) {
+        if !self.input_buffer.starts_with(':') {
+            return;
+        }
+        let command_text: String = self.input_buffer.chars().skip(1).collect();
+        self.input_buffer.clear();
+        self.input_cursor = 0;
+        self.input_mode = false;
+        self.palette.open_with_buffer(command_text);
+        self.command_return_target = Some(target);
+    }
+
+    fn maybe_enter_command_mode_from_input_buffer(&mut self) -> bool {
+        let Some(target) = self.command_return_target_for_input_surface() else {
+            return false;
+        };
+        if !self.input_buffer.starts_with(':') {
+            return false;
+        }
+        self.enter_command_mode_from_input_buffer(target);
+        true
+    }
+
+    fn restore_input_focus_after_command_exit(&mut self) {
+        let Some(target) = self.command_return_target.take() else {
+            return;
+        };
+        match target {
+            CommandReturnTarget::Idea => {
+                if self.state.current_phase == Phase::IdeaInput {
+                    self.input_mode = true;
+                }
+            }
+            CommandReturnTarget::FooterInteractive => {
+                self.input_mode =
+                    self.interactive_run_waiting_for_input() && !self.split_owns_input();
+            }
+            CommandReturnTarget::SplitInteractive => {
+                // If the split ownership changed while command mode was open,
+                // refuse to force-focus the wrong surface.
+                self.input_mode =
+                    self.interactive_run_waiting_for_input() && self.split_owns_input();
+            }
+        }
+    }
+
+    fn close_palette(&mut self, restore_input_focus: bool) {
+        self.palette.close();
+        if restore_input_focus {
+            self.restore_input_focus_after_command_exit();
+        } else {
+            self.command_return_target = None;
+        }
+    }
+
+    fn open_palette_browser(&mut self) {
+        self.palette.open();
+        self.command_return_target = None;
+    }
+
     fn scroll_split_by_lines(&mut self, delta: isize) {
         let content_height = self.current_split_content_height();
         if content_height == 0 {
@@ -169,7 +242,7 @@ impl App {
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => false,
             KeyCode::Char(':') => {
-                self.palette.open();
+                self.open_palette_browser();
                 false
             }
             KeyCode::Up => {
@@ -227,7 +300,7 @@ impl App {
             {
                 // Approval pauses render as modals, but YOLO must be toggleable
                 // while paused so the gate can resolve on the next loop tick.
-                self.palette.open();
+                self.open_palette_browser();
                 return false;
             }
             self.confirm_back = false;
@@ -239,10 +312,6 @@ impl App {
         }
 
         if self.interactive_run_active() {
-            if key.code == KeyCode::Char(':') {
-                self.palette.open();
-                return false;
-            }
             if self.interactive_run_waiting_for_input() {
                 let text_entry_key = matches!(key.code, KeyCode::Enter)
                     || (matches!(key.code, KeyCode::Char(_))
@@ -269,7 +338,7 @@ impl App {
         }
 
         if self.can_focus_input()
-            && matches!(key.code, KeyCode::Char(c) if c != ':')
+            && matches!(key.code, KeyCode::Char(_))
             && !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
@@ -308,7 +377,7 @@ impl App {
                 }
             }
             KeyCode::Char(':') => {
-                self.palette.open();
+                self.open_palette_browser();
                 false
             }
             KeyCode::Up => {
@@ -344,6 +413,43 @@ impl App {
             }
             _ => false,
         }
+    }
+
+    pub(super) fn handle_paste(&mut self, text: &str) {
+        if self.palette.open {
+            crate::input_editor::insert_str(
+                &mut self.palette.buffer,
+                &mut self.palette.cursor,
+                text,
+            );
+            return;
+        }
+
+        if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
+            self.input_mode = false;
+            return;
+        }
+
+        let can_edit_input = self.split_owns_input()
+            || self.interactive_run_waiting_for_input()
+            || self.input_mode
+            || self.can_focus_input();
+        if !can_edit_input {
+            return;
+        }
+        self.input_mode = true;
+
+        if self.maybe_enter_command_mode_from_input_buffer() {
+            crate::input_editor::insert_str(
+                &mut self.palette.buffer,
+                &mut self.palette.cursor,
+                text,
+            );
+            return;
+        }
+
+        crate::input_editor::insert_str(&mut self.input_buffer, &mut self.input_cursor, text);
+        let _ = self.maybe_enter_command_mode_from_input_buffer();
     }
 
     pub(super) fn palette_commands(&self) -> Vec<PaletteCommand> {
@@ -420,7 +526,7 @@ impl App {
     fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc => {
-                self.palette.close();
+                self.close_palette(true);
                 false
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -430,13 +536,13 @@ impl App {
                         _ => return false,
                     })
                 } else {
-                    self.palette.close();
+                    self.close_palette(false);
                     false
                 }
             }
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
-                self.palette.close();
+                self.close_palette(false);
                 self.execute_palette_input(&input)
             }
             KeyCode::Tab => {
@@ -448,7 +554,7 @@ impl App {
             }
             KeyCode::Backspace => {
                 if self.palette.buffer.is_empty() {
-                    self.palette.close();
+                    self.close_palette(true);
                 } else {
                     let cursor = self.palette.cursor;
                     if cursor > 0 {
@@ -806,6 +912,10 @@ impl App {
             return false;
         }
 
+        if self.maybe_enter_command_mode_from_input_buffer() {
+            return self.handle_palette_key(key);
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = false;
@@ -863,6 +973,7 @@ impl App {
             _ => {}
         }
         let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
+        let _ = self.maybe_enter_command_mode_from_input_buffer();
         false
     }
 

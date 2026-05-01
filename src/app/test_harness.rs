@@ -134,6 +134,7 @@ pub(super) fn mk_app(state: SessionState) -> App {
         status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
         prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: palette::PaletteState::default(),
+        command_return_target: None,
     };
     app.rebuild_visible_rows();
     app.restore_selection(app.selected_key.clone(), app.selected);
@@ -410,6 +411,7 @@ pub(super) fn idle_app(state: SessionState) -> App {
         status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
         prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: palette::PaletteState::default(),
+        command_return_target: None,
     };
     app.rebuild_visible_rows();
     app.restore_selection(app.selected_key.clone(), app.selected);

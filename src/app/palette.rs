@@ -223,6 +223,12 @@ impl PaletteState {
         self.cursor = 0;
     }
 
+    pub fn open_with_buffer(&mut self, buffer: String) {
+        self.open = true;
+        self.cursor = buffer.chars().count();
+        self.buffer = buffer;
+    }
+
     pub fn close(&mut self) {
         self.open = false;
         self.buffer.clear();
@@ -419,6 +425,15 @@ mod tests {
         assert!(!state.open);
         assert!(state.buffer.is_empty());
         assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
+    fn palette_state_open_with_buffer_preserves_text_and_cursor() {
+        let mut state = PaletteState::default();
+        state.open_with_buffer("cheap".to_string());
+        assert!(state.open);
+        assert_eq!(state.buffer, "cheap");
+        assert_eq!(state.cursor, 5);
     }
 
     #[test]

@@ -2,6 +2,7 @@ pub mod acp;
 pub mod adapters;
 pub mod app;
 pub mod artifacts;
+pub mod brainstorm_sync;
 pub mod cache;
 pub mod cache_lock;
 pub mod coder_summary;

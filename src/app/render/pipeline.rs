@@ -1,12 +1,13 @@
 use super::*;
-use crate::app::split::SplitTarget;
+use crate::app::chat_widget;
+use crate::app::clock::WallClock;
+use crate::app::split::{SplitTarget, run_main_panel_message_visible};
 
 pub(super) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 enum PipelineLineKind {
     Other,
     RunningLeafTail { run_id: u64 },
@@ -18,9 +19,6 @@ struct PipelineLine {
     kind: PipelineLineKind,
 }
 
-// RunningTailLine and running_tail_for_row will be used by the split
-// renderer once transcript tails move out of the tree body.
-#[allow(dead_code)]
 pub(super) struct RunningTailLine {
     pub(super) line: Line<'static>,
     kind: PipelineLineKind,
@@ -268,27 +266,64 @@ impl App {
     fn node_body_lines_with_offset(
         &self,
         index: usize,
-        _available_width: usize,
-        _local_offset: &chrono::FixedOffset,
-        _suppressed_container_runs: &BTreeSet<u64>,
+        available_width: usize,
+        local_offset: &chrono::FixedOffset,
+        suppressed_container_runs: &BTreeSet<u64>,
     ) -> Vec<PipelineLine> {
         let Some(node) = self.node_for_row(index) else {
             return Vec::new();
         };
 
-        if let Some(_id) = node.run_id.or(node.leaf_run_id)
-            && let Some(_run) = self.state.agent_runs.iter().find(|r| r.id == _id)
+        if let Some(id) = node.run_id.or(node.leaf_run_id)
+            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id)
         {
-            // Transcript content (messages, thinking, tools, outputs, live
-            // tails, and running placeholders) moved to the split view; tree
-            // body stays structural-only. See spec §3.
-            return Vec::new();
+            // Main panel restores the system/status/user transcript surface
+            // for both interactive and non-interactive runs. ACP output
+            // (`AgentText`) and thought/tool text (`AgentThought`) stay in
+            // the split panel — the visibility decision is centralized in
+            // `run_main_panel_message_visible`.
+            let msgs: Vec<_> = self
+                .messages
+                .iter()
+                .filter(|m| m.run_id == id)
+                .filter(|m| {
+                    run_main_panel_message_visible(run, m.kind, self.state.show_thinking_texts)
+                })
+                .cloned()
+                .collect();
+            let running_tail = self.running_tail_for_row(
+                index,
+                run,
+                &WallClock::new(),
+                suppressed_container_runs,
+            );
+            let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
+            let has_end = msgs
+                .iter()
+                .any(|m| m.kind == crate::state::MessageKind::End);
+            let mut lines: Vec<_> = chat_widget::message_lines(
+                &msgs,
+                run,
+                local_offset,
+                running_tail.map(|tail| tail.line),
+                available_width,
+            )
+            .into_iter()
+            .map(|line| PipelineLine {
+                line,
+                kind: PipelineLineKind::Other,
+            })
+            .collect();
+            if run.status == RunStatus::Running
+                && !has_end
+                && let Some(kind) = tail_kind
+                && let Some(last) = lines.last_mut()
+            {
+                last.kind = kind;
+            }
+            return lines;
         }
 
-        // Detailed transcript content (messages, thinking, tools, outputs,
-        // live tails, and Idea text/input) moved to the split view. Tree
-        // bodies remain structural-only, showing compact status summaries
-        // and child links where applicable.
         self.render_compact_node(node, index)
             .into_iter()
             .map(|line| PipelineLine {
@@ -304,7 +339,6 @@ impl App {
     /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows use the
     /// tree-shape placeholder only when a visible child transcript tail for the
     /// same run is not already representing progress.
-    #[allow(dead_code)]
     pub(super) fn running_tail_for_row<C: Clock>(
         &self,
         index: usize,

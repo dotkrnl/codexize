@@ -1438,7 +1438,10 @@ fn interactive_run_split_renders_model_output_and_user_input() {
     let split_text = split_panel_text(&mut app, 80, 90);
 
     assert!(split_text.contains("visible model answer"), "{split_text}");
-    assert!(split_text.contains("visible operator input"), "{split_text}");
+    assert!(
+        split_text.contains("visible operator input"),
+        "{split_text}"
+    );
     // System lifecycle/status records belong only in the main panel.
     assert!(!split_text.contains("Lifecycle started"), "{split_text}");
     assert!(!split_text.contains("lifecycle brief"), "{split_text}");
@@ -2871,8 +2874,7 @@ fn main_panel_shows_live_summary_tail_for_both_run_modes() {
         let mut run = run_record(7, RunStatus::Running);
         run.modes.interactive = interactive;
         let mut app = test_app(leaf_only_tree(), vec![run], Vec::new());
-        app.live_summary_cached_text =
-            "drafting parity test | covers both modes".to_string();
+        app.live_summary_cached_text = "drafting parity test | covers both modes".to_string();
         app.state.current_phase = Phase::PlanningRunning;
 
         let lines = render_lines(&app, 12);

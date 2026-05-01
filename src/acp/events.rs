@@ -248,4 +248,28 @@ mod tests {
             Some("next thought".to_string())
         );
     }
+
+    #[test]
+    fn finish_prompt_turn_drains_queued_ready_blocks_before_live_buffer() {
+        // Spec: a prompt turn must not swallow a queued ready block when a
+        // live block also exists. `finish_prompt_turn` returns one block per
+        // call so the caller can loop and persist each finalized block before
+        // the live remainder. Drain order is ready blocks first (in arrival
+        // order), then the live buffer.
+        let mut accumulator = AcpTextAccumulator::with_max_chars(80);
+
+        assert_eq!(
+            accumulator.push("first paragraph\n\nsecond paragraph\n\nlive"),
+            Some("first paragraph".to_string())
+        );
+        // Caller has only consumed one ready block so far; another ready
+        // block plus the live buffer remain. finish_prompt_turn must surface
+        // both rather than collapsing them.
+        assert_eq!(
+            accumulator.finish_prompt_turn(),
+            Some("second paragraph".to_string())
+        );
+        assert_eq!(accumulator.finish_prompt_turn(), Some("live".to_string()));
+        assert!(accumulator.finish_prompt_turn().is_none());
+    }
 }

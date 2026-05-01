@@ -1052,6 +1052,7 @@ fn brainstorm_prompts_require_authoritative_user_requirements() {
                 &spec_path.display().to_string(),
                 &summary_path.display().to_string(),
                 &live_summary.display().to_string(),
+                None,
                 yolo,
             );
 
@@ -1071,6 +1072,125 @@ fn brainstorm_prompts_require_authoritative_user_requirements() {
                 ));
             }
         }
+    });
+}
+
+#[test]
+fn brainstorm_prompt_adds_vendor_package_path_without_losing_existing_rules() {
+    with_temp_root(|| {
+        let session_dir = session_state::session_dir("brainstorm-package-path");
+        let artifacts = session_dir.join("artifacts");
+        let spec_path = artifacts.join("spec.md");
+        let summary_path = artifacts.join("session_summary.toml");
+        let live_summary = artifacts.join("live_summary.txt");
+        std::fs::create_dir_all(&artifacts).unwrap();
+
+        let package_path = "/home/test/.codex/skills/brainstorming";
+        for yolo in [false, true] {
+            let prompt = brainstorm_prompt(
+                "add retries unless disabled",
+                &spec_path.display().to_string(),
+                &summary_path.display().to_string(),
+                &live_summary.display().to_string(),
+                Some(std::path::Path::new(package_path)),
+                yolo,
+            );
+
+            assert!(prompt.contains(package_path));
+            assert!(prompt.contains("Use that installed package for brainstorming."));
+            assert!(prompt.contains("## User-stated requirements (authoritative)"));
+            assert!(
+                prompt
+                    .contains("Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):")
+            );
+            assert!(
+                prompt.contains("No `git add`/`commit`/`stash` or any version-control mutation")
+            );
+            if yolo {
+                assert!(prompt.contains("and on each sub-goal change"));
+                assert!(!prompt.contains("`/exit`"));
+            } else {
+                assert!(prompt.contains("so the operator can follow along"));
+                assert!(prompt.contains("operator to enter `/exit`"));
+            }
+        }
+    });
+}
+
+#[test]
+fn brainstorm_launch_uses_selected_vendor_package_path_when_metadata_exists() {
+    with_temp_root(|| {
+        let home = tempfile::TempDir::new().unwrap();
+        let prev_home = std::env::var_os("HOME");
+        // SAFETY: with_temp_root serializes filesystem/env-sensitive tests.
+        unsafe {
+            std::env::set_var("HOME", home.path());
+        }
+
+        let result = std::panic::catch_unwind(|| {
+            let metadata_path = home
+                .path()
+                .join(".codexize/skills/brainstorming/metadata.toml");
+            std::fs::create_dir_all(metadata_path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &metadata_path,
+                r#"
+[vendors.codex]
+installed_commit = "abc123"
+path = "/vendor/codex/brainstorming"
+mode = "native"
+"#,
+            )
+            .unwrap();
+
+            let session_id = "brainstorm-launch-package-path";
+            let mut state = SessionState::new(session_id.to_string());
+            state.current_phase = Phase::BrainstormRunning;
+            let mut app = idle_app(state);
+            app.models = vec![ranked_model(
+                selection::VendorKind::Codex,
+                "gpt-5.5",
+                1,
+                1,
+                1,
+            )];
+            app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+                TestLaunchHarness {
+                    outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                        exit_code: 0,
+                        artifact_contents: None,
+                        launch_error: None,
+                    }]),
+                },
+            )));
+
+            assert!(app.launch_brainstorm_with_model(
+                "add retries".to_string(),
+                Some(ranked_model(
+                    selection::VendorKind::Codex,
+                    "gpt-5.5",
+                    1,
+                    1,
+                    1,
+                )),
+            ));
+
+            let prompt_path = session_state::session_dir(session_id)
+                .join("prompts")
+                .join("brainstorm.md");
+            let prompt = std::fs::read_to_string(prompt_path).unwrap();
+            assert!(prompt.contains("/vendor/codex/brainstorming"));
+            assert!(prompt.contains("Use that installed package for brainstorming."));
+        });
+
+        // SAFETY: with_temp_root serializes filesystem/env-sensitive tests.
+        unsafe {
+            match prev_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        result.expect("test panicked");
     });
 }
 

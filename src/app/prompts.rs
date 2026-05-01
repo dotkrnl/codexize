@@ -270,20 +270,34 @@ critical, write a single bullet saying so — do NOT invent issues.
     )
 }
 
+fn brainstorm_package_instruction(package_path: Option<&std::path::Path>) -> String {
+    let Some(package_path) = package_path else {
+        return String::new();
+    };
+    // Metadata records the package root directory, and vendor adapters are
+    // discovered from that directory rather than from an individual file.
+    format!(
+        "Use the brainstorming package installed at {}. Use that installed package for brainstorming.\n\n",
+        package_path.display()
+    )
+}
+
 pub(super) fn brainstorm_prompt(
     idea: &str,
     spec_path: &str,
     summary_path: &str,
     live_summary_path: &str,
+    package_path: Option<&std::path::Path>,
     yolo: bool,
 ) -> String {
     let project_doc_instr = project_doc_instr();
+    let package_instr = brainstorm_package_instruction(package_path);
     if !yolo {
         let instr = live_summary_instruction_interactive(std::path::Path::new(live_summary_path));
         return format!(
             r#"{project_doc_instr}Invoke your brainstorming skill now.
 
-Idea:
+{package_instr}Idea:
 ---
 {idea}
 ---
@@ -357,7 +371,7 @@ your best judgement and move forward.
 
 Invoke your brainstorming skill now.
 
-Idea:
+{package_instr}Idea:
 ---
 {idea}
 ---

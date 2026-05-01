@@ -3,6 +3,7 @@ use super::*;
 use crate::{
     adapters::{AgentRun, EffortLevel, run_label_with_model},
     artifacts::ArtifactKind,
+    brainstorm_sync::{default_metadata_path, metadata::load as load_brainstorm_metadata},
     runner::{launch_interactive, launch_noninteractive},
     selection::{
         CachedModel, VendorKind,
@@ -15,10 +16,25 @@ use crate::{
     },
 };
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 use super::{models::vendor_tag, prompts::*};
 
 impl App {
+    fn brainstorm_package_path_for_vendor(vendor: VendorKind) -> Option<PathBuf> {
+        let metadata_path = default_metadata_path().ok()?;
+        Self::brainstorm_package_path_for_vendor_from(&metadata_path, vendor)
+    }
+
+    fn brainstorm_package_path_for_vendor_from(
+        metadata_path: &Path,
+        vendor: VendorKind,
+    ) -> Option<PathBuf> {
+        load_brainstorm_metadata(metadata_path)
+            .vendor_record(vendor)
+            .map(|record| record.path.clone())
+    }
+
     pub(super) fn try_test_launch(
         &mut self,
         artifact_path: Option<&std::path::Path>,
@@ -547,11 +563,13 @@ impl App {
         let summary_path = session_state::session_dir(session_id)
             .join("artifacts")
             .join(ArtifactKind::SessionSummary.filename());
+        let package_path = Self::brainstorm_package_path_for_vendor(vendor_kind);
         let prompt = brainstorm_prompt(
             &idea,
             &spec_path.display().to_string(),
             &summary_path.display().to_string(),
             &live_summary_path.display().to_string(),
+            package_path.as_deref(),
             modes.yolo,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {

@@ -419,6 +419,7 @@ fn yolo_prompts_insert_trust_preamble_and_drop_interactive_exit_cues() {
             &spec_path.display().to_string(),
             &summary_path.display().to_string(),
             &live_summary.display().to_string(),
+            None,
             true,
         );
         assert_eq!(brainstorm.matches(trust_preamble).count(), 1);

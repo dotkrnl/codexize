@@ -9,6 +9,7 @@
 
 pub mod adapter;
 pub mod discovery;
+pub mod installer;
 pub mod lock;
 pub mod metadata;
 pub mod plan;

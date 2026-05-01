@@ -291,12 +291,8 @@ impl App {
                 })
                 .cloned()
                 .collect();
-            let running_tail = self.running_tail_for_row(
-                index,
-                run,
-                &WallClock::new(),
-                suppressed_container_runs,
-            );
+            let running_tail =
+                self.running_tail_for_row(index, run, &WallClock::new(), suppressed_container_runs);
             let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
             let has_end = msgs
                 .iter()

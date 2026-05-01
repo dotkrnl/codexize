@@ -834,17 +834,29 @@ impl App {
                 let node = self.node_for_row(index)?;
                 let run_id = node.run_id.or(node.leaf_run_id)?;
                 let run = self.state.agent_runs.iter().find(|run| run.id == run_id)?;
+                // Match main-panel rendering: messages that are not visible
+                // in the main panel must not contribute to the unread offset
+                // because the pipeline widget never renders them.
+                let visible = |message: &&crate::state::Message| {
+                    crate::app::split::run_main_panel_message_visible(
+                        run,
+                        message.kind,
+                        self.state.show_thinking_texts,
+                    )
+                };
                 let old_messages: Vec<_> = self
                     .messages
                     .iter()
                     .take(baseline)
                     .filter(|message| message.run_id == run_id)
+                    .filter(visible)
                     .cloned()
                     .collect();
                 let all_messages: Vec<_> = self
                     .messages
                     .iter()
                     .filter(|message| message.run_id == run_id)
+                    .filter(visible)
                     .cloned()
                     .collect();
 

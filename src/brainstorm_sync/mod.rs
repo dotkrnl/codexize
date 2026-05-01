@@ -10,6 +10,7 @@
 pub mod discovery;
 pub mod lock;
 pub mod metadata;
+pub mod upstream;
 
 pub use metadata::{
     BrainstormMetadata, CachedSource, InstallMode, VendorRecord, default_metadata_dir,

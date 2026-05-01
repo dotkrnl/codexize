@@ -12,6 +12,7 @@ pub mod lock;
 pub mod metadata;
 pub mod plan;
 pub mod upstream;
+pub mod upstream_git;
 
 pub use metadata::{
     BrainstormMetadata, CachedSource, InstallMode, VendorRecord, default_metadata_dir,

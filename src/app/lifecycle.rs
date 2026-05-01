@@ -455,7 +455,11 @@ impl App {
     /// and clamps the scroll offset.
     ///
     /// Interactive ACP prompts force-open the split for the active run and
-    /// focus the split input box without waiting for another keypress.
+    /// focus the split input box without waiting for another keypress. The
+    /// `interactive_run_waiting_for_input` guard checks `run.modes.interactive`,
+    /// so non-interactive runs never trigger auto-open, auto-switch, or forced
+    /// input focus from this path — only the stale-target cleanup below applies
+    /// to them.
     pub(super) fn synchronize_split_target(&mut self) {
         if self.interactive_run_waiting_for_input()
             && let Some(run_id) = self.current_run_id
@@ -1588,6 +1592,9 @@ impl App {
                 run.window_name
             ));
         }
+        // Auto-close on exit/stop is interactive-only. Non-interactive runs
+        // keep any manually opened split until the operator closes it or a
+        // later rebuild evicts it as a stale target.
         if run.modes.interactive && self.split_target == Some(SplitTarget::Run(run.id)) {
             self.close_split();
         }

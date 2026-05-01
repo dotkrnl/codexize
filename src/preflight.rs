@@ -1,6 +1,18 @@
+use crate::brainstorm_sync::{
+    CachedSource, InstallMode, VendorRecord, default_metadata_path,
+    discovery::{discover_targets, eligible_vendors},
+    installer::{InstallOutcome, InstallTarget, install_packages},
+    lock::{LockOutcome, try_with_lock},
+    metadata::{load_with_status, save},
+    plan::{BatchPlan, PlanOfferability, build_plan},
+    upstream::{UpstreamSource, resolve_upstream_url},
+    upstream_git::{GitUpstream, SourceCache},
+};
 use crate::state::codexize_root;
 use crate::tui::AppTerminal;
+use crate::{acp::AcpConfig, selection::VendorKind};
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
     Frame,
@@ -10,7 +22,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use std::{
+    collections::BTreeSet,
     fs,
+    io::IsTerminal,
     path::Path,
     process::{Command, Stdio},
     time::Duration,
@@ -40,6 +54,21 @@ enum ModalAction {
 }
 
 const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
+
+#[derive(Debug, Default)]
+struct BrainstormSyncReport {
+    notices: Vec<String>,
+}
+
+struct BrainstormSyncContext<'a> {
+    now: DateTime<Utc>,
+    interactive: bool,
+    available_vendors: &'a BTreeSet<VendorKind>,
+    metadata_path: &'a Path,
+    home: &'a Path,
+    codexize_home: &'a Path,
+    upstream: &'a dyn UpstreamSource,
+}
 
 fn detect_git() -> bool {
     Command::new("git")
@@ -344,10 +373,7 @@ fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::
 }
 
 fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 72);
-
-    let (title, body_lines): (&str, Vec<Line>) = match scenario {
+    let (title, body_lines): (&str, Vec<Line<'static>>) = match scenario {
         Scenario::NoGitEmpty => {
             let title = " No git repository ";
             let lines = vec![
@@ -465,6 +491,12 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
             (title, lines)
         }
     };
+    render_modal(frame, title, body_lines);
+}
+
+fn render_modal(frame: &mut Frame<'_>, title: &str, body_lines: Vec<Line<'static>>) {
+    let area = frame.area();
+    let modal_width = area.width.saturating_sub(8).clamp(30, 72);
 
     let inner_width = modal_width.saturating_sub(2) as usize;
     let wrapped: u16 = body_lines
@@ -504,6 +536,95 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
     frame.render_widget(paragraph, rect);
 }
 
+fn body_line(text: impl Into<String>) -> Line<'static> {
+    Line::from(text.into())
+}
+
+fn vendor_label(vendor: VendorKind) -> &'static str {
+    match vendor {
+        VendorKind::Codex => "Codex",
+        VendorKind::Claude => "Claude",
+        VendorKind::Gemini => "Gemini",
+        VendorKind::Kimi => "Kimi",
+    }
+}
+
+fn brainstorm_sync_modal_lines(plan: &BatchPlan) -> (String, Vec<Line<'static>>) {
+    let mut lines = vec![
+        Line::from(""),
+        body_line(format!("Upstream: {}", plan.upstream_url)),
+        body_line(format!(
+            "Commit: {}",
+            plan.latest_known_commit.as_deref().unwrap_or("unknown")
+        )),
+    ];
+
+    let native = plan.vendors_by_mode(InstallMode::Native);
+    if !native.is_empty() {
+        lines.push(body_line("Native installs:"));
+        for vendor in native {
+            lines.push(body_line(format!(
+                "  - {} -> {}",
+                vendor_label(vendor.vendor),
+                vendor.path.display()
+            )));
+        }
+    }
+
+    let fallback = plan.vendors_by_mode(InstallMode::Fallback);
+    if !fallback.is_empty() {
+        lines.push(body_line("Fallback installs:"));
+        for vendor in fallback {
+            lines.push(body_line(format!(
+                "  - {} -> {}",
+                vendor_label(vendor.vendor),
+                vendor.path.display()
+            )));
+        }
+    }
+
+    lines.push(body_line(
+        "Warning: replacing these packages will discard local edits and keep no backups.",
+    ));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("[Y]", Style::default().fg(Color::Green)),
+        Span::raw("/"),
+        Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::raw("  update all"),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("[N]", Style::default().fg(Color::DarkGray)),
+        Span::raw("/"),
+        Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+        Span::raw("  skip"),
+    ]));
+
+    (" Brainstorm skill update ".to_string(), lines)
+}
+
+fn run_brainstorm_sync_modal(terminal: &mut AppTerminal, plan: &BatchPlan) -> Result<ModalAction> {
+    let (title, lines) = brainstorm_sync_modal_lines(plan);
+    loop {
+        terminal.draw(|frame| {
+            render_modal(frame, &title, lines.clone());
+        })?;
+
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match classify_optional_modal_key(key.code) {
+                ModalAction::Accept => return Ok(ModalAction::Accept),
+                ModalAction::Skip => return Ok(ModalAction::Skip),
+                ModalAction::Exit | ModalAction::Ignore => {}
+            }
+        }
+    }
+}
+
 pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     let has_git = detect_git();
     let root = codexize_root();
@@ -517,14 +638,18 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
 
     if has_git {
         if detect_ignored(&root) {
-            return run_acp_install_modals_if_missing(terminal);
+            run_acp_install_modals_if_missing(terminal)?;
+            run_brainstorm_sync_preflight(terminal)?;
+            return Ok(PreflightOutcome::Continue);
         }
         if run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?
             == PreflightOutcome::Exit
         {
             return Ok(PreflightOutcome::Exit);
         }
-        return run_acp_install_modals_if_missing(terminal);
+        run_acp_install_modals_if_missing(terminal)?;
+        run_brainstorm_sync_preflight(terminal)?;
+        return Ok(PreflightOutcome::Continue);
     }
 
     let scenario = if has_existing_files() {
@@ -536,7 +661,9 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     if run_git_init_modal(terminal, scenario, &codexize_entry)? == PreflightOutcome::Exit {
         return Ok(PreflightOutcome::Exit);
     }
-    run_acp_install_modals_if_missing(terminal)
+    run_acp_install_modals_if_missing(terminal)?;
+    run_brainstorm_sync_preflight(terminal)?;
+    Ok(PreflightOutcome::Continue)
 }
 
 fn run_git_init_modal(
@@ -607,14 +734,240 @@ fn run_gitignore_modal(
     }
 }
 
-fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
+fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
     if crate::acp::should_offer_codex_acp_install() {
         run_acp_install_modal(terminal, Scenario::CodexAcpMissing, install_codex_acp)?;
     }
     if crate::acp::should_offer_claude_acp_install() {
         run_acp_install_modal(terminal, Scenario::ClaudeAcpMissing, install_claude_acp)?;
     }
-    Ok(PreflightOutcome::Continue)
+    Ok(())
+}
+
+fn run_brainstorm_sync_preflight(terminal: &mut AppTerminal) -> Result<()> {
+    let metadata_path = match default_metadata_path() {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("warning: brainstorm sync skipped: {err:#}");
+            return Ok(());
+        }
+    };
+    let home = match std::env::var_os("HOME") {
+        Some(path) => Path::new(&path).to_path_buf(),
+        None => {
+            eprintln!("warning: brainstorm sync skipped: HOME is not set");
+            return Ok(());
+        }
+    };
+    let codexize_home = home.join(".codexize");
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let available = AcpConfig::default().available_vendors();
+    let upstream = GitUpstream::default();
+
+    let report = run_brainstorm_sync_preflight_with(
+        BrainstormSyncContext {
+            now: Utc::now(),
+            interactive,
+            available_vendors: &available,
+            metadata_path: &metadata_path,
+            home: &home,
+            codexize_home: &codexize_home,
+            upstream: &upstream,
+        },
+        |plan| run_brainstorm_sync_modal(terminal, plan),
+        install_packages,
+    )?;
+    for notice in report.notices {
+        eprintln!("{notice}");
+    }
+    Ok(())
+}
+
+fn run_brainstorm_sync_preflight_with<Prompt, Install>(
+    ctx: BrainstormSyncContext<'_>,
+    mut prompt: Prompt,
+    install: Install,
+) -> Result<BrainstormSyncReport>
+where
+    Prompt: FnMut(&BatchPlan) -> Result<ModalAction>,
+    Install: Fn(&Path, &str, &[InstallTarget]) -> Result<Vec<InstallOutcome>>,
+{
+    let lock_path = ctx.metadata_path.with_extension("toml.lock");
+    match try_with_lock(&lock_path, || {
+        let load = load_with_status(ctx.metadata_path);
+        let mut report = BrainstormSyncReport::default();
+        if let Some(warning) = load.warning {
+            report.notices.push(warning);
+        }
+
+        let mut metadata = load.metadata;
+        let mut metadata_dirty = false;
+        let upstream_url = resolve_upstream_url(metadata.upstream_url.as_deref());
+        let eligible = eligible_vendors(ctx.available_vendors, &metadata);
+        if eligible.is_empty() {
+            return Ok(report);
+        }
+        let targets = discover_targets(ctx.home, ctx.codexize_home, &eligible);
+        let offerability = if ctx.interactive {
+            PlanOfferability::Interactive
+        } else {
+            PlanOfferability::NonInteractive
+        };
+
+        let mut latest_remote_commit = None;
+        let mut remote_check_failed = false;
+        if ctx.interactive
+            && !targets.is_empty()
+            && crate::brainstorm_sync::plan::evaluate_upstream_check(ctx.now, &metadata, &targets)
+                != crate::brainstorm_sync::plan::UpstreamCheck::Skip
+        {
+            match ctx.upstream.latest_commit(&upstream_url) {
+                Ok(commit) => {
+                    metadata.last_checked_at = Some(ctx.now.to_rfc3339());
+                    metadata.upstream_url = Some(upstream_url.clone());
+                    metadata.latest_known_upstream_commit = Some(commit.clone());
+                    latest_remote_commit = Some(commit);
+                    metadata_dirty = true;
+                }
+                Err(err) => {
+                    // Ambiguous policy note: this preflight only offers the
+                    // batch modal when it can name the current upstream commit
+                    // with confidence; otherwise it logs and keeps startup
+                    // moving instead of risking a stale destructive update.
+                    remote_check_failed = true;
+                    report.notices.push(format!(
+                        "warning: brainstorm sync skipped after upstream check failed: {err:#}"
+                    ));
+                }
+            }
+        }
+
+        let plan = build_plan(
+            ctx.now,
+            &metadata,
+            &targets,
+            latest_remote_commit.as_deref(),
+            upstream_url.clone(),
+            offerability,
+        );
+        if plan.is_empty() {
+            if metadata_dirty {
+                save(ctx.metadata_path, &metadata)?;
+            }
+            return Ok(report);
+        }
+        if !ctx.interactive {
+            report.notices.push(
+                "warning: brainstorm sync skipped during non-interactive startup".to_string(),
+            );
+            if metadata_dirty {
+                save(ctx.metadata_path, &metadata)?;
+            }
+            return Ok(report);
+        }
+        if remote_check_failed {
+            if metadata_dirty {
+                save(ctx.metadata_path, &metadata)?;
+            }
+            return Ok(report);
+        }
+
+        match prompt(&plan)? {
+            ModalAction::Accept => {}
+            ModalAction::Skip => {
+                report
+                    .notices
+                    .push("warning: brainstorm sync skipped by operator".to_string());
+                if metadata_dirty {
+                    save(ctx.metadata_path, &metadata)?;
+                }
+                return Ok(report);
+            }
+            ModalAction::Exit | ModalAction::Ignore => {
+                report
+                    .notices
+                    .push("warning: brainstorm sync skipped by operator".to_string());
+                if metadata_dirty {
+                    save(ctx.metadata_path, &metadata)?;
+                }
+                return Ok(report);
+            }
+        }
+
+        let Some(commit) = plan.latest_known_commit.as_deref() else {
+            report.notices.push(
+                "warning: brainstorm sync skipped because no upstream commit is known".to_string(),
+            );
+            if metadata_dirty {
+                save(ctx.metadata_path, &metadata)?;
+            }
+            return Ok(report);
+        };
+
+        let metadata_dir = ctx.metadata_path.parent().unwrap_or_else(|| Path::new("."));
+        let cache = SourceCache::new(metadata_dir);
+        let source_root = match cache.ensure(ctx.upstream, &upstream_url, commit) {
+            Ok(path) => path,
+            Err(err) => {
+                report.notices.push(format!(
+                    "warning: brainstorm sync failed before install: {err:#}"
+                ));
+                if metadata_dirty {
+                    save(ctx.metadata_path, &metadata)?;
+                }
+                return Ok(report);
+            }
+        };
+        metadata.cached_source = Some(CachedSource {
+            commit: commit.to_string(),
+            path: source_root.clone(),
+        });
+        metadata.upstream_url = Some(upstream_url.clone());
+        metadata_dirty = true;
+
+        let install_targets = plan
+            .vendors
+            .iter()
+            .map(|vendor| InstallTarget {
+                vendor: vendor.vendor,
+                mode: vendor.mode,
+                path: vendor.path.clone(),
+            })
+            .collect::<Vec<_>>();
+        let outcomes = install(&source_root, commit, &install_targets)?;
+        for outcome in outcomes {
+            match outcome.error {
+                None => {
+                    metadata.set_vendor_record(
+                        outcome.vendor,
+                        VendorRecord {
+                            installed_commit: outcome.commit,
+                            path: outcome.path,
+                            mode: outcome.mode,
+                        },
+                    );
+                    metadata_dirty = true;
+                }
+                Some(err) => report.notices.push(format!(
+                    "warning: brainstorm sync failed for {}: {err:#}",
+                    vendor_label(outcome.vendor)
+                )),
+            }
+        }
+
+        if metadata_dirty {
+            save(ctx.metadata_path, &metadata)?;
+        }
+        Ok(report)
+    })? {
+        LockOutcome::Held(report) => Ok(report),
+        LockOutcome::Skipped => Ok(BrainstormSyncReport {
+            notices: vec![
+                "warning: brainstorm sync skipped because another codexize process holds the lock"
+                    .to_string(),
+            ],
+        }),
+    }
 }
 
 fn run_acp_install_modal(
@@ -677,8 +1030,20 @@ fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brainstorm_sync::{
+        InstallMode,
+        installer::{InstallOutcome, InstallTarget},
+        plan::{BatchPlan, InstallReason, PlanOfferability, VendorPlan},
+        upstream::UpstreamSource,
+    };
+    use crate::selection::VendorKind;
     use crate::state::test_fs_lock;
+    use anyhow::Result;
+    use chrono::{TimeZone, Utc};
+    use std::collections::BTreeSet;
     use std::ffi::OsStr;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
         let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1027,5 +1392,261 @@ mod tests {
                 "expected identity warning, got: {warnings:?}"
             );
         });
+    }
+
+    #[derive(Default)]
+    struct StubUpstream {
+        latest_commit: Option<String>,
+    }
+
+    impl UpstreamSource for StubUpstream {
+        fn latest_commit(&self, _url: &str) -> Result<String> {
+            Ok(self
+                .latest_commit
+                .clone()
+                .unwrap_or_else(|| "0123456789abcdef0123456789abcdef01234567".to_string()))
+        }
+
+        fn fetch_source(&self, _url: &str, _commit: &str, dest: &Path) -> Result<()> {
+            let pkg = dest.join("skills").join("brainstorming");
+            fs::create_dir_all(&pkg)?;
+            fs::write(pkg.join("SKILL.md"), "# Brainstorming\n")?;
+            Ok(())
+        }
+    }
+
+    fn line_text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn demo_plan() -> BatchPlan {
+        BatchPlan {
+            upstream_url: "https://example.test/superpowers".to_string(),
+            latest_known_commit: Some("abcdef1234567890".to_string()),
+            vendors: vec![
+                VendorPlan {
+                    vendor: VendorKind::Codex,
+                    mode: InstallMode::Native,
+                    path: PathBuf::from("/native/codex/brainstorming"),
+                    installed_commit: Some("old".to_string()),
+                    reason: InstallReason::StaleCommit {
+                        installed: "old".to_string(),
+                        latest: "abcdef1234567890".to_string(),
+                    },
+                },
+                VendorPlan {
+                    vendor: VendorKind::Claude,
+                    mode: InstallMode::Fallback,
+                    path: PathBuf::from("/fallback/claude/brainstorming"),
+                    installed_commit: None,
+                    reason: InstallReason::Missing,
+                },
+            ],
+            upstream_check: crate::brainstorm_sync::plan::UpstreamCheck::Skip,
+            offerability: PlanOfferability::Interactive,
+        }
+    }
+
+    #[test]
+    fn brainstorm_sync_modal_lists_paths_and_destructive_warning() {
+        let (_title, lines) = brainstorm_sync_modal_lines(&demo_plan());
+        let text = line_text(&lines);
+        assert!(text.contains("/native/codex/brainstorming"));
+        assert!(text.contains("/fallback/claude/brainstorming"));
+        assert!(text.contains("discard local edits"));
+        assert!(text.contains("no backups"));
+        assert!(text.contains("[Y]/Enter"));
+        assert!(text.contains("[N]/Esc"));
+    }
+
+    #[test]
+    fn brainstorm_sync_accept_installs_all_planned_vendors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let metadata_path = dir.path().join("brainstorming").join("metadata.toml");
+        let home = dir.path().join("home");
+        let codexize_home = home.join(".codexize");
+        fs::create_dir_all(&home).unwrap();
+        let captured: Arc<Mutex<Vec<InstallTarget>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_for_install = Arc::clone(&captured);
+        let mut available = BTreeSet::new();
+        available.insert(VendorKind::Codex);
+        available.insert(VendorKind::Claude);
+
+        let report = run_brainstorm_sync_preflight_with(
+            BrainstormSyncContext {
+                now: Utc.with_ymd_and_hms(2026, 4, 30, 12, 0, 0).unwrap(),
+                interactive: true,
+                available_vendors: &available,
+                metadata_path: &metadata_path,
+                home: &home,
+                codexize_home: &codexize_home,
+                upstream: &StubUpstream::default(),
+            },
+            |_| Ok(ModalAction::Accept),
+            move |_root, commit, targets| {
+                assert_eq!(commit, "0123456789abcdef0123456789abcdef01234567");
+                captured_for_install
+                    .lock()
+                    .unwrap()
+                    .extend_from_slice(targets);
+                Ok(targets
+                    .iter()
+                    .map(|target| InstallOutcome {
+                        vendor: target.vendor,
+                        mode: target.mode,
+                        path: target.path.clone(),
+                        commit: commit.to_string(),
+                        error: None,
+                    })
+                    .collect())
+            },
+        )
+        .unwrap();
+
+        assert!(report.notices.is_empty(), "{:?}", report.notices);
+        let installed = captured.lock().unwrap().clone();
+        assert_eq!(installed.len(), 2);
+        assert_eq!(installed[0].vendor, VendorKind::Claude);
+        assert_eq!(installed[1].vendor, VendorKind::Codex);
+
+        let metadata = crate::brainstorm_sync::metadata::load(&metadata_path);
+        assert_eq!(
+            metadata.vendor_record(VendorKind::Codex).map(|r| &r.mode),
+            Some(&InstallMode::Fallback)
+        );
+        assert_eq!(
+            metadata.vendor_record(VendorKind::Claude).map(|r| &r.mode),
+            Some(&InstallMode::Fallback)
+        );
+    }
+
+    #[test]
+    fn brainstorm_sync_skip_installs_nothing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let metadata_path = dir.path().join("brainstorming").join("metadata.toml");
+        let home = dir.path().join("home");
+        let codexize_home = home.join(".codexize");
+        fs::create_dir_all(&home).unwrap();
+        let mut available = BTreeSet::new();
+        available.insert(VendorKind::Codex);
+
+        let report = run_brainstorm_sync_preflight_with(
+            BrainstormSyncContext {
+                now: Utc.with_ymd_and_hms(2026, 4, 30, 12, 0, 0).unwrap(),
+                interactive: true,
+                available_vendors: &available,
+                metadata_path: &metadata_path,
+                home: &home,
+                codexize_home: &codexize_home,
+                upstream: &StubUpstream::default(),
+            },
+            |_| Ok(ModalAction::Skip),
+            |_root, _commit, _targets| {
+                panic!("skip must not invoke installer");
+            },
+        )
+        .unwrap();
+
+        assert!(
+            report
+                .notices
+                .iter()
+                .any(|notice| notice.contains("skipped")),
+            "{:?}",
+            report.notices
+        );
+        let metadata = crate::brainstorm_sync::metadata::load(&metadata_path);
+        assert!(metadata.vendors.is_empty());
+    }
+
+    #[test]
+    fn brainstorm_sync_noninteractive_skips_package_changes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let metadata_path = dir.path().join("brainstorming").join("metadata.toml");
+        let home = dir.path().join("home");
+        let codexize_home = home.join(".codexize");
+        fs::create_dir_all(&home).unwrap();
+        let mut available = BTreeSet::new();
+        available.insert(VendorKind::Codex);
+
+        let report = run_brainstorm_sync_preflight_with(
+            BrainstormSyncContext {
+                now: Utc.with_ymd_and_hms(2026, 4, 30, 12, 0, 0).unwrap(),
+                interactive: false,
+                available_vendors: &available,
+                metadata_path: &metadata_path,
+                home: &home,
+                codexize_home: &codexize_home,
+                upstream: &StubUpstream::default(),
+            },
+            |_| {
+                panic!("non-interactive startup must not prompt");
+            },
+            |_root, _commit, _targets| {
+                panic!("non-interactive startup must not install");
+            },
+        )
+        .unwrap();
+
+        assert!(
+            report
+                .notices
+                .iter()
+                .any(|notice| notice.contains("non-interactive")),
+            "{:?}",
+            report.notices
+        );
+    }
+
+    #[test]
+    fn brainstorm_sync_lock_contention_skips_without_install() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let metadata_path = dir.path().join("brainstorming").join("metadata.toml");
+        let lock_path = metadata_path.with_extension("toml.lock");
+        let home = dir.path().join("home");
+        let codexize_home = home.join(".codexize");
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+        fs::write(
+            &lock_path,
+            format!("{}\n{}\n", std::process::id(), 4_102_444_800u64),
+        )
+        .unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let mut available = BTreeSet::new();
+        available.insert(VendorKind::Codex);
+
+        let report = run_brainstorm_sync_preflight_with(
+            BrainstormSyncContext {
+                now: Utc.with_ymd_and_hms(2026, 4, 30, 12, 0, 0).unwrap(),
+                interactive: true,
+                available_vendors: &available,
+                metadata_path: &metadata_path,
+                home: &home,
+                codexize_home: &codexize_home,
+                upstream: &StubUpstream::default(),
+            },
+            |_| {
+                panic!("lock contention must not prompt");
+            },
+            |_root, _commit, _targets| {
+                panic!("lock contention must not install");
+            },
+        )
+        .unwrap();
+
+        assert!(
+            report.notices.iter().any(|notice| notice.contains("lock")),
+            "{:?}",
+            report.notices
+        );
     }
 }

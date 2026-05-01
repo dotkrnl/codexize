@@ -1,0 +1,2 @@
+status = "done"
+summary = "Wired brainstorm skill sync into startup preflight after the existing ACP checks, added the batch confirmation modal with native/fallback path details and destructive replacement warning, and covered accept/skip, non-interactive, and lock-contention paths with focused preflight tests."

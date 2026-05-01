@@ -160,6 +160,14 @@ fn active_acp_runs() -> &'static Mutex<std::collections::HashMap<String, Managed
     ACTIVE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+#[cfg(test)]
+fn test_input_receivers()
+-> &'static Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpInput>>> {
+    static RECEIVERS: OnceLock<Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpInput>>>> =
+        OnceLock::new();
+    RECEIVERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_managed_acp_launch(
     window_name: &str,
@@ -626,6 +634,13 @@ fn cleanup_finished_acp_runs() {
 }
 
 fn take_managed_acp_run(window_name: &str) -> Option<ManagedAcpRun> {
+    #[cfg(test)]
+    {
+        test_input_receivers()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(window_name);
+    }
     active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -695,9 +710,13 @@ pub fn request_run_label_interactive_input_for_test(window_name: &str) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (cancel_tx, _) = mpsc::channel();
-    let (input_tx, _) = mpsc::channel();
+    let (input_tx, input_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
     let waiting_for_input = std::sync::Arc::new(AtomicBool::new(true));
+    test_input_receivers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(window_name.to_string(), input_rx);
     guard.insert(
         window_name.to_string(),
         ManagedAcpRun {
@@ -765,6 +784,13 @@ pub fn shutdown_all_runs() {
             .into_values()
             .collect::<Vec<_>>()
     };
+    #[cfg(test)]
+    {
+        test_input_receivers()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
 
     for mut run in runs {
         let _ = run.cancel_tx.send(AcpCancelReason::Terminate);

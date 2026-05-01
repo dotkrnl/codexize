@@ -3020,3 +3020,119 @@ fn split_follow_tail_keeps_live_running_tail_visible() {
         );
     });
 }
+
+fn make_non_interactive_run(id: u64, window_name: &str) -> RunRecord {
+    RunRecord {
+        id,
+        stage: "planning".to_string(),
+        task_id: None,
+        round: 1,
+        attempt: 1,
+        model: "m".to_string(),
+        vendor: "v".to_string(),
+        window_name: window_name.to_string(),
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        status: RunStatus::Running,
+        error: None,
+        effort: EffortLevel::Normal,
+        modes: crate::state::LaunchModes {
+            interactive: false,
+            ..Default::default()
+        },
+        hostname: None,
+        mount_device_id: None,
+    }
+}
+
+#[test]
+fn synchronize_split_target_does_not_auto_open_for_non_interactive_run() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("non-interactive-no-auto-open".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        state
+            .agent_runs
+            .push(make_non_interactive_run(42, "non-int-1"));
+
+        // Even with the runner label flagged as waiting for input, a
+        // non-interactive run must not trigger auto-open, auto-switch, or
+        // forced input focus.
+        crate::runner::request_run_label_interactive_input_for_test("non-int-1");
+
+        let mut app = idle_app(state);
+        app.current_run_id = Some(42);
+
+        assert!(app.split_target.is_none());
+        assert!(!app.input_mode);
+
+        app.synchronize_split_target();
+
+        assert!(
+            app.split_target.is_none(),
+            "non-interactive run must not auto-open the split"
+        );
+        assert!(
+            !app.input_mode,
+            "non-interactive run must not force input focus"
+        );
+    });
+}
+
+#[test]
+fn synchronize_split_target_does_not_force_focus_for_non_interactive_open_split() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("non-interactive-manual-split".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        state
+            .agent_runs
+            .push(make_non_interactive_run(42, "non-int-2"));
+
+        crate::runner::request_run_label_interactive_input_for_test("non-int-2");
+
+        let mut app = idle_app(state);
+        app.current_run_id = Some(42);
+        // Operator manually opened the split for this non-interactive run.
+        app.split_target = Some(super::split::SplitTarget::Run(42));
+
+        app.synchronize_split_target();
+
+        assert_eq!(
+            app.split_target,
+            Some(super::split::SplitTarget::Run(42)),
+            "manually opened split for a non-interactive run must remain open"
+        );
+        assert!(
+            !app.input_mode,
+            "non-interactive run must not gain forced input focus from sync"
+        );
+    });
+}
+
+#[test]
+fn poll_agent_run_does_not_close_split_for_non_interactive_run_on_exit() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("non-interactive-exit-keep-split".to_string());
+        state.current_phase = Phase::PlanningRunning;
+        state
+            .agent_runs
+            .push(make_non_interactive_run(42, "[Planning]"));
+
+        let mut app = idle_app(state);
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness::default(),
+        )));
+        app.current_run_id = Some(42);
+        app.run_launched = true;
+        // Operator opened the split manually; lifecycle exit must not close it.
+        app.split_target = Some(super::split::SplitTarget::Run(42));
+        app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+
+        app.poll_agent_run();
+
+        assert_eq!(
+            app.split_target,
+            Some(super::split::SplitTarget::Run(42)),
+            "non-interactive exit must not auto-close a manually opened split"
+        );
+    });
+}

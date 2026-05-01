@@ -176,7 +176,10 @@ mod tests {
     fn preamble_identifies_vendor_and_defers_to_codexize_prompt() {
         let body = vendor_preamble(VendorKind::Claude);
         assert!(body.contains("Claude adapter"), "{body}");
-        assert!(body.contains("codexize's generated brainstorm prompt"), "{body}");
+        assert!(
+            body.contains("codexize's generated brainstorm prompt"),
+            "{body}"
+        );
         assert!(body.contains("/exit"), "{body}");
     }
 

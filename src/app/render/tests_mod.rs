@@ -1457,6 +1457,53 @@ fn interactive_run_split_renders_model_output_and_user_input() {
 }
 
 #[test]
+fn split_renders_one_message_per_finalized_acp_block_with_main_panel_clean() {
+    // Acceptance: a multi-boundary ACP stream persists N+1 distinct
+    // AgentText messages (see runner::tests_mod for the persistence proof);
+    // each must render in the split as a separate message and stay out of
+    // the main panel even with a final live remainder present.
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = true;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![
+            agent_text(1, "alpha paragraph"),
+            agent_text(1, "beta paragraph"),
+            agent_text(1, "gamma overflow extra"),
+            agent_text(1, "live remainder"),
+        ],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+
+    let split_text = split_panel_text(&mut app, 80, 90);
+    for block in [
+        "alpha paragraph",
+        "beta paragraph",
+        "gamma overflow extra",
+        "live remainder",
+    ] {
+        assert!(
+            split_text.contains(block),
+            "split must render finalized block {block:?}: {split_text}"
+        );
+    }
+
+    let main_panel_lines = render_lines(&app, 30);
+    for block in [
+        "alpha paragraph",
+        "beta paragraph",
+        "gamma overflow extra",
+        "live remainder",
+    ] {
+        assert!(
+            !main_panel_lines.iter().any(|line| line.contains(block)),
+            "main panel must not render ACP block {block:?}: {main_panel_lines:#?}"
+        );
+    }
+}
+
+#[test]
 fn interactive_run_split_height_uses_same_filter_as_rendering() {
     let mut run = run_record(1, RunStatus::Done);
     run.modes.interactive = true;

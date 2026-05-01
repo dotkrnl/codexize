@@ -196,6 +196,7 @@ impl App {
             status_line: Rc::new(RefCell::new(status_line::StatusLine::new())),
             prev_models_mode: models_area::ModelsAreaMode::default(),
             palette: palette::PaletteState::default(),
+            command_return_target: None,
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
@@ -344,12 +345,15 @@ impl App {
             terminal.draw(|frame| self.draw(frame))?;
             self.on_frame_drawn();
 
-            if event::poll(self.event_poll_duration())?
-                && let Event::Key(key) = event::read()?
-                && self.handle_key(key)
-            {
-                crate::runner::shutdown_all_runs();
-                return Ok(());
+            if event::poll(self.event_poll_duration())? {
+                match event::read()? {
+                    Event::Key(key) if self.handle_key(key) => {
+                        crate::runner::shutdown_all_runs();
+                        return Ok(());
+                    }
+                    Event::Paste(text) => self.handle_paste(&text),
+                    _ => {}
+                }
             }
         }
     }

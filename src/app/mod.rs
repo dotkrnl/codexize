@@ -116,6 +116,13 @@ pub(super) enum ModalKind {
     StageError(StageId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CommandReturnTarget {
+    Idea,
+    FooterInteractive,
+    SplitInteractive,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone)]
 struct TestLaunchOutcome {
@@ -197,6 +204,7 @@ pub struct App {
     status_line: Rc<RefCell<status_line::StatusLine>>,
     prev_models_mode: models_area::ModelsAreaMode,
     palette: palette::PaletteState,
+    command_return_target: Option<CommandReturnTarget>,
 }
 
 fn default_expansion(

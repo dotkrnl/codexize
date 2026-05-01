@@ -624,10 +624,9 @@ impl App {
                     .iter()
                     .filter(|m| m.run_id == run_id)
                     .filter(|m| {
-                        crate::app::split::run_split_message_visible(
+                        crate::app::split::run_split_panel_message_visible(
                             run,
                             m.kind,
-                            self.state.show_noninteractive_texts,
                             self.state.show_thinking_texts,
                         )
                     })

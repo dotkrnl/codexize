@@ -38,10 +38,9 @@ impl SplitWidget<'_> {
             .iter()
             .filter(|m| m.run_id == run_id)
             .filter(|m| {
-                crate::app::split::run_split_message_visible(
+                crate::app::split::run_split_panel_message_visible(
                     run,
                     m.kind,
-                    self.app.state.show_noninteractive_texts,
                     self.app.state.show_thinking_texts,
                 )
             })

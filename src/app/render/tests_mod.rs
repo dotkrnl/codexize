@@ -1443,13 +1443,16 @@ fn interactive_run_split_renders_model_output_and_user_input() {
         split_text.contains("visible operator input"),
         "{split_text}"
     );
-    // System lifecycle/status records belong only in the main panel.
-    assert!(!split_text.contains("Lifecycle started"), "{split_text}");
+    // Started + End messages now appear in both panels (split picks up the
+    // same start/finish lifecycle markers as the main panel).
+    assert!(split_text.contains("Lifecycle started"), "{split_text}");
+    assert!(split_text.contains("Lifecycle end"), "{split_text}");
+    // Brief / Summary / SummaryWarn remain main-panel-only and AgentThought
+    // gates on the verbose-thinking toggle.
     assert!(!split_text.contains("lifecycle brief"), "{split_text}");
     assert!(!split_text.contains("hidden model thought"), "{split_text}");
     assert!(!split_text.contains("Lifecycle summary"), "{split_text}");
     assert!(!split_text.contains("lifecycle warning"), "{split_text}");
-    assert!(!split_text.contains("lifecycle end"), "{split_text}");
 
     app.state.show_thinking_texts = true;
     let split_text = split_panel_text(&mut app, 80, 90);
@@ -1511,12 +1514,12 @@ fn interactive_run_split_height_uses_same_filter_as_rendering() {
         nested_transcript_tree(),
         vec![run],
         vec![
-            kind_message(1, MessageKind::Started, "hidden started"),
-            user_input(1, "hidden operator input"),
-            agent_text(1, "visible model answer"),
+            kind_message(1, MessageKind::Started, "started"),
+            user_input(1, "operator input"),
+            agent_text(1, "model answer"),
             agent_thought(1, "hidden model thought"),
             message(1, "hidden summary"),
-            kind_message(1, MessageKind::End, "hidden end"),
+            kind_message(1, MessageKind::End, "end"),
         ],
     );
     app.split_target = Some(super::super::split::SplitTarget::Run(1));
@@ -1531,13 +1534,17 @@ fn interactive_run_split_height_uses_same_filter_as_rendering() {
     let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
     let expected = crate::app::chat_widget::message_lines(
         &[
-            user_input(1, "hidden operator input"),
-            agent_text(1, "visible model answer"),
+            kind_message(1, MessageKind::Started, "started"),
+            user_input(1, "operator input"),
+            agent_text(1, "model answer"),
+            kind_message(1, MessageKind::End, "end"),
         ],
         run,
         &local_offset,
         None,
         app.body_inner_width,
+        0,
+        true,
     )
     .len();
 
@@ -1545,7 +1552,50 @@ fn interactive_run_split_height_uses_same_filter_as_rendering() {
 }
 
 #[test]
-fn interactive_run_split_height_excludes_running_tail_line() {
+fn split_transcript_tail_line_renders_transcript_leaf_shape() {
+    let mut run = run_record(1, RunStatus::Running);
+    run.modes.interactive = false;
+    let mut app = test_app(
+        nested_transcript_tree(),
+        vec![run],
+        vec![agent_text(1, "visible model answer")],
+    );
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+    app.body_inner_height = 30;
+    app.body_inner_width = 80;
+    app.selected = 0; // a container row; ensures tail shape is independent of selection
+    app.live_summary_cached_text =
+        "unique streaming tail | should appear as transcript-leaf body".to_string();
+
+    let run = app
+        .state
+        .agent_runs
+        .iter()
+        .find(|run| run.id == 1)
+        .expect("run");
+    let tail = app
+        .split_transcript_tail_line(run)
+        .expect("split transcript tail should be available for an active run");
+
+    let text: String = tail
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect();
+    // Container placeholders look like `  ⠋  running` (two leading spaces + spinner + label).
+    // Transcript-leaf shape is `HH:MM:SS ⠋ <title>` — starts with a digit timestamp.
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_digit()),
+        "split tail must start with a transcript timestamp, got: {text:?}"
+    );
+    assert!(
+        !text.contains("running") || text.contains("Unique streaming tail"),
+        "split tail must not be the container placeholder `  ⠋  running`: {text:?}"
+    );
+}
+
+#[test]
+fn split_transcript_tail_line_includes_tail_for_interactive_runs() {
     let mut run = run_record(1, RunStatus::Running);
     run.modes.interactive = true;
     let mut app = test_app(
@@ -1556,31 +1606,40 @@ fn interactive_run_split_height_excludes_running_tail_line() {
     app.split_target = Some(super::super::split::SplitTarget::Run(1));
     app.body_inner_height = 30;
     app.body_inner_width = 80;
-    app.selected = 2;
-    app.live_summary_cached_text = "unique streaming tail | should stay out of split".to_string();
+    app.live_summary_cached_text = "interactive streaming tail".to_string();
 
-    let run = app
+    let run_ref = app
         .state
         .agent_runs
         .iter()
         .find(|run| run.id == 1)
         .expect("run");
+    // Without `current_run_id` set, `interactive_run_waiting_for_input` is false,
+    // so the new split tail should mirror the main panel and show a tail.
     assert!(
-        app.split_running_tail_line(run).is_some(),
-        "precondition: ordinary running split tail would be available"
+        app.split_transcript_tail_line(run_ref).is_some(),
+        "interactive runs that are not waiting for input should show a transcript tail in split"
     );
 
+    // Bookkeeping must include the tail; height is strictly greater than a
+    // tail-less render of the same messages. Avoid timestamp races by comparing
+    // counts (transcript-leaf rows are 1 line at width 80 with a short title).
     let local_offset = chrono::FixedOffset::east_opt(0).expect("zero offset");
-    let expected = crate::app::chat_widget::message_lines(
+    let no_tail = crate::app::chat_widget::message_lines(
         &[agent_text(1, "visible model answer")],
-        run,
+        run_ref,
         &local_offset,
         None,
         app.body_inner_width,
+        app.spinner_tick,
+        true,
     )
     .len();
 
-    assert_eq!(app.current_split_content_height(), expected);
+    assert!(
+        app.current_split_content_height() > no_tail,
+        "split height should include the running tail line"
+    );
 }
 
 #[test]

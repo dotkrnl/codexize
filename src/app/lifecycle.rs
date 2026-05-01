@@ -646,10 +646,10 @@ impl App {
                     &msgs,
                     run,
                     &local_offset,
-                    (!run.modes.interactive)
-                        .then(|| self.split_running_tail_line(run))
-                        .flatten(),
+                    self.split_transcript_tail_line(run),
                     self.body_inner_width.max(1),
+                    self.spinner_tick,
+                    true,
                 )
                 .len()
             }
@@ -878,6 +878,8 @@ impl App {
                     &local_offset,
                     None,
                     available_width,
+                    0,
+                    false,
                 )
                 .len();
                 let all_line_count = crate::app::chat_widget::message_lines(
@@ -886,6 +888,8 @@ impl App {
                     &local_offset,
                     None,
                     available_width,
+                    0,
+                    false,
                 )
                 .len();
 

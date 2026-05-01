@@ -10,6 +10,7 @@ use ratatui::{
 
 use crate::app::chat_widget_view_model::chat_scroll_window;
 use crate::app::footer::{HistoricalStyleHints, format_historical_message};
+use crate::app::render_view_model::spinner_frame;
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
 
 pub struct ChatWidget<'a> {
@@ -18,6 +19,8 @@ pub struct ChatWidget<'a> {
     scroll_offset: usize,
     local_offset: FixedOffset,
     running_tail: Option<Line<'static>>,
+    spinner_tick: usize,
+    animate_started: bool,
 }
 
 impl<'a> ChatWidget<'a> {
@@ -27,6 +30,8 @@ impl<'a> ChatWidget<'a> {
         scroll_offset: usize,
         local_offset: FixedOffset,
         running_tail: Option<Line<'static>>,
+        spinner_tick: usize,
+        animate_started: bool,
     ) -> Self {
         Self {
             messages,
@@ -34,6 +39,8 @@ impl<'a> ChatWidget<'a> {
             scroll_offset,
             local_offset,
             running_tail,
+            spinner_tick,
+            animate_started,
         }
     }
 }
@@ -43,12 +50,26 @@ struct SymbolStyle {
     color: Color,
 }
 
-fn message_symbol(kind: MessageKind, run_status: RunStatus) -> SymbolStyle {
+fn message_symbol(
+    kind: MessageKind,
+    run_status: RunStatus,
+    animate_started: bool,
+    spinner_tick: usize,
+) -> SymbolStyle {
     match kind {
-        MessageKind::Started => SymbolStyle {
-            symbol: "○",
-            color: Color::DarkGray,
-        },
+        MessageKind::Started => {
+            if animate_started && run_status == RunStatus::Running {
+                SymbolStyle {
+                    symbol: spinner_frame(spinner_tick),
+                    color: Color::Blue,
+                }
+            } else {
+                SymbolStyle {
+                    symbol: "○",
+                    color: Color::DarkGray,
+                }
+            }
+        }
         MessageKind::Brief => SymbolStyle {
             symbol: "◐",
             color: Color::Cyan,
@@ -443,12 +464,20 @@ pub fn message_lines(
     local_offset: &FixedOffset,
     running_tail: Option<Line<'static>>,
     available_width: usize,
+    spinner_tick: usize,
+    animate_started: bool,
 ) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> =
-        render_messages(messages, run, local_offset, available_width)
-            .into_iter()
-            .map(|rendered| Line::from(rendered.spans))
-            .collect();
+    let mut lines: Vec<Line<'static>> = render_messages(
+        messages,
+        run,
+        local_offset,
+        available_width,
+        spinner_tick,
+        animate_started,
+    )
+    .into_iter()
+    .map(|rendered| Line::from(rendered.spans))
+    .collect();
     let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
     if run.status == RunStatus::Running
         && !has_end
@@ -464,6 +493,8 @@ fn render_messages(
     run: &RunRecord,
     local_offset: &FixedOffset,
     available_width: usize,
+    spinner_tick: usize,
+    animate_started: bool,
 ) -> Vec<RenderedLine> {
     let now_local = local_offset.from_utc_datetime(&Utc::now().naive_utc());
     let today_local = now_local.date_naive();
@@ -472,7 +503,7 @@ fn render_messages(
     for msg in messages {
         let ts_str = format_timestamp(&msg.ts, local_offset, today_local);
         let ts_w = ts_str.chars().count();
-        let sym = message_symbol(msg.kind, run.status);
+        let sym = message_symbol(msg.kind, run.status, animate_started, spinner_tick);
         let prefix_width = ts_w + 3; // " ○ "
         let content_width = available_width.saturating_sub(prefix_width);
 
@@ -643,6 +674,8 @@ impl Widget for ChatWidget<'_> {
             &self.local_offset,
             self.running_tail.clone(),
             width,
+            self.spinner_tick,
+            self.animate_started,
         );
 
         let total = all_lines.len();
@@ -683,6 +716,7 @@ impl Widget for ChatWidget<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn chat_lines(
     messages: &[Message],
     run: &RunRecord,
@@ -691,8 +725,18 @@ pub fn chat_lines(
     running_tail: Option<Line<'static>>,
     available_width: usize,
     available_height: usize,
+    spinner_tick: usize,
+    animate_started: bool,
 ) -> Vec<Line<'static>> {
-    let all_lines = message_lines(messages, run, local_offset, running_tail, available_width);
+    let all_lines = message_lines(
+        messages,
+        run,
+        local_offset,
+        running_tail,
+        available_width,
+        spinner_tick,
+        animate_started,
+    );
 
     let total = all_lines.len();
     if total == 0 {
@@ -789,44 +833,97 @@ mod tests {
 
     #[test]
     fn symbol_started() {
-        let s = message_symbol(MessageKind::Started, RunStatus::Running);
+        let s = message_symbol(MessageKind::Started, RunStatus::Running, false, 0);
+        assert_eq!(s.symbol, "○");
+        assert_eq!(s.color, Color::DarkGray);
+    }
+
+    #[test]
+    fn symbol_started_animates_when_running_and_enabled() {
+        let s = message_symbol(MessageKind::Started, RunStatus::Running, true, 0);
+        assert_ne!(s.symbol, "○");
+        assert_eq!(s.symbol, spinner_frame(0));
+        assert_eq!(s.color, Color::Blue);
+    }
+
+    #[test]
+    fn symbol_started_static_when_animation_disabled() {
+        let s = message_symbol(MessageKind::Started, RunStatus::Running, false, 5);
+        assert_eq!(s.symbol, "○");
+        assert_eq!(s.color, Color::DarkGray);
+    }
+
+    #[test]
+    fn symbol_started_static_when_not_running() {
+        // Animation toggle is harmless once the run finished — symbol stays static.
+        let s = message_symbol(MessageKind::Started, RunStatus::Done, true, 3);
         assert_eq!(s.symbol, "○");
         assert_eq!(s.color, Color::DarkGray);
     }
 
     #[test]
     fn symbol_brief() {
-        let s = message_symbol(MessageKind::Brief, RunStatus::Running);
+        let s = message_symbol(MessageKind::Brief, RunStatus::Running, false, 0);
         assert_eq!(s.symbol, "◐");
         assert_eq!(s.color, Color::Cyan);
     }
 
     #[test]
     fn symbol_user_input() {
-        let s = message_symbol(MessageKind::UserInput, RunStatus::Running);
+        let s = message_symbol(MessageKind::UserInput, RunStatus::Running, false, 0);
         assert_eq!(s.symbol, "›");
         assert_eq!(s.color, Color::Magenta);
     }
 
     #[test]
     fn symbol_end_done() {
-        let s = message_symbol(MessageKind::End, RunStatus::Done);
+        let s = message_symbol(MessageKind::End, RunStatus::Done, false, 0);
         assert_eq!(s.symbol, "●");
         assert_eq!(s.color, Color::Green);
     }
 
     #[test]
     fn symbol_end_failed() {
-        let s = message_symbol(MessageKind::End, RunStatus::Failed);
+        let s = message_symbol(MessageKind::End, RunStatus::Failed, false, 0);
         assert_eq!(s.symbol, "✗");
         assert_eq!(s.color, Color::Red);
     }
 
     #[test]
     fn symbol_end_failed_unverified() {
-        let s = message_symbol(MessageKind::End, RunStatus::FailedUnverified);
+        let s = message_symbol(MessageKind::End, RunStatus::FailedUnverified, false, 0);
         assert_eq!(s.symbol, "!");
         assert_eq!(s.color, Color::Yellow);
+    }
+
+    #[test]
+    fn message_lines_animates_started_when_enabled() {
+        let msgs = vec![make_msg(MessageKind::Started, "agent started")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 60, 2, true);
+        let symbol_span = &lines[0].spans[1];
+        assert_eq!(
+            symbol_span.content.trim(),
+            spinner_frame(2),
+            "Started symbol should animate when animate_started=true and run is Running"
+        );
+        assert_eq!(symbol_span.style.fg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn message_lines_keeps_static_started_when_animation_disabled() {
+        let msgs = vec![make_msg(MessageKind::Started, "agent started")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 60, 7, false);
+        let symbol_span = &lines[0].spans[1];
+        assert_eq!(
+            symbol_span.content.trim(),
+            "○",
+            "Started symbol should stay static when animate_started=false"
+        );
+        assert_eq!(symbol_span.style.fg, Some(Color::DarkGray));
     }
 
     #[test]
@@ -876,7 +973,15 @@ mod tests {
         let msgs = vec![make_msg(MessageKind::Started, "agent started")];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, Some(tail_line("LIVE-TAIL")), 60);
+        let lines = message_lines(
+            &msgs,
+            &run,
+            &offset,
+            Some(tail_line("LIVE-TAIL")),
+            60,
+            0,
+            false,
+        );
         let last_text: String = lines
             .last()
             .unwrap()
@@ -892,7 +997,7 @@ mod tests {
         let msgs = vec![make_msg(MessageKind::UserInput, "please continue")];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
         let text = line_text(&lines[0]);
 
         assert!(text.contains("› please continue"));
@@ -923,7 +1028,7 @@ mod tests {
         )];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
 
         assert_eq!(line_text(&lines[1]).trim(), "second thinking line");
         assert!(
@@ -945,7 +1050,7 @@ mod tests {
         )];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
         let text = line_text(&lines[0]);
 
         assert!(text.contains("Thinking with bold text and code."));
@@ -978,7 +1083,7 @@ mod tests {
         let mut run = make_run(RunStatus::Running);
         run.modes.interactive = true;
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
         let texts = lines.iter().map(line_text).collect::<Vec<_>>();
 
         assert!(texts[0].contains("› please continue"));
@@ -1003,7 +1108,7 @@ mod tests {
         )];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
         let text = line_text(&lines[0]);
 
         assert!(text.contains("Here is bold text and code."));
@@ -1033,7 +1138,7 @@ mod tests {
         )];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 80);
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
         let texts = lines.iter().map(line_text).collect::<Vec<_>>();
 
         assert!(texts.iter().any(|line| line.contains("• first")));
@@ -1050,7 +1155,7 @@ mod tests {
         let msgs = vec![make_msg(MessageKind::Started, "agent started")];
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, None, 60);
+        let lines = message_lines(&msgs, &run, &offset, None, 60, 0, false);
         for line in &lines {
             let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
             assert!(
@@ -1068,7 +1173,15 @@ mod tests {
         ];
         let run = make_run(RunStatus::Done);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = message_lines(&msgs, &run, &offset, Some(tail_line("LIVE-TAIL")), 60);
+        let lines = message_lines(
+            &msgs,
+            &run,
+            &offset,
+            Some(tail_line("LIVE-TAIL")),
+            60,
+            0,
+            false,
+        );
         for line in &lines {
             let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
             assert!(!text.contains("LIVE-TAIL"));
@@ -1083,7 +1196,7 @@ mod tests {
         }
         let run = make_run(RunStatus::Done);
         let offset = FixedOffset::east_opt(0).unwrap();
-        let lines = chat_lines(&msgs, &run, 5, &offset, None, 60, 10);
+        let lines = chat_lines(&msgs, &run, 5, &offset, None, 60, 10, 0, false);
         let first_text: String = lines[0]
             .spans
             .iter()
@@ -1114,7 +1227,7 @@ mod tests {
         let run = make_run(RunStatus::Running);
         let offset = FixedOffset::east_opt(0).unwrap();
         // width 30 forces wrapping. Prefix = "10:30 ◐ " = 5+3=8 chars
-        let lines = render_messages(&[msg], &run, &offset, 30);
+        let lines = render_messages(&[msg], &run, &offset, 30, 0, false);
         assert!(lines.len() >= 2, "should have wrapped lines");
         // Second line should be indented (starts with spaces)
         let second_text: String = lines[1]
@@ -1138,7 +1251,7 @@ mod tests {
         let offset = FixedOffset::east_opt(0).unwrap();
         // Height 5 means overflow; at bottom, we should be able to reach the last message.
         // Max offset should be `total - (height - 1)` when overflow.
-        let lines = chat_lines(&msgs, &run, 999, &offset, None, 60, 5);
+        let lines = chat_lines(&msgs, &run, 999, &offset, None, 60, 5, 0, false);
         let last_text: String = lines
             .last()
             .unwrap()

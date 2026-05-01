@@ -164,19 +164,52 @@ impl App {
             .is_empty()
     }
 
-    pub(crate) fn split_running_tail_line(&self, run: &RunRecord) -> Option<Line<'static>> {
-        // The split still derives the tail shape from the selected pipeline row.
-        // Keep lifecycle line counts on the same path until split targets carry
-        // their own row identity.
-        let suppressed_container_runs =
-            self.visible_live_summary_tail_runs(self.split_viewport_height(), self.viewport_top);
-        self.running_tail_for_row(
-            self.selected,
-            run,
-            &crate::app::clock::WallClock::new(),
-            &suppressed_container_runs,
-        )
-        .map(|tail| tail.line)
+    /// Return the trailing tail line for a split-panel transcript.
+    ///
+    /// Always renders a transcript-leaf shape (`HH:MM:SS ⠋ <title>`), never the
+    /// tree container placeholder produced for pipeline rows. Suppression mirrors
+    /// `running_tail_for_row` exactly so the split tail honors the same
+    /// interactive-waiting guard the main panel uses; only the shape diverges.
+    pub(crate) fn split_transcript_tail_line(&self, run: &RunRecord) -> Option<Line<'static>> {
+        if run.status != RunStatus::Running {
+            return None;
+        }
+        if !self.live_agent_spinner_active() {
+            return None;
+        }
+        if run.modes.interactive
+            && self.interactive_run_waiting_for_input()
+            && self
+                .messages
+                .iter()
+                .rev()
+                .find(|message| {
+                    message.run_id == run.id
+                        && matches!(
+                            message.kind,
+                            crate::state::MessageKind::AgentText
+                                | crate::state::MessageKind::AgentThought
+                                | crate::state::MessageKind::UserInput
+                        )
+                })
+                .is_some_and(|message| message.kind == crate::state::MessageKind::AgentText)
+        {
+            return None;
+        }
+        let phase_label = self.state.current_phase.label();
+        let fetcher = CachedSummaryFetcher::new(&self.live_summary_cached_text, &phase_label);
+        let clock = crate::app::clock::WallClock::new();
+        let line = if self.live_agent_progress_recent() {
+            format_running_transcript_leaf(
+                TranscriptLeafMarker::new(),
+                &clock,
+                self.spinner_tick,
+                &fetcher,
+            )
+        } else {
+            format_stalled_transcript_leaf(TranscriptLeafMarker::new(), &clock, &fetcher)
+        };
+        Some(line)
     }
 
     pub(super) fn node_header(
@@ -303,6 +336,8 @@ impl App {
                 local_offset,
                 running_tail.map(|tail| tail.line),
                 available_width,
+                0,
+                false,
             )
             .into_iter()
             .map(|line| PipelineLine {

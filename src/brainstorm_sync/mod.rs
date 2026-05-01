@@ -7,6 +7,7 @@
 //! Source acquisition, package rendering, installation, and preflight UI live
 //! outside this module and consume the plan produced here.
 
+pub mod adapter;
 pub mod discovery;
 pub mod lock;
 pub mod metadata;

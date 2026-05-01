@@ -127,7 +127,7 @@ fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
 }
 
 #[test]
-fn interactive_split_input_treats_colon_as_text_before_palette() {
+fn interactive_split_input_routes_leading_colon_into_command_mode() {
     let mut state = SessionState::new("interactive-colon-text".to_string());
     state.current_phase = Phase::ImplementationRound(1);
     let run = RunRecord {
@@ -162,9 +162,11 @@ fn interactive_split_input_treats_colon_as_text_before_palette() {
 
     app.handle_key(key(crossterm::event::KeyCode::Char(':')));
 
-    assert_eq!(app.input_buffer, ":");
-    assert!(
-        !app.palette.open,
-        "interactive split input should keep ':' as editor text instead of opening the palette"
+    assert!(app.palette.open);
+    assert!(app.input_buffer.is_empty());
+    assert!(app.palette.buffer.is_empty());
+    assert_eq!(
+        app.command_return_target,
+        Some(super::CommandReturnTarget::SplitInteractive)
     );
 }

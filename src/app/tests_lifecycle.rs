@@ -1665,86 +1665,94 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
 }
 
 #[test]
-fn interactive_palette_opens_only_after_colon() {
+fn idea_input_leading_colon_enters_command_mode() {
     with_temp_root(|| {
-        let mut state = SessionState::new("interactive-palette-colon".to_string());
+        let mut state = SessionState::new("idea-leading-colon".to_string());
+        state.current_phase = Phase::IdeaInput;
+        let mut app = idle_app(state);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+
+        assert!(app.palette.open);
+        assert!(app.palette.buffer.is_empty());
+        assert_eq!(
+            app.command_return_target,
+            Some(super::CommandReturnTarget::Idea)
+        );
+    });
+}
+
+#[test]
+fn footer_interactive_leading_colon_enters_command_mode() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("footer-interactive-leading-colon".to_string());
         state.current_phase = Phase::BrainstormRunning;
         let mut run = make_brainstorm_run(7);
         run.modes.interactive = true;
+        let window_name = run.window_name.clone();
         state.agent_runs.push(run);
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
 
-        app.handle_key(key(crossterm::event::KeyCode::Char('h')));
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        assert!(app.palette.open);
+        assert!(app.palette.buffer.is_empty());
+        assert_eq!(
+            app.command_return_target,
+            Some(super::CommandReturnTarget::FooterInteractive)
+        );
         assert!(!app.input_mode);
-        assert!(app.input_buffer.is_empty());
-        assert!(!app.palette.open);
-
-        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
-        assert!(app.palette.open);
-        assert!(app.palette.buffer.is_empty());
     });
 }
 
 #[test]
-fn interactive_palette_esc_closes_entry_box() {
+fn leading_colon_from_paste_enters_command_mode() {
     with_temp_root(|| {
-        let mut state = SessionState::new("interactive-palette-esc-close".to_string());
+        let mut state = SessionState::new("idea-paste-leading-colon".to_string());
+        state.current_phase = Phase::IdeaInput;
+        let mut app = idle_app(state);
+        app.handle_paste(":cheap");
+
+        assert!(app.palette.open);
+        assert_eq!(app.palette.buffer, "cheap");
+        assert_eq!(
+            app.command_return_target,
+            Some(super::CommandReturnTarget::Idea)
+        );
+    });
+}
+
+#[test]
+fn edit_derived_leading_colon_enters_command_mode() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("footer-edit-derived-leading-colon".to_string());
         state.current_phase = Phase::BrainstormRunning;
         let mut run = make_brainstorm_run(7);
         run.modes.interactive = true;
+        let window_name = run.window_name.clone();
         state.agent_runs.push(run);
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
 
-        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('c')));
         app.handle_key(key(crossterm::event::KeyCode::Char('h')));
-        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Esc));
-
-        assert!(!should_quit);
-        assert!(!app.palette.open);
-        assert!(app.palette.buffer.is_empty());
-        assert_eq!(app.palette.cursor, 0);
-    });
-}
-
-#[test]
-fn interactive_palette_treats_q_as_input_text() {
-    with_temp_root(|| {
-        let mut state = SessionState::new("interactive-palette-q-text".to_string());
-        state.current_phase = Phase::BrainstormRunning;
-        let mut run = make_brainstorm_run(7);
-        run.modes.interactive = true;
-        state.agent_runs.push(run);
-        let mut app = idle_app(state);
-        app.current_run_id = Some(7);
-
+        app.handle_key(key(crossterm::event::KeyCode::Char('e')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('a')));
+        app.handle_key(key(crossterm::event::KeyCode::Char('p')));
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Home,
+            crossterm::event::KeyModifiers::NONE,
+        ));
         app.handle_key(key(crossterm::event::KeyCode::Char(':')));
-        app.handle_key(key(crossterm::event::KeyCode::Char('q')));
 
         assert!(app.palette.open);
-        assert_eq!(app.palette.buffer, "q");
-    });
-}
-
-#[test]
-fn interactive_palette_enter_sends_plain_text_to_agent() {
-    with_temp_root(|| {
-        let mut state = SessionState::new("interactive-palette-send-text".to_string());
-        state.current_phase = Phase::BrainstormRunning;
-        let mut run = make_brainstorm_run(7);
-        run.modes.interactive = true;
-        state.agent_runs.push(run);
-        let mut app = idle_app(state);
-        app.current_run_id = Some(7);
-
-        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
-        app.handle_key(key(crossterm::event::KeyCode::Char('q')));
-        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
-
-        assert!(!should_quit);
-        assert!(!app.palette.open);
-        assert!(app.palette.buffer.is_empty());
+        assert_eq!(app.palette.buffer, "cheap");
+        assert_eq!(
+            app.command_return_target,
+            Some(super::CommandReturnTarget::FooterInteractive)
+        );
     });
 }
 
@@ -1764,27 +1772,110 @@ fn idea_input_treats_q_as_text_before_global_quit() {
 }
 
 #[test]
-fn interactive_palette_closes_when_colon_suffix_is_removed() {
+fn command_mode_esc_restores_split_interactive_input() {
     with_temp_root(|| {
-        let mut state = SessionState::new("interactive-palette-remove-colon".to_string());
+        let mut state = SessionState::new("split-command-esc-restore".to_string());
         state.current_phase = Phase::BrainstormRunning;
         let mut run = make_brainstorm_run(7);
         run.modes.interactive = true;
+        let window_name = run.window_name.clone();
         state.agent_runs.push(run);
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+        app.open_split_target(super::split::SplitTarget::Run(7));
+        app.input_mode = true;
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        assert!(app.palette.open);
+        assert_eq!(
+            app.command_return_target,
+            Some(super::CommandReturnTarget::SplitInteractive)
+        );
+
+        app.handle_key(key(crossterm::event::KeyCode::Esc));
+
+        assert!(!app.palette.open);
+        assert!(app.input_mode);
+    });
+}
+
+#[test]
+fn command_mode_backspace_on_empty_buffer_restores_footer_input() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("footer-command-backspace-restore".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run);
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
         let mut app = idle_app(state);
         app.current_run_id = Some(7);
 
         app.handle_key(key(crossterm::event::KeyCode::Char(':')));
-
         assert!(app.palette.open);
-        assert!(app.input_buffer.is_empty());
         assert!(app.palette.buffer.is_empty());
 
         app.handle_key(key(crossterm::event::KeyCode::Backspace));
 
         assert!(!app.palette.open);
-        assert!(!app.input_mode);
+        assert!(app.input_mode);
         assert!(app.input_buffer.is_empty());
+    });
+}
+
+#[test]
+fn unknown_command_in_waiting_interactive_mode_is_sent_as_user_input() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("unknown-command-waiting".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run);
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "unknown-cmd".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(
+            app.messages
+                .iter()
+                .any(|m| { m.kind == MessageKind::UserInput && m.text == "unknown-cmd" })
+        );
+    });
+}
+
+#[test]
+fn unknown_command_outside_waiting_mode_sets_status_and_is_not_persisted() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("unknown-command-not-waiting".to_string());
+        state.current_phase = Phase::IdeaInput;
+        let mut app = idle_app(state);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "unknown-cmd".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(
+            !app.messages
+                .iter()
+                .any(|m| m.kind == MessageKind::UserInput)
+        );
+        let status = app.status_line.borrow().render().expect("status flash");
+        assert!(
+            status
+                .to_string()
+                .contains("palette: unknown command \"unknown-cmd\"")
+        );
     });
 }
 

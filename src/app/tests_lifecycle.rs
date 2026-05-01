@@ -3090,6 +3090,8 @@ fn split_follow_tail_keeps_live_running_tail_visible() {
             &local_offset,
             Some(ratatui::text::Line::from("LIVE-TAIL")),
             app.body_inner_width.max(1),
+            0,
+            true,
         )
         .len();
 

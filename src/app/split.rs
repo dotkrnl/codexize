@@ -39,11 +39,8 @@ pub(crate) fn run_split_panel_message_visible(
         // User input is the approved exception to the split's ACP/debug focus.
         MessageKind::UserInput => true,
         MessageKind::AgentThought => show_thinking_texts,
-        MessageKind::Started
-        | MessageKind::Brief
-        | MessageKind::Summary
-        | MessageKind::SummaryWarn
-        | MessageKind::End => false,
+        MessageKind::Started | MessageKind::End => true,
+        MessageKind::Brief | MessageKind::Summary | MessageKind::SummaryWarn => false,
     }
 }
 
@@ -120,13 +117,14 @@ mod tests {
             for show_thinking_texts in [true, false] {
                 for kind in ALL_MESSAGE_KINDS {
                     let expected = match kind {
-                        MessageKind::AgentText | MessageKind::UserInput => true,
+                        MessageKind::AgentText
+                        | MessageKind::UserInput
+                        | MessageKind::Started
+                        | MessageKind::End => true,
                         MessageKind::AgentThought => show_thinking_texts,
-                        MessageKind::Started
-                        | MessageKind::Brief
-                        | MessageKind::Summary
-                        | MessageKind::SummaryWarn
-                        | MessageKind::End => false,
+                        MessageKind::Brief | MessageKind::Summary | MessageKind::SummaryWarn => {
+                            false
+                        }
                     };
 
                     assert_eq!(

@@ -27,6 +27,14 @@ impl App {
             return Ok(());
         }
 
+        #[cfg(test)]
+        if !Self::test_uses_real_live_summary_watcher() {
+            let (_tx, rx) = mpsc::channel();
+            self.live_summary_watcher = None;
+            self.live_summary_change_rx = Some(rx);
+            return Ok(());
+        }
+
         let (tx, rx) = mpsc::channel();
         let watched_file = path.clone();
         let watcher_result = notify::RecommendedWatcher::new(
@@ -64,6 +72,11 @@ impl App {
                 Ok(())
             }
         }
+    }
+
+    #[cfg(test)]
+    fn test_uses_real_live_summary_watcher() -> bool {
+        std::env::var_os("CODEXIZE_TEST_REAL_WATCHER").is_some()
     }
 
     pub(super) fn process_live_summary_changes(&mut self) {

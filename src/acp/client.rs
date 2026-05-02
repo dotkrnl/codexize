@@ -204,12 +204,29 @@ impl AcpBoundaryState {
         Self::default()
     }
 
+    /// Reset both stream identities at a prompt-turn boundary.
+    ///
+    /// ACP servers may legally reuse message ids across turns, so the next
+    /// turn must always restart at `StartNewMessage` even when the first
+    /// chunk repeats an earlier id.
+    fn reset_for_prompt_turn(&mut self) {
+        self.agent_message_id = None;
+        self.agent_thought_id = None;
+    }
+
     /// Reset both stream identities so the next agent or thought chunk is
     /// classified as `StartNewMessage`. Called whenever a tool-call
     /// invocation/result interleaves the visible stream.
     fn reset_for_tool_call(&mut self) {
-        self.agent_message_id = None;
-        self.agent_thought_id = None;
+        self.reset_for_prompt_turn();
+    }
+}
+
+impl SubprocessSession {
+    fn finish_prompt_turn(&mut self) {
+        self.prompt_finished = true;
+        self.prompt_response = None;
+        self.boundary_state.reset_for_prompt_turn();
     }
 }
 
@@ -245,7 +262,7 @@ impl AcpSession for SubprocessSession {
                 }
                 Ok(None) => break,
                 Err(err) => {
-                    self.prompt_finished = true;
+                    self.finish_prompt_turn();
                     return Ok(Some(ClientUpdate::PromptTurnFailed {
                         message: err.to_string(),
                     }));
@@ -263,8 +280,7 @@ impl AcpSession for SubprocessSession {
 
         match prompt_response.try_recv() {
             Ok(Ok(result)) => {
-                self.prompt_finished = true;
-                self.prompt_response = None;
+                self.finish_prompt_turn();
                 let update = match parse_prompt_result(result) {
                     Ok(PromptTurnOutcome::Finished) => ClientUpdate::PromptTurnFinished,
                     Ok(PromptTurnOutcome::Failed { message }) => {
@@ -277,16 +293,14 @@ impl AcpSession for SubprocessSession {
                 Ok(Some(update))
             }
             Ok(Err(err)) => {
-                self.prompt_finished = true;
-                self.prompt_response = None;
+                self.finish_prompt_turn();
                 Ok(Some(ClientUpdate::PromptTurnFailed {
                     message: err.to_string(),
                 }))
             }
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => {
-                self.prompt_finished = true;
-                self.prompt_response = None;
+                self.finish_prompt_turn();
                 Ok(Some(ClientUpdate::PromptTurnFailed {
                     message: "ACP prompt turn channel disconnected".to_string(),
                 }))
@@ -300,6 +314,10 @@ impl AcpSession for SubprocessSession {
                 "ACP prompt turn is still running".to_string(),
             ));
         }
+        // Starting a new prompt turn must clear any stale continuation cache
+        // before the server can reuse a prior turn's messageId on its first
+        // chunk. The conservative reset avoids cross-turn gluing.
+        self.boundary_state.reset_for_prompt_turn();
         let prompt = prompt_blocks(&PromptPayload::Text(text.to_string()))?;
         let prompt_response = self.rpc.start_request(
             "session/prompt",
@@ -1625,6 +1643,44 @@ mod tests {
             after,
             vec![ClientUpdate::AgentMessageText {
                 text: "after".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            }]
+        );
+    }
+
+    #[test]
+    fn dispatch_resets_continuation_across_prompt_turns() {
+        // Prompt-turn boundaries also clear live logical-message continuity:
+        // even if a later turn reuses the same messageId, its first chunk
+        // must restart at StartNewMessage because there is no current live
+        // block left to continue from the prior turn.
+        let mut map = ToolCallMap::new();
+        let mut state = AcpBoundaryState::new();
+        let _ = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-7",
+                "content": { "text": "turn one" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        state.reset_for_prompt_turn();
+        let next_turn = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg-7",
+                "content": { "text": "turn two" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        assert_eq!(
+            next_turn,
+            vec![ClientUpdate::AgentMessageText {
+                text: "turn two".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
             }]
         );

@@ -43,20 +43,22 @@ pub enum BlockOrigin {
 }
 
 impl BlockOrigin {
-    /// Map a stage string used in `agent_runs` to its block origin.
+    /// Map a `RunRecord.stage` string to its block origin.
     /// Returns `None` for unrecognized stages so callers can fall back to a
-    /// safer value (typically the originating phase).
+    /// safer value (typically the originating phase). The accepted strings
+    /// match what `start_run_tracking` writes into `agent_runs`, not the
+    /// `StageIO::stage` identifiers (which differ for several stages).
     pub fn for_stage(stage: &str) -> Option<Self> {
         Some(match stage {
             "brainstorm" => Self::Brainstorm,
-            "spec-reviewer" => Self::SpecReview,
-            "planner" => Self::Planning,
-            "plan-reviewer" => Self::PlanReview,
-            "sharder" => Self::Sharding,
+            "spec-review" => Self::SpecReview,
+            "planning" => Self::Planning,
+            "plan-review" => Self::PlanReview,
+            "sharding" => Self::Sharding,
             "coder" => Self::Implementation,
             "reviewer" => Self::Review,
             "recovery" => Self::BuilderRecovery,
-            "final-validation" | "final_validation" => Self::FinalValidation,
+            "final-validation" => Self::FinalValidation,
             _ => return None,
         })
     }

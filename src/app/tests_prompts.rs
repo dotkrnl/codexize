@@ -315,6 +315,86 @@ fn live_summary_instruction_requires_immediate_creation_and_current_updates() {
 }
 
 #[test]
+fn final_validation_prompt_embeds_idea_spec_and_precedence_rules() {
+    let verdict = std::path::Path::new("artifacts/final_validation_3.toml");
+    let live = std::path::Path::new("artifacts/live_summary.final-validation-r3.txt");
+    let idea = "Make the validator agent run end-to-end every milestone.";
+    let spec = "# Spec\n\n## User-stated requirements (authoritative)\n- run\n\n## Out of scope\n- migration\n";
+
+    let prompt = final_validation_prompt(idea, spec, verdict, live);
+
+    // Raw idea text and final spec text must appear verbatim.
+    assert!(
+        prompt.contains(idea),
+        "prompt must embed raw idea text verbatim"
+    );
+    assert!(
+        prompt.contains(spec),
+        "prompt must embed final spec text verbatim"
+    );
+
+    // Source-of-truth precedence rules must be stated.
+    assert!(prompt.contains("`## User-stated requirements (authoritative)`"));
+    assert!(prompt.contains("`## Out of scope`"));
+    assert!(
+        prompt.contains("Source-of-truth precedence"),
+        "prompt must explicitly call out the precedence rules"
+    );
+    assert!(
+        prompt.contains("NOT gaps"),
+        "prompt must explicitly state out-of-scope items are not gaps"
+    );
+
+    // Required workspace status check, no git diff, allowlist intent.
+    assert!(prompt.contains("`git status --short`"));
+    assert!(
+        prompt.contains("Do **NOT** use `git diff`"),
+        "prompt must explicitly forbid `git diff`"
+    );
+    assert!(prompt.contains("`git log` (read-only)"));
+
+    // The two allowed output paths.
+    assert!(prompt.contains(verdict.display().to_string().as_str()));
+    assert!(prompt.contains(live.display().to_string().as_str()));
+
+    // Excluded inputs — the validator must explicitly note they are not provided.
+    assert!(
+        prompt.contains("not given the plan"),
+        "validator prompt must declare plan is not an input"
+    );
+    assert!(
+        prompt.contains("any git diff"),
+        "validator prompt must declare git diff is not an input"
+    );
+    assert!(
+        prompt.contains("test or"),
+        "validator prompt must declare test/build output is not an input"
+    );
+    assert!(
+        prompt.contains("per-task review"),
+        "validator prompt must declare per-task review verdicts are not inputs"
+    );
+    assert!(
+        prompt.contains("prior validation rounds"),
+        "validator prompt must declare prior validation rounds are not inputs"
+    );
+    // Validator-only paths: no plan/review pointers in the inputs/outputs.
+    assert!(
+        !prompt.contains("artifacts/plan.md"),
+        "validator prompt must not reference artifacts/plan.md as a path"
+    );
+    assert!(
+        !prompt.contains("review_scope.toml"),
+        "validator prompt must not reference review scope artifacts"
+    );
+
+    // Non-interactive, no mutations.
+    assert!(prompt.contains("NON-INTERACTIVE"));
+    assert!(prompt.contains("may not mutate the workspace"));
+    assert!(prompt.contains("may not write code"));
+}
+
+#[test]
 fn interactive_live_summary_instruction_requires_immediate_creation() {
     let path = std::path::Path::new("artifacts/live_summary.interactive.txt");
     let prompt = live_summary_instruction_interactive(path);

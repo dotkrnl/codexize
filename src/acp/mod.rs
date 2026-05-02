@@ -1,6 +1,7 @@
 mod client;
 mod config;
 mod events;
+mod tool_call;
 
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
 pub use config::{

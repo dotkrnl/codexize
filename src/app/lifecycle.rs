@@ -238,7 +238,7 @@ impl App {
             if app.state.pending_guard_decision.is_none() {
                 app.record_agent_error("guard pending state missing on resume".to_string());
                 app.clear_builder_recovery_context();
-                let _ = app.transition_to_phase(Phase::BlockedNeedsUser);
+                let _ = app.transition_to_blocked(crate::state::BlockOrigin::GitGuard);
                 let _ = app.state.save();
             }
         } else if app.state.pending_guard_decision.is_some() {
@@ -927,6 +927,18 @@ impl App {
         Ok(())
     }
 
+    /// Set `block_origin` on the session and transition into
+    /// `BlockedNeedsUser`. The single throat for entering a block from app
+    /// code so the persisted provenance is always populated and the
+    /// force-ship guard has a value to read.
+    pub(super) fn transition_to_blocked(
+        &mut self,
+        origin: crate::state::BlockOrigin,
+    ) -> Result<()> {
+        self.state.block_origin = Some(origin);
+        self.transition_to_phase(Phase::BlockedNeedsUser)
+    }
+
     pub(super) fn record_agent_error(&mut self, message: impl Into<String>) {
         session_state::transitions::record_agent_error(&mut self.state, message);
     }
@@ -1084,7 +1096,8 @@ impl App {
             | Phase::Done
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
-            | Phase::GitGuardPending => {
+            | Phase::GitGuardPending
+            | Phase::FinalValidation(_) => {
                 return None;
             }
         };
@@ -1463,6 +1476,22 @@ impl App {
                 // No agent process owned by this phase; the modal is purely TUI.
                 // Operator handlers are the legitimate exit path; go_back is
                 // a no-op while the decision is pending.
+            }
+            Phase::FinalValidation(_) => {
+                // Validator is non-mutating and can be rewound. Route back to
+                // ReviewRound(r) for any round; round-1 sessions on the
+                // skip-to-impl path can additionally rewind to ImplementationRound(1)
+                // via existing transitions, but the default rewind target is the
+                // matching review round to preserve per-task review history.
+                if let Phase::FinalValidation(r) = self.state.current_phase {
+                    cancel_run_label(&format!("[FinalValidation r{r}]"));
+                    let target = if r >= 1 {
+                        Phase::ReviewRound(r)
+                    } else {
+                        Phase::ImplementationRound(1)
+                    };
+                    let _ = self.transition_to_phase(target);
+                }
             }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }

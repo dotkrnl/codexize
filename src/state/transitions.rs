@@ -7,7 +7,7 @@
 //! boundary.
 
 use super::{
-    BuilderState, LaunchModes, Modes, PendingGuardDecision, Phase, PipelineItem,
+    BlockOrigin, BuilderState, LaunchModes, Modes, PendingGuardDecision, Phase, PipelineItem,
     PipelineItemStatus, RunStatus, SessionState,
 };
 use crate::adapters::EffortLevel;
@@ -60,11 +60,34 @@ pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionErr
 }
 
 /// Execute a validated transition, updating the state and persisting it.
+///
+/// Force-ship guard: `BlockedNeedsUser -> Done` is rejected at runtime unless
+/// the current `block_origin` is `FinalValidation`. The static phase graph
+/// allows the edge so the operator-facing affordance can be surfaced, but
+/// only final-validation blocks may take it.
 pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     validate_transition(&state.current_phase, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    if matches!(state.current_phase, Phase::BlockedNeedsUser)
+        && matches!(to, Phase::Done)
+        && state.block_origin != Some(BlockOrigin::FinalValidation)
+    {
+        anyhow::bail!(
+            "force-ship from BlockedNeedsUser to Done requires block_origin = final_validation (current: {:?})",
+            state.block_origin
+        );
+    }
+
     let old_phase = state.current_phase;
     state.current_phase = to;
+
+    // `block_origin` describes the *current* block. Clear it whenever the
+    // session leaves `BlockedNeedsUser` so a subsequent re-block must set a
+    // fresh origin and stale provenance can never satisfy the force-ship
+    // guard above.
+    if matches!(old_phase, Phase::BlockedNeedsUser) && !matches!(to, Phase::BlockedNeedsUser) {
+        state.block_origin = None;
+    }
 
     state
         .log_event(format!(
@@ -78,6 +101,15 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
         .context("failed to save state after transition")?;
 
     Ok(())
+}
+
+/// Set `block_origin` and transition to `BlockedNeedsUser`. The single throat
+/// for entering a block — every code path that would have called
+/// `execute_transition(state, Phase::BlockedNeedsUser)` should call this
+/// instead so the persisted provenance is always populated.
+pub fn block_with_origin(state: &mut SessionState, origin: BlockOrigin) -> Result<()> {
+    state.block_origin = Some(origin);
+    execute_transition(state, Phase::BlockedNeedsUser)
 }
 
 pub fn prepare_new_session_for_brainstorm(
@@ -992,5 +1024,110 @@ mod tests {
             untyped_still_none,
             "no-task-id coder pending row must be left untouched"
         );
+    }
+
+    /// Run `f` with a private `CODEXIZE_ROOT` so `execute_transition`'s
+    /// implicit `SessionState::save` writes into a temp directory that gets
+    /// cleaned up. Mirrors `state::tests_mod::with_temp_root`; defined here
+    /// because `tests_mod` is a sibling module.
+    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("CODEXIZE_ROOT");
+        // SAFETY: `set_var`/`remove_var` are not thread-safe on *nix; the
+        // `test_fs_lock` mutex serializes every test that touches the env.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
+        result.unwrap()
+    }
+
+    #[test]
+    fn force_ship_rejected_without_final_validation_origin() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("force-ship-recovery".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.block_origin = Some(BlockOrigin::BuilderRecovery);
+            let err =
+                execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("force-ship"),
+                "guard error must mention force-ship: {msg}"
+            );
+            // Phase must remain unchanged on rejection.
+            assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        });
+    }
+
+    #[test]
+    fn force_ship_rejected_when_block_origin_missing() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("force-ship-missing".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.block_origin = None;
+            let err =
+                execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+            assert!(format!("{err:#}").contains("force-ship"));
+        });
+    }
+
+    #[test]
+    fn force_ship_allowed_with_final_validation_origin() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("force-ship-ok".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.block_origin = Some(BlockOrigin::FinalValidation);
+            execute_transition(&mut state, Phase::Done).expect("force-ship must succeed");
+            assert_eq!(state.current_phase, Phase::Done);
+            // Block origin is cleared on leaving BlockedNeedsUser so a stale
+            // value cannot satisfy a later force-ship guard.
+            assert!(state.block_origin.is_none());
+        });
+    }
+
+    #[test]
+    fn block_with_origin_sets_field_and_transitions() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("block-helper".to_string());
+            state.current_phase = Phase::PlanReviewRunning;
+            block_with_origin(&mut state, BlockOrigin::PlanReview)
+                .expect("block transition succeeds");
+            assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+            assert_eq!(state.block_origin, Some(BlockOrigin::PlanReview));
+        });
+    }
+
+    #[test]
+    fn leaving_block_clears_origin() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("leave-block".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.block_origin = Some(BlockOrigin::Brainstorm);
+            execute_transition(&mut state, Phase::BrainstormRunning).expect("rewind succeeds");
+            assert_eq!(state.current_phase, Phase::BrainstormRunning);
+            assert!(state.block_origin.is_none(), "origin must clear on leave");
+        });
+    }
+
+    #[test]
+    fn final_validation_round_trip_through_execute_transition() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-round-trip".to_string());
+            state.current_phase = Phase::ReviewRound(2);
+            execute_transition(&mut state, Phase::FinalValidation(2)).unwrap();
+            assert_eq!(state.current_phase, Phase::FinalValidation(2));
+            execute_transition(&mut state, Phase::Done).unwrap();
+            assert_eq!(state.current_phase, Phase::Done);
+        });
     }
 }

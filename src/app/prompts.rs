@@ -465,8 +465,17 @@ Inputs:
 
 Triage reviews first. They may contradict each other AND are written by AI
 agents — be skeptical, accept only what genuinely improves the spec or plan,
-reject the rest with a brief reason. If a real trade-off exceeds your
-confidence, ASK the operator (this is interactive).
+reject the rest with a brief reason.
+
+Escalation rules — ask the operator when:
+• The feedback affects end-user-facing design (UI/UX, CLI behavior, config
+  schema, output formats, user-facing prompts, file layout). MUST ask.
+  Present a concise accept/reject choice; never decide alone.
+• The feedback is an internal design decision (code structure, module
+  boundaries, function signatures, invisible implementation patterns) and
+  you are very unsure. If confident, decide and briefly explain why.
+• Cosmetic / trivial (typos, naming nits, formatting, obvious fixes) —
+  decide alone; no escalation.
 
 Once trade-offs are resolved, do TWO things IN THIS ORDER:
   1. UPDATE {spec} in place to reflect every accepted decision. If you change

@@ -1238,7 +1238,11 @@ mod tests {
     #[test]
     fn dispatch_falls_back_to_literal_tool_when_payload_is_empty() {
         let mut map = ToolCallMap::new();
-        let updates = drain(json!({ "sessionUpdate": "tool_call" }), Path::new("/tmp"), &mut map);
+        let updates = drain(
+            json!({ "sessionUpdate": "tool_call" }),
+            Path::new("/tmp"),
+            &mut map,
+        );
         assert_eq!(
             updates,
             vec![ClientUpdate::ToolCallText {
@@ -1288,7 +1292,10 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        assert_eq!(messages, vec![ClientUpdate::AgentMessageText("hello".to_string())]);
+        assert_eq!(
+            messages,
+            vec![ClientUpdate::AgentMessageText("hello".to_string())]
+        );
 
         let thoughts = drain(
             json!({

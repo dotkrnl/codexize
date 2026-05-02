@@ -879,7 +879,7 @@ impl App {
         if let Err(err) = self.transition_to_phase(Phase::BuilderRecovery(triggering_round)) {
             self.record_agent_error(format!("failed to enter builder recovery: {err}"));
             self.clear_builder_recovery_context();
-            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
         }
         true
     }
@@ -1187,7 +1187,8 @@ impl App {
                         self.finalize_run_record(run.id, false, Some(reason.clone()));
                         self.record_agent_error(reason);
                         self.clear_builder_recovery_context();
-                        let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+                        let _ =
+                            self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
                         return Ok(());
                     }
                 }
@@ -1400,13 +1401,15 @@ impl App {
             if failed_run.stage == "recovery" {
                 let summary = format!("builder recovery retry exhausted\n{summary}");
                 self.record_agent_error(summary.clone());
-                let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+                let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
                 self.append_system_message(failed_run.id, MessageKind::End, summary);
                 return true;
             }
 
             self.record_agent_error(summary.clone());
-            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+            let origin = crate::state::BlockOrigin::for_stage(&failed_run.stage)
+                .unwrap_or(crate::state::BlockOrigin::Implementation);
+            let _ = self.transition_to_blocked(origin);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             let _ = self.state.log_event(format!(
                 "auto-retry safety cap hit for {} round {} attempt {}",
@@ -1455,13 +1458,15 @@ impl App {
         if failed_run.stage == "recovery" {
             let summary = format!("builder recovery retry exhausted\n{summary}");
             self.record_agent_error(summary.clone());
-            let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
             self.append_system_message(failed_run.id, MessageKind::End, summary);
             return true;
         }
 
         self.record_agent_error(summary.clone());
-        let _ = self.transition_to_phase(Phase::BlockedNeedsUser);
+        let origin = crate::state::BlockOrigin::for_stage(&failed_run.stage)
+            .unwrap_or(crate::state::BlockOrigin::Implementation);
+        let _ = self.transition_to_blocked(origin);
         self.append_system_message(failed_run.id, MessageKind::End, summary);
         true
     }
@@ -1895,6 +1900,7 @@ impl App {
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
+            | Phase::FinalValidation(_)
             | Phase::Done => {}
         }
         Ok(())

@@ -112,6 +112,46 @@ pub fn block_with_origin(state: &mut SessionState, origin: BlockOrigin) -> Resul
     execute_transition(state, Phase::BlockedNeedsUser)
 }
 
+/// Hard cap on `FinalValidation` runs per session. The 4th attempted entry
+/// auto-routes to `BlockedNeedsUser` *before* the validator launches, with
+/// `block_origin = FinalValidation` so the operator can force-ship or rewind.
+/// Hard-coded per spec §4 — there is no runtime override.
+pub const VALIDATION_ATTEMPT_CAP: u32 = 3;
+
+/// Outcome of [`enter_final_validation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalValidationEntry {
+    /// The session entered `FinalValidation(round)`. `attempt` is the
+    /// 1-indexed validation attempt that just started (1, 2, or 3).
+    Entered { attempt: u32 },
+    /// The cap was already at the limit on entry; the session was routed
+    /// straight to `BlockedNeedsUser` with `block_origin = FinalValidation`
+    /// and the validator must not be launched.
+    CapExceeded,
+}
+
+/// Single throat for entering `FinalValidation(round)`. Increments
+/// `validation_attempts` on success; on the 4th attempt (cap already
+/// exhausted) blocks instead so the validator never spawns. Callers MUST
+/// gate the validator launch on `Entered`.
+pub fn enter_final_validation(
+    state: &mut SessionState,
+    round: u32,
+) -> Result<FinalValidationEntry> {
+    if state.validation_attempts >= VALIDATION_ATTEMPT_CAP {
+        block_with_origin(state, BlockOrigin::FinalValidation)?;
+        return Ok(FinalValidationEntry::CapExceeded);
+    }
+    let target = Phase::FinalValidation(round);
+    // Validate before incrementing so an illegal source phase cannot leak a
+    // stale attempt count into the persisted state.
+    validate_transition(&state.current_phase, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
+    state.validation_attempts += 1;
+    let attempt = state.validation_attempts;
+    execute_transition(state, target)?;
+    Ok(FinalValidationEntry::Entered { attempt })
+}
+
 pub fn prepare_new_session_for_brainstorm(
     state: &mut SessionState,
     idea: impl Into<String>,
@@ -1128,6 +1168,72 @@ mod tests {
             assert_eq!(state.current_phase, Phase::FinalValidation(2));
             execute_transition(&mut state, Phase::Done).unwrap();
             assert_eq!(state.current_phase, Phase::Done);
+        });
+    }
+
+    #[test]
+    fn enter_final_validation_increments_attempts_for_first_three_entries() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-cap-increment".to_string());
+            assert_eq!(state.validation_attempts, 0);
+
+            // Attempt 1: ReviewRound(1) -> FinalValidation(1).
+            state.current_phase = Phase::ReviewRound(1);
+            let outcome = enter_final_validation(&mut state, 1).unwrap();
+            assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 1 });
+            assert_eq!(state.current_phase, Phase::FinalValidation(1));
+            assert_eq!(state.validation_attempts, 1);
+
+            // Attempt 2: simulate goal_gap pivot then re-validation.
+            execute_transition(&mut state, Phase::ImplementationRound(2)).unwrap();
+            execute_transition(&mut state, Phase::ReviewRound(2)).unwrap();
+            let outcome = enter_final_validation(&mut state, 2).unwrap();
+            assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 2 });
+            assert_eq!(state.validation_attempts, 2);
+
+            // Attempt 3.
+            execute_transition(&mut state, Phase::ImplementationRound(3)).unwrap();
+            execute_transition(&mut state, Phase::ReviewRound(3)).unwrap();
+            let outcome = enter_final_validation(&mut state, 3).unwrap();
+            assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 3 });
+            assert_eq!(state.validation_attempts, 3);
+            assert_eq!(state.current_phase, Phase::FinalValidation(3));
+        });
+    }
+
+    #[test]
+    fn enter_final_validation_caps_fourth_entry_into_blocked() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-cap-block".to_string());
+            // Pretend three validation rounds already ran and the coder loop
+            // just produced new work for round 4.
+            state.validation_attempts = VALIDATION_ATTEMPT_CAP;
+            state.current_phase = Phase::ReviewRound(4);
+
+            let outcome = enter_final_validation(&mut state, 4).unwrap();
+
+            assert_eq!(outcome, FinalValidationEntry::CapExceeded);
+            // The cap path must not increment past the limit.
+            assert_eq!(state.validation_attempts, VALIDATION_ATTEMPT_CAP);
+            // It must block with the final-validation origin so force-ship
+            // is unlocked.
+            assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+            assert_eq!(state.block_origin, Some(BlockOrigin::FinalValidation));
+        });
+    }
+
+    #[test]
+    fn enter_final_validation_rejects_illegal_source_phase() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-illegal-source".to_string());
+            state.current_phase = Phase::IdeaInput;
+
+            let err = enter_final_validation(&mut state, 1).expect_err("must reject");
+            assert!(format!("{err:#}").contains("Cannot transition"));
+            // No half-applied state: counter must not have advanced and the
+            // phase must remain unchanged.
+            assert_eq!(state.validation_attempts, 0);
+            assert_eq!(state.current_phase, Phase::IdeaInput);
         });
     }
 }

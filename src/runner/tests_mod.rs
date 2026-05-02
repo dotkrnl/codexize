@@ -603,7 +603,14 @@ fn acp_text_stream_one_logical_output_persists_one_sequence_without_duplicates()
 }
 
 #[test]
-fn acp_session_update_fixture_path_persists_adjacent_messages_separately() {
+fn acp_session_update_fixture_path_merges_adjacent_no_identity_chunks() {
+    // Real ACP servers emit `agent_message_chunk` events without any stable
+    // message id. Two such chunks in a row are pieces of one streamed
+    // response, not two logical messages: the dispatcher tags the second
+    // `Continue`, and the runner persists them as a single merged block once
+    // the live buffer is finalized at prompt-turn end. Splitting one
+    // streamed response into one persisted message per chunk would be the
+    // bug this test guards against.
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
@@ -613,14 +620,14 @@ fn acp_session_update_fixture_path_persists_adjacent_messages_separately() {
         std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
     }
 
-    let session_id = "runner-acp-json-fixture-boundary";
+    let session_id = "runner-acp-json-fixture-merge";
     let window_name = "[Fixture]";
     seed_stream_session(session_id, window_name);
     let launch = make_acp_test_launch(session_id, window_name, temp.path());
     let mut stream = AcpTextStream::new();
 
     let fixture_updates = [
-        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"first fixture output"}}"#,
+        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"first fixture output "}}"#,
         r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"second fixture output"}}"#,
     ]
     .into_iter()
@@ -640,10 +647,11 @@ fn acp_session_update_fixture_path_persists_adjacent_messages_separately() {
             text_event.boundary,
         );
     }
+    stream.finish_turn(&launch, MessageKind::AgentText);
 
     assert_eq!(
         persisted_texts(session_id, MessageKind::AgentText),
-        vec!["first fixture output", "second fixture output"]
+        vec!["first fixture output second fixture output"]
     );
     let raw_messages = fs::read_to_string(
         temp.path()
@@ -653,7 +661,75 @@ fn acp_session_update_fixture_path_persists_adjacent_messages_separately() {
             .join("messages.toml"),
     )
     .expect("messages.toml");
-    assert_eq!(raw_messages.matches("kind = \"AgentText\"").count(), 2);
+    assert_eq!(raw_messages.matches("kind = \"AgentText\"").count(), 1);
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_session_update_fixture_path_splits_no_identity_chunks_around_tool_call() {
+    // Sibling to the merge test: when an explicit boundary — here a
+    // `tool_call` payload — interleaves two no-identity `agent_message_chunk`
+    // events, the dispatcher must reset the agent stream so the post-tool
+    // chunk is tagged `StartNewMessage`. The fixture path therefore persists
+    // the two AgentText blocks separately even though neither chunk carried
+    // a message id.
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-json-fixture-tool-split";
+    let window_name = "[FixtureSplit]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut agent = AcpTextStream::new();
+    let mut thought = AcpTextStream::new();
+
+    let fixture_updates = [
+        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"pre-tool output"}}"#,
+        r#"{"sessionUpdate":"tool_call","toolCallId":"call_z","kind":"execute","status":"completed","rawInput":{"command":["echo","ok"]},"rawOutput":{"exit_code":0,"stdout":"ok"}}"#,
+        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"post-tool output"}}"#,
+    ]
+    .into_iter()
+    .map(|raw| serde_json::from_str(raw).expect("fixture json"));
+
+    for update in
+        crate::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
+    {
+        let Some(event) = crate::acp::translate_update(update, true) else {
+            continue;
+        };
+        let crate::acp::AcpRuntimeEvent::Text(text_event) = event else {
+            continue;
+        };
+        if text_event.thought {
+            thought.push_text_boundary(
+                &launch,
+                &text_event.text,
+                MessageKind::AgentThought,
+                text_event.boundary,
+            );
+        } else {
+            agent.push_text_boundary(
+                &launch,
+                &text_event.text,
+                MessageKind::AgentText,
+                text_event.boundary,
+            );
+        }
+    }
+    thought.finish_turn(&launch, MessageKind::AgentThought);
+    agent.finish_turn(&launch, MessageKind::AgentText);
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["pre-tool output", "post-tool output"]
+    );
 
     restore_codexize_root_env(prev);
 }

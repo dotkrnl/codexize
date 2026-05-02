@@ -7,10 +7,12 @@ use std::collections::VecDeque;
 /// on the matching stream. `StartNewMessage` means the runner must finalize
 /// any current live block before pushing this chunk through its accumulator.
 ///
-/// The conservative no-identity fallback is `StartNewMessage`: when the ACP
-/// payload exposes no stable message identity, we prefer over-splitting
-/// streamed chunks into more, smaller persisted messages over silently
-/// merging separate logical outputs (see spec §Design).
+/// The dispatcher only emits `StartNewMessage` at explicit boundaries —
+/// session start, prompt-turn reset, tool-call interleave, or a stable
+/// identity change. No-identity mid-stream chunks default to `Continue` so
+/// one streamed response is not over-split into one persisted message per
+/// chunk. Intra-message paragraph splits are still handled downstream by
+/// `AcpTextAccumulator`'s blank-line splitter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpTextBoundary {
     Continue,

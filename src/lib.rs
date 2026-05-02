@@ -8,6 +8,7 @@ pub mod cache_lock;
 pub mod coder_summary;
 pub mod dashboard;
 mod dashboard_view_model;
+pub mod final_validation;
 pub mod input_editor;
 pub mod model_names;
 pub mod picker;

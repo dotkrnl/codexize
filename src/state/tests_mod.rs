@@ -270,10 +270,10 @@ fn test_node_creation() {
 }
 
 #[test]
-fn test_session_state_schema_v2() {
+fn test_session_state_schema_v3() {
     with_temp_root(|| {
         let mut state = SessionState::new("test-session".to_string());
-        state.schema_version = 2;
+        state.schema_version = 3;
         state.agent_runs.push(RunRecord {
             id: 1,
             stage: "brainstorm".to_string(),
@@ -296,10 +296,120 @@ fn test_session_state_schema_v2() {
         state.save().unwrap();
         let loaded = SessionState::load("test-session").unwrap();
 
-        assert_eq!(loaded.schema_version, 2);
+        assert_eq!(loaded.schema_version, 3);
         assert_eq!(loaded.agent_runs.len(), 1);
         assert_eq!(loaded.agent_runs[0].id, 1);
     });
+}
+
+#[test]
+fn test_session_state_v2_rejected_after_v3_bump() {
+    with_temp_root(|| {
+        // A well-formed v2 file must now be rejected — the schema is hard-versioned
+        // and there is no v2->v3 migration.
+        let dir = session_dir("test-v2-rejected");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.toml");
+        std::fs::write(
+            &path,
+            r#"
+session_id = "test-v2-rejected"
+schema_version = 2
+current_phase = "IdeaInput"
+"#,
+        )
+        .unwrap();
+
+        let result = SessionState::load("test-v2-rejected");
+        assert!(result.is_err());
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("schema v2") || err_msg.contains("archive"),
+            "v2 rejection message must mention version or archive: {err_msg}"
+        );
+    });
+}
+
+#[test]
+fn test_new_session_defaults_to_v3_with_zero_validation_attempts() {
+    let state = SessionState::new("fresh".to_string());
+    assert_eq!(state.schema_version, 3);
+    assert_eq!(state.validation_attempts, 0);
+    assert!(state.block_origin.is_none());
+}
+
+#[test]
+fn test_block_origin_serializes_snake_case() {
+    let mut state = SessionState::new("block-origin".to_string());
+    state.block_origin = Some(BlockOrigin::FinalValidation);
+    let text = toml::to_string(&state).unwrap();
+    assert!(
+        text.contains(r#"block_origin = "final_validation""#),
+        "block_origin must serialize as snake_case string: {text}"
+    );
+}
+
+#[test]
+fn test_block_origin_round_trip_all_variants() {
+    for origin in [
+        BlockOrigin::Brainstorm,
+        BlockOrigin::SpecReview,
+        BlockOrigin::SkipToImpl,
+        BlockOrigin::Planning,
+        BlockOrigin::PlanReview,
+        BlockOrigin::Sharding,
+        BlockOrigin::Implementation,
+        BlockOrigin::Review,
+        BlockOrigin::BuilderRecovery,
+        BlockOrigin::GitGuard,
+        BlockOrigin::FinalValidation,
+    ] {
+        let mut state = SessionState::new("rt".to_string());
+        state.block_origin = Some(origin);
+        let text = toml::to_string(&state).unwrap();
+        let back: SessionState = toml::from_str(&text).unwrap();
+        assert_eq!(back.block_origin, Some(origin));
+    }
+}
+
+#[test]
+fn test_block_origin_skipped_when_none() {
+    let state = SessionState::new("no-origin".to_string());
+    let text = toml::to_string(&state).unwrap();
+    assert!(
+        !text.contains("block_origin"),
+        "block_origin must be omitted when None: {text}"
+    );
+}
+
+#[test]
+fn test_validation_attempts_field_persists() {
+    let mut state = SessionState::new("attempts".to_string());
+    state.validation_attempts = 3;
+    let text = toml::to_string(&state).unwrap();
+    let back: SessionState = toml::from_str(&text).unwrap();
+    assert_eq!(back.validation_attempts, 3);
+}
+
+#[test]
+fn test_for_stage_maps_known_stages() {
+    assert_eq!(
+        BlockOrigin::for_stage("coder"),
+        Some(BlockOrigin::Implementation)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("reviewer"),
+        Some(BlockOrigin::Review)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("recovery"),
+        Some(BlockOrigin::BuilderRecovery)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("brainstorm"),
+        Some(BlockOrigin::Brainstorm)
+    );
+    assert_eq!(BlockOrigin::for_stage("unknown-stage"), None);
 }
 
 #[test]
@@ -760,9 +870,9 @@ fn test_agent_runs_defaults_empty() {
 }
 
 #[test]
-fn test_schema_version_defaults_to_2() {
+fn test_schema_version_defaults_to_3() {
     let state = SessionState::new("test".to_string());
-    assert_eq!(state.schema_version, 2);
+    assert_eq!(state.schema_version, 3);
 }
 
 #[test]

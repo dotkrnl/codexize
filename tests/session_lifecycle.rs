@@ -84,7 +84,7 @@ fn session_round_trips_schema_v2_runs_and_messages() {
         let loaded_messages =
             SessionState::load_messages("integration-session").expect("load messages");
 
-        assert_eq!(loaded_state.schema_version, 2);
+        assert_eq!(loaded_state.schema_version, 3);
         assert!(loaded_state.modes.yolo);
         assert!(loaded_state.modes.cheap);
         assert_eq!(loaded_state.agent_runs.len(), 1);

@@ -551,6 +551,7 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::Done => ("done".to_string(), Color::Green, "✓"),
         Phase::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
         Phase::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
+        Phase::FinalValidation(n) => (format!("final validation r{}", n), Color::Cyan, "●"),
     }
 }
 

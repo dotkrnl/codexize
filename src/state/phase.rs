@@ -407,5 +407,4 @@ mod tests {
         assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(1)));
         assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ImplementationRound(2)));
     }
-
 }

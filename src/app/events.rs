@@ -7,9 +7,44 @@ use crate::state::{Message, MessageKind, MessageSender, NodeStatus, Phase, RunSt
 use super::palette::{self, PaletteCommand};
 use super::split::SplitTarget;
 use super::status_line::Severity;
-use super::{App, CommandReturnTarget, ExpansionOverride, ModalKind, StageId};
+use super::{
+    App, CommandReturnTarget, ExpansionOverride, ModalKind, PendingTermination, RetryLaunch,
+    StageId, TerminationIntent,
+};
 
 impl App {
+    fn marker_already_logged(&self, marker: &str) -> bool {
+        let events_path = crate::state::session_dir(&self.state.session_id).join("events.toml");
+        std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
+    }
+
+    fn request_termination(&mut self, pending: PendingTermination, window_name: String) {
+        if let Some(existing) = self.pending_termination.as_ref()
+            && existing.run_id == pending.run_id
+        {
+            if existing.intent == pending.intent {
+                return;
+            }
+            // Once cancellation has started, keep the first requested outcome so
+            // repeated stop/retry/quit input cannot race contradictory follow-up work.
+            return;
+        }
+
+        let marker = format!("{}: run_id={}", pending.marker(), pending.run_id);
+        if !self.marker_already_logged(&marker) {
+            let _ = self.state.log_event(marker);
+        }
+        self.pending_quit_confirmation_run_id = None;
+        self.pending_termination = Some(pending.clone());
+        crate::app::prompts::cancel_run_label(&window_name);
+        let status = match pending.intent {
+            TerminationIntent::StopOnly => "Stopping agent...",
+            TerminationIntent::StopAndRetry(_) => "Stopping agent and queuing retry...",
+            TerminationIntent::StopAndQuit => "Stopping agent and quitting...",
+        };
+        self.push_status(status.to_string(), Severity::Warn, Duration::from_secs(5));
+    }
+
     /// Push a transient status-line message from a non-render call site.
     ///
     /// Single entry point so renderer toasts and side-effect producers
@@ -43,22 +78,57 @@ impl App {
             return;
         };
 
-        let run_id = run.id;
-        let marker = format!("agent_killed_by_user: run_id={run_id}");
-        let events_path = crate::state::session_dir(&self.state.session_id).join("events.toml");
-        if std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(&marker)) {
-            return;
-        }
-
-        let window_name = run.window_name.clone();
-        let _ = self.state.log_event(marker);
-
-        crate::app::prompts::cancel_run_label(&window_name);
-        self.push_status(
-            "Stopping agent...".to_string(),
-            Severity::Warn,
-            Duration::from_secs(5),
+        self.request_termination(
+            PendingTermination {
+                run_id: run.id,
+                intent: TerminationIntent::StopOnly,
+            },
+            run.window_name.clone(),
         );
+    }
+
+    fn retry_running_agent(&mut self) {
+        let Some(run) = self
+            .running_run()
+            .or_else(|| {
+                self.state
+                    .agent_runs
+                    .iter()
+                    .find(|candidate| candidate.status == RunStatus::Running)
+            })
+            .cloned()
+        else {
+            return;
+        };
+        let Some(retry_launch) = RetryLaunch::for_run(&run) else {
+            self.push_status(
+                "retry: current run is not retryable".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        };
+
+        self.request_termination(
+            PendingTermination {
+                run_id: run.id,
+                intent: TerminationIntent::StopAndRetry(retry_launch),
+            },
+            run.window_name.clone(),
+        );
+    }
+
+    fn open_quit_running_agent_modal(&mut self) {
+        let running = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.status == RunStatus::Running)
+            .map(|run| run.id)
+            .collect::<Vec<_>>();
+        if running.len() == 1 {
+            self.pending_quit_confirmation_run_id = running.first().copied();
+        }
     }
 
     /// Resolve the currently selected visible row to a split target, if any.
@@ -355,7 +425,7 @@ impl App {
                 }
                 if self.has_running_agent() {
                     self.push_status(
-                        "agent running — use :quit to exit".to_string(),
+                        "agent running — use palette commands".to_string(),
                         Severity::Warn,
                         Duration::from_secs(3),
                     );
@@ -367,7 +437,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 if self.has_running_agent() {
                     self.push_status(
-                        "agent running — use :quit to exit".to_string(),
+                        "agent running — use palette commands".to_string(),
                         Severity::Warn,
                         Duration::from_secs(3),
                     );
@@ -393,7 +463,9 @@ impl App {
                 false
             }
             KeyCode::Enter => {
-                if let Some(target) = self.resolve_split_target_for_selected_row() {
+                if !self.has_running_agent() && self.selected_retry_target().is_some() {
+                    self.retry_selected_target();
+                } else if let Some(target) = self.resolve_split_target_for_selected_row() {
                     self.open_split_target(target);
                 }
                 if self.can_focus_input() {
@@ -491,8 +563,8 @@ impl App {
             },
             PaletteCommand {
                 name: "stop",
-                aliases: &["kill", "cancel"],
-                help: "Kill the running agent and trigger auto-retry",
+                aliases: &[],
+                help: "Stop the running agent without retry",
                 key_hint: Some("Ctrl-C"),
             },
         ];
@@ -504,11 +576,15 @@ impl App {
                 key_hint: None,
             });
         }
-        if self.selected_retry_target().is_some() {
+        if self.has_running_agent() || self.selected_retry_target().is_some() {
             commands.push(PaletteCommand {
                 name: "retry",
                 aliases: &["r"],
-                help: "Retry selected stage or task",
+                help: if self.has_running_agent() {
+                    "Stop and retry the running agent"
+                } else {
+                    "Retry selected stage or task"
+                },
                 key_hint: None,
             });
         }
@@ -528,17 +604,6 @@ impl App {
             KeyCode::Esc => {
                 self.close_palette(true);
                 false
-            }
-            KeyCode::Char('q') | KeyCode::Char('Q') => {
-                if self.interactive_run_active() {
-                    self.insert_palette_char(match key.code {
-                        KeyCode::Char(c) => c,
-                        _ => return false,
-                    })
-                } else {
-                    self.close_palette(false);
-                    false
-                }
             }
             KeyCode::Enter => {
                 let input = self.palette.buffer.clone();
@@ -604,18 +669,6 @@ impl App {
         match palette::resolve(input, &commands) {
             palette::MatchResult::Exact { command, args }
             | palette::MatchResult::UniquePrefix { command, args } => {
-                if self.interactive_run_active() && command.name == "quit" {
-                    if self.interactive_run_waiting_for_input() {
-                        self.send_interactive_input(input.trim().to_string());
-                    } else {
-                        self.push_status(
-                            "interactive agent is not ready for input".to_string(),
-                            Severity::Warn,
-                            Duration::from_secs(3),
-                        );
-                    }
-                    return false;
-                }
                 let _ = self.state.log_event(format!(
                     "palette_invoked: command={} args={args}",
                     command.name
@@ -648,7 +701,14 @@ impl App {
 
     fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
         match name {
-            "quit" => true,
+            "quit" => {
+                if self.has_running_agent() {
+                    self.open_quit_running_agent_modal();
+                    false
+                } else {
+                    true
+                }
+            }
             "back" => {
                 self.confirm_back = false;
                 self.status_line.borrow_mut().clear();
@@ -658,7 +718,11 @@ impl App {
                 false
             }
             "retry" => {
-                self.retry_selected_target();
+                if self.has_running_agent() {
+                    self.retry_running_agent();
+                } else {
+                    self.retry_selected_target();
+                }
                 false
             }
             "edit" => {
@@ -703,19 +767,6 @@ impl App {
             }
             _ => false,
         }
-    }
-
-    fn insert_palette_char(&mut self, c: char) -> bool {
-        let byte = self
-            .palette
-            .buffer
-            .char_indices()
-            .nth(self.palette.cursor)
-            .map(|(i, _)| i)
-            .unwrap_or(self.palette.buffer.len());
-        self.palette.buffer.insert(byte, c);
-        self.palette.cursor += 1;
-        false
     }
 
     pub(super) fn interactive_run_active(&self) -> bool {
@@ -836,9 +887,44 @@ impl App {
         match modal {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
             ModalKind::GitGuard => self.handle_guard_modal_key(key),
+            ModalKind::QuitRunningAgent => self.handle_quit_running_agent_modal_key(key),
             ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
             ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
             ModalKind::StageError(stage_id) => self.handle_stage_error_modal_key(stage_id, key),
+        }
+    }
+
+    fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') => {
+                let Some(run_id) = self.pending_quit_confirmation_run_id.take() else {
+                    return false;
+                };
+                let Some(run) = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|candidate| {
+                        candidate.id == run_id && candidate.status == RunStatus::Running
+                    })
+                    .cloned()
+                else {
+                    return false;
+                };
+                self.request_termination(
+                    PendingTermination {
+                        run_id,
+                        intent: TerminationIntent::StopAndQuit,
+                    },
+                    run.window_name.clone(),
+                );
+                false
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                self.pending_quit_confirmation_run_id = None;
+                false
+            }
+            _ => false,
         }
     }
 

@@ -95,6 +95,9 @@ fn stage_str(stage: &str) -> Option<&'static str> {
 
 impl App {
     pub(super) fn active_modal(&self) -> Option<ModalKind> {
+        if self.pending_quit_confirmation_run_id.is_some() {
+            return Some(ModalKind::QuitRunningAgent);
+        }
         match self.state.current_phase {
             Phase::SkipToImplPending => Some(ModalKind::SkipToImpl),
             Phase::GitGuardPending => Some(ModalKind::GitGuard),
@@ -185,6 +188,9 @@ impl App {
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,
+            pending_termination: None,
+            pending_quit_confirmation_run_id: None,
+            pending_app_exit: false,
             current_run_id: None,
             failed_models,
             pending_yolo_toggle_gate: None,
@@ -337,6 +343,10 @@ impl App {
             }
             self.refresh_models_if_due();
             self.poll_agent_run();
+            if self.pending_app_exit {
+                crate::runner::shutdown_all_runs();
+                return Ok(());
+            }
             self.maybe_yolo_auto_resolve();
             self.maybe_auto_launch();
             self.update_agent_progress();
@@ -1607,5 +1617,23 @@ impl App {
             self.close_split();
         }
         self.rebuild_tree_view(None);
+    }
+
+    pub(super) fn launch_retry_from_descriptor(&mut self, retry: RetryLaunch) {
+        match retry {
+            RetryLaunch::Brainstorm => {
+                let idea = self.state.idea_text.clone().unwrap_or_default();
+                self.launch_brainstorm(idea);
+            }
+            RetryLaunch::SpecReview => self.launch_spec_review(),
+            RetryLaunch::Planning => self.launch_planning(),
+            RetryLaunch::PlanReview => self.launch_plan_review(),
+            RetryLaunch::Sharding => self.launch_sharding(),
+            RetryLaunch::Recovery => self.launch_recovery(),
+            RetryLaunch::RecoveryPlanReview => self.launch_recovery_plan_review(),
+            RetryLaunch::RecoverySharding => self.launch_recovery_sharding(),
+            RetryLaunch::Coder => self.launch_coder(),
+            RetryLaunch::Reviewer => self.launch_reviewer(),
+        }
     }
 }

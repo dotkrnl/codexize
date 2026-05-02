@@ -24,6 +24,13 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     time::Duration,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperatorTerminationMarker {
+    Stopped,
+    RetryRequested,
+}
+
 impl App {
     pub(super) fn rebuild_failed_models(state: &SessionState) -> HashMap<RetryKey, FailedModelSet> {
         let mut failed_models = HashMap::new();
@@ -546,7 +553,7 @@ impl App {
                 let signal_received = crate::runner::read_finish_stamp(&stamp_path)
                     .map(|s| s.signal_received)
                     .unwrap_or_default();
-                let is_operator_killed = Self::has_operator_kill_marker(&session_dir, run.id);
+                let operator_marker = Self::operator_termination_marker(&session_dir, run.id);
                 // Reviewer note: legacy stamps also deserialize to an empty
                 // signal marker, so this branch means the wrapper recorded no
                 // trapped signal, not that we can distinguish historical gaps.
@@ -564,8 +571,13 @@ impl App {
                     "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
                     run.id, run.stage
                 ));
-                if is_operator_killed {
-                    return Ok(Some("Operator Killed".to_string()));
+                if let Some(marker) = operator_marker {
+                    return Ok(Some(match marker {
+                        OperatorTerminationMarker::Stopped => "Operator Killed".to_string(),
+                        OperatorTerminationMarker::RetryRequested => {
+                            "user_forced_retry".to_string()
+                        }
+                    }));
                 }
                 return Ok(Some(format!("killed({signal_num}) [{detail}]")));
             }
@@ -597,7 +609,10 @@ impl App {
         Ok(guard_reason.or(artifact_reason))
     }
 
-    fn has_operator_kill_marker(session_dir: &std::path::Path, run_id: u64) -> bool {
+    fn operator_termination_marker(
+        session_dir: &std::path::Path,
+        run_id: u64,
+    ) -> Option<OperatorTerminationMarker> {
         #[derive(serde::Deserialize)]
         struct EventsFile {
             #[serde(default)]
@@ -610,17 +625,27 @@ impl App {
         }
 
         let Ok(events_text) = std::fs::read_to_string(session_dir.join("events.toml")) else {
-            return false;
+            return None;
         };
         let Ok(events_file) = toml::from_str::<EventsFile>(&events_text) else {
-            return false;
+            return None;
         };
-        let marker = format!("agent_killed_by_user: run_id={run_id}");
-        // stop_running_agent stores this as an audit message, so match the parsed message exactly.
         events_file
             .events
             .iter()
-            .any(|event| event.message == marker)
+            .rev()
+            .find_map(|event| match event.message.as_str() {
+                marker if marker == format!("agent_stopped_by_user: run_id={run_id}") => {
+                    Some(OperatorTerminationMarker::Stopped)
+                }
+                marker if marker == format!("agent_retry_requested_by_user: run_id={run_id}") => {
+                    Some(OperatorTerminationMarker::RetryRequested)
+                }
+                marker if marker == format!("agent_killed_by_user: run_id={run_id}") => {
+                    Some(OperatorTerminationMarker::RetryRequested)
+                }
+                _ => None,
+            })
     }
 
     fn recovery_artifact_failure_reason(
@@ -1469,6 +1494,32 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         if let Some(error) = failure_reason {
             self.finalize_run_record(run.id, false, Some(error.clone()));
+            let pending_termination = self
+                .pending_termination
+                .as_ref()
+                .filter(|pending| pending.run_id == run.id)
+                .cloned();
+            if let Some(pending) = pending_termination {
+                self.pending_termination = None;
+                self.clear_agent_error();
+                match pending.intent {
+                    TerminationIntent::StopOnly => {}
+                    TerminationIntent::StopAndRetry(retry) => {
+                        self.launch_retry_from_descriptor(retry);
+                    }
+                    TerminationIntent::StopAndQuit => {
+                        self.pending_app_exit = true;
+                    }
+                }
+                return Ok(());
+            }
+            if matches!(error.as_str(), "Operator Killed" | "user_forced_retry") {
+                self.clear_agent_error();
+                if error == "user_forced_retry" {
+                    return Ok(());
+                }
+                return Ok(());
+            }
             let failed_run = self
                 .state
                 .agent_runs

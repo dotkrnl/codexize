@@ -1,15 +1,15 @@
 use super::{
     AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate, PromptPayload,
     tool_call::{
-        ToolCallDisplayState, ToolCallPayload, format_invocation_line, format_result_line,
-        is_terminal_status,
+        ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line,
+        format_result_line, is_terminal_status,
     },
 };
 use crate::selection::vendor::vendor_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     io::{BufRead, BufReader, ErrorKind, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -70,7 +70,7 @@ impl AcpConnector for SubprocessConnector {
             .stdin
             .take()
             .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
-        let mut rpc = RpcPeer::new(stdin, stdout, launch.session.cwd.clone());
+        let mut rpc = RpcPeer::new(stdin, stdout);
         let initialize = match rpc.call(
             "initialize",
             json!({
@@ -152,6 +152,9 @@ impl AcpConnector for SubprocessConnector {
             prompt_response: Some(prompt_response),
             prompt_finished: false,
             closed: false,
+            cwd: launch.session.cwd.clone(),
+            tool_calls: ToolCallMap::new(),
+            pending_updates: VecDeque::new(),
         }))
     }
 }
@@ -175,6 +178,9 @@ struct SubprocessSession {
     prompt_response: Option<Receiver<AcpResult<Value>>>,
     prompt_finished: bool,
     closed: bool,
+    cwd: PathBuf,
+    tool_calls: ToolCallMap,
+    pending_updates: VecDeque<ClientUpdate>,
 }
 
 impl AcpSession for SubprocessSession {
@@ -183,16 +189,41 @@ impl AcpSession for SubprocessSession {
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
-        match self.rpc.try_next_update() {
-            Ok(Some(update)) => return Ok(Some(update)),
-            Ok(None) if !self.prompt_finished => {}
-            Ok(None) => return Ok(None),
-            Err(err) => {
-                self.prompt_finished = true;
-                return Ok(Some(ClientUpdate::PromptTurnFailed {
-                    message: err.to_string(),
-                }));
+        // Drain queued visible updates before pulling more wire messages so a
+        // single `tool_call` payload that yields both invocation and result
+        // lines surfaces across two successive calls.
+        if let Some(queued) = self.pending_updates.pop_front() {
+            return Ok(Some(queued));
+        }
+
+        // Non-terminal `tool_call_update` events are silently absorbed into
+        // merge state; keep pulling wire messages until either a visible
+        // update is queued or the channel runs dry.
+        loop {
+            match self.rpc.try_next_update() {
+                Ok(Some(value)) => {
+                    dispatch_update(
+                        &value,
+                        &self.cwd,
+                        &mut self.tool_calls,
+                        &mut self.pending_updates,
+                    );
+                    if let Some(queued) = self.pending_updates.pop_front() {
+                        return Ok(Some(queued));
+                    }
+                }
+                Ok(None) => break,
+                Err(err) => {
+                    self.prompt_finished = true;
+                    return Ok(Some(ClientUpdate::PromptTurnFailed {
+                        message: err.to_string(),
+                    }));
+                }
             }
+        }
+
+        if self.prompt_finished {
+            return Ok(None);
         }
 
         let Some(prompt_response) = self.prompt_response.as_ref() else {
@@ -256,6 +287,8 @@ impl AcpSession for SubprocessSession {
             return Ok(());
         }
         self.closed = true;
+        self.pending_updates.clear();
+        self.tool_calls = ToolCallMap::new();
 
         if self.supports_close {
             let _ = self
@@ -292,21 +325,20 @@ impl Drop for SubprocessSession {
 struct RpcPeer {
     writer: SharedWriter,
     pending: PendingRequests,
-    updates_rx: Receiver<AcpResult<ClientUpdate>>,
+    updates_rx: Receiver<AcpResult<Value>>,
     reader_handle: Option<JoinHandle<()>>,
     next_request_id: u64,
 }
 
 impl RpcPeer {
-    fn new(stdin: ChildStdin, stdout: ChildStdout, cwd: PathBuf) -> Self {
+    fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
         let writer = Arc::new(Mutex::new(Some(stdin)));
         let pending = Arc::new(Mutex::new(BTreeMap::<u64, Sender<AcpResult<Value>>>::new()));
         let (updates_tx, updates_rx) = mpsc::channel();
         let reader_writer = Arc::clone(&writer);
         let reader_pending = Arc::clone(&pending);
-        let reader_handle = thread::spawn(move || {
-            read_loop(stdout, reader_writer, reader_pending, updates_tx, cwd)
-        });
+        let reader_handle =
+            thread::spawn(move || read_loop(stdout, reader_writer, reader_pending, updates_tx));
         Self {
             writer,
             pending,
@@ -349,9 +381,9 @@ impl RpcPeer {
         Ok(rx)
     }
 
-    fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
+    fn try_next_update(&mut self) -> AcpResult<Option<Value>> {
         match self.updates_rx.try_recv() {
-            Ok(Ok(update)) => Ok(Some(update)),
+            Ok(Ok(value)) => Ok(Some(value)),
             Ok(Err(err)) => Err(err),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Ok(None),
@@ -401,8 +433,7 @@ fn read_loop(
     stdout: ChildStdout,
     writer: SharedWriter,
     pending: PendingRequests,
-    updates_tx: Sender<AcpResult<ClientUpdate>>,
-    cwd: PathBuf,
+    updates_tx: Sender<AcpResult<Value>>,
 ) {
     let reader = BufReader::new(stdout);
     for line in reader.lines() {
@@ -433,14 +464,16 @@ fn read_loop(
 
         if let Some(method) = value.get("method").and_then(Value::as_str) {
             if method == "session/update" {
-                let update = value
+                // Forward the inner `update` field unchanged; the consumer
+                // owns the per-session state needed to translate it. Null
+                // signals "session/update without an update field" so the
+                // dispatcher can emit Unknown { kind: "session/update" }.
+                let update_value = value
                     .get("params")
                     .and_then(|params| params.get("update"))
-                    .map(|update| parse_update(update, &cwd))
-                    .unwrap_or_else(|| ClientUpdate::Unknown {
-                        kind: "session/update".to_string(),
-                    });
-                let _ = updates_tx.send(Ok(update));
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let _ = updates_tx.send(Ok(update_value));
                 continue;
             }
 
@@ -504,7 +537,7 @@ fn read_loop(
 
 fn broadcast_transport_error(
     pending: &PendingRequests,
-    updates_tx: &Sender<AcpResult<ClientUpdate>>,
+    updates_tx: &Sender<AcpResult<Value>>,
     message: String,
 ) {
     let err = AcpError::protocol(message);
@@ -636,7 +669,25 @@ fn is_failed_stop_reason(stop_reason: &str) -> bool {
     )
 }
 
-fn parse_update(value: &Value, cwd: &Path) -> ClientUpdate {
+/// Translate one ACP `session/update` payload into zero or more visible
+/// `ClientUpdate`s, mutating the per-session tool-call state map in the
+/// process. A single `tool_call` payload may yield two updates (invocation
+/// followed by result) when its status is already terminal; non-terminal
+/// `tool_call_update`s with prior state are absorbed silently and emit
+/// nothing.
+fn dispatch_update(
+    value: &Value,
+    cwd: &Path,
+    map: &mut ToolCallMap,
+    out: &mut VecDeque<ClientUpdate>,
+) {
+    if value.is_null() {
+        out.push_back(ClientUpdate::Unknown {
+            kind: "session/update".to_string(),
+        });
+        return;
+    }
+
     let kind = value
         .get("sessionUpdate")
         .and_then(Value::as_str)
@@ -648,7 +699,7 @@ fn parse_update(value: &Value, cwd: &Path) -> ClientUpdate {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            ClientUpdate::AgentMessageText(text)
+            out.push_back(ClientUpdate::AgentMessageText(text));
         }
         "agent_thought_chunk" => {
             let text = value
@@ -656,50 +707,102 @@ fn parse_update(value: &Value, cwd: &Path) -> ClientUpdate {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            ClientUpdate::AgentThoughtText(text)
+            out.push_back(ClientUpdate::AgentThoughtText(text));
         }
-        "session_info_update" => ClientUpdate::SessionInfoUpdate {
-            title: value
-                .get("title")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        },
-        "tool_call" => {
-            // Stateless rendering: format the invocation block from this single
-            // payload. Per-session merge state is owned by the dependent
-            // lifecycle work; on a `tool_call` whose status is already terminal
-            // we still only emit the invocation here.
-            let payload = ToolCallPayload::from_value(value);
-            let state = ToolCallDisplayState::from_payload(&payload);
-            ClientUpdate::ToolCallText {
-                text: format_invocation_line(&state, cwd),
-            }
+        "session_info_update" => {
+            out.push_back(ClientUpdate::SessionInfoUpdate {
+                title: value
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            });
         }
+        "tool_call" => handle_tool_call(ToolCallPayload::from_value(value), cwd, map, out),
         "tool_call_update" => {
-            // Spec §Behavior: non-terminal updates produce no transcript output;
-            // terminal updates render a best-effort result block from their own
-            // payload. Statefully merging with a prior `tool_call` is out of
-            // scope for this task.
-            let payload = ToolCallPayload::from_value(value);
-            let terminal = payload
-                .status
-                .as_deref()
-                .map(is_terminal_status)
-                .unwrap_or(false);
-            if !terminal {
-                return ClientUpdate::Unknown {
-                    kind: kind.to_string(),
-                };
-            }
-            let state = ToolCallDisplayState::from_payload(&payload);
-            ClientUpdate::ToolCallText {
-                text: format_result_line(&state),
-            }
+            handle_tool_call_update(ToolCallPayload::from_value(value), map, out);
         }
-        other => ClientUpdate::Unknown {
+        other => out.push_back(ClientUpdate::Unknown {
             kind: other.to_string(),
-        },
+        }),
     }
+}
+
+fn handle_tool_call(
+    payload: ToolCallPayload,
+    cwd: &Path,
+    map: &mut ToolCallMap,
+    out: &mut VecDeque<ClientUpdate>,
+) {
+    let state = ToolCallDisplayState::from_payload(&payload);
+    let terminal = state
+        .status
+        .as_deref()
+        .map(is_terminal_status)
+        .unwrap_or(false);
+
+    let invocation = format_invocation_line(&state, cwd);
+
+    if let Some(id) = payload.tool_call_id.clone() {
+        map.insert(id.clone(), state.clone());
+        out.push_back(ClientUpdate::ToolCallText { text: invocation });
+        if terminal {
+            // Spec §Behavior rule 1: when the same payload carries terminal
+            // status, emit the result block immediately afterward and evict.
+            out.push_back(ClientUpdate::ToolCallText {
+                text: format_result_line(&state),
+            });
+            map.evict(&id);
+        }
+    } else {
+        // Missing toolCallId: best-effort output only, never stored.
+        out.push_back(ClientUpdate::ToolCallText { text: invocation });
+        if terminal {
+            out.push_back(ClientUpdate::ToolCallText {
+                text: format_result_line(&state),
+            });
+        }
+    }
+}
+
+fn handle_tool_call_update(
+    payload: ToolCallPayload,
+    map: &mut ToolCallMap,
+    out: &mut VecDeque<ClientUpdate>,
+) {
+    let terminal = payload
+        .status
+        .as_deref()
+        .map(is_terminal_status)
+        .unwrap_or(false);
+
+    let Some(id) = payload.tool_call_id.clone() else {
+        // Missing toolCallId: best-effort result if terminal, otherwise drop.
+        if terminal {
+            let state = ToolCallDisplayState::from_payload(&payload);
+            out.push_back(ClientUpdate::ToolCallText {
+                text: format_result_line(&state),
+            });
+        }
+        return;
+    };
+
+    if let Some(state) = map.merge(&id, &payload) {
+        if terminal {
+            let result = format_result_line(state);
+            out.push_back(ClientUpdate::ToolCallText { text: result });
+            map.evict(&id);
+        }
+        // Non-terminal merges into prior state and produces no transcript
+        // output (spec §Behavior rule 5).
+    } else if terminal {
+        // No prior state (never created or already evicted): emit a
+        // best-effort result block from the payload only; never insert.
+        let state = ToolCallDisplayState::from_payload(&payload);
+        out.push_back(ClientUpdate::ToolCallText {
+            text: format_result_line(&state),
+        });
+    }
+    // Non-terminal update with no prior state is silently dropped.
 }
 
 fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
@@ -880,10 +983,17 @@ mod tests {
         assert_eq!(result, PromptTurnOutcome::Finished);
     }
 
+    fn drain(value: Value, cwd: &Path, map: &mut ToolCallMap) -> Vec<ClientUpdate> {
+        let mut out = VecDeque::new();
+        dispatch_update(&value, cwd, map, &mut out);
+        out.into_iter().collect()
+    }
+
     #[test]
-    fn parse_tool_call_renders_invocation_from_observed_codex_payload() {
-        let update = parse_update(
-            &json!({
+    fn dispatch_renders_invocation_from_observed_codex_read_payload() {
+        let mut map = ToolCallMap::new();
+        let updates = drain(
+            json!({
                 "sessionUpdate": "tool_call",
                 "toolCallId": "call_1",
                 "title": "Read Cargo.toml",
@@ -895,102 +1005,302 @@ mod tests {
                 }
             }),
             Path::new("/work/project"),
+            &mut map,
         );
 
         assert_eq!(
-            update,
-            ClientUpdate::ToolCallText {
+            updates,
+            vec![ClientUpdate::ToolCallText {
                 text: "tool: read(Cargo.toml)".to_string()
-            }
+            }]
         );
+        assert_eq!(map.len(), 1);
     }
 
     #[test]
-    fn parse_tool_call_renders_exec_invocation_from_command_array() {
-        let update = parse_update(
-            &json!({
+    fn dispatch_emits_invocation_then_result_when_terminal_arrives_in_two_payloads() {
+        // Spec §Behavior: the invocation block is emitted on `tool_call`, and
+        // a separate result block is emitted on the terminal `tool_call_update`.
+        let mut map = ToolCallMap::new();
+        let invocation = drain(
+            json!({
                 "sessionUpdate": "tool_call",
-                "rawInput": { "command": ["cargo", "test", "--workspace"] }
+                "toolCallId": "call_1",
+                "title": "Read Cargo.toml",
+                "kind": "read",
+                "status": "in_progress",
+                "locations": [{ "path": "/work/project/Cargo.toml" }],
             }),
-            Path::new("/tmp"),
+            Path::new("/work/project"),
+            &mut map,
         );
-
         assert_eq!(
-            update,
-            ClientUpdate::ToolCallText {
-                text: "tool: exec(cargo test --workspace)".to_string()
-            }
+            invocation,
+            vec![ClientUpdate::ToolCallText {
+                text: "tool: read(Cargo.toml)".to_string()
+            }]
         );
-    }
+        assert!(map.contains("call_1"));
 
-    #[test]
-    fn parse_tool_call_falls_back_to_literal_tool_when_payload_is_empty() {
-        let update = parse_update(
-            &json!({ "sessionUpdate": "tool_call" }),
-            Path::new("/tmp"),
-        );
-
-        assert_eq!(
-            update,
-            ClientUpdate::ToolCallText {
-                text: "tool: tool".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn parse_tool_call_update_with_terminal_status_emits_result_block() {
-        let update = parse_update(
-            &json!({
+        let result = drain(
+            json!({
                 "sessionUpdate": "tool_call_update",
                 "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "[package] name = \"codexize\"" }
+            }),
+            Path::new("/work/project"),
+            &mut map,
+        );
+        assert_eq!(
+            result,
+            vec![ClientUpdate::ToolCallText {
+                text: "result: completed, exit 0, output: [package] name = \"codexize\""
+                    .to_string()
+            }]
+        );
+        // After eviction the entry must be gone.
+        assert!(!map.contains("call_1"));
+    }
+
+    #[test]
+    fn dispatch_emits_invocation_and_result_when_tool_call_payload_is_already_terminal() {
+        // Spec §Behavior rule 1: a `tool_call` carrying terminal status emits
+        // the invocation followed by the result, then evicts.
+        let mut map = ToolCallMap::new();
+        let updates = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_q",
+                "kind": "execute",
+                "status": "completed",
+                "rawInput": { "command": ["echo", "ok"] },
+                "rawOutput": { "exit_code": 0, "stdout": "ok" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(
+            updates,
+            vec![
+                ClientUpdate::ToolCallText {
+                    text: "tool: exec(echo ok)".to_string()
+                },
+                ClientUpdate::ToolCallText {
+                    text: "result: completed, exit 0, output: ok".to_string()
+                },
+            ]
+        );
+        assert!(!map.contains("call_q"));
+    }
+
+    #[test]
+    fn dispatch_silently_merges_non_terminal_update_into_existing_state() {
+        // Spec §Behavior rule 5: non-terminal `tool_call_update` events
+        // produce no transcript output but still merge into the merge state,
+        // so a later terminal update can use the merged status snapshot.
+        let mut map = ToolCallMap::new();
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "kind": "execute",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let progress = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "in_progress",
+                "rawOutput": { "stdout": "still working" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert!(
+            progress.is_empty(),
+            "non-terminal updates must produce no visible blocks"
+        );
+        let merged = map.get("call_1").expect("entry preserved");
+        assert_eq!(merged.status.as_deref(), Some("in_progress"));
+    }
+
+    #[test]
+    fn dispatch_terminal_update_without_prior_state_emits_best_effort_result_only() {
+        // Spec §Behavior rule 4: terminal update with no prior state renders
+        // a result block from the payload alone, with no synthesized
+        // invocation and no map entry retained.
+        let mut map = ToolCallMap::new();
+        let updates = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "stale_id",
                 "status": "completed",
                 "rawOutput": { "exit_code": 0, "stdout": "ok" }
             }),
             Path::new("/tmp"),
+            &mut map,
         );
-
         assert_eq!(
-            update,
-            ClientUpdate::ToolCallText {
+            updates,
+            vec![ClientUpdate::ToolCallText {
                 text: "result: completed, exit 0, output: ok".to_string()
-            }
+            }]
+        );
+        assert!(
+            !map.contains("stale_id"),
+            "best-effort updates must never insert state"
         );
     }
 
     #[test]
-    fn parse_tool_call_update_silently_drops_non_terminal_status() {
-        let update = parse_update(
-            &json!({
+    fn dispatch_second_terminal_update_for_evicted_id_emits_at_most_best_effort_then_nothing() {
+        // Spec §Behavior rule 3: after eviction, a *second* terminal update
+        // for the same id is treated as a "no prior state" terminal update.
+        // It still produces a best-effort result block (per rule 4) but does
+        // not double-emit from the original invocation+result pair, and the
+        // total visible blocks for that tool stay capped at two.
+        let mut map = ToolCallMap::new();
+        let _invocation = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "kind": "execute",
+                "rawInput": { "command": ["echo", "hi"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let first_result = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "hi" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(first_result.len(), 1);
+        assert!(!map.contains("call_1"));
+
+        // A second terminal update for the now-evicted id is best-effort.
+        let second_result = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "stale" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(second_result.len(), 1);
+        assert!(!map.contains("call_1"));
+
+        // A non-terminal stale update produces nothing.
+        let stale = drain(
+            json!({
                 "sessionUpdate": "tool_call_update",
                 "toolCallId": "call_1",
                 "status": "in_progress"
             }),
             Path::new("/tmp"),
+            &mut map,
         );
+        assert!(stale.is_empty());
+    }
 
+    #[test]
+    fn dispatch_renders_exec_invocation_from_command_array() {
+        let mut map = ToolCallMap::new();
+        let updates = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "rawInput": { "command": ["cargo", "test", "--workspace"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
         assert_eq!(
-            update,
-            ClientUpdate::Unknown {
-                kind: "tool_call_update".to_string()
-            }
+            updates,
+            vec![ClientUpdate::ToolCallText {
+                text: "tool: exec(cargo test --workspace)".to_string()
+            }]
+        );
+        // Missing toolCallId must never be stored.
+        assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn dispatch_falls_back_to_literal_tool_when_payload_is_empty() {
+        let mut map = ToolCallMap::new();
+        let updates = drain(json!({ "sessionUpdate": "tool_call" }), Path::new("/tmp"), &mut map);
+        assert_eq!(
+            updates,
+            vec![ClientUpdate::ToolCallText {
+                text: "tool: tool".to_string()
+            }]
         );
     }
 
     #[test]
-    fn parse_update_routes_unrelated_kinds_with_substring_tool_to_unknown() {
-        // Spec §Interfaces: `is_tool_update` narrows to exact `tool_call` /
-        // `tool_call_update`. The previous heuristic over-matched anything
-        // containing "tool".
-        let update = parse_update(
-            &json!({ "sessionUpdate": "tool_progress_chunk" }),
+    fn dispatch_routes_unrelated_kinds_containing_tool_to_unknown() {
+        // Spec §Interfaces: only exact "tool_call" / "tool_call_update" route
+        // through the new pipeline. Other kinds remain Unknown.
+        let mut map = ToolCallMap::new();
+        let updates = drain(
+            json!({ "sessionUpdate": "tool_progress_chunk" }),
             Path::new("/tmp"),
+            &mut map,
         );
         assert_eq!(
-            update,
-            ClientUpdate::Unknown {
+            updates,
+            vec![ClientUpdate::Unknown {
                 kind: "tool_progress_chunk".to_string()
-            }
+            }]
+        );
+    }
+
+    #[test]
+    fn dispatch_emits_session_update_unknown_when_payload_is_null() {
+        let mut map = ToolCallMap::new();
+        let updates = drain(Value::Null, Path::new("/tmp"), &mut map);
+        assert_eq!(
+            updates,
+            vec![ClientUpdate::Unknown {
+                kind: "session/update".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn dispatch_passes_through_agent_message_and_thought_chunks() {
+        let mut map = ToolCallMap::new();
+        let messages = drain(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "text": "hello" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(messages, vec![ClientUpdate::AgentMessageText("hello".to_string())]);
+
+        let thoughts = drain(
+            json!({
+                "sessionUpdate": "agent_thought_chunk",
+                "content": { "text": "thinking" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(
+            thoughts,
+            vec![ClientUpdate::AgentThoughtText("thinking".to_string())]
         );
     }
 

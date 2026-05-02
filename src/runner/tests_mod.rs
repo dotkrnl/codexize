@@ -340,6 +340,324 @@ fn restore_codexize_root_env(prev: Option<std::ffi::OsString>) {
     }
 }
 
+fn persisted_texts(session_id: &str, kind: MessageKind) -> Vec<String> {
+    SessionState::load_messages(session_id)
+        .unwrap()
+        .into_iter()
+        .filter(|message| message.kind == kind)
+        .map(|message| message.text)
+        .collect()
+}
+
+#[test]
+fn acp_text_stream_start_new_message_splits_adjacent_logical_outputs() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-logical-boundary";
+    let window_name = "[Boundary]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text_boundary(
+        &launch,
+        "first logical output",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.push_text_boundary(
+        &launch,
+        "second logical output",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["first logical output", "second logical output"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_text_stream_continue_appends_within_stable_identity() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-continue-boundary";
+    let window_name = "[Continue]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text_boundary(
+        &launch,
+        "hel",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.push_text_boundary(
+        &launch,
+        "lo",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::Continue,
+    );
+    stream.finish_turn(&launch, MessageKind::AgentText);
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["hello"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_text_stream_start_new_message_preserves_blank_line_splitting() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-boundary-paragraphs";
+    let window_name = "[Paragraphs]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text_boundary(
+        &launch,
+        "first paragraph\n\nsecond paragraph",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.finish_turn(&launch, MessageKind::AgentText);
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["first paragraph", "second paragraph"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_text_stream_boundary_finalizes_live_message_before_next_live_message() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-boundary-finalizes-live";
+    let window_name = "[Finalize]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text_boundary(
+        &launch,
+        "old live",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.push_text_boundary(
+        &launch,
+        "new",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.push_text_boundary(
+        &launch,
+        " live",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::Continue,
+    );
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["old live", "new live"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-tool-interleave";
+    let window_name = "[Tool]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut agent = AcpTextStream::new();
+    let mut thought = AcpTextStream::new();
+
+    thought.push_text_boundary(
+        &launch,
+        "private thought",
+        MessageKind::AgentThought,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    agent.push_text_boundary(
+        &launch,
+        "pre-tool answer",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    let tool_event = crate::acp::translate_update(
+        crate::acp::ClientUpdate::ToolCallText {
+            text: "tool: exec(echo ok)".to_string(),
+            boundary: crate::acp::AcpTextBoundary::StartNewMessage,
+        },
+        true,
+    )
+    .expect("tool text event");
+    let crate::acp::AcpRuntimeEvent::Text(tool_text) = tool_event else {
+        panic!("tool call must translate to text");
+    };
+    thought.push_text_boundary(
+        &launch,
+        &tool_text.text,
+        MessageKind::AgentThought,
+        tool_text.boundary,
+    );
+    agent.push_text_boundary(
+        &launch,
+        "post-tool answer",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentThought),
+        vec!["private thought", "tool: exec(echo ok)"]
+    );
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["pre-tool answer", "post-tool answer"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_text_stream_one_logical_output_persists_one_sequence_without_duplicates() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-duplicate-invariant";
+    let window_name = "[Duplicate]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    stream.push_text_boundary(
+        &launch,
+        "one visible output",
+        MessageKind::AgentText,
+        crate::acp::AcpTextBoundary::StartNewMessage,
+    );
+    stream.finish_turn(&launch, MessageKind::AgentText);
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["one visible output"]
+    );
+
+    restore_codexize_root_env(prev);
+}
+
+#[test]
+fn acp_session_update_fixture_path_persists_adjacent_messages_separately() {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+
+    let session_id = "runner-acp-json-fixture-boundary";
+    let window_name = "[Fixture]";
+    seed_stream_session(session_id, window_name);
+    let launch = make_acp_test_launch(session_id, window_name, temp.path());
+    let mut stream = AcpTextStream::new();
+
+    let fixture_updates = [
+        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"first fixture output"}}"#,
+        r#"{"sessionUpdate":"agent_message_chunk","content":{"text":"second fixture output"}}"#,
+    ]
+    .into_iter()
+    .map(|raw| serde_json::from_str(raw).expect("fixture json"));
+
+    for update in
+        crate::acp::client_updates_from_session_updates_for_test(fixture_updates, temp.path())
+    {
+        let event = crate::acp::translate_update(update, true).expect("runtime event");
+        let crate::acp::AcpRuntimeEvent::Text(text_event) = event else {
+            panic!("fixture update must translate to text");
+        };
+        stream.push_text_boundary(
+            &launch,
+            &text_event.text,
+            MessageKind::AgentText,
+            text_event.boundary,
+        );
+    }
+
+    assert_eq!(
+        persisted_texts(session_id, MessageKind::AgentText),
+        vec!["first fixture output", "second fixture output"]
+    );
+    let raw_messages = fs::read_to_string(
+        temp.path()
+            .join(".codexize")
+            .join("sessions")
+            .join(session_id)
+            .join("messages.toml"),
+    )
+    .expect("messages.toml");
+    assert_eq!(raw_messages.matches("kind = \"AgentText\"").count(), 2);
+
+    restore_codexize_root_env(prev);
+}
+
 #[test]
 fn acp_text_stream_persists_one_message_per_finalized_block_plus_live_text() {
     // Acceptance: a multi-paragraph stream with N paragraph/max-size

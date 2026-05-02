@@ -3,6 +3,8 @@ mod config;
 mod events;
 mod tool_call;
 
+#[cfg(test)]
+pub use client::client_updates_from_session_updates_for_test;
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
 pub use config::{
     AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_is_available,

@@ -11,8 +11,8 @@ pub use config::{
     should_offer_codex_acp_install,
 };
 pub use events::{
-    AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextEvent,
-    ClientUpdate, translate_update,
+    AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary,
+    AcpTextEvent, ClientUpdate, translate_update,
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};
@@ -338,7 +338,10 @@ mod tests {
     #[test]
     fn runtime_interface_compiles_without_real_agent_binaries() {
         let connector = StubConnector::new([
-            ClientUpdate::AgentMessageText("hello".to_string()),
+            ClientUpdate::AgentMessageText {
+                text: "hello".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            },
             ClientUpdate::PromptTurnFinished,
         ]);
         let closed = Arc::clone(&connector.closed);
@@ -364,6 +367,7 @@ mod tests {
                 text,
                 interactive: false,
                 thought: false,
+                boundary: AcpTextBoundary::StartNewMessage,
             })) if text == "hello"
         ));
 

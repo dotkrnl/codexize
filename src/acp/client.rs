@@ -1,5 +1,5 @@
 use super::{
-    AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate, PromptPayload,
+    AcpError, AcpResolvedLaunch, AcpResult, AcpTextBoundary, ClientUpdate, PromptPayload,
     tool_call::{
         ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line,
         format_result_line, is_terminal_status,
@@ -675,6 +675,11 @@ fn is_failed_stop_reason(stop_reason: &str) -> bool {
 /// followed by result) when its status is already terminal; non-terminal
 /// `tool_call_update`s with prior state are absorbed silently and emit
 /// nothing.
+///
+/// Each text-bearing update carries an `AcpTextBoundary`. This commit wires
+/// the contract through dispatch with a uniform `StartNewMessage` tag so the
+/// runner can already see the field; identity-based classification of
+/// `agent_message_chunk` / `agent_thought_chunk` lands in the next commit.
 fn dispatch_update(
     value: &Value,
     cwd: &Path,
@@ -699,7 +704,10 @@ fn dispatch_update(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            out.push_back(ClientUpdate::AgentMessageText(text));
+            out.push_back(ClientUpdate::AgentMessageText {
+                text,
+                boundary: AcpTextBoundary::StartNewMessage,
+            });
         }
         "agent_thought_chunk" => {
             let text = value
@@ -707,7 +715,10 @@ fn dispatch_update(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            out.push_back(ClientUpdate::AgentThoughtText(text));
+            out.push_back(ClientUpdate::AgentThoughtText {
+                text,
+                boundary: AcpTextBoundary::StartNewMessage,
+            });
         }
         "session_info_update" => {
             out.push_back(ClientUpdate::SessionInfoUpdate {
@@ -744,23 +755,19 @@ fn handle_tool_call(
 
     if let Some(id) = payload.tool_call_id.clone() {
         map.insert(id.clone(), state.clone());
-        out.push_back(ClientUpdate::ToolCallText { text: invocation });
+        out.push_back(tool_call_text(invocation));
         if terminal {
             // Spec §Behavior rule 1: when the same payload carries terminal
             // status, emit the result block immediately afterward and evict.
-            out.push_back(ClientUpdate::ToolCallText {
-                text: format_result_line(&state),
-            });
+            out.push_back(tool_call_text(format_result_line(&state)));
             map.evict(&id);
             map.mark_terminal_emitted(&id);
         }
     } else {
         // Missing toolCallId: best-effort output only, never stored.
-        out.push_back(ClientUpdate::ToolCallText { text: invocation });
+        out.push_back(tool_call_text(invocation));
         if terminal {
-            out.push_back(ClientUpdate::ToolCallText {
-                text: format_result_line(&state),
-            });
+            out.push_back(tool_call_text(format_result_line(&state)));
         }
     }
 }
@@ -780,9 +787,7 @@ fn handle_tool_call_update(
         // Missing toolCallId: best-effort result if terminal, otherwise drop.
         if terminal {
             let state = ToolCallDisplayState::from_payload(&payload);
-            out.push_back(ClientUpdate::ToolCallText {
-                text: format_result_line(&state),
-            });
+            out.push_back(tool_call_text(format_result_line(&state)));
         }
         return;
     };
@@ -790,7 +795,7 @@ fn handle_tool_call_update(
     if let Some(state) = map.merge(&id, &payload) {
         if terminal {
             let result = format_result_line(state);
-            out.push_back(ClientUpdate::ToolCallText { text: result });
+            out.push_back(tool_call_text(result));
             map.evict(&id);
             map.mark_terminal_emitted(&id);
         }
@@ -805,12 +810,22 @@ fn handle_tool_call_update(
         // No prior state (never created or already evicted): emit a
         // best-effort result block from the payload only; never insert.
         let state = ToolCallDisplayState::from_payload(&payload);
-        out.push_back(ClientUpdate::ToolCallText {
-            text: format_result_line(&state),
-        });
+        out.push_back(tool_call_text(format_result_line(&state)));
         map.mark_terminal_emitted(&id);
     }
     // Non-terminal update with no prior state is silently dropped.
+}
+
+/// Build a `ClientUpdate::ToolCallText` with the boundary metadata required
+/// by the runner. Tool-call invocation/result text is always tagged
+/// `StartNewMessage` so the runner can finalize the thought stream's live
+/// buffer before appending the synthetic paragraph and prevent post-tool
+/// free-form text from gluing onto a pre-tool live buffer.
+fn tool_call_text(text: String) -> ClientUpdate {
+    ClientUpdate::ToolCallText {
+        text,
+        boundary: AcpTextBoundary::StartNewMessage,
+    }
 }
 
 fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
@@ -997,6 +1012,13 @@ mod tests {
         out.into_iter().collect()
     }
 
+    fn tool_call_block(text: &str) -> ClientUpdate {
+        ClientUpdate::ToolCallText {
+            text: text.to_string(),
+            boundary: AcpTextBoundary::StartNewMessage,
+        }
+    }
+
     #[test]
     fn dispatch_renders_invocation_from_observed_codex_read_payload() {
         let mut map = ToolCallMap::new();
@@ -1016,12 +1038,7 @@ mod tests {
             &mut map,
         );
 
-        assert_eq!(
-            updates,
-            vec![ClientUpdate::ToolCallText {
-                text: "tool: read(Cargo.toml)".to_string()
-            }]
-        );
+        assert_eq!(updates, vec![tool_call_block("tool: read(Cargo.toml)")]);
         assert_eq!(map.len(), 1);
     }
 
@@ -1042,12 +1059,7 @@ mod tests {
             Path::new("/work/project"),
             &mut map,
         );
-        assert_eq!(
-            invocation,
-            vec![ClientUpdate::ToolCallText {
-                text: "tool: read(Cargo.toml)".to_string()
-            }]
-        );
+        assert_eq!(invocation, vec![tool_call_block("tool: read(Cargo.toml)")]);
         assert!(map.contains("call_1"));
 
         let result = drain(
@@ -1062,10 +1074,9 @@ mod tests {
         );
         assert_eq!(
             result,
-            vec![ClientUpdate::ToolCallText {
-                text: "result: completed, exit 0, output: [package] name = \"codexize\""
-                    .to_string()
-            }]
+            vec![tool_call_block(
+                "result: completed, exit 0, output: [package] name = \"codexize\""
+            )]
         );
         // After eviction the entry must be gone.
         assert!(!map.contains("call_1"));
@@ -1091,12 +1102,8 @@ mod tests {
         assert_eq!(
             updates,
             vec![
-                ClientUpdate::ToolCallText {
-                    text: "tool: exec(echo ok)".to_string()
-                },
-                ClientUpdate::ToolCallText {
-                    text: "result: completed, exit 0, output: ok".to_string()
-                },
+                tool_call_block("tool: exec(echo ok)"),
+                tool_call_block("result: completed, exit 0, output: ok"),
             ]
         );
         assert!(!map.contains("call_q"));
@@ -1154,9 +1161,7 @@ mod tests {
         );
         assert_eq!(
             updates,
-            vec![ClientUpdate::ToolCallText {
-                text: "result: completed, exit 0, output: ok".to_string()
-            }]
+            vec![tool_call_block("result: completed, exit 0, output: ok")]
         );
         assert!(
             !map.contains("stale_id"),
@@ -1256,9 +1261,7 @@ mod tests {
         );
         assert_eq!(
             reused_invocation,
-            vec![ClientUpdate::ToolCallText {
-                text: "tool: exec(echo second)".to_string()
-            }]
+            vec![tool_call_block("tool: exec(echo second)")]
         );
         let reused_result = drain(
             json!({
@@ -1286,9 +1289,7 @@ mod tests {
         );
         assert_eq!(
             updates,
-            vec![ClientUpdate::ToolCallText {
-                text: "tool: exec(cargo test --workspace)".to_string()
-            }]
+            vec![tool_call_block("tool: exec(cargo test --workspace)")]
         );
         // Missing toolCallId must never be stored.
         assert_eq!(map.len(), 0);
@@ -1302,12 +1303,7 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        assert_eq!(
-            updates,
-            vec![ClientUpdate::ToolCallText {
-                text: "tool: tool".to_string()
-            }]
-        );
+        assert_eq!(updates, vec![tool_call_block("tool: tool")]);
     }
 
     #[test]
@@ -1351,9 +1347,15 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
+        // No stable identity in the payload, so the conservative fallback
+        // tags the chunk as `StartNewMessage` (see spec §Design — over-split
+        // rather than risk merging unrelated logical messages).
         assert_eq!(
             messages,
-            vec![ClientUpdate::AgentMessageText("hello".to_string())]
+            vec![ClientUpdate::AgentMessageText {
+                text: "hello".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            }]
         );
 
         let thoughts = drain(
@@ -1366,7 +1368,10 @@ mod tests {
         );
         assert_eq!(
             thoughts,
-            vec![ClientUpdate::AgentThoughtText("thinking".to_string())]
+            vec![ClientUpdate::AgentThoughtText {
+                text: "thinking".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            }]
         );
     }
 

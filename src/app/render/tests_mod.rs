@@ -239,6 +239,26 @@ fn render_lines(app: &App, height: u16) -> Vec<String> {
 }
 
 #[test]
+fn quit_modal_shows_run_context_and_shortcuts() {
+    let mut run = run_record(7, RunStatus::Running);
+    run.stage = "brainstorm".to_string();
+    run.window_name = "[Brainstorm]".to_string();
+    let mut app = test_app(nested_transcript_tree(), vec![run], Vec::new());
+    app.pending_quit_confirmation_run_id = Some(7);
+
+    let lines = app.modal_content_lines(ModalKind::QuitRunningAgent, 80);
+    let text = lines
+        .iter()
+        .map(line_to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Run: [Brainstorm]"));
+    assert!(text.contains("running brainstorm stage"));
+    assert!(text.contains("Enter/y confirm"));
+    assert!(text.contains("Esc/n/q cancel"));
+}
+
+#[test]
 fn renders_depth_indented_visible_rows_with_main_panel_transcript() {
     let app = test_app(
         nested_transcript_tree(),

@@ -172,18 +172,34 @@ fn guard_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
 
 fn quit_running_agent_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        vec![KeyBinding {
-            glyph: "Enter",
-            action: "confirm",
-            is_primary: true,
-            capability: None,
-        }],
-        vec![KeyBinding {
-            glyph: "Esc",
-            action: "cancel",
-            is_primary: false,
-            capability: None,
-        }],
+        vec![
+            KeyBinding {
+                glyph: "Enter",
+                action: "confirm",
+                is_primary: true,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "y",
+                action: "confirm",
+                is_primary: false,
+                capability: None,
+            },
+        ],
+        vec![
+            KeyBinding {
+                glyph: "Esc",
+                action: "cancel",
+                is_primary: false,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "n",
+                action: "cancel",
+                is_primary: false,
+                capability: None,
+            },
+        ],
     )
 }
 

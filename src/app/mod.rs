@@ -133,6 +133,8 @@ enum RetryLaunch {
 
 impl RetryLaunch {
     fn for_run(run: &crate::state::RunRecord) -> Option<Self> {
+        // Recovery sub-stages all share `stage == "recovery"`, so we key off the
+        // human-readable window label to preserve retry fidelity.
         if run.window_name.contains("[Recovery Plan Review]") {
             return Some(Self::RecoveryPlanReview);
         }
@@ -159,6 +161,24 @@ enum TerminationIntent {
     StopOnly,
     StopAndRetry(RetryLaunch),
     StopAndQuit,
+}
+
+impl TerminationIntent {
+    fn summary(&self) -> &'static str {
+        match self {
+            Self::StopOnly => "stop without retry",
+            Self::StopAndRetry(_) => "stop and retry",
+            Self::StopAndQuit => "stop and quit",
+        }
+    }
+
+    fn in_progress_status(&self) -> &'static str {
+        match self {
+            Self::StopOnly => "Stopping agent...",
+            Self::StopAndRetry(_) => "Stopping agent and queuing retry...",
+            Self::StopAndQuit => "Stopping agent and quitting...",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

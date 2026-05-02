@@ -827,7 +827,10 @@ mod tests {
         map.insert("id-a".to_string(), replacement);
 
         assert_eq!(map.len(), 2);
-        assert_eq!(map.get("id-a").and_then(|s| s.title.clone()).as_deref(), Some("second"));
+        assert_eq!(
+            map.get("id-a").and_then(|s| s.title.clone()).as_deref(),
+            Some("second")
+        );
 
         // Reused id moves to the most-recent FIFO slot. Filling to the cap
         // and inserting one more should evict id-b before id-a.

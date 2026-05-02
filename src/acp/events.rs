@@ -1,15 +1,46 @@
 use crate::selection::VendorKind;
 use std::collections::VecDeque;
 
+/// Logical-message boundary signal carried alongside ACP text payloads.
+///
+/// `Continue` means the runner may append the chunk to the current live block
+/// on the matching stream. `StartNewMessage` means the runner must finalize
+/// any current live block before pushing this chunk through its accumulator.
+///
+/// The conservative no-identity fallback is `StartNewMessage`: when the ACP
+/// payload exposes no stable message identity, we prefer over-splitting
+/// streamed chunks into more, smaller persisted messages over silently
+/// merging separate logical outputs (see spec §Design).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpTextBoundary {
+    Continue,
+    StartNewMessage,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientUpdate {
-    AgentMessageText(String),
-    AgentThoughtText(String),
-    ToolCallText { text: String },
-    SessionInfoUpdate { title: Option<String> },
+    AgentMessageText {
+        text: String,
+        boundary: AcpTextBoundary,
+    },
+    AgentThoughtText {
+        text: String,
+        boundary: AcpTextBoundary,
+    },
+    ToolCallText {
+        text: String,
+        boundary: AcpTextBoundary,
+    },
+    SessionInfoUpdate {
+        title: Option<String>,
+    },
     PromptTurnFinished,
-    PromptTurnFailed { message: String },
-    Unknown { kind: String },
+    PromptTurnFailed {
+        message: String,
+    },
+    Unknown {
+        kind: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +66,7 @@ pub struct AcpTextEvent {
     pub text: String,
     pub interactive: bool,
     pub thought: bool,
+    pub boundary: AcpTextBoundary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,21 +150,30 @@ impl Default for AcpTextAccumulator {
 
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
     match update {
-        ClientUpdate::AgentMessageText(text) => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text,
-            interactive,
-            thought: false,
-        })),
-        ClientUpdate::AgentThoughtText(text) => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text,
-            interactive,
-            thought: true,
-        })),
-        ClientUpdate::ToolCallText { text } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text: format!("{text}\n\n"),
-            interactive,
-            thought: true,
-        })),
+        ClientUpdate::AgentMessageText { text, boundary } => {
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text,
+                interactive,
+                thought: false,
+                boundary,
+            }))
+        }
+        ClientUpdate::AgentThoughtText { text, boundary } => {
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text,
+                interactive,
+                thought: true,
+                boundary,
+            }))
+        }
+        ClientUpdate::ToolCallText { text, boundary } => {
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text: format!("{text}\n\n"),
+                interactive,
+                thought: true,
+                boundary,
+            }))
+        }
         ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
             AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
         }),
@@ -152,8 +193,14 @@ mod tests {
 
     #[test]
     fn message_chunks_become_text_events() {
-        let event = translate_update(ClientUpdate::AgentMessageText("hello".to_string()), true)
-            .expect("text event");
+        let event = translate_update(
+            ClientUpdate::AgentMessageText {
+                text: "hello".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            },
+            true,
+        )
+        .expect("text event");
 
         assert_eq!(
             event,
@@ -161,13 +208,42 @@ mod tests {
                 text: "hello".to_string(),
                 interactive: true,
                 thought: false,
+                boundary: AcpTextBoundary::StartNewMessage,
+            })
+        );
+    }
+
+    #[test]
+    fn message_chunks_preserve_continue_boundary() {
+        let event = translate_update(
+            ClientUpdate::AgentMessageText {
+                text: " more".to_string(),
+                boundary: AcpTextBoundary::Continue,
+            },
+            true,
+        )
+        .expect("text event");
+
+        assert_eq!(
+            event,
+            AcpRuntimeEvent::Text(AcpTextEvent {
+                text: " more".to_string(),
+                interactive: true,
+                thought: false,
+                boundary: AcpTextBoundary::Continue,
             })
         );
     }
 
     #[test]
     fn thought_chunks_are_ignored() {
-        let event = translate_update(ClientUpdate::AgentThoughtText("internal".to_string()), true);
+        let event = translate_update(
+            ClientUpdate::AgentThoughtText {
+                text: "internal".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            },
+            true,
+        );
 
         assert_eq!(
             event,
@@ -175,6 +251,7 @@ mod tests {
                 text: "internal".to_string(),
                 interactive: true,
                 thought: true,
+                boundary: AcpTextBoundary::StartNewMessage,
             }))
         );
     }
@@ -184,6 +261,7 @@ mod tests {
         let event = translate_update(
             ClientUpdate::ToolCallText {
                 text: "tool: read(Cargo.toml)".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
             },
             false,
         );
@@ -194,6 +272,7 @@ mod tests {
                 text: "tool: read(Cargo.toml)\n\n".to_string(),
                 interactive: false,
                 thought: true,
+                boundary: AcpTextBoundary::StartNewMessage,
             }))
         );
     }
@@ -203,6 +282,7 @@ mod tests {
         let event = translate_update(
             ClientUpdate::ToolCallText {
                 text: "result: completed, exit 0, output: ok".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
             },
             true,
         );
@@ -213,6 +293,7 @@ mod tests {
                 text: "result: completed, exit 0, output: ok\n\n".to_string(),
                 interactive: true,
                 thought: true,
+                boundary: AcpTextBoundary::StartNewMessage,
             }))
         );
     }

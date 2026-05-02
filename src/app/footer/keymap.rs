@@ -170,6 +170,23 @@ fn guard_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     )
 }
 
+fn quit_running_agent_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![KeyBinding {
+            glyph: "Enter",
+            action: "confirm",
+            is_primary: true,
+            capability: None,
+        }],
+        vec![KeyBinding {
+            glyph: "Esc",
+            action: "cancel",
+            is_primary: false,
+            capability: None,
+        }],
+    )
+}
+
 /// Input mode bindings.
 fn input_bindings() -> Vec<KeyBinding> {
     vec![
@@ -428,6 +445,7 @@ pub fn keymap(
             ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => pause_bindings(),
             ModalKind::SkipToImpl => skip_to_impl_bindings(),
             ModalKind::GitGuard => guard_bindings(),
+            ModalKind::QuitRunningAgent => quit_running_agent_bindings(),
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
         };
         return render_keymap_line(&[&actions, &system], &caps_fn, width);

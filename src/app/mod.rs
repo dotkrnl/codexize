@@ -111,9 +111,77 @@ pub(super) enum StageId {
 pub(super) enum ModalKind {
     SkipToImpl,
     GitGuard,
+    QuitRunningAgent,
     SpecReviewPaused,
     PlanReviewPaused,
     StageError(StageId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RetryLaunch {
+    Brainstorm,
+    SpecReview,
+    Planning,
+    PlanReview,
+    Sharding,
+    Recovery,
+    RecoveryPlanReview,
+    RecoverySharding,
+    Coder,
+    Reviewer,
+}
+
+impl RetryLaunch {
+    fn for_run(run: &crate::state::RunRecord) -> Option<Self> {
+        if run.window_name.contains("[Recovery Plan Review]") {
+            return Some(Self::RecoveryPlanReview);
+        }
+        if run.window_name.contains("[Recovery Sharding]") {
+            return Some(Self::RecoverySharding);
+        }
+        match run.stage.as_str() {
+            "brainstorm" => Some(Self::Brainstorm),
+            "spec-review" => Some(Self::SpecReview),
+            "planning" => Some(Self::Planning),
+            "plan-review" => Some(Self::PlanReview),
+            "sharding" => Some(Self::Sharding),
+            "recovery" => Some(Self::Recovery),
+            "coder" => Some(Self::Coder),
+            "reviewer" => Some(Self::Reviewer),
+            _ => None,
+        }
+    }
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminationIntent {
+    StopOnly,
+    StopAndRetry(RetryLaunch),
+    StopAndQuit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingTermination {
+    run_id: u64,
+    intent: TerminationIntent,
+}
+
+impl PendingTermination {
+    #[cfg(test)]
+    fn new_stop_only(run_id: u64) -> Self {
+        Self {
+            run_id,
+            intent: TerminationIntent::StopOnly,
+        }
+    }
+
+    fn marker(&self) -> &'static str {
+        match self.intent {
+            TerminationIntent::StopOnly | TerminationIntent::StopAndQuit => "agent_stopped_by_user",
+            TerminationIntent::StopAndRetry(_) => "agent_retry_requested_by_user",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +261,9 @@ pub struct App {
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,
     pending_drain_deadline: Option<Instant>,
+    pending_termination: Option<PendingTermination>,
+    pending_quit_confirmation_run_id: Option<u64>,
+    pending_app_exit: bool,
     current_run_id: Option<u64>,
     failed_models: HashMap<RetryKey, FailedModelSet>,
     pending_yolo_toggle_gate: Option<&'static str>,

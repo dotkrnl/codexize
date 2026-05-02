@@ -452,6 +452,26 @@ impl App {
                 width,
             ),
             ModalKind::GitGuard => guard_content(self.state.pending_guard_decision.as_ref()),
+            ModalKind::QuitRunningAgent => {
+                let run_name = self
+                    .pending_quit_confirmation_run_id
+                    .and_then(|run_id| {
+                        self.state
+                            .agent_runs
+                            .iter()
+                            .find(|run| run.id == run_id)
+                            .map(|run| run.window_name.clone())
+                    })
+                    .unwrap_or_else(|| "the running agent".to_string());
+                vec![
+                    Line::from(Span::styled(run_name, Style::default().fg(Color::White))),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "The agent will be stopped without retry.".to_string(),
+                        Style::default().fg(Color::White),
+                    )),
+                ]
+            }
             ModalKind::SpecReviewPaused => vec![Line::from(Span::styled(
                 "Spec review complete".to_string(),
                 Style::default().fg(Color::White),

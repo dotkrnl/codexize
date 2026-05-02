@@ -393,6 +393,31 @@ fn test_validation_attempts_field_persists() {
 
 #[test]
 fn test_for_stage_maps_known_stages() {
+    // The accepted strings must match the values that `start_run_tracking`
+    // writes into `RunRecord.stage` — not the `StageIO::stage` identifiers
+    // (e.g., `start_run_tracking` uses "spec-review" while `SPEC_REVIEWER_IO`
+    // uses "spec-reviewer"). All non-recovery, non-coder/reviewer block sites
+    // depend on this mapping to persist the correct provenance.
+    assert_eq!(
+        BlockOrigin::for_stage("brainstorm"),
+        Some(BlockOrigin::Brainstorm)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("spec-review"),
+        Some(BlockOrigin::SpecReview)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("planning"),
+        Some(BlockOrigin::Planning)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("plan-review"),
+        Some(BlockOrigin::PlanReview)
+    );
+    assert_eq!(
+        BlockOrigin::for_stage("sharding"),
+        Some(BlockOrigin::Sharding)
+    );
     assert_eq!(
         BlockOrigin::for_stage("coder"),
         Some(BlockOrigin::Implementation)
@@ -406,10 +431,42 @@ fn test_for_stage_maps_known_stages() {
         Some(BlockOrigin::BuilderRecovery)
     );
     assert_eq!(
-        BlockOrigin::for_stage("brainstorm"),
-        Some(BlockOrigin::Brainstorm)
+        BlockOrigin::for_stage("final-validation"),
+        Some(BlockOrigin::FinalValidation)
     );
+    // Older `StageIO::stage` strings are intentionally not accepted; they
+    // never appear in `RunRecord.stage`.
+    assert_eq!(BlockOrigin::for_stage("spec-reviewer"), None);
+    assert_eq!(BlockOrigin::for_stage("planner"), None);
+    assert_eq!(BlockOrigin::for_stage("plan-reviewer"), None);
+    assert_eq!(BlockOrigin::for_stage("sharder"), None);
     assert_eq!(BlockOrigin::for_stage("unknown-stage"), None);
+}
+
+/// Verify every stage name that `start_run_tracking` actually writes into
+/// `RunRecord.stage` round-trips through `for_stage`. If a new stage gets
+/// added without updating the mapper, the retry-exhaustion block sites in
+/// `finalization.rs` will silently fall back to the default `Implementation`
+/// origin and persist the wrong provenance.
+#[test]
+fn test_for_stage_covers_all_run_record_stages() {
+    let stages_used_in_start_run_tracking = [
+        "brainstorm",
+        "spec-review",
+        "planning",
+        "plan-review",
+        "sharding",
+        "coder",
+        "reviewer",
+        "recovery",
+    ];
+    for stage in stages_used_in_start_run_tracking {
+        assert!(
+            BlockOrigin::for_stage(stage).is_some(),
+            "for_stage({stage:?}) returned None — the retry-exhaustion block \
+             site would fall back to Implementation and persist the wrong origin",
+        );
+    }
 }
 
 #[test]

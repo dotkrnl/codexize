@@ -8,9 +8,9 @@
 //! per-vendor wording map, not hand-authored package bodies.
 //!
 //! The renderer copies the upstream package tree into the target directory
-//! and rewrites `SKILL.md` to start with the vendor preamble followed by the
-//! upstream body verbatim. Other files (e.g. `references/`) are copied as-is
-//! so the upstream workflow keeps working without per-vendor patching.
+//! and rewrites `SKILL.md` to include the vendor preamble after any upstream
+//! YAML frontmatter. Other files (e.g. `references/`) are copied as-is so
+//! the upstream workflow keeps working without per-vendor patching.
 
 use super::metadata::vendor_key;
 use crate::selection::VendorKind;
@@ -52,7 +52,7 @@ fn vendor_invocation_hint(vendor: VendorKind) -> &'static str {
 }
 
 /// Build the adapter preamble for `vendor`. Always ends with a blank line so
-/// concatenating it onto the upstream body produces well-formed Markdown.
+/// inserting it into the upstream body produces well-formed Markdown.
 pub fn vendor_preamble(vendor: VendorKind) -> String {
     let name = vendor_display_name(vendor);
     let key = vendor_key(vendor);
@@ -82,7 +82,8 @@ pub fn vendor_preamble(vendor: VendorKind) -> String {
 ///   `out_dir` (creating parents as needed). Existing contents under
 ///   `out_dir` are left untouched — callers stage into a fresh temp dir.
 /// * Reads `SKILL.md` from the upstream package and writes
-///   `<out_dir>/SKILL.md` as `<vendor preamble><upstream body>`.
+///   `<out_dir>/SKILL.md` with the vendor preamble inserted after upstream
+///   YAML frontmatter when present, preserving loader-required first bytes.
 ///
 /// Errors when the upstream `SKILL.md` is missing — the installer treats
 /// that as a hard abort because the spec requires upstream
@@ -118,12 +119,31 @@ pub fn render_package(upstream_pkg_dir: &Path, vendor: VendorKind, out_dir: &Pat
         )
     })?;
 
-    let wrapped = format!("{}{}", vendor_preamble(vendor), upstream_body);
+    let wrapped = wrap_skill_body(&upstream_body, vendor);
     let skill_out = out_dir.join(SKILL_FILE);
     std::fs::write(&skill_out, wrapped)
         .with_context(|| format!("failed to write adapter {}", skill_out.display()))?;
 
     Ok(())
+}
+
+fn wrap_skill_body(upstream_body: &str, vendor: VendorKind) -> String {
+    let preamble = vendor_preamble(vendor);
+    if let Some(frontmatter_end) = frontmatter_end(upstream_body) {
+        let (frontmatter, body) = upstream_body.split_at(frontmatter_end);
+        format!("{frontmatter}\n{preamble}{body}")
+    } else {
+        format!("{preamble}{upstream_body}")
+    }
+}
+
+fn frontmatter_end(body: &str) -> Option<usize> {
+    if !body.starts_with("---\n") {
+        return None;
+    }
+    let rest = &body[4..];
+    rest.find("\n---\n")
+        .map(|closing_start| 4 + closing_start + "\n---\n".len())
 }
 
 /// Recursive copy that follows the upstream tree shape. Symlinks are
@@ -212,6 +232,29 @@ mod tests {
             .expect("preamble separator missing");
         // Preamble appears before the upstream body.
         assert!(split < skill.find("upstream body line").unwrap());
+    }
+
+    #[test]
+    fn render_package_preserves_frontmatter_as_first_bytes() {
+        let upstream = make_upstream(
+            "---\nname: brainstorming\ndescription: upstream skill\n---\n\n# Brainstorming\n",
+        );
+        let out_root = TempDir::new().unwrap();
+        let out = out_root.path().join("staged");
+        render_package(upstream.path(), VendorKind::Codex, &out).unwrap();
+        let skill = std::fs::read_to_string(out.join(SKILL_FILE)).unwrap();
+
+        assert!(
+            skill.starts_with("---\nname: brainstorming\ndescription: upstream skill\n---\n\n"),
+            "{skill}"
+        );
+        assert!(skill.contains("<!-- codexize: brainstorming adapter for codex -->"));
+        assert!(
+            skill.find("---\n\n").unwrap()
+                < skill
+                    .find("<!-- codexize: brainstorming adapter for codex -->")
+                    .unwrap()
+        );
     }
 
     #[test]

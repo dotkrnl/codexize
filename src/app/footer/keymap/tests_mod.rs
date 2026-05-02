@@ -143,7 +143,9 @@ fn quit_running_agent_modal_exact_string() {
     );
     let text = line_text(&line);
     assert!(text.contains("Enter confirm"));
+    assert!(text.contains("y confirm"));
     assert!(text.contains("Esc cancel"));
+    assert!(text.contains("n cancel"));
 }
 
 // Input mode

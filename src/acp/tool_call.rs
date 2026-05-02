@@ -1,17 +1,24 @@
 //! Pure parsers and formatters for ACP `tool_call` / `tool_call_update`
-//! payloads. Phase 1 scaffolding: stateless helpers used by the transcript
-//! pipeline once wired in. Items are unused outside the module's own tests
-//! until that wiring lands.
+//! payloads, plus the per-session merge map that turns those wire messages
+//! into the two-block invocation/result transcript contract.
 #![allow(dead_code)]
 
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    path::{Path, PathBuf},
+};
 
 pub(super) const SNIPPET_MAX_CHARS: usize = 160;
 pub(super) const INVOCATION_LINE_MAX: usize = 200;
 pub(super) const RESULT_LINE_MAX: usize = 200;
 pub(super) const INVOCATION_PREFIX: &str = "tool: ";
 pub(super) const RESULT_PREFIX: &str = "result: ";
+
+/// Hard ceiling on tracked tool-call entries per session. Defends against
+/// pathological agents that emit an unbounded stream of `tool_call`s without
+/// terminal updates.
+pub(super) const TOOL_CALL_MAP_CAP: usize = 256;
 
 const TRUNCATE_SUFFIX: &str = "...";
 
@@ -119,6 +126,69 @@ impl ToolCallDisplayState {
         if !payload.content.is_empty() {
             self.content = payload.content.clone();
         }
+    }
+}
+
+/// Per-session map of `toolCallId` → merged display state, with FIFO-bounded
+/// capacity and overwrite-on-id-reuse semantics per spec §State Lifecycle.
+#[derive(Debug, Default)]
+pub(super) struct ToolCallMap {
+    entries: BTreeMap<String, ToolCallDisplayState>,
+    insertion_order: VecDeque<String>,
+}
+
+impl ToolCallMap {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(super) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
+        self.entries.get(id)
+    }
+
+    /// Insert or replace state for `id`. A reused id is treated as a fresh
+    /// invocation: the previous entry is dropped and the new one takes the
+    /// most-recent FIFO slot. When the map is at the 256-entry cap, the
+    /// oldest entry is dropped first.
+    pub(super) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
+        if self.entries.remove(&id).is_some() {
+            self.insertion_order.retain(|existing| existing != &id);
+        }
+        while self.insertion_order.len() >= TOOL_CALL_MAP_CAP {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&oldest);
+        }
+        self.insertion_order.push_back(id.clone());
+        self.entries.insert(id, state);
+    }
+
+    /// Merge non-empty fields from `payload` into the existing entry for
+    /// `id`. Returns the merged state, or `None` when no entry exists.
+    pub(super) fn merge(
+        &mut self,
+        id: &str,
+        payload: &ToolCallPayload,
+    ) -> Option<&ToolCallDisplayState> {
+        let entry = self.entries.get_mut(id)?;
+        entry.merge(payload);
+        Some(entry)
+    }
+
+    pub(super) fn evict(&mut self, id: &str) {
+        if self.entries.remove(id).is_some() {
+            self.insertion_order.retain(|existing| existing != id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn contains(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
     }
 }
 
@@ -724,6 +794,92 @@ mod tests {
         assert_eq!(state.title.as_deref(), Some("first"));
         assert_eq!(state.kind.as_deref(), Some("read"));
         assert_eq!(state.status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn tool_call_map_evicts_oldest_when_cap_exceeded() {
+        let mut map = ToolCallMap::new();
+        for i in 0..TOOL_CALL_MAP_CAP {
+            map.insert(format!("id-{i}"), ToolCallDisplayState::default());
+        }
+        assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
+        assert!(map.contains("id-0"));
+
+        map.insert("id-overflow".to_string(), ToolCallDisplayState::default());
+        assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
+        assert!(!map.contains("id-0"), "oldest entry should be evicted");
+        assert!(map.contains("id-overflow"));
+        assert!(map.contains(&format!("id-{}", TOOL_CALL_MAP_CAP - 1)));
+    }
+
+    #[test]
+    fn tool_call_map_overwrite_on_id_reuse_replaces_state_and_refreshes_position() {
+        let mut map = ToolCallMap::new();
+        let first = ToolCallDisplayState {
+            title: Some("first".to_string()),
+            ..ToolCallDisplayState::default()
+        };
+        map.insert("id-a".to_string(), first);
+        map.insert("id-b".to_string(), ToolCallDisplayState::default());
+
+        let replacement = ToolCallDisplayState {
+            title: Some("second".to_string()),
+            ..ToolCallDisplayState::default()
+        };
+        map.insert("id-a".to_string(), replacement);
+
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("id-a").and_then(|s| s.title.clone()).as_deref(), Some("second"));
+
+        // Reused id moves to the most-recent FIFO slot. Filling to the cap
+        // and inserting one more should evict id-b before id-a.
+        for i in 0..(TOOL_CALL_MAP_CAP - 2) {
+            map.insert(format!("id-fill-{i}"), ToolCallDisplayState::default());
+        }
+        assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
+        map.insert("id-overflow".to_string(), ToolCallDisplayState::default());
+        assert!(!map.contains("id-b"), "id-b should be evicted before id-a");
+        assert!(map.contains("id-a"));
+    }
+
+    #[test]
+    fn tool_call_map_merge_returns_none_for_missing_entry() {
+        let mut map = ToolCallMap::new();
+        let payload = ToolCallPayload::from_value(&json!({ "status": "completed" }));
+        assert!(map.merge("nope", &payload).is_none());
+    }
+
+    #[test]
+    fn tool_call_map_merge_applies_to_existing_entry() {
+        let mut map = ToolCallMap::new();
+        let initial = state_from_payload(&json!({
+            "kind": "read",
+            "title": "Read file",
+        }));
+        map.insert("id-x".to_string(), initial);
+
+        let update = ToolCallPayload::from_value(&json!({
+            "status": "completed",
+            "rawOutput": { "exit_code": 0, "stdout": "ok" }
+        }));
+        let merged = map.merge("id-x", &update).expect("entry exists");
+        assert_eq!(merged.kind.as_deref(), Some("read"));
+        assert_eq!(merged.status.as_deref(), Some("completed"));
+        assert_eq!(merged.title.as_deref(), Some("Read file"));
+    }
+
+    #[test]
+    fn tool_call_map_evict_removes_entry_and_clears_order() {
+        let mut map = ToolCallMap::new();
+        map.insert("id-x".to_string(), ToolCallDisplayState::default());
+        map.insert("id-y".to_string(), ToolCallDisplayState::default());
+        map.evict("id-x");
+        assert!(!map.contains("id-x"));
+        assert_eq!(map.len(), 1);
+
+        // Re-inserting the same id should not collide with stale order entries.
+        map.insert("id-x".to_string(), ToolCallDisplayState::default());
+        assert_eq!(map.len(), 2);
     }
 
     #[test]

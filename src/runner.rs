@@ -2,7 +2,7 @@ use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState}
 use crate::{
     acp::{
         AcpCompletionEvent, AcpConfig, AcpConnector, AcpLaunchRequest, AcpRuntimeEvent,
-        AcpTextAccumulator, PromptPayload, SubprocessConnector, translate_update,
+        AcpTextAccumulator, AcpTextBoundary, PromptPayload, SubprocessConnector, translate_update,
     },
     adapters::AgentRun,
     selection::VendorKind,
@@ -417,7 +417,25 @@ impl AcpTextStream {
         }
     }
 
+    #[cfg(test)]
     fn push_text(&mut self, launch: &ManagedAcpLaunch, chunk: &str, kind: MessageKind) {
+        self.push_text_boundary(launch, chunk, kind, AcpTextBoundary::Continue);
+    }
+
+    fn push_text_boundary(
+        &mut self,
+        launch: &ManagedAcpLaunch,
+        chunk: &str,
+        kind: MessageKind,
+        boundary: AcpTextBoundary,
+    ) {
+        if boundary == AcpTextBoundary::StartNewMessage {
+            // ACP only emits Continue when stable identity proves continuity;
+            // otherwise this intentionally over-splits rather than rewriting
+            // an unrelated previous live message.
+            self.finish_turn(launch, kind);
+            self.live_ts = None;
+        }
         if let Some(text) = self.accumulator.push(chunk) {
             self.persist_ready(launch, text, kind);
         }
@@ -567,9 +585,19 @@ fn run_managed_acp_launch(
             Some(AcpRuntimeEvent::Text(text_event)) => {
                 let text = text_event.text;
                 if text_event.thought {
-                    thought_text.push_text(&launch, &text, MessageKind::AgentThought);
+                    thought_text.push_text_boundary(
+                        &launch,
+                        &text,
+                        MessageKind::AgentThought,
+                        text_event.boundary,
+                    );
                 } else {
-                    agent_text.push_text(&launch, &text, MessageKind::AgentText);
+                    agent_text.push_text_boundary(
+                        &launch,
+                        &text,
+                        MessageKind::AgentText,
+                        text_event.boundary,
+                    );
                 }
                 thread::sleep(ACP_POLL_INTERVAL)
             }

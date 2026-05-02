@@ -803,6 +803,20 @@ fn dispatch_update(
     }
 }
 
+#[cfg(test)]
+pub fn client_updates_from_session_updates_for_test(
+    values: impl IntoIterator<Item = Value>,
+    cwd: &Path,
+) -> Vec<ClientUpdate> {
+    let mut map = ToolCallMap::new();
+    let mut boundary_state = AcpBoundaryState::new();
+    let mut out = VecDeque::new();
+    for value in values {
+        dispatch_update(&value, cwd, &mut map, &mut boundary_state, &mut out);
+    }
+    out.into_iter().collect()
+}
+
 /// Classify a single text chunk relative to the per-stream identity we have
 /// already observed.
 ///

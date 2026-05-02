@@ -1484,7 +1484,7 @@ impl App {
                 // via existing transitions, but the default rewind target is the
                 // matching review round to preserve per-task review history.
                 if let Phase::FinalValidation(r) = self.state.current_phase {
-                    cancel_run_label(&format!("[FinalValidation r{r}]"));
+                    cancel_run_label("[FinalValidation]");
                     let target = if r >= 1 {
                         Phase::ReviewRound(r)
                     } else {
@@ -1579,6 +1579,7 @@ impl App {
             Phase::BuilderRecovery(_) => self.launch_recovery(),
             Phase::BuilderRecoveryPlanReview(_) => self.launch_recovery_plan_review(),
             Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
+            Phase::FinalValidation(_) => self.launch_final_validation(),
             _ => {}
         }
     }

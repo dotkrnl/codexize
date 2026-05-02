@@ -2439,7 +2439,13 @@ fn non_yolo_prompts_keep_interactive_operator_cues() {
 
         let planning = planning_prompt(&spec_path, &[], &plan_path, &live_summary, false);
         assert!(!planning.contains("You have the operator's full trust."));
-        assert!(planning.contains("ASK the operator (this is interactive)."));
+        assert!(planning.contains("Escalation rules — ask the operator when:"));
+        assert!(
+            planning.contains("The feedback affects end-user-facing design (UI/UX, CLI behavior,")
+        );
+        assert!(planning.contains("The feedback is an internal design decision"));
+        assert!(planning.contains("Cosmetic / trivial (typos, naming nits, formatting,"));
+        assert!(!planning.contains("If a real trade-off exceeds your\nconfidence, ASK the operator"));
         assert!(
             planning.contains(
                 "Stage completion — ONLY once all pending trade-off decisions are resolved"

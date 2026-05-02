@@ -461,7 +461,7 @@ fn planning_launch_failure_surfaces_status_line_and_agent_error() {
 }
 
 #[test]
-fn watcher_setup_allows_missing_live_summary_file_under_existing_artifacts_dir() {
+fn watcher_setup_uses_fast_synthetic_watcher_in_tests() {
     with_temp_root(|| {
         let session_id = "watcher-missing-live-summary";
         let state = SessionState::new(session_id.to_string());
@@ -472,7 +472,7 @@ fn watcher_setup_allows_missing_live_summary_file_under_existing_artifacts_dir()
 
         app.setup_watcher().expect("watcher setup should succeed");
 
-        assert!(app.live_summary_watcher.is_some());
+        assert!(app.live_summary_watcher.is_none());
         assert!(app.live_summary_change_rx.is_some());
         assert!(app.status_line.borrow().render().is_none());
         assert!(

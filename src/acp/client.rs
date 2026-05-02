@@ -185,38 +185,65 @@ struct SubprocessSession {
     pending_updates: VecDeque<ClientUpdate>,
 }
 
-/// Per-stream identity tracking used to classify text chunks as `Continue`
-/// vs. `StartNewMessage`.
+/// Per-stream identity + restart-flag tracking used to classify text chunks
+/// as `Continue` vs. `StartNewMessage`.
 ///
-/// We retain the most recent stable ACP message id we have observed for each
-/// text-bearing stream. A new chunk is `Continue` only when its payload
-/// carries the same id; missing identity, a different id, or a tool-call
-/// interleave forces `StartNewMessage`. The conservative no-identity fallback
-/// is documented at the call site (see `boundary_for_text_chunk`).
-#[derive(Debug, Clone, Default)]
+/// `last_identity` retains the most recent stable ACP message id observed for
+/// the stream, when the payload exposes one. `restart_pending` is set at
+/// every explicit boundary (session start, prompt-turn reset, tool-call
+/// interleave) and forces the next chunk on the stream to be classified as
+/// `StartNewMessage`. Once a chunk is classified, the flag is cleared, so
+/// subsequent chunks default to `Continue` until the next explicit boundary.
+#[derive(Debug, Clone)]
+struct StreamIdentity {
+    last_identity: Option<String>,
+    restart_pending: bool,
+}
+
+impl StreamIdentity {
+    fn fresh() -> Self {
+        Self {
+            last_identity: None,
+            restart_pending: true,
+        }
+    }
+}
+
+/// Per-stream boundary classification state.
+///
+/// Real ACP servers emit `agent_message_chunk` events without any stable
+/// message id, so the classifier defaults mid-stream chunks to `Continue` and
+/// only emits `StartNewMessage` at explicit boundaries: the very first chunk
+/// after session start, after a prompt-turn reset, or after a tool-call
+/// interleave. When a payload does carry a stable id, the classifier honors
+/// it: matching ids stay `Continue`, differing ids start a new message.
+#[derive(Debug, Clone)]
 struct AcpBoundaryState {
-    agent_message_id: Option<String>,
-    agent_thought_id: Option<String>,
+    agent_message: StreamIdentity,
+    agent_thought: StreamIdentity,
 }
 
 impl AcpBoundaryState {
     fn new() -> Self {
-        Self::default()
+        Self {
+            agent_message: StreamIdentity::fresh(),
+            agent_thought: StreamIdentity::fresh(),
+        }
     }
 
-    /// Reset both stream identities at a prompt-turn boundary.
+    /// Reset both streams at a prompt-turn boundary.
     ///
     /// ACP servers may legally reuse message ids across turns, so the next
     /// turn must always restart at `StartNewMessage` even when the first
     /// chunk repeats an earlier id.
     fn reset_for_prompt_turn(&mut self) {
-        self.agent_message_id = None;
-        self.agent_thought_id = None;
+        self.agent_message = StreamIdentity::fresh();
+        self.agent_thought = StreamIdentity::fresh();
     }
 
-    /// Reset both stream identities so the next agent or thought chunk is
-    /// classified as `StartNewMessage`. Called whenever a tool-call
-    /// invocation/result interleaves the visible stream.
+    /// Reset both streams so the next agent or thought chunk is classified
+    /// as `StartNewMessage`. Called whenever a tool-call invocation/result
+    /// interleaves the visible stream.
     fn reset_for_tool_call(&mut self) {
         self.reset_for_prompt_turn();
     }
@@ -728,11 +755,10 @@ fn is_failed_stop_reason(stop_reason: &str) -> bool {
 /// Each text-bearing update carries an `AcpTextBoundary`. The classification
 /// rule is:
 ///
-/// * `Continue` only when the payload exposes a stable ACP message identity
-///   that matches the most recent identity we have seen for that stream and
-///   no tool-call interleave has occurred in between.
-/// * `StartNewMessage` otherwise — including the documented conservative
-///   no-identity fallback (see `boundary_for_text_chunk`).
+/// * `StartNewMessage` at every explicit boundary — session start, prompt-turn
+///   reset, or tool-call interleave — and whenever a stable identity changes.
+/// * `Continue` otherwise: mid-stream no-identity chunks default to continuing
+///   the live block, and matching identities continue as well.
 fn dispatch_update(
     value: &Value,
     cwd: &Path,
@@ -760,7 +786,7 @@ fn dispatch_update(
                 .to_string();
             let identity = extract_message_identity(value);
             let boundary =
-                boundary_for_text_chunk(&mut boundary_state.agent_message_id, identity.as_deref());
+                boundary_for_text_chunk(&mut boundary_state.agent_message, identity.as_deref());
             out.push_back(ClientUpdate::AgentMessageText { text, boundary });
         }
         "agent_thought_chunk" => {
@@ -771,7 +797,7 @@ fn dispatch_update(
                 .to_string();
             let identity = extract_message_identity(value);
             let boundary =
-                boundary_for_text_chunk(&mut boundary_state.agent_thought_id, identity.as_deref());
+                boundary_for_text_chunk(&mut boundary_state.agent_thought, identity.as_deref());
             out.push_back(ClientUpdate::AgentThoughtText { text, boundary });
         }
         "session_info_update" => {
@@ -817,38 +843,40 @@ pub fn client_updates_from_session_updates_for_test(
     out.into_iter().collect()
 }
 
-/// Classify a single text chunk relative to the per-stream identity we have
+/// Classify a single text chunk relative to the per-stream state we have
 /// already observed.
 ///
-/// The conservative no-identity fallback is `StartNewMessage`: when the ACP
-/// payload exposes no stable message id, we cannot prove that the chunk
-/// continues the live block, so we prefer to over-split visible streams into
-/// more, smaller persisted messages instead of silently merging separate
-/// logical outputs (see spec §Design — the documented over-splitting
-/// trade-off). When a payload does provide a stable id, we emit `Continue`
-/// only if it matches the most recent id we accepted as `Continue` or
-/// `StartNewMessage` for that stream.
-fn boundary_for_text_chunk(
-    last_identity: &mut Option<String>,
-    incoming: Option<&str>,
-) -> AcpTextBoundary {
-    match incoming {
-        Some(id) => {
-            if last_identity.as_deref() == Some(id) {
-                AcpTextBoundary::Continue
-            } else {
-                *last_identity = Some(id.to_string());
+/// `restart_pending` is the only source of `StartNewMessage` for no-identity
+/// chunks: it is set at session start and at every explicit boundary
+/// (prompt-turn reset, tool-call interleave), and cleared once a chunk has
+/// been classified. Real ACP servers do not surface a stable message id on
+/// `agent_message_chunk` events, so a no-identity mid-stream chunk defaults
+/// to `Continue` rather than over-splitting one streamed response into one
+/// persisted message per chunk.
+///
+/// When a payload does carry a stable id, the classifier honors it: a
+/// matching id continues the live block; a differing id starts a new one.
+/// The `restart_pending` flag still wins over a matching id, so the first
+/// chunk after a tool-call or prompt-turn reset is `StartNewMessage` even if
+/// it carries the previous turn's id.
+fn boundary_for_text_chunk(state: &mut StreamIdentity, incoming: Option<&str>) -> AcpTextBoundary {
+    let boundary = if state.restart_pending {
+        if let Some(id) = incoming {
+            state.last_identity = Some(id.to_string());
+        }
+        AcpTextBoundary::StartNewMessage
+    } else {
+        match (incoming, state.last_identity.as_deref()) {
+            (Some(id), Some(last)) if last == id => AcpTextBoundary::Continue,
+            (Some(id), _) => {
+                state.last_identity = Some(id.to_string());
                 AcpTextBoundary::StartNewMessage
             }
+            (None, _) => AcpTextBoundary::Continue,
         }
-        None => {
-            // Conservative fallback: with no identity we cannot prove
-            // continuation. Drop any prior identity so a later identified
-            // chunk does not accidentally inherit it as a continuation.
-            *last_identity = None;
-            AcpTextBoundary::StartNewMessage
-        }
-    }
+    };
+    state.restart_pending = false;
+    boundary
 }
 
 /// Best-effort lookup of a stable ACP message identity on a `session/update`
@@ -1524,12 +1552,15 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_emits_start_new_message_for_no_identity_chunk_pairs() {
-        // Conservative fallback: two adjacent agent_message_chunks with no
-        // stable identity must each be tagged StartNewMessage so the runner
-        // never merges them across logical-message boundaries. The
-        // documented cost is over-splitting; spec §Design accepts that
-        // trade-off when continuity cannot be proven.
+    fn dispatch_continues_no_identity_chunks_until_explicit_boundary() {
+        // Real ACP servers emit `agent_message_chunk` events without any
+        // stable message id; treating each chunk as a fresh logical message
+        // would over-split a single streamed response into one persisted
+        // block per chunk. The first chunk on a fresh stream is
+        // StartNewMessage (initial restart_pending), but subsequent
+        // no-identity chunks default to Continue. Explicit boundaries —
+        // tool-call interleave or prompt-turn reset — are still honored by
+        // the dedicated tests in this module.
         let mut map = ToolCallMap::new();
         let mut state = AcpBoundaryState::new();
         let first = drain_with_state(
@@ -1561,6 +1592,89 @@ mod tests {
             second,
             vec![ClientUpdate::AgentMessageText {
                 text: "second".to_string(),
+                boundary: AcpTextBoundary::Continue,
+            }]
+        );
+    }
+
+    #[test]
+    fn dispatch_restarts_no_identity_chunk_after_tool_call_interleave() {
+        // Without identity, mid-stream chunks default to Continue, but a
+        // tool-call interleave is still a hard boundary: the first chunk
+        // after a tool_call (or tool_call_update) must reset to
+        // StartNewMessage so the runner finalizes the pre-tool live buffer
+        // before appending post-tool free-form text.
+        let mut map = ToolCallMap::new();
+        let mut state = AcpBoundaryState::new();
+        let _ = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "text": "before" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        let _ = drain_with_state(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_x",
+                "kind": "execute",
+                "rawInput": { "command": ["echo", "x"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        let after = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "text": "after" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        assert_eq!(
+            after,
+            vec![ClientUpdate::AgentMessageText {
+                text: "after".to_string(),
+                boundary: AcpTextBoundary::StartNewMessage,
+            }]
+        );
+    }
+
+    #[test]
+    fn dispatch_restarts_no_identity_chunk_across_prompt_turns() {
+        // Prompt-turn resets must restart no-identity continuity too:
+        // there is no live block left to continue from the prior turn, so
+        // the first chunk of a new turn is StartNewMessage even when no
+        // tool-call interleaved.
+        let mut map = ToolCallMap::new();
+        let mut state = AcpBoundaryState::new();
+        let _ = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "text": "turn one" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        state.reset_for_prompt_turn();
+        let next_turn = drain_with_state(
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": { "text": "turn two" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+            &mut state,
+        );
+        assert_eq!(
+            next_turn,
+            vec![ClientUpdate::AgentMessageText {
+                text: "turn two".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
             }]
         );

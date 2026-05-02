@@ -63,8 +63,8 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             Some("killed(15) [agent exited 143]".to_string())
         );
         app.state
-            .log_event("agent_killed_by_user: run_id=9")
-            .expect("log user kill marker");
+            .log_event("agent_stopped_by_user: run_id=9")
+            .expect("log user stop marker");
         assert_eq!(
             app.normalized_failure_reason(&run)
                 .expect("operator-killed signal reason"),
@@ -198,6 +198,38 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
                 .expect("error text")
                 .starts_with("artifact_invalid: ")
         );
+    });
+}
+
+#[test]
+fn operator_stopped_run_finalizes_without_agent_error() {
+    with_temp_root(|| {
+        let session_id = "operator-stop-no-modal";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let run = make_brainstorm_run(7);
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.pending_termination = Some(PendingTermination::new_stop_only(run.id));
+
+        app.state
+            .log_event(format!("agent_stopped_by_user: run_id={}", run.id))
+            .expect("log stop marker");
+        write_finish_stamp_for_run(&app, &run, 143, "");
+
+        app.poll_agent_run();
+
+        let finalized = app
+            .state
+            .agent_runs
+            .iter()
+            .find(|candidate| candidate.id == run.id)
+            .expect("finalized run");
+        assert_eq!(finalized.status, RunStatus::Failed);
+        assert_eq!(finalized.error.as_deref(), Some("Operator Killed"));
+        assert!(app.state.agent_error.is_none());
+        assert_eq!(app.active_modal(), None);
     });
 }
 

@@ -1916,7 +1916,7 @@ fn pending_guard_modal_ctrl_c_stops_running_agent_without_quitting() {
         let events_path = session_state::session_dir(&app.state.session_id).join("events.toml");
         let events = std::fs::read_to_string(events_path).expect("events log");
         assert!(
-            events.contains("agent_killed_by_user: run_id=32"),
+            events.contains("agent_stopped_by_user: run_id=32"),
             "Ctrl+C should always route through stop_running_agent while a run is active"
         );
     });
@@ -2326,6 +2326,192 @@ fn palette_retry_is_available_from_non_task_stage_focus() {
 }
 
 #[test]
+fn running_palette_shows_stop_retry_and_no_legacy_aliases() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("running-palette-commands".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let app = mk_app(state);
+
+        let stop = app
+            .palette_commands()
+            .into_iter()
+            .find(|command| command.name == "stop")
+            .expect("stop command");
+        assert_eq!(stop.help, "Stop the running agent without retry");
+        assert!(
+            stop.aliases.is_empty(),
+            "legacy stop aliases should be removed"
+        );
+
+        let retry = app
+            .palette_commands()
+            .into_iter()
+            .find(|command| command.name == "retry")
+            .expect("retry command");
+        assert_eq!(retry.help, "Stop and retry the running agent");
+
+        let commands = app.palette_commands();
+        let names = commands
+            .iter()
+            .flat_map(|command| {
+                std::iter::once(command.name).chain(command.aliases.iter().copied())
+            })
+            .collect::<Vec<_>>();
+        assert!(!names.contains(&"kill"));
+        assert!(!names.contains(&"cancel"));
+    });
+}
+
+#[test]
+fn running_palette_retry_stops_current_run_with_retry_marker() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("running-palette-retry".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let run = make_brainstorm_run(7);
+        state.agent_runs.push(run);
+        let mut app = mk_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "retry".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        let events_path = session_state::session_dir(&app.state.session_id).join("events.toml");
+        let events = std::fs::read_to_string(events_path).expect("events log");
+        assert!(
+            events.contains("agent_retry_requested_by_user: run_id=7"),
+            "running :retry should log the forced-retry marker"
+        );
+    });
+}
+
+#[test]
+fn idle_enter_retries_selected_target() {
+    with_temp_root(|| {
+        let session_id = "idle-enter-retry-selected-task";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::ImplementationRound(1);
+        state.builder.current_task = Some(1);
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "claude-sonnet".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        let removed_run = state.agent_runs[0].clone();
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            1,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        write_finish_stamp_for_run(&app, &removed_run, 1, "");
+        app.rebuild_tree_view(None);
+        app.selected = row_index(&app, "Task 1");
+
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert_eq!(app.state.agent_runs.len(), 1);
+        assert_eq!(app.state.agent_runs[0].status, RunStatus::Running);
+        assert_eq!(app.state.agent_runs[0].stage, "coder");
+    });
+}
+
+#[test]
+fn bare_enter_while_running_does_not_trigger_retry() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("running-enter-no-retry".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = mk_app(state);
+        app.current_run_id = Some(7);
+        let before = app
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == "brainstorm")
+            .count();
+
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        let after = app
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == "brainstorm")
+            .count();
+        assert_eq!(after, before, "bare Enter must not trigger running retry");
+    });
+}
+
+#[test]
+fn quit_command_with_running_agent_opens_confirmation_modal() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("quit-running-modal".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = mk_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "quit".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit, "quit should wait for post-stop finalization");
+        assert_eq!(app.active_modal(), Some(ModalKind::QuitRunningAgent));
+    });
+}
+
+#[test]
+fn quit_confirmation_cancel_leaves_run_active() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("quit-running-modal-cancel".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = mk_app(state);
+        app.current_run_id = Some(7);
+        app.pending_quit_confirmation_run_id = Some(7);
+
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('q')));
+
+        assert!(!should_quit);
+        assert_eq!(app.active_modal(), None);
+        assert!(app.has_running_agent());
+    });
+}
+
+#[test]
 fn pending_guard_resume_fail_closed_when_decision_missing() {
     with_temp_root(|| {
         let session_id = "pending-guard-resume-fail";
@@ -2445,7 +2631,9 @@ fn non_yolo_prompts_keep_interactive_operator_cues() {
         );
         assert!(planning.contains("The feedback is an internal design decision"));
         assert!(planning.contains("Cosmetic / trivial (typos, naming nits, formatting,"));
-        assert!(!planning.contains("If a real trade-off exceeds your\nconfidence, ASK the operator"));
+        assert!(
+            !planning.contains("If a real trade-off exceeds your\nconfidence, ASK the operator")
+        );
         assert!(
             planning.contains(
                 "Stage completion — ONLY once all pending trade-off decisions are resolved"

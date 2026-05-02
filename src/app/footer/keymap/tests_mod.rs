@@ -131,6 +131,21 @@ fn guard_exact_string() {
     assert!(text.contains("Esc quit"));
 }
 
+#[test]
+fn quit_running_agent_modal_exact_string() {
+    let line = keymap(
+        Phase::BrainstormRunning,
+        Some(ModalKind::QuitRunningAgent),
+        FocusCaps::default(),
+        false,
+        false,
+        200,
+    );
+    let text = line_text(&line);
+    assert!(text.contains("Enter confirm"));
+    assert!(text.contains("Esc cancel"));
+}
+
 // Input mode
 #[test]
 fn input_mode_exact_string() {

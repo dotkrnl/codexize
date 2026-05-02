@@ -27,6 +27,14 @@ impl App {
             }
             // Once cancellation has started, keep the first requested outcome so
             // repeated stop/retry/quit input cannot race contradictory follow-up work.
+            self.push_status(
+                format!(
+                    "Termination already pending: keeping {}.",
+                    existing.intent.summary()
+                ),
+                Severity::Warn,
+                Duration::from_secs(5),
+            );
             return;
         }
 
@@ -37,12 +45,11 @@ impl App {
         self.pending_quit_confirmation_run_id = None;
         self.pending_termination = Some(pending.clone());
         crate::app::prompts::cancel_run_label(&window_name);
-        let status = match pending.intent {
-            TerminationIntent::StopOnly => "Stopping agent...",
-            TerminationIntent::StopAndRetry(_) => "Stopping agent and queuing retry...",
-            TerminationIntent::StopAndQuit => "Stopping agent and quitting...",
-        };
-        self.push_status(status.to_string(), Severity::Warn, Duration::from_secs(5));
+        self.push_status(
+            pending.intent.in_progress_status().to_string(),
+            Severity::Warn,
+            Duration::from_secs(5),
+        );
     }
 
     /// Push a transient status-line message from a non-render call site.

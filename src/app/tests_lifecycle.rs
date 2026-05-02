@@ -2390,6 +2390,45 @@ fn running_palette_retry_stops_current_run_with_retry_marker() {
 }
 
 #[test]
+fn conflicting_running_termination_request_keeps_first_intent_and_surfaces_status() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("running-termination-first-wins".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(7));
+        let mut app = mk_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "stop".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "retry".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        assert!(!app.handle_key(key(crossterm::event::KeyCode::Enter)));
+
+        assert_eq!(
+            app.pending_termination,
+            Some(PendingTermination::new_stop_only(7))
+        );
+        let status = app.status_line.borrow().render().expect("status flash");
+        assert!(
+            status
+                .to_string()
+                .contains("Termination already pending: keeping stop without retry.")
+        );
+
+        let events_path = session_state::session_dir(&app.state.session_id).join("events.toml");
+        let events = std::fs::read_to_string(events_path).expect("events log");
+        assert!(events.contains("agent_stopped_by_user: run_id=7"));
+        assert!(!events.contains("agent_retry_requested_by_user: run_id=7"));
+    });
+}
+
+#[test]
 fn idle_enter_retries_selected_target() {
     with_temp_root(|| {
         let session_id = "idle-enter-retry-selected-task";

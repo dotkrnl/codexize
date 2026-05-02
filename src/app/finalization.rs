@@ -1515,9 +1515,6 @@ impl App {
             }
             if matches!(error.as_str(), "Operator Killed" | "user_forced_retry") {
                 self.clear_agent_error();
-                if error == "user_forced_retry" {
-                    return Ok(());
-                }
                 return Ok(());
             }
             let failed_run = self

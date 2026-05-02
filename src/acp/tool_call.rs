@@ -132,6 +132,8 @@ impl ToolCallDisplayState {
 pub(super) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,
     insertion_order: VecDeque<String>,
+    terminal_emitted: BTreeMap<String, ()>,
+    terminal_order: VecDeque<String>,
 }
 
 impl ToolCallMap {
@@ -157,6 +159,7 @@ impl ToolCallMap {
         if self.entries.remove(&id).is_some() {
             self.insertion_order.retain(|existing| existing != &id);
         }
+        self.clear_terminal_emitted(&id);
         while self.insertion_order.len() >= TOOL_CALL_MAP_CAP {
             let Some(oldest) = self.insertion_order.pop_front() else {
                 break;
@@ -182,6 +185,30 @@ impl ToolCallMap {
     pub(super) fn evict(&mut self, id: &str) {
         if self.entries.remove(id).is_some() {
             self.insertion_order.retain(|existing| existing != id);
+        }
+    }
+
+    pub(super) fn mark_terminal_emitted(&mut self, id: &str) {
+        if self.terminal_emitted.remove(id).is_some() {
+            self.terminal_order.retain(|existing| existing != id);
+        }
+        while self.terminal_order.len() >= TOOL_CALL_MAP_CAP {
+            let Some(oldest) = self.terminal_order.pop_front() else {
+                break;
+            };
+            self.terminal_emitted.remove(&oldest);
+        }
+        self.terminal_order.push_back(id.to_string());
+        self.terminal_emitted.insert(id.to_string(), ());
+    }
+
+    pub(super) fn terminal_emitted(&self, id: &str) -> bool {
+        self.terminal_emitted.contains_key(id)
+    }
+
+    fn clear_terminal_emitted(&mut self, id: &str) {
+        if self.terminal_emitted.remove(id).is_some() {
+            self.terminal_order.retain(|existing| existing != id);
         }
     }
 
@@ -881,6 +908,27 @@ mod tests {
         // Re-inserting the same id should not collide with stale order entries.
         map.insert("id-x".to_string(), ToolCallDisplayState::default());
         assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn tool_call_map_terminal_markers_are_bounded_fifo() {
+        let mut map = ToolCallMap::new();
+        for i in 0..TOOL_CALL_MAP_CAP {
+            map.mark_terminal_emitted(&format!("id-{i}"));
+        }
+        assert!(map.terminal_emitted("id-0"));
+        map.mark_terminal_emitted("id-overflow");
+        assert!(!map.terminal_emitted("id-0"));
+        assert!(map.terminal_emitted("id-overflow"));
+    }
+
+    #[test]
+    fn tool_call_map_insert_clears_terminal_marker_for_id_reuse() {
+        let mut map = ToolCallMap::new();
+        map.mark_terminal_emitted("id-x");
+        assert!(map.terminal_emitted("id-x"));
+        map.insert("id-x".to_string(), ToolCallDisplayState::default());
+        assert!(!map.terminal_emitted("id-x"));
     }
 
     #[test]

@@ -752,6 +752,7 @@ fn handle_tool_call(
                 text: format_result_line(&state),
             });
             map.evict(&id);
+            map.mark_terminal_emitted(&id);
         }
     } else {
         // Missing toolCallId: best-effort output only, never stored.
@@ -791,16 +792,23 @@ fn handle_tool_call_update(
             let result = format_result_line(state);
             out.push_back(ClientUpdate::ToolCallText { text: result });
             map.evict(&id);
+            map.mark_terminal_emitted(&id);
         }
         // Non-terminal merges into prior state and produces no transcript
         // output (spec §Behavior rule 5).
     } else if terminal {
+        if map.terminal_emitted(&id) {
+            // Duplicate terminal update for an already-completed id: suppress
+            // re-emission to keep the two-block contract append-only.
+            return;
+        }
         // No prior state (never created or already evicted): emit a
         // best-effort result block from the payload only; never insert.
         let state = ToolCallDisplayState::from_payload(&payload);
         out.push_back(ClientUpdate::ToolCallText {
             text: format_result_line(&state),
         });
+        map.mark_terminal_emitted(&id);
     }
     // Non-terminal update with no prior state is silently dropped.
 }
@@ -1157,12 +1165,10 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_second_terminal_update_for_evicted_id_emits_at_most_best_effort_then_nothing() {
-        // Spec §Behavior rule 3: after eviction, a *second* terminal update
-        // for the same id is treated as a "no prior state" terminal update.
-        // It still produces a best-effort result block (per rule 4) but does
-        // not double-emit from the original invocation+result pair, and the
-        // total visible blocks for that tool stay capped at two.
+    fn dispatch_second_terminal_update_for_evicted_id_is_suppressed() {
+        // Once a terminal result has been emitted for an id, later terminal
+        // updates for that same id are ignored unless a new `tool_call`
+        // reuses the id and starts a fresh lifecycle.
         let mut map = ToolCallMap::new();
         let _invocation = drain(
             json!({
@@ -1187,7 +1193,7 @@ mod tests {
         assert_eq!(first_result.len(), 1);
         assert!(!map.contains("call_1"));
 
-        // A second terminal update for the now-evicted id is best-effort.
+        // Duplicate terminal update for the now-evicted id must be ignored.
         let second_result = drain(
             json!({
                 "sessionUpdate": "tool_call_update",
@@ -1198,7 +1204,7 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        assert_eq!(second_result.len(), 1);
+        assert!(second_result.is_empty());
         assert!(!map.contains("call_1"));
 
         // A non-terminal stale update produces nothing.
@@ -1212,6 +1218,59 @@ mod tests {
             &mut map,
         );
         assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn dispatch_id_reuse_after_terminal_allows_new_result() {
+        let mut map = ToolCallMap::new();
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "kind": "execute",
+                "rawInput": { "command": ["echo", "first"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "stdout": "first" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+
+        let reused_invocation = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "kind": "execute",
+                "rawInput": { "command": ["echo", "second"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(
+            reused_invocation,
+            vec![ClientUpdate::ToolCallText {
+                text: "tool: exec(echo second)".to_string()
+            }]
+        );
+        let reused_result = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "stdout": "second" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        assert_eq!(reused_result.len(), 1);
     }
 
     #[test]

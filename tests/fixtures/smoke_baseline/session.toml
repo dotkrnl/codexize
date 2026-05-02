@@ -3,10 +3,11 @@ agent_runs = [
 ]
 archived = false
 current_phase = "IdeaInput"
-schema_version = 2
+schema_version = 3
 session_id = "<SESSION_ID>"
 show_noninteractive_texts = false
 show_thinking_texts = false
+validation_attempts = 0
 
 [builder]
 done = []

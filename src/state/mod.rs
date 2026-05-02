@@ -20,6 +20,48 @@ pub struct Event {
     pub message: String,
 }
 
+/// Coarse provenance for a `BlockedNeedsUser` transition.
+///
+/// Persisted as snake_case strings so the value is stable across process
+/// restarts and serializable into `session.toml`. `final_validation` is the
+/// only origin that unlocks the force-ship `BlockedNeedsUser -> Done`
+/// transition; all other origins reject it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockOrigin {
+    Brainstorm,
+    SpecReview,
+    SkipToImpl,
+    Planning,
+    PlanReview,
+    Sharding,
+    Implementation,
+    Review,
+    BuilderRecovery,
+    GitGuard,
+    FinalValidation,
+}
+
+impl BlockOrigin {
+    /// Map a stage string used in `agent_runs` to its block origin.
+    /// Returns `None` for unrecognized stages so callers can fall back to a
+    /// safer value (typically the originating phase).
+    pub fn for_stage(stage: &str) -> Option<Self> {
+        Some(match stage {
+            "brainstorm" => Self::Brainstorm,
+            "spec-reviewer" => Self::SpecReview,
+            "planner" => Self::Planning,
+            "plan-reviewer" => Self::PlanReview,
+            "sharder" => Self::Sharding,
+            "coder" => Self::Implementation,
+            "reviewer" => Self::Review,
+            "recovery" => Self::BuilderRecovery,
+            "final-validation" | "final_validation" => Self::FinalValidation,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RunStatus {
     Running,
@@ -296,13 +338,22 @@ pub struct SessionState {
     pub skip_to_impl_kind: Option<crate::artifacts::SkipToImplKind>,
     #[serde(default)]
     pub pending_guard_decision: Option<PendingGuardDecision>,
+    /// Number of `FinalValidation` runs entered in this session. Increments
+    /// on entry; the orchestrator hard-blocks before the 4th run starts.
+    #[serde(default)]
+    pub validation_attempts: u32,
+    /// Origin of the most recent `BlockedNeedsUser` transition. Cleared when
+    /// the session moves out of `BlockedNeedsUser`. The force-ship guard reads
+    /// this field to decide whether `BlockedNeedsUser -> Done` is allowed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_origin: Option<BlockOrigin>,
 }
 
 impl SessionState {
     pub fn new(session_id: String) -> Self {
         Self {
             session_id,
-            schema_version: 2,
+            schema_version: 3,
             modes: Modes::default(),
             agent_runs: Vec::new(),
             current_phase: Phase::IdeaInput,
@@ -317,6 +368,8 @@ impl SessionState {
             skip_to_impl_rationale: None,
             skip_to_impl_kind: None,
             pending_guard_decision: None,
+            validation_attempts: 0,
+            block_origin: None,
         }
     }
 
@@ -339,7 +392,7 @@ impl SessionState {
         let state: SessionState = toml::from_str(&text)
             .with_context(|| format!("failed to parse session state from {}", path.display()))?;
 
-        if state.schema_version != 2 {
+        if state.schema_version != 3 {
             anyhow::bail!(
                 "session {} uses schema v{}; archive with `codexize archive {}` and start fresh.",
                 session_id,

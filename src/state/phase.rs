@@ -31,6 +31,9 @@ pub enum Phase {
     /// the modal is up and the operator must choose reset or keep before the
     /// run can finalize.
     GitGuardPending,
+    /// Final goal validation runs once per queue-empty pre-`Done` boundary.
+    /// The stored round is the coder round whose work is being validated.
+    FinalValidation(u32),
     Done,
     BlockedNeedsUser,
 }
@@ -55,6 +58,7 @@ impl Phase {
             Phase::BlockedNeedsUser => "Blocked".to_string(),
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
             Phase::GitGuardPending => "Guard Decision".to_string(),
+            Phase::FinalValidation(_) => "Final Validation".to_string(),
         }
     }
 
@@ -126,6 +130,18 @@ impl Phase {
             (GitGuardPending, SkipToImplPending) => true,
             (GitGuardPending, PlanReviewRunning) => true,
             (GitGuardPending, BuilderRecoveryPlanReview(_)) => true,
+            // Final validation: queue-empty/pre-`Done` boundary on every
+            // code-producing path. Round identifies the coder round whose
+            // work is being validated.
+            (ReviewRound(r), FinalValidation(r2)) if *r == *r2 => true,
+            (ImplementationRound(1), FinalValidation(1)) => true,
+            (FinalValidation(_), Done) => true,
+            (FinalValidation(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
+            (FinalValidation(_), BlockedNeedsUser) => true,
+            // Force-ship from a final-validation block. The runtime guard in
+            // `execute_transition` rejects this transition when the block did
+            // not originate from final validation.
+            (BlockedNeedsUser, Done) => true,
             // Backward transitions (go_back)
             (BrainstormRunning, IdeaInput) => true,
             (SpecReviewRunning, BrainstormRunning) => true,
@@ -142,6 +158,9 @@ impl Phase {
             (ImplementationRound(r), BrainstormRunning) if *r <= 1 => true,
             (ImplementationRound(r), ReviewRound(r2)) if *r2 == *r - 1 => true,
             (ReviewRound(r), ImplementationRound(r2)) if *r == *r2 => true,
+            // Rewind transitions out of final validation.
+            (FinalValidation(r), ReviewRound(r2)) if *r == *r2 && *r >= 1 => true,
+            (FinalValidation(1), ImplementationRound(1)) => true,
             _ => false,
         }
     }
@@ -162,6 +181,7 @@ impl Phase {
             Phase::BuilderRecoverySharding(_) => vec![ArtifactKind::Spec, ArtifactKind::Plan],
             Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself
             Phase::GitGuardPending => vec![],
+            Phase::FinalValidation(_) => vec![ArtifactKind::Spec],
             _ => vec![],
         }
     }
@@ -187,6 +207,9 @@ impl Phase {
             Phase::BlockedNeedsUser => "Blocked - requires user intervention",
             Phase::SkipToImplPending => "Awaiting user confirmation to skip to implementation",
             Phase::GitGuardPending => "Awaiting git guard decision",
+            Phase::FinalValidation(_) => {
+                "AI agent verifying the original goal against the live workspace"
+            }
         }
     }
 
@@ -198,6 +221,7 @@ impl Phase {
             Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
             Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
             Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
+            Phase::FinalValidation(n) => format!("Final Validation Round {n}"),
             _ => self.label(),
         }
     }
@@ -327,4 +351,61 @@ mod tests {
         // Later rounds must not jump straight to brainstorm.
         assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::BrainstormRunning));
     }
+
+    #[test]
+    fn final_validation_metadata() {
+        assert_eq!(Phase::FinalValidation(2).label(), "Final Validation");
+        assert_eq!(
+            Phase::FinalValidation(2).display_name(),
+            "Final Validation Round 2"
+        );
+        assert_eq!(
+            Phase::FinalValidation(1).description(),
+            "AI agent verifying the original goal against the live workspace"
+        );
+        assert_eq!(
+            Phase::FinalValidation(1).required_artifacts(),
+            vec![crate::artifacts::ArtifactKind::Spec]
+        );
+    }
+
+    #[test]
+    fn final_validation_forward_transitions_from_review_and_skip_to_impl() {
+        // ReviewRound -> FinalValidation matches by round.
+        assert!(Phase::ReviewRound(2).can_transition_to(&Phase::FinalValidation(2)));
+        // Cross-round combinations are rejected.
+        assert!(!Phase::ReviewRound(2).can_transition_to(&Phase::FinalValidation(3)));
+        // Skip-to-impl exit only valid for round 1 (single-commit promise).
+        assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::FinalValidation(1)));
+        assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::FinalValidation(2)));
+    }
+
+    #[test]
+    fn final_validation_outbound_transitions() {
+        assert!(Phase::FinalValidation(1).can_transition_to(&Phase::Done));
+        assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(2)));
+        assert!(Phase::FinalValidation(3).can_transition_to(&Phase::ImplementationRound(4)));
+        // r+2 not allowed; only r+1.
+        assert!(!Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(3)));
+        assert!(Phase::FinalValidation(1).can_transition_to(&Phase::BlockedNeedsUser));
+    }
+
+    #[test]
+    fn blocked_needs_user_to_done_is_statically_allowed() {
+        // The static graph permits the edge so the operator-facing affordance
+        // can be surfaced; the runtime guard in `execute_transition` enforces
+        // `block_origin == FinalValidation`.
+        assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::Done));
+    }
+
+    #[test]
+    fn final_validation_rewind_transitions() {
+        assert!(Phase::FinalValidation(2).can_transition_to(&Phase::ReviewRound(2)));
+        // Cross-round rewind rejected.
+        assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ReviewRound(1)));
+        // Skip-to-impl rewind: only valid at round 1.
+        assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(1)));
+        assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ImplementationRound(2)));
+    }
+
 }

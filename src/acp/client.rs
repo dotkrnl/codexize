@@ -1,10 +1,17 @@
-use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate, PromptPayload};
+use super::{
+    AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate, PromptPayload,
+    tool_call::{
+        ToolCallDisplayState, ToolCallPayload, format_invocation_line, format_result_line,
+        is_terminal_status,
+    },
+};
 use crate::selection::vendor::vendor_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, ErrorKind, Write},
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -63,7 +70,7 @@ impl AcpConnector for SubprocessConnector {
             .stdin
             .take()
             .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
-        let mut rpc = RpcPeer::new(stdin, stdout);
+        let mut rpc = RpcPeer::new(stdin, stdout, launch.session.cwd.clone());
         let initialize = match rpc.call(
             "initialize",
             json!({
@@ -291,14 +298,15 @@ struct RpcPeer {
 }
 
 impl RpcPeer {
-    fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
+    fn new(stdin: ChildStdin, stdout: ChildStdout, cwd: PathBuf) -> Self {
         let writer = Arc::new(Mutex::new(Some(stdin)));
         let pending = Arc::new(Mutex::new(BTreeMap::<u64, Sender<AcpResult<Value>>>::new()));
         let (updates_tx, updates_rx) = mpsc::channel();
         let reader_writer = Arc::clone(&writer);
         let reader_pending = Arc::clone(&pending);
-        let reader_handle =
-            thread::spawn(move || read_loop(stdout, reader_writer, reader_pending, updates_tx));
+        let reader_handle = thread::spawn(move || {
+            read_loop(stdout, reader_writer, reader_pending, updates_tx, cwd)
+        });
         Self {
             writer,
             pending,
@@ -394,6 +402,7 @@ fn read_loop(
     writer: SharedWriter,
     pending: PendingRequests,
     updates_tx: Sender<AcpResult<ClientUpdate>>,
+    cwd: PathBuf,
 ) {
     let reader = BufReader::new(stdout);
     for line in reader.lines() {
@@ -427,7 +436,7 @@ fn read_loop(
                 let update = value
                     .get("params")
                     .and_then(|params| params.get("update"))
-                    .map(parse_update)
+                    .map(|update| parse_update(update, &cwd))
                     .unwrap_or_else(|| ClientUpdate::Unknown {
                         kind: "session/update".to_string(),
                     });
@@ -627,7 +636,7 @@ fn is_failed_stop_reason(stop_reason: &str) -> bool {
     )
 }
 
-fn parse_update(value: &Value) -> ClientUpdate {
+fn parse_update(value: &Value, cwd: &Path) -> ClientUpdate {
     let kind = value
         .get("sessionUpdate")
         .and_then(Value::as_str)
@@ -655,103 +664,41 @@ fn parse_update(value: &Value) -> ClientUpdate {
                 .and_then(Value::as_str)
                 .map(str::to_string),
         },
-        kind if is_tool_update(kind) => ClientUpdate::ToolCallBrief {
-            name: brief_tool_name(value),
-        },
+        "tool_call" => {
+            // Stateless rendering: format the invocation block from this single
+            // payload. Per-session merge state is owned by the dependent
+            // lifecycle work; on a `tool_call` whose status is already terminal
+            // we still only emit the invocation here.
+            let payload = ToolCallPayload::from_value(value);
+            let state = ToolCallDisplayState::from_payload(&payload);
+            ClientUpdate::ToolCallText {
+                text: format_invocation_line(&state, cwd),
+            }
+        }
+        "tool_call_update" => {
+            // Spec §Behavior: non-terminal updates produce no transcript output;
+            // terminal updates render a best-effort result block from their own
+            // payload. Statefully merging with a prior `tool_call` is out of
+            // scope for this task.
+            let payload = ToolCallPayload::from_value(value);
+            let terminal = payload
+                .status
+                .as_deref()
+                .map(is_terminal_status)
+                .unwrap_or(false);
+            if !terminal {
+                return ClientUpdate::Unknown {
+                    kind: kind.to_string(),
+                };
+            }
+            let state = ToolCallDisplayState::from_payload(&payload);
+            ClientUpdate::ToolCallText {
+                text: format_result_line(&state),
+            }
+        }
         other => ClientUpdate::Unknown {
             kind: other.to_string(),
         },
-    }
-}
-
-fn is_tool_update(kind: &str) -> bool {
-    kind.contains("tool")
-}
-
-fn brief_tool_name(value: &Value) -> String {
-    if let Some(shell) = shell_tool_summary(value) {
-        return shell;
-    }
-
-    [
-        "/toolCall/name",
-        "/toolCall/title",
-        "/tool/name",
-        "/content/name",
-        "/content/toolName",
-        "/name",
-        "/toolName",
-    ]
-    .into_iter()
-    .find_map(|path| value.pointer(path).and_then(Value::as_str))
-    .map(|name| {
-        let trimmed = name.trim();
-        if trimmed.is_empty() {
-            "tool".to_string()
-        } else {
-            trimmed.chars().take(64).collect()
-        }
-    })
-    .unwrap_or_else(|| "tool".to_string())
-}
-
-fn shell_tool_summary(value: &Value) -> Option<String> {
-    let name = [
-        "/toolCall/name",
-        "/tool/name",
-        "/content/name",
-        "/content/toolName",
-        "/name",
-        "/toolName",
-    ]
-    .into_iter()
-    .find_map(|path| value.pointer(path).and_then(Value::as_str))
-    .unwrap_or_default();
-    if !matches!(
-        name,
-        "exec_command" | "bash" | "shell" | "run_shell_command" | "terminal"
-    ) {
-        return None;
-    }
-
-    let cmd = [
-        "/toolCall/arguments/cmd",
-        "/toolCall/arguments/command",
-        "/tool/arguments/cmd",
-        "/tool/arguments/command",
-        "/content/arguments/cmd",
-        "/content/arguments/command",
-        "/arguments/cmd",
-        "/arguments/command",
-    ]
-    .into_iter()
-    .find_map(|path| value.pointer(path).and_then(Value::as_str))?;
-    let detail = shell_command_detail(cmd);
-    if detail.is_empty() {
-        Some("bash".to_string())
-    } else {
-        Some(format!("bash ({detail})"))
-    }
-}
-
-fn shell_command_detail(cmd: &str) -> String {
-    let mut words = cmd.split_whitespace();
-    let Some(first) = words.next() else {
-        return String::new();
-    };
-    match first {
-        "cat" => "cat file".to_string(),
-        "sed" => "sed file".to_string(),
-        "rg" => "rg search".to_string(),
-        "cargo" => words
-            .next()
-            .map(|subcommand| format!("cargo {subcommand}"))
-            .unwrap_or_else(|| "cargo".to_string()),
-        "git" => words
-            .next()
-            .map(|subcommand| format!("git {subcommand}"))
-            .unwrap_or_else(|| "git".to_string()),
-        other => other.chars().take(48).collect(),
     }
 }
 
@@ -934,60 +881,115 @@ mod tests {
     }
 
     #[test]
-    fn parse_tool_call_update_summarizes_shell_command_when_available() {
-        let update = parse_update(&json!({
-            "sessionUpdate": "tool_call",
-            "toolCall": {
-                "name": "exec_command",
-                "arguments": {
-                    "cmd": "cargo test --workspace"
+    fn parse_tool_call_renders_invocation_from_observed_codex_payload() {
+        let update = parse_update(
+            &json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_1",
+                "title": "Read Cargo.toml",
+                "kind": "read",
+                "status": "in_progress",
+                "locations": [{ "path": "/work/project/Cargo.toml" }],
+                "rawInput": {
+                    "command": ["/bin/zsh", "-lc", "sed -n '1,120p' Cargo.toml"]
                 }
-            }
-        }));
+            }),
+            Path::new("/work/project"),
+        );
 
         assert_eq!(
             update,
-            ClientUpdate::ToolCallBrief {
-                name: "bash (cargo test)".to_string()
+            ClientUpdate::ToolCallText {
+                text: "tool: read(Cargo.toml)".to_string()
             }
         );
     }
 
     #[test]
-    fn parse_shell_tool_call_update_summarizes_command() {
-        let update = parse_update(&json!({
-            "sessionUpdate": "tool_call",
-            "toolCall": {
-                "name": "exec_command",
-                "arguments": {
-                    "cmd": "cat src/main.rs"
-                }
-            }
-        }));
+    fn parse_tool_call_renders_exec_invocation_from_command_array() {
+        let update = parse_update(
+            &json!({
+                "sessionUpdate": "tool_call",
+                "rawInput": { "command": ["cargo", "test", "--workspace"] }
+            }),
+            Path::new("/tmp"),
+        );
 
         assert_eq!(
             update,
-            ClientUpdate::ToolCallBrief {
-                name: "bash (cat file)".to_string()
+            ClientUpdate::ToolCallText {
+                text: "tool: exec(cargo test --workspace)".to_string()
             }
         );
     }
 
     #[test]
-    fn parse_tool_call_update_falls_back_to_generic_label() {
-        let update = parse_update(&json!({
-            "sessionUpdate": "tool_call",
-            "toolCall": {
-                "arguments": {
-                    "cmd": "cargo test --workspace"
-                }
-            }
-        }));
+    fn parse_tool_call_falls_back_to_literal_tool_when_payload_is_empty() {
+        let update = parse_update(
+            &json!({ "sessionUpdate": "tool_call" }),
+            Path::new("/tmp"),
+        );
 
         assert_eq!(
             update,
-            ClientUpdate::ToolCallBrief {
-                name: "tool".to_string()
+            ClientUpdate::ToolCallText {
+                text: "tool: tool".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tool_call_update_with_terminal_status_emits_result_block() {
+        let update = parse_update(
+            &json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "ok" }
+            }),
+            Path::new("/tmp"),
+        );
+
+        assert_eq!(
+            update,
+            ClientUpdate::ToolCallText {
+                text: "result: completed, exit 0, output: ok".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tool_call_update_silently_drops_non_terminal_status() {
+        let update = parse_update(
+            &json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_1",
+                "status": "in_progress"
+            }),
+            Path::new("/tmp"),
+        );
+
+        assert_eq!(
+            update,
+            ClientUpdate::Unknown {
+                kind: "tool_call_update".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_update_routes_unrelated_kinds_with_substring_tool_to_unknown() {
+        // Spec §Interfaces: `is_tool_update` narrows to exact `tool_call` /
+        // `tool_call_update`. The previous heuristic over-matched anything
+        // containing "tool".
+        let update = parse_update(
+            &json!({ "sessionUpdate": "tool_progress_chunk" }),
+            Path::new("/tmp"),
+        );
+        assert_eq!(
+            update,
+            ClientUpdate::Unknown {
+                kind: "tool_progress_chunk".to_string()
             }
         );
     }

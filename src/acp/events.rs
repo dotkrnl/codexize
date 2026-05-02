@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 pub enum ClientUpdate {
     AgentMessageText(String),
     AgentThoughtText(String),
-    ToolCallBrief { name: String },
+    ToolCallText { text: String },
     SessionInfoUpdate { title: Option<String> },
     PromptTurnFinished,
     PromptTurnFailed { message: String },
@@ -128,8 +128,8 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
             interactive,
             thought: true,
         })),
-        ClientUpdate::ToolCallBrief { name } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text: format!("tool: {name}\n\n"),
+        ClientUpdate::ToolCallText { text } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text: format!("{text}\n\n"),
             interactive,
             thought: true,
         })),
@@ -180,10 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_calls_become_brief_thought_events() {
+    fn tool_call_text_becomes_thought_event_with_paragraph_break() {
         let event = translate_update(
-            ClientUpdate::ToolCallBrief {
-                name: "exec_command".to_string(),
+            ClientUpdate::ToolCallText {
+                text: "tool: read(Cargo.toml)".to_string(),
             },
             false,
         );
@@ -191,8 +191,27 @@ mod tests {
         assert_eq!(
             event,
             Some(AcpRuntimeEvent::Text(AcpTextEvent {
-                text: "tool: exec_command\n\n".to_string(),
+                text: "tool: read(Cargo.toml)\n\n".to_string(),
                 interactive: false,
+                thought: true,
+            }))
+        );
+    }
+
+    #[test]
+    fn tool_call_text_translates_unchanged_for_result_blocks() {
+        let event = translate_update(
+            ClientUpdate::ToolCallText {
+                text: "result: completed, exit 0, output: ok".to_string(),
+            },
+            true,
+        );
+
+        assert_eq!(
+            event,
+            Some(AcpRuntimeEvent::Text(AcpTextEvent {
+                text: "result: completed, exit 0, output: ok\n\n".to_string(),
+                interactive: true,
                 thought: true,
             }))
         );

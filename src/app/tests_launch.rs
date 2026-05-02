@@ -1254,6 +1254,201 @@ fn coder_prompt_tells_resume_rounds_to_rebut_unhelpful_ai_feedback() {
     });
 }
 
+#[test]
+fn final_validation_launch_uses_session_model_review_effort_and_window_label() {
+    with_temp_root(|| {
+        let session_id = "final-validation-launch";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(
+            artifacts.join("spec.md"),
+            "# Spec\n\n## User-stated requirements (authoritative)\n- run\n",
+        )
+        .expect("write spec");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::FinalValidation(2);
+        state.idea_text = Some("Make the validator agent run end-to-end".to_string());
+        state.selected_model = Some("claude-sonnet-4-6".to_string());
+
+        let mut app = idle_app(state);
+        // The session-selected model should be used; other models in the list
+        // exist only to confirm the picker doesn't replace the selection.
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 1, 10),
+            ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet-4-6",
+                10,
+                10,
+                10,
+            ),
+        ];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"goal_met\"\nsummary = \"ok\"\nfindings = [\"workspace clean\"]\n"
+                            .to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_final_validation_with_model(None));
+
+        let run = app
+            .state
+            .agent_runs
+            .last()
+            .expect("final validation must record a run");
+        assert_eq!(run.stage, "final-validation");
+        assert_eq!(run.task_id, None);
+        assert_eq!(run.round, 2);
+        assert_eq!(run.model, "claude-sonnet-4-6");
+        assert_eq!(run.vendor, "claude");
+        assert_eq!(run.effort, EffortLevel::Normal);
+        assert!(
+            !run.modes.interactive,
+            "final validation must launch non-interactively"
+        );
+        assert!(
+            run.window_name.starts_with("[FinalValidation] "),
+            "expected `[FinalValidation] {{model_short}}` window label, got {}",
+            run.window_name
+        );
+        assert!(
+            run.window_name.contains("sonnet-4-6"),
+            "window label must include short model name, got {}",
+            run.window_name
+        );
+
+        let verdict_path = artifacts.join("final_validation_2.toml");
+        assert!(verdict_path.exists(), "harness must write the verdict path");
+        let live_summary = artifacts.join(format!(
+            "live_summary.{}.txt",
+            App::run_key_for("final-validation", None, 2, 1)
+        ));
+        let prompt_path = session_dir.join("prompts").join("final-validation-r2.md");
+        let prompt = std::fs::read_to_string(&prompt_path).expect("prompt file");
+        assert!(prompt.contains(&verdict_path.display().to_string()));
+        assert!(prompt.contains(&live_summary.display().to_string()));
+    });
+}
+
+#[test]
+fn final_validation_launch_falls_back_when_selected_model_missing() {
+    with_temp_root(|| {
+        let session_id = "final-validation-fallback";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::FinalValidation(1);
+        state.idea_text = Some("idea".to_string());
+        // No `selected_model` — the launcher must still pick a model rather
+        // than refuse to start.
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Claude,
+            "claude-opus-4-7",
+            10,
+            10,
+            1,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"goal_met\"\nsummary = \"ok\"\nfindings = []\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_final_validation_with_model(None));
+        let run = app.state.agent_runs.last().expect("run record");
+        assert_eq!(run.model, "claude-opus-4-7");
+        assert_eq!(run.stage, "final-validation");
+    });
+}
+
+#[test]
+fn final_validation_auto_launches_via_maybe_auto_launch() {
+    with_temp_root(|| {
+        let session_id = "final-validation-auto";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::FinalValidation(1);
+        state.idea_text = Some("idea".to_string());
+        state.selected_model = Some("gpt-5".to_string());
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            10,
+            1,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"goal_met\"\nsummary = \"ok\"\nfindings = []\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        app.maybe_auto_launch();
+        let run = app
+            .state
+            .agent_runs
+            .last()
+            .expect("auto-launch must record a run");
+        assert_eq!(run.stage, "final-validation");
+        assert_eq!(run.round, 1);
+    });
+}
+
+#[test]
+fn final_validation_launch_without_models_records_agent_error() {
+    with_temp_root(|| {
+        let session_id = "final-validation-no-models";
+        let session_dir = session_state::session_dir(session_id);
+        std::fs::create_dir_all(session_dir.join("artifacts")).expect("artifacts dir");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::FinalValidation(1);
+        let mut app = idle_app(state);
+
+        assert!(!app.launch_final_validation_with_model(None));
+        assert!(
+            app.state
+                .agent_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("model list not yet loaded")
+        );
+        assert!(app.state.agent_runs.is_empty());
+    });
+}
+
 // Modal tests
 
 #[test]

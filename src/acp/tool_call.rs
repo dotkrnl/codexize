@@ -1,7 +1,6 @@
 //! Pure parsers and formatters for ACP `tool_call` / `tool_call_update`
 //! payloads, plus the per-session merge map that turns those wire messages
 //! into the two-block invocation/result transcript contract.
-#![allow(dead_code)]
 
 use serde_json::Value;
 use std::{
@@ -25,7 +24,6 @@ const TRUNCATE_SUFFIX: &str = "...";
 #[derive(Debug, Default, Clone)]
 pub(super) struct ToolCallPayload {
     pub(super) tool_call_id: Option<String>,
-    pub(super) session_update_kind: Option<String>,
     pub(super) title: Option<String>,
     pub(super) kind: Option<String>,
     pub(super) status: Option<String>,
@@ -63,7 +61,6 @@ impl ToolCallPayload {
             .unwrap_or_default();
         Self {
             tool_call_id: non_empty_string("toolCallId"),
-            session_update_kind: non_empty_string("sessionUpdate"),
             title: non_empty_string("title"),
             kind: non_empty_string("kind"),
             status: non_empty_string("status"),
@@ -142,10 +139,12 @@ impl ToolCallMap {
         Self::default()
     }
 
+    #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[cfg(test)]
     pub(super) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
         self.entries.get(id)
     }
@@ -504,7 +503,6 @@ mod tests {
         }));
 
         assert_eq!(payload.tool_call_id.as_deref(), Some("call_1"));
-        assert_eq!(payload.session_update_kind.as_deref(), Some("tool_call"));
         assert_eq!(payload.kind.as_deref(), Some("read"));
         assert_eq!(payload.status.as_deref(), Some("in_progress"));
         assert_eq!(payload.locations.len(), 1);

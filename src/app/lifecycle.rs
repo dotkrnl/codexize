@@ -1111,7 +1111,8 @@ impl App {
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
-            | Phase::FinalValidation(_) => {
+            | Phase::FinalValidation(_)
+            | Phase::Simplification(_) => {
                 return None;
             }
         };
@@ -1499,6 +1500,20 @@ impl App {
                 // matching review round to preserve per-task review history.
                 if let Phase::FinalValidation(r) = self.state.current_phase {
                     cancel_run_label("[FinalValidation]");
+                    let target = if r >= 1 {
+                        Phase::ReviewRound(r)
+                    } else {
+                        Phase::ImplementationRound(1)
+                    };
+                    let _ = self.transition_to_phase(target);
+                }
+            }
+            Phase::Simplification(_) => {
+                // Simplification is a code-producing stage; rewind to the
+                // matching ReviewRound to drop back into the loop on round >= 1
+                // or to ImplementationRound(1) on the skip-to-impl path.
+                if let Phase::Simplification(r) = self.state.current_phase {
+                    cancel_run_label("[Simplifier]");
                     let target = if r >= 1 {
                         Phase::ReviewRound(r)
                     } else {

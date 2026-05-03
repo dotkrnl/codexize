@@ -34,6 +34,9 @@ pub enum Phase {
     /// Final goal validation runs once per queue-empty pre-`Done` boundary.
     /// The stored round is the coder round whose work is being validated.
     FinalValidation(u32),
+    /// Behavior-preserving cleanup pass between loop convergence and FinalValidation.
+    /// The stored round matches the coder round whose work is being simplified.
+    Simplification(u32),
     Done,
     BlockedNeedsUser,
 }
@@ -59,6 +62,7 @@ impl Phase {
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
             Phase::GitGuardPending => "Guard Decision".to_string(),
             Phase::FinalValidation(_) => "Final Validation".to_string(),
+            Phase::Simplification(_) => "Simplification".to_string(),
         }
     }
 
@@ -132,12 +136,25 @@ impl Phase {
             (GitGuardPending, BuilderRecoveryPlanReview(_)) => true,
             // Final validation: queue-empty/pre-`Done` boundary on every
             // code-producing path. Round identifies the coder round whose
-            // work is being validated.
-            (ReviewRound(r), FinalValidation(r2)) if *r == *r2 => true,
-            (ImplementationRound(1), FinalValidation(1)) => true,
+            // work is being validated. Normal pipeline entries reach
+            // FinalValidation through Simplification; the only non-simplifier
+            // inbound edge is BlockedNeedsUser -> FinalValidation(_).
             (FinalValidation(_), Done) => true,
             (FinalValidation(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
             (FinalValidation(_), BlockedNeedsUser) => true,
+            // Simplification: behavior-preserving cleanup pass that gates every
+            // normal entry into FinalValidation. The pre-existing direct edges
+            // ReviewRound(r) -> FinalValidation(r) and ImplementationRound(1)
+            // -> FinalValidation(1) are intentionally absent from this graph;
+            // BlockedNeedsUser -> FinalValidation(_) is the operator-directed
+            // recovery exception (matched separately below).
+            (ReviewRound(r), Simplification(r2)) if *r == *r2 => true,
+            (ImplementationRound(1), Simplification(1)) => true,
+            (BlockedNeedsUser, Simplification(_)) => true,
+            (Simplification(r), FinalValidation(r2)) if *r == *r2 => true,
+            (Simplification(_), BlockedNeedsUser) => true,
+            // Operator-directed recovery into final validation from a block.
+            (BlockedNeedsUser, FinalValidation(_)) => true,
             // Force-ship from a final-validation block. The runtime guard in
             // `execute_transition` rejects this transition when the block did
             // not originate from final validation.
@@ -161,6 +178,9 @@ impl Phase {
             // Rewind transitions out of final validation.
             (FinalValidation(r), ReviewRound(r2)) if *r == *r2 && *r >= 1 => true,
             (FinalValidation(1), ImplementationRound(1)) => true,
+            // Rewind transitions out of simplification.
+            (Simplification(r), ReviewRound(r2)) if *r == *r2 && *r >= 1 => true,
+            (Simplification(1), ImplementationRound(1)) => true,
             _ => false,
         }
     }
@@ -182,6 +202,7 @@ impl Phase {
             Phase::SkipToImplPending => vec![], // No artifacts required for this phase itself
             Phase::GitGuardPending => vec![],
             Phase::FinalValidation(_) => vec![ArtifactKind::Spec],
+            Phase::Simplification(_) => vec![ArtifactKind::Spec],
             _ => vec![],
         }
     }
@@ -210,6 +231,9 @@ impl Phase {
             Phase::FinalValidation(_) => {
                 "AI agent verifying the original goal against the live workspace"
             }
+            Phase::Simplification(_) => {
+                "AI agent applying behavior-preserving simplifications before final validation"
+            }
         }
     }
 
@@ -222,6 +246,7 @@ impl Phase {
             Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
             Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
             Phase::FinalValidation(n) => format!("Final Validation Round {n}"),
+            Phase::Simplification(n) => format!("Simplification Round {n}"),
             _ => self.label(),
         }
     }
@@ -370,13 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn final_validation_forward_transitions_from_review_and_skip_to_impl() {
-        // ReviewRound -> FinalValidation matches by round.
-        assert!(Phase::ReviewRound(2).can_transition_to(&Phase::FinalValidation(2)));
-        // Cross-round combinations are rejected.
+    fn final_validation_no_longer_has_direct_edges_from_review_or_impl() {
+        // The pre-existing direct edges are removed; normal pipeline entries
+        // into FinalValidation must go through Simplification.
+        assert!(!Phase::ReviewRound(2).can_transition_to(&Phase::FinalValidation(2)));
         assert!(!Phase::ReviewRound(2).can_transition_to(&Phase::FinalValidation(3)));
-        // Skip-to-impl exit only valid for round 1 (single-commit promise).
-        assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::FinalValidation(1)));
+        assert!(!Phase::ImplementationRound(1).can_transition_to(&Phase::FinalValidation(1)));
         assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::FinalValidation(2)));
     }
 
@@ -406,5 +430,94 @@ mod tests {
         // Skip-to-impl rewind: only valid at round 1.
         assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(1)));
         assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ImplementationRound(2)));
+    }
+
+    #[test]
+    fn simplification_metadata() {
+        assert_eq!(Phase::Simplification(2).label(), "Simplification");
+        assert_eq!(
+            Phase::Simplification(2).display_name(),
+            "Simplification Round 2"
+        );
+        assert_eq!(
+            Phase::Simplification(1).description(),
+            "AI agent applying behavior-preserving simplifications before final validation"
+        );
+        assert_eq!(
+            Phase::Simplification(1).required_artifacts(),
+            vec![crate::artifacts::ArtifactKind::Spec]
+        );
+    }
+
+    #[test]
+    fn simplification_inbound_transitions() {
+        // Normal converging-loop entry.
+        assert!(Phase::ReviewRound(2).can_transition_to(&Phase::Simplification(2)));
+        // Cross-round combinations are rejected.
+        assert!(!Phase::ReviewRound(2).can_transition_to(&Phase::Simplification(3)));
+        // Skip-to-impl entry — only at round 1.
+        assert!(Phase::ImplementationRound(1).can_transition_to(&Phase::Simplification(1)));
+        assert!(!Phase::ImplementationRound(2).can_transition_to(&Phase::Simplification(2)));
+        // Operator can re-enter simplification from a block.
+        assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::Simplification(3)));
+    }
+
+    #[test]
+    fn simplification_outbound_transitions() {
+        // Happy path into final validation; matched round only.
+        assert!(Phase::Simplification(2).can_transition_to(&Phase::FinalValidation(2)));
+        assert!(!Phase::Simplification(2).can_transition_to(&Phase::FinalValidation(1)));
+        assert!(!Phase::Simplification(2).can_transition_to(&Phase::FinalValidation(3)));
+        // Failure path.
+        assert!(Phase::Simplification(2).can_transition_to(&Phase::BlockedNeedsUser));
+        // Direct shortcut to Done is rejected.
+        assert!(!Phase::Simplification(2).can_transition_to(&Phase::Done));
+    }
+
+    #[test]
+    fn simplification_rewind_transitions() {
+        assert!(Phase::Simplification(2).can_transition_to(&Phase::ReviewRound(2)));
+        // Cross-round rewind rejected.
+        assert!(!Phase::Simplification(2).can_transition_to(&Phase::ReviewRound(1)));
+        // Skip-to-impl rewind only at round 1.
+        assert!(Phase::Simplification(1).can_transition_to(&Phase::ImplementationRound(1)));
+        assert!(!Phase::Simplification(2).can_transition_to(&Phase::ImplementationRound(2)));
+    }
+
+    #[test]
+    fn final_validation_inbound_edges_only_simplification_or_block() {
+        // The blocked recovery exception is preserved.
+        assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::FinalValidation(1)));
+        assert!(Phase::BlockedNeedsUser.can_transition_to(&Phase::FinalValidation(7)));
+        // Sweep every other Phase variant: only Simplification(r) can reach
+        // FinalValidation(r), and BlockedNeedsUser can reach any round.
+        let candidates = [
+            Phase::IdeaInput,
+            Phase::BrainstormRunning,
+            Phase::SpecReviewRunning,
+            Phase::SpecReviewPaused,
+            Phase::PlanningRunning,
+            Phase::PlanReviewRunning,
+            Phase::PlanReviewPaused,
+            Phase::ShardingRunning,
+            Phase::SkipToImplPending,
+            Phase::ImplementationRound(2),
+            Phase::ReviewRound(2),
+            Phase::BuilderRecovery(2),
+            Phase::BuilderRecoveryPlanReview(2),
+            Phase::BuilderRecoverySharding(2),
+            Phase::GitGuardPending,
+            Phase::FinalValidation(2),
+            Phase::Done,
+        ];
+        for from in candidates {
+            assert!(
+                !from.can_transition_to(&Phase::FinalValidation(2)),
+                "unexpected inbound edge into FinalValidation from {:?}",
+                from
+            );
+        }
+        // Round-1 skip-to-impl direct edge is also gone.
+        assert!(!Phase::ImplementationRound(1).can_transition_to(&Phase::FinalValidation(1)));
     }
 }

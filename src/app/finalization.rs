@@ -2038,10 +2038,7 @@ impl App {
                 // idea + spec, so we don't branch on the parsed status here.
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
-                let _ = session_state::transitions::enter_final_validation(
-                    &mut self.state,
-                    round,
-                )?;
+                let _ = session_state::transitions::enter_final_validation(&mut self.state, round)?;
             }
             Phase::IdeaInput
             | Phase::SpecReviewPaused

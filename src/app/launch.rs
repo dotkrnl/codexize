@@ -1797,11 +1797,7 @@ impl App {
     /// resolve its `(model, vendor_kind, vendor_tag)` triple. Returns
     /// `None` when no matching run exists or its persisted vendor string
     /// no longer parses (e.g. after a vendor rename).
-    fn round_stage_model(
-        &self,
-        stage: &str,
-        round: u32,
-    ) -> Option<(String, VendorKind, String)> {
+    fn round_stage_model(&self, stage: &str, round: u32) -> Option<(String, VendorKind, String)> {
         let last = self
             .state
             .agent_runs
@@ -1879,12 +1875,7 @@ impl App {
             .or_else(|| self.round_stage_model("simplifier", round))
             .or_else(|| self.round_stage_model("coder", round))
             .or_else(|| {
-                self.choose_primary_model(
-                    None,
-                    SelectionPhase::Build,
-                    effort,
-                    modes.cheap,
-                )
+                self.choose_primary_model(None, SelectionPhase::Build, effort, modes.cheap)
             });
         let Some((model, vendor_kind, vendor)) = chosen else {
             self.record_agent_error("no model available for simplifier".to_string());
@@ -1894,8 +1885,7 @@ impl App {
         };
 
         let attempt = self.attempt_for("simplifier", None, round);
-        let live_summary_path =
-            self.live_summary_path_for_run("simplifier", None, round, attempt);
+        let live_summary_path = self.live_summary_path_for_run("simplifier", None, round, attempt);
         let prompt = simplifier_prompt(
             &session_dir,
             &review_scope_file,

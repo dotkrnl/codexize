@@ -1,6 +1,6 @@
 use super::{
     AcpError, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort, AcpResolvedLaunch,
-    AcpResult, AcpSessionSpec, AcpSpawnSpec,
+    AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
 };
 use crate::selection::{VendorKind, vendor::vendor_kind_to_str};
 use std::{
@@ -68,6 +68,7 @@ impl AcpConfig {
             .iter()
             .map(|path| absolutize(path))
             .collect::<AcpResult<Vec<_>>>()?;
+        let policy = absolutize_policy(&request.policy)?;
         let reasoning_effort = match request.effective_effort {
             crate::adapters::EffortLevel::Low => AcpReasoningEffort::Low,
             crate::adapters::EffortLevel::Normal => AcpReasoningEffort::Medium,
@@ -105,6 +106,27 @@ impl AcpConfig {
             "CODEXIZE_ACP_YOLO".to_string(),
             request.modes.yolo.to_string(),
         );
+        env.insert(
+            "CODEXIZE_ACP_ALLOWED_WRITE_PATHS".to_string(),
+            policy
+                .allowed_write_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        env.insert(
+            "CODEXIZE_ACP_SHELL_POLICY".to_string(),
+            shell_policy_name(&policy.shell_policy).to_string(),
+        );
+        env.insert(
+            "CODEXIZE_ACP_ALLOWED_SHELL_COMMANDS".to_string(),
+            shell_policy_commands(&policy.shell_policy).join("\n"),
+        );
+        env.insert(
+            "CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE".to_string(),
+            policy.enforce_readonly_workspace.to_string(),
+        );
 
         let mut metadata = BTreeMap::new();
         metadata.insert(
@@ -133,6 +155,27 @@ impl AcpConfig {
             request.modes.cheap.to_string(),
         );
         metadata.insert("codexize.yolo".to_string(), request.modes.yolo.to_string());
+        metadata.insert(
+            "codexize.allowed_write_paths".to_string(),
+            policy
+                .allowed_write_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        metadata.insert(
+            "codexize.shell_policy".to_string(),
+            shell_policy_name(&policy.shell_policy).to_string(),
+        );
+        metadata.insert(
+            "codexize.allowed_shell_commands".to_string(),
+            shell_policy_commands(&policy.shell_policy).join("\n"),
+        );
+        metadata.insert(
+            "codexize.enforce_readonly_workspace".to_string(),
+            policy.enforce_readonly_workspace.to_string(),
+        );
 
         Ok(AcpResolvedLaunch {
             vendor: request.vendor,
@@ -153,6 +196,7 @@ impl AcpConfig {
                 interactive: request.interactive,
                 modes: request.modes,
                 required_artifacts,
+                policy,
                 metadata,
             },
         })
@@ -304,6 +348,32 @@ fn absolutize(path: &Path) -> AcpResult<PathBuf> {
     }
 }
 
+fn absolutize_policy(policy: &super::AcpLaunchPolicy) -> AcpResult<super::AcpLaunchPolicy> {
+    Ok(super::AcpLaunchPolicy {
+        allowed_write_paths: policy
+            .allowed_write_paths
+            .iter()
+            .map(|path| absolutize(path))
+            .collect::<AcpResult<Vec<_>>>()?,
+        shell_policy: policy.shell_policy.clone(),
+        enforce_readonly_workspace: policy.enforce_readonly_workspace,
+    })
+}
+
+fn shell_policy_name(policy: &AcpShellCommandPolicy) -> &'static str {
+    match policy {
+        AcpShellCommandPolicy::FullAccess => "full-access",
+        AcpShellCommandPolicy::Allowlist(_) => "allowlist",
+    }
+}
+
+fn shell_policy_commands(policy: &AcpShellCommandPolicy) -> Vec<String> {
+    match policy {
+        AcpShellCommandPolicy::FullAccess => Vec::new(),
+        AcpShellCommandPolicy::Allowlist(commands) => commands.clone(),
+    }
+}
+
 pub fn program_is_executable(program: &str) -> bool {
     let candidate = Path::new(program);
     if candidate.components().count() > 1 {
@@ -360,6 +430,7 @@ mod tests {
                 interactive: false,
             },
             required_artifacts: vec![PathBuf::from("artifacts/summary.toml")],
+            policy: super::super::AcpLaunchPolicy::default(),
         }
     }
 
@@ -473,6 +544,89 @@ mod tests {
                 .get("codexize.permission_mode")
                 .map(String::as_str),
             Some("code")
+        );
+    }
+
+    #[test]
+    fn final_validation_policy_is_exported_to_session_env_and_metadata() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let verdict_path = temp.path().join("artifacts/final_validation_1.toml");
+        let live_summary_path = temp
+            .path()
+            .join("artifacts/live_summary.final-validation-r1.txt");
+        let request = AcpLaunchRequest {
+            cwd: temp.path().to_path_buf(),
+            policy: super::super::AcpLaunchPolicy::final_validation(
+                &verdict_path,
+                &live_summary_path,
+            ),
+            ..sample_request(VendorKind::Codex)
+        };
+
+        let resolved = AcpConfig::default()
+            .resolve(&request)
+            .expect("resolve codex");
+
+        assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
+        assert_eq!(
+            resolved.session.policy.allowed_write_paths,
+            vec![verdict_path.clone(), live_summary_path.clone()]
+        );
+        assert!(resolved.session.policy.enforce_readonly_workspace);
+        assert!(matches!(
+            resolved.session.policy.shell_policy,
+            super::super::AcpShellCommandPolicy::Allowlist(_)
+        ));
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_ALLOWED_WRITE_PATHS")
+                .cloned(),
+            Some(format!(
+                "{}\n{}",
+                verdict_path.display(),
+                live_summary_path.display()
+            ))
+        );
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_SHELL_POLICY")
+                .map(String::as_str),
+            Some("allowlist")
+        );
+        assert!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_ALLOWED_SHELL_COMMANDS")
+                .is_some_and(|commands| commands.contains("git status"))
+        );
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            resolved
+                .session
+                .metadata
+                .get("codexize.shell_policy")
+                .map(String::as_str),
+            Some("allowlist")
+        );
+        assert_eq!(
+            resolved
+                .session
+                .metadata
+                .get("codexize.enforce_readonly_workspace")
+                .map(String::as_str),
+            Some("true")
         );
     }
 

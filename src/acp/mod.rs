@@ -105,6 +105,44 @@ impl AcpPermissionMode {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AcpShellCommandPolicy {
+    #[default]
+    FullAccess,
+    Allowlist(Vec<String>),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AcpLaunchPolicy {
+    pub allowed_write_paths: Vec<PathBuf>,
+    pub shell_policy: AcpShellCommandPolicy,
+    pub enforce_readonly_workspace: bool,
+}
+
+impl AcpLaunchPolicy {
+    pub fn final_validation(
+        verdict_path: impl Into<PathBuf>,
+        live_summary_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
+            shell_policy: AcpShellCommandPolicy::Allowlist(vec![
+                "git status".to_string(),
+                "git log".to_string(),
+                "ls".to_string(),
+                "cat".to_string(),
+                "head".to_string(),
+                "tail".to_string(),
+                "wc".to_string(),
+                "file".to_string(),
+                "find".to_string(),
+                "pwd".to_string(),
+            ]),
+            enforce_readonly_workspace: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
     pub vendor: VendorKind,
@@ -116,6 +154,7 @@ pub struct AcpLaunchRequest {
     pub interactive: bool,
     pub modes: LaunchModes,
     pub required_artifacts: Vec<PathBuf>,
+    pub policy: AcpLaunchPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +176,7 @@ pub struct AcpSessionSpec {
     pub interactive: bool,
     pub modes: LaunchModes,
     pub required_artifacts: Vec<PathBuf>,
+    pub policy: AcpLaunchPolicy,
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -334,6 +374,7 @@ mod tests {
                 interactive: false,
             },
             required_artifacts: vec![PathBuf::from("/tmp/project/summary.toml")],
+            policy: AcpLaunchPolicy::default(),
         }
     }
 

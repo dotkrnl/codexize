@@ -1974,6 +1974,11 @@ impl App {
                     }
                 }
             }
+            Phase::Simplification(_) => {
+                // Launch/finalization for the simplifier stage lands in a
+                // follow-up task; the variant exists today so the build
+                // succeeds with the new state machine in place.
+            }
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused

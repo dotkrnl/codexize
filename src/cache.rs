@@ -1,4 +1,5 @@
 use crate::cache_lock;
+use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -9,12 +10,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const TTL: Duration = Duration::from_secs(30 * 60);
 
-pub const CACHE_VERSION: u32 = 3;
+/// Bump from v3 → v4 because dashboard entries now carry ipbr-specific
+/// phase-score fields and a row-match flag. v3 entries cached old
+/// aistupidlevel scores in axes/`overall_score`; treating those as v4
+/// would let stale aistupidlevel data masquerade as ipbr authority on
+/// load, which the spec explicitly forbids. Quota cache shape and TTL
+/// are unchanged; quotas will simply be re-fetched on first run after
+/// the bump.
+pub const CACHE_VERSION: u32 = 4;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 
 // ---------------------------------------------------------------------------
-// Schema v3 types
+// Schema v4 types
 // ---------------------------------------------------------------------------
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -36,7 +44,11 @@ pub struct Section<T> {
 pub struct DashboardEntry {
     pub vendor: String,
     pub name: String,
+    /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
+    /// auto-selection eligibility, or vendor backfill ordering.
     pub overall_score: f64,
+    /// Cosmetic display-only summary score. Same constraint as
+    /// `overall_score`.
     pub current_score: f64,
     pub standard_error: f64,
     /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
@@ -44,6 +56,21 @@ pub struct DashboardEntry {
     pub axes: Vec<(String, f64)>,
     #[serde(default)]
     pub axis_provenance: BTreeMap<String, String>,
+    /// Per-phase ipbr rank scores. `#[serde(default)]` so a v4 entry
+    /// written before ipbr ingestion lands deserializes with all phases
+    /// `None`, preserving the unscored-vs-known distinction.
+    #[serde(default)]
+    pub ipbr_phase_scores: IpbrPhaseScores,
+    /// Provenance marker for the per-phase scores. Defaults to
+    /// `ScoreSource::None` so a missing field cannot be interpreted as
+    /// `Ipbr` authority.
+    #[serde(default)]
+    pub score_source: ScoreSource,
+    /// `true` when this row matched an ipbr scoreboard row by normalized
+    /// exact key. Defaults to `false` so legacy/inventory-only entries
+    /// do not appear matched.
+    #[serde(default)]
+    pub ipbr_row_matched: bool,
     pub display_order: usize,
     #[serde(default)]
     pub fallback_from: Option<String>,
@@ -240,6 +267,9 @@ mod tests {
             standard_error: 1.5,
             axes: vec![("coding".to_string(), 90.0)],
             axis_provenance,
+            ipbr_phase_scores: IpbrPhaseScores::default(),
+            score_source: ScoreSource::None,
+            ipbr_row_matched: false,
             display_order: 0,
             fallback_from: None,
         }]
@@ -316,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn old_v3_cache_without_quota_resets_loads() {
+    fn current_version_cache_without_quota_resets_loads() {
         let dir = TempDir::new().unwrap();
         let file = serde_json::json!({
             "version": CACHE_VERSION,
@@ -337,6 +367,112 @@ mod tests {
 
         assert!(loaded.quotas.is_some());
         assert!(loaded.quota_resets.is_none());
+    }
+
+    /// A v3 cache file (which only stored aistupidlevel-shaped score data
+    /// in `axes` / `overall_score` and lacked any ipbr-specific fields)
+    /// MUST NOT be readable as a v4 dashboard. Otherwise old aistupidlevel
+    /// scores could masquerade as ipbr phase authority on load — the
+    /// exact failure mode the task 1 schema bump is meant to prevent.
+    #[test]
+    fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
+        let dir = TempDir::new().unwrap();
+        let v3_payload = serde_json::json!({
+            "version": 3,
+            "dashboard": {
+                "fetched_at": now_secs(),
+                "data": [{
+                    "vendor": "claude",
+                    "name": "claude-sonnet",
+                    "overall_score": 85.0,
+                    "current_score": 82.0,
+                    "standard_error": 1.5,
+                    "axes": [["coding", 90.0]],
+                    "axis_provenance": {},
+                    "display_order": 0,
+                    "fallback_from": null
+                }]
+            },
+            "quotas": {
+                "fetched_at": now_secs(),
+                "data": sample_quotas()
+            }
+        });
+        fs::create_dir_all(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            serde_json::to_string(&v3_payload).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_at(dir.path());
+
+        assert!(
+            loaded.dashboard.is_none(),
+            "v3 dashboard must not be readable under v{CACHE_VERSION}"
+        );
+        assert!(
+            loaded.quotas.is_none(),
+            "v3 sections are dropped wholesale; quotas will be re-fetched"
+        );
+    }
+
+    /// A v4 dashboard entry written before ipbr ingestion lands omits the
+    /// new ipbr fields. Loading must default the per-phase scores to
+    /// `None` and the provenance to a non-`Ipbr` value so cached
+    /// aistupidlevel `axes` / `overall_score` cannot pretend to be ipbr
+    /// phase authority.
+    #[test]
+    fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
+        let dir = TempDir::new().unwrap();
+        let payload = serde_json::json!({
+            "version": CACHE_VERSION,
+            "dashboard": {
+                "fetched_at": now_secs(),
+                "data": [{
+                    "vendor": "claude",
+                    "name": "claude-sonnet",
+                    "overall_score": 85.0,
+                    "current_score": 82.0,
+                    "standard_error": 1.5,
+                    "axes": [["coding", 90.0]],
+                    "axis_provenance": {},
+                    "display_order": 0,
+                    "fallback_from": null
+                }]
+            }
+        });
+        fs::create_dir_all(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            serde_json::to_string(&payload).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_at(dir.path());
+        let entry = loaded
+            .dashboard
+            .expect("dashboard section should load")
+            .data
+            .into_iter()
+            .next()
+            .expect("entry should round-trip");
+
+        assert_eq!(entry.ipbr_phase_scores, IpbrPhaseScores::default());
+        assert_eq!(entry.ipbr_phase_scores.idea, None);
+        assert_eq!(entry.ipbr_phase_scores.planning, None);
+        assert_eq!(entry.ipbr_phase_scores.build, None);
+        assert_eq!(entry.ipbr_phase_scores.review, None);
+        assert_ne!(
+            entry.score_source,
+            ScoreSource::Ipbr,
+            "missing provenance must not default to Ipbr"
+        );
+        assert_eq!(entry.score_source, ScoreSource::None);
+        assert!(
+            !entry.ipbr_row_matched,
+            "no ipbr row matched until task 2 runs the ipbr lookup"
+        );
     }
 
     #[test]

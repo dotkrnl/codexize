@@ -1,8 +1,9 @@
 // yolo_exit.rs
 use super::*;
 use crate::{
-    artifacts::ArtifactKind,
+    artifacts::{ArtifactKind, RecoveryArtifact, ReviewStatus},
     state::{self as session_state, LaunchModes, Phase, RunRecord},
+    tasks,
 };
 use std::time::Duration;
 impl App {
@@ -68,7 +69,12 @@ impl App {
             "sharding" => vec![artifacts.join("tasks.toml")],
             "coder" => vec![round_dir.join("coder_summary.toml")],
             "reviewer" => vec![round_dir.join("review.toml")],
-            "recovery" => vec![round_dir.join("recovery.toml")],
+            "recovery" => vec![
+                artifacts.join("spec.md"),
+                artifacts.join("plan.md"),
+                artifacts.join("tasks.toml"),
+                round_dir.join("recovery.toml"),
+            ],
             _ => Vec::new(),
         }
     }
@@ -184,6 +190,43 @@ impl App {
 
     pub(super) fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
         let paths = self.yolo_exit_stage_artifacts(run);
-        !paths.is_empty() && paths.iter().all(|path| Self::artifact_present(path))
+        if paths.is_empty() || !paths.iter().all(|path| Self::artifact_present(path)) {
+            return false;
+        }
+        if run.stage == "recovery" {
+            return self.yolo_recovery_artifacts_ready(run);
+        }
+        true
+    }
+
+    fn yolo_recovery_artifacts_ready(&self, run: &RunRecord) -> bool {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+        let recovery_path = session_dir
+            .join("rounds")
+            .join(format!("{:03}", run.round))
+            .join("recovery.toml");
+
+        if super::prompts::validate_stage_toml_writes(&session_dir, "recovery", run.round).is_err()
+        {
+            return false;
+        }
+        if tasks::validate(&tasks_path).is_err() {
+            return false;
+        }
+
+        let Ok(text) = std::fs::read_to_string(&recovery_path) else {
+            return false;
+        };
+        let Ok(artifact) = toml::from_str::<RecoveryArtifact>(&text) else {
+            return false;
+        };
+        if artifact.summary.trim().is_empty() {
+            return false;
+        }
+        if artifact.status != ReviewStatus::Approved && artifact.feedback.is_empty() {
+            return false;
+        }
+        true
     }
 }

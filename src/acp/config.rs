@@ -631,6 +631,62 @@ mod tests {
     }
 
     #[test]
+    fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let simplification_path = temp.path().join("rounds/001/simplification.toml");
+        let live_summary_path = temp
+            .path()
+            .join("artifacts/live_summary.simplifier-stage-r1-a1.txt");
+        let request = AcpLaunchRequest {
+            cwd: temp.path().to_path_buf(),
+            policy: super::super::AcpLaunchPolicy::simplifier(
+                &simplification_path,
+                &live_summary_path,
+            ),
+            ..sample_request(VendorKind::Codex)
+        };
+
+        let resolved = AcpConfig::default()
+            .resolve(&request)
+            .expect("resolve codex");
+
+        // Code-producing parity with coder/reviewer: Code permission mode,
+        // workspace not enforced read-only, shell policy is full access.
+        assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
+        assert!(!resolved.session.policy.enforce_readonly_workspace);
+        assert!(matches!(
+            resolved.session.policy.shell_policy,
+            super::super::AcpShellCommandPolicy::FullAccess
+        ));
+        // Mandatory write paths still advertised so the runtime can surface
+        // misrouted required-output writes.
+        assert_eq!(
+            resolved.session.policy.allowed_write_paths,
+            vec![simplification_path.clone(), live_summary_path.clone()]
+        );
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_ALLOWED_WRITE_PATHS")
+                .cloned(),
+            Some(format!(
+                "{}\n{}",
+                simplification_path.display(),
+                live_summary_path.display()
+            ))
+        );
+        assert_eq!(
+            resolved
+                .spawn
+                .env
+                .get("CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE")
+                .map(String::as_str),
+            Some("false")
+        );
+    }
+
+    #[test]
     fn claude_acp_local_program_lives_under_home_codexize_acp() {
         let _guard = crate::state::test_fs_lock()
             .lock()

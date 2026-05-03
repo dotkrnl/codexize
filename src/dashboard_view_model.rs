@@ -103,38 +103,48 @@ pub(crate) fn merge_with_warnings(
         .map(|s| (s.name.clone(), s))
         .collect();
 
-    let mut models: Vec<DashboardModel> = inventory
-        .into_iter()
-        .map(|inv| {
-            if let Some(sc) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) {
-                dashboard_model_from_score(inv.name, &inv.vendor, sc, None)
-            } else if let Some(sc) = legacy_score_map.get(&inv.name) {
-                dashboard_model_from_score(inv.name, &inv.vendor, sc, None)
-            } else if let Some(sc) = sibling_score(&inv.name, &scores) {
-                dashboard_model_from_score(inv.name, &inv.vendor, sc, Some(sc.name.clone()))
-            } else {
-                DashboardModel {
-                    name: inv.name,
-                    vendor: inv.vendor,
-                    overall_score: 0.0,
-                    current_score: 0.0,
-                    standard_error: 0.0,
-                    axes: Vec::new(),
-                    axis_provenance: BTreeMap::new(),
-                    ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-                    score_source: crate::selection::ScoreSource::None,
-                    ipbr_row_matched: false,
-                    display_order: inv.display_order + 10_000,
-                    fallback_from: None,
-                }
-            }
-        })
-        .collect();
+    let mut consumed_ipbr_scores = BTreeSet::new();
+    let mut models: Vec<DashboardModel> = Vec::with_capacity(inventory.len());
+    for inv in inventory {
+        if let Some(score_index) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) {
+            consumed_ipbr_scores.insert(*score_index);
+            models.push(dashboard_model_from_score(
+                inv.name,
+                &inv.vendor,
+                &scores[*score_index],
+                None,
+            ));
+        } else if let Some(sc) = legacy_score_map.get(&inv.name) {
+            models.push(dashboard_model_from_score(inv.name, &inv.vendor, sc, None));
+        } else if let Some(sc) = sibling_score(&inv.name, &scores) {
+            models.push(dashboard_model_from_score(
+                inv.name,
+                &inv.vendor,
+                sc,
+                Some(sc.name.clone()),
+            ));
+        } else {
+            models.push(DashboardModel {
+                name: inv.name,
+                vendor: inv.vendor,
+                overall_score: 0.0,
+                current_score: 0.0,
+                standard_error: 0.0,
+                axes: Vec::new(),
+                axis_provenance: BTreeMap::new(),
+                ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+                score_source: crate::selection::ScoreSource::None,
+                ipbr_row_matched: false,
+                display_order: inv.display_order + 10_000,
+                fallback_from: None,
+            });
+        }
+    }
 
     let inv_names: std::collections::HashSet<String> =
         models.iter().map(|m| m.name.clone()).collect();
-    for sc in &scores {
-        if !inv_names.contains(&sc.name) {
+    for (score_index, sc) in scores.iter().enumerate() {
+        if !consumed_ipbr_scores.contains(&score_index) && !inv_names.contains(&sc.name) {
             models.push(dashboard_model_from_score(
                 sc.name.clone(),
                 &sc.vendor,
@@ -363,12 +373,12 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
         })
 }
 
-struct IpbrLookup<'a> {
-    matches: HashMap<String, &'a ScoreEntry>,
+struct IpbrLookup {
+    matches: HashMap<String, usize>,
     warnings: Vec<String>,
 }
 
-fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup<'_> {
+fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup {
     let mut owners: HashMap<String, usize> = HashMap::new();
     let mut collisions: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
 
@@ -394,10 +404,7 @@ fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup<'_> {
         owners.remove(key);
     }
 
-    let matches = owners
-        .into_iter()
-        .map(|(key, index)| (key, &scores[index]))
-        .collect();
+    let matches = owners.into_iter().collect();
     let warnings = collisions
         .into_iter()
         .map(|(key, row_indexes)| {
@@ -537,6 +544,19 @@ mod tests {
         assert_eq!(model.score_source, ScoreSource::Ipbr);
         assert_eq!(model.ipbr_phase_scores.build, Some(93.0));
         assert_eq!(model.fallback_from, None);
+    }
+
+    #[test]
+    fn merge_does_not_readd_ipbr_row_consumed_by_normalized_inventory_match() {
+        let models = merge(
+            vec![inventory("claude-opus-4.1", 0)],
+            vec![ipbr_score("Claude Opus 4.1", None, &[], 91.0, 3)],
+        );
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "claude-opus-4.1");
+        assert_eq!(models[0].score_source, ScoreSource::Ipbr);
+        assert_eq!(models[0].ipbr_phase_scores.build, Some(93.0));
     }
 
     #[test]

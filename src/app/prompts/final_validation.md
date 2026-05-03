@@ -57,7 +57,7 @@ never gaps.
 
 Outputs (the ONLY two paths you may Write):
   - {verdict} — the verdict TOML.
-  - {live_summary} — the live progress summary (rules below).
+  - {live_summary} — the live progress summary (rules below).{simplification_block}
 
 Verdict TOML schema (validated programmatically; parse failure or schema
 violation = run failure):

@@ -1706,8 +1706,17 @@ impl App {
         let attempt = self.attempt_for("final-validation", None, round);
         let live_summary_path =
             self.live_summary_path_for_run("final-validation", None, round, attempt);
-        let prompt =
-            final_validation_prompt(&idea_text, &spec_text, &verdict_path, &live_summary_path);
+        let simplification_path = session_dir
+            .join("rounds")
+            .join(format!("{round:03}"))
+            .join("simplification.toml");
+        let prompt = final_validation_prompt(
+            &idea_text,
+            &spec_text,
+            &verdict_path,
+            &live_summary_path,
+            Some(&simplification_path),
+        );
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("final-validation-r{round}.md"));

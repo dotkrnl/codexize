@@ -1341,6 +1341,24 @@ fn skip_modal_accept_generates_artifacts_and_enters_impl_round_one() {
 }
 
 #[test]
+fn skip_modal_accept_nothing_to_do_bypasses_final_validation_and_finishes() {
+    with_temp_root(|| {
+        let session_id = "skip-accept-nothing-to-do";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::SkipToImplPending;
+        state.skip_to_impl_rationale = Some("already complete".to_string());
+        state.skip_to_impl_kind = Some(crate::artifacts::SkipToImplKind::NothingToDo);
+
+        let mut app = idle_app(state);
+        app.accept_skip_to_implementation()
+            .expect("accept should succeed");
+
+        assert_eq!(app.state.current_phase, Phase::Done);
+        assert_eq!(app.state.validation_attempts, 0);
+    });
+}
+
+#[test]
 fn enter_builder_recovery_sets_interactive_for_human_blocked() {
     with_temp_root(|| {
         let mut state = SessionState::new("recovery-interactive".to_string());

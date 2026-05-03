@@ -76,13 +76,26 @@ pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
 pub struct DashboardModel {
     pub name: String,
     pub vendor: String,
+    /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
+    /// auto-selection eligibility, or vendor backfill ordering.
     pub overall_score: f64,
+    /// Cosmetic display-only summary score. Same constraint as
+    /// `overall_score`.
     pub current_score: f64,
     pub standard_error: f64,
     /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
     /// lowercased camelCase. Backfill semantics are owned by the selection layer.
     pub axes: Vec<(String, f64)>,
     pub axis_provenance: BTreeMap<String, String>,
+    /// Per-phase ipbr rank scores. Defaults to all-`None` until task 2
+    /// lands ipbr ingestion.
+    pub ipbr_phase_scores: crate::selection::IpbrPhaseScores,
+    /// Where the per-phase rank scores came from. Defaults to
+    /// `ScoreSource::None`; only `Ipbr` may drive automatic selection.
+    pub score_source: crate::selection::ScoreSource,
+    /// `true` when this model matched an ipbr row by normalized exact
+    /// key. Inventory-/CLI-only visible models keep this `false`.
+    pub ipbr_row_matched: bool,
     pub display_order: usize,
     /// Set when this model's score was borrowed from a same-stem sibling
     /// because the ranking API has no entry for it yet. Holds the sibling's
@@ -252,6 +265,9 @@ mod tests {
             standard_error: 0.0,
             axes: Vec::new(),
             axis_provenance: BTreeMap::new(),
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+            score_source: crate::selection::ScoreSource::None,
+            ipbr_row_matched: false,
             display_order: 0,
             fallback_from: None,
         }
@@ -279,6 +295,9 @@ mod tests {
                 standard_error: entry.standard_error,
                 axes: entry.axes,
                 axis_provenance: entry.axis_provenance,
+                ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+                score_source: crate::selection::ScoreSource::None,
+                ipbr_row_matched: false,
                 quota_percent: Some(80),
                 quota_resets_at: None,
                 display_order: entry.display_order,

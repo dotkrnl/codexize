@@ -46,6 +46,9 @@ pub(crate) fn merge(
                     standard_error: 0.0,
                     axes: Vec::new(),
                     axis_provenance: BTreeMap::new(),
+                    ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+                    score_source: crate::selection::ScoreSource::None,
+                    ipbr_row_matched: false,
                     display_order: inv.display_order + 10_000,
                     fallback_from: None,
                 }
@@ -81,6 +84,9 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             standard_error: sc.standard_error,
             axes: sc.axes,
             axis_provenance: sc.axis_provenance,
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+            score_source: crate::selection::ScoreSource::None,
+            ipbr_row_matched: false,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -98,6 +104,9 @@ pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
             standard_error: 0.0,
             axes: Vec::new(),
             axis_provenance: BTreeMap::new(),
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+            score_source: crate::selection::ScoreSource::None,
+            ipbr_row_matched: false,
             display_order: inv.display_order,
             fallback_from: None,
         })
@@ -133,6 +142,12 @@ pub fn synthesize_sibling(
         standard_error: sibling.standard_error,
         axes: sibling.axes.clone(),
         axis_provenance: sibling.axis_provenance.clone(),
+        // Sibling-synthesized models inherit cosmetic display state but
+        // MUST NOT inherit ipbr authority — only an explicit ipbr row
+        // match may set those fields. See spec "Model Matching".
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        score_source: crate::selection::ScoreSource::None,
+        ipbr_row_matched: false,
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
@@ -226,6 +241,12 @@ fn dashboard_model_from_score(
         standard_error: sc.standard_error,
         axes: sc.axes.clone(),
         axis_provenance: sc.axis_provenance.clone(),
+        // Aistupidlevel score parsing populates cosmetic fields only.
+        // ipbr phase scores stay `None` until task 2 lands ingestion;
+        // selection MUST treat this model as unranked for now.
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        score_source: crate::selection::ScoreSource::None,
+        ipbr_row_matched: false,
         display_order: sc.display_order,
         fallback_from,
     }

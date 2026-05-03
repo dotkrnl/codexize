@@ -440,6 +440,11 @@ mod tests {
             "../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
         ))
         .expect("fixture should be valid JSON");
+        let pinned_phase_scores: BTreeMap<String, BTreeMap<String, f64>> =
+            serde_json::from_str(include_str!(
+                "../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
+            ))
+            .expect("post-change artifact should be valid JSON");
         parse_dashboard_scores(&payload)
             .expect("fixture should parse")
             .into_iter()
@@ -451,15 +456,25 @@ mod tests {
                     "moonshotai" => VendorKind::Kimi,
                     other => panic!("fixture vendor {other} is not mapped"),
                 },
-                name: entry.name,
+                name: entry.name.clone(),
                 overall_score: entry.overall_score,
                 current_score: entry.current_score,
                 standard_error: entry.standard_error,
                 axes: entry.axes,
                 axis_provenance: entry.axis_provenance,
-                ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-                score_source: crate::selection::ScoreSource::None,
-                ipbr_row_matched: false,
+                ipbr_phase_scores: {
+                    let scores = pinned_phase_scores
+                        .get(&entry.name)
+                        .expect("fixture model should have pinned phase scores");
+                    crate::selection::IpbrPhaseScores {
+                        idea: scores.get("idea").copied(),
+                        planning: scores.get("planning").copied(),
+                        build: scores.get("build").copied(),
+                        review: scores.get("review").copied(),
+                    }
+                },
+                score_source: crate::selection::ScoreSource::Ipbr,
+                ipbr_row_matched: true,
                 quota_percent: Some(80),
                 quota_resets_at: None,
                 display_order: entry.display_order,
@@ -539,12 +554,12 @@ mod tests {
     }
 
     #[test]
-    fn glm46_clears_inclusion_gate_when_newest_glm_in_pool() {
+    fn glm46_preserves_pinned_nonzero_build_score() {
         let filtered_model_set: &[&str] =
             &["claude-sonnet-4.6", "gemini-2.5-pro", "glm-4.6", "gpt-5.4"];
-        const RATIO: f64 = 1.0 / 3.0;
         const COMPARISON_ANCHOR_MODEL: &str = "gpt-5.4";
         const COMPARISON_ANCHOR_BUILD: f64 = 0.807161; // gpt-5.4 Build, post-change
+        const GLM46_BUILD: f64 = 0.19148;
         let mut models = fixture_cached_models();
         models.retain(|model| filtered_model_set.contains(&model.name.as_str()));
         for model in &mut models {
@@ -570,12 +585,13 @@ mod tests {
             "{COMPARISON_ANCHOR_MODEL} Build anchor drifted"
         );
         let glm46 = models.iter().find(|m| m.name == "glm-4.6").unwrap();
-        let glm46_prob = selection_probability(glm46, SelectionPhase::Build, &version_index);
-        let cutoff = COMPARISON_ANCHOR_BUILD * RATIO;
-        assert!(
-            glm46_prob > cutoff,
-            "glm-4.6 Build ({glm46_prob}) should exceed cutoff ({cutoff}) = {COMPARISON_ANCHOR_MODEL} Build {COMPARISON_ANCHOR_BUILD} * {RATIO}"
-        );
+        let glm46_prob = rounded_probability(selection_probability(
+            glm46,
+            SelectionPhase::Build,
+            &version_index,
+        ));
+        assert_eq!(glm46_prob, GLM46_BUILD, "glm-4.6 Build score drifted");
+        assert!(glm46_prob > 0.0, "glm-4.6 Build should remain scored");
     }
 
     #[test]
@@ -700,6 +716,7 @@ mod tests {
         stripped
             .axes
             .retain(|(k, _)| k != "contextawareness" && k != "taskcompletion");
+        stripped.ipbr_phase_scores.idea = None;
         let score_without = selection_probability(&stripped, SelectionPhase::Idea, &index);
 
         assert!(

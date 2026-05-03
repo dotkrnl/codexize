@@ -325,6 +325,14 @@ pub(super) fn rank_to_axis_score_inner(rank: u8) -> f64 {
     }
 }
 
+fn rank_to_ipbr_score(rank: u8) -> f64 {
+    // Keep test picks effectively deterministic under the softmax sampler:
+    // adjacent fixture ranks should be separated enough that rank 1 wins
+    // whenever it is present, while retry exclusion can still advance to
+    // rank 2/3 after the earlier model has failed.
+    100.0 - (f64::from(rank.saturating_sub(1)) * 100.0)
+}
+
 pub(super) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::CachedModel {
     let idea = rank_to_axis_score_inner(idea_rank);
     let build = rank_to_axis_score_inner(build_rank);
@@ -347,9 +355,14 @@ pub(super) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selecti
             ("taskcompletion".to_string(), idea),
         ],
         axis_provenance: std::collections::BTreeMap::new(),
-        ipbr_phase_scores: selection::IpbrPhaseScores::default(),
-        score_source: selection::ScoreSource::None,
-        ipbr_row_matched: false,
+        ipbr_phase_scores: selection::IpbrPhaseScores {
+            idea: Some(rank_to_ipbr_score(idea_rank)),
+            planning: Some(rank_to_ipbr_score(idea_rank)),
+            build: Some(rank_to_ipbr_score(build_rank)),
+            review: Some(rank_to_ipbr_score(build_rank)),
+        },
+        score_source: selection::ScoreSource::Ipbr,
+        ipbr_row_matched: true,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 0,
@@ -390,9 +403,14 @@ pub(super) fn ranked_model(
             ("taskcompletion".to_string(), 0.3),
         ],
         axis_provenance: std::collections::BTreeMap::new(),
-        ipbr_phase_scores: selection::IpbrPhaseScores::default(),
-        score_source: selection::ScoreSource::None,
-        ipbr_row_matched: false,
+        ipbr_phase_scores: selection::IpbrPhaseScores {
+            idea: Some(rank_to_ipbr_score(planning_rank)),
+            planning: Some(rank_to_ipbr_score(planning_rank)),
+            build: Some(rank_to_ipbr_score(build_rank)),
+            review: Some(rank_to_ipbr_score(review_rank)),
+        },
+        score_source: selection::ScoreSource::Ipbr,
+        ipbr_row_matched: true,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 0,

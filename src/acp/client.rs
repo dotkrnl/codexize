@@ -1130,6 +1130,7 @@ mod tests {
             interactive: false,
             modes: LaunchModes::default(),
             required_artifacts: Vec::new(),
+            policy: super::super::AcpLaunchPolicy::default(),
             metadata: BTreeMap::new(),
         }
     }

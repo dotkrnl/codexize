@@ -1,8 +1,9 @@
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use crate::{
     acp::{
-        AcpCompletionEvent, AcpConfig, AcpConnector, AcpLaunchRequest, AcpRuntimeEvent,
-        AcpTextAccumulator, AcpTextBoundary, PromptPayload, SubprocessConnector, translate_update,
+        AcpCompletionEvent, AcpConfig, AcpConnector, AcpLaunchPolicy, AcpLaunchRequest,
+        AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, PromptPayload, SubprocessConnector,
+        translate_update,
     },
     adapters::AgentRun,
     selection::VendorKind,
@@ -177,6 +178,7 @@ fn build_managed_acp_launch(
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
     interactive: bool,
+    policy: AcpLaunchPolicy,
 ) -> Result<ManagedAcpLaunch> {
     let cwd = std::env::current_dir().context("failed to capture launch cwd")?;
     let request = AcpLaunchRequest {
@@ -195,6 +197,7 @@ fn build_managed_acp_launch(
             .into_iter()
             .map(Path::to_path_buf)
             .collect(),
+        policy,
     };
     let resolved = AcpConfig::default()
         .resolve(&request)
@@ -272,6 +275,17 @@ fn working_tree_clean() -> bool {
         .filter(|output| output.status.success())
         .map(|output| output.stdout.is_empty())
         .unwrap_or(false)
+}
+
+fn git_status_porcelain() -> Result<String> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .context("failed to run git status --porcelain")?;
+    if !output.status.success() {
+        bail!("git status --porcelain failed with exit {}", output.status);
+    }
+    String::from_utf8(output.stdout).context("git status --porcelain emitted non-UTF-8 output")
 }
 
 fn stamp_stabilize_budget() -> Duration {
@@ -498,6 +512,37 @@ fn write_finish_stamp_for_outcome(
     write_finish_stamp(stamp_path, &stamp)
 }
 
+fn enforce_readonly_workspace_policy(
+    launch: &ManagedAcpLaunch,
+    head_before: &str,
+    git_status_before: Option<&str>,
+) -> Result<()> {
+    if !launch.resolved.session.policy.enforce_readonly_workspace {
+        return Ok(());
+    }
+
+    let head_after = git_rev_parse_head().unwrap_or_default();
+    if head_after != head_before {
+        bail!(
+            "ACP launch violated read-only workspace policy: HEAD changed from {head_before} to {head_after}"
+        );
+    }
+
+    let Some(git_status_before) = git_status_before else {
+        bail!("ACP launch violated read-only workspace policy: missing pre-run git status");
+    };
+    let git_status_after = git_status_porcelain()?;
+    if git_status_after != git_status_before {
+        bail!(
+            "ACP launch violated read-only workspace policy: git status changed from {:?} to {:?}",
+            git_status_before,
+            git_status_after
+        );
+    }
+
+    Ok(())
+}
+
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
@@ -505,6 +550,16 @@ fn run_managed_acp_launch(
     waiting_for_input: std::sync::Arc<AtomicBool>,
 ) -> Result<ManagedAcpOutcome> {
     let head_before = git_rev_parse_head().unwrap_or_default();
+    // Final validation is allowed to update its ignored artifact files, so the
+    // ACP-side write allowlist carries those exact paths while the runner
+    // enforces that no git-visible workspace state changes during the run.
+    let git_status_before = launch
+        .resolved
+        .session
+        .policy
+        .enforce_readonly_workspace
+        .then(git_status_porcelain)
+        .transpose()?;
     let connector = SubprocessConnector;
     let mut session = connector
         .connect(&launch.resolved)
@@ -605,6 +660,7 @@ fn run_managed_acp_launch(
         }
     };
 
+    enforce_readonly_workspace_policy(&launch, &head_before, git_status_before.as_deref())?;
     write_finish_stamp_for_outcome(&launch.stamp_path, head_before, &outcome)?;
     Ok(outcome)
 }
@@ -876,6 +932,7 @@ pub fn launch_interactive(
         artifacts_dir,
         required_artifact,
         true,
+        AcpLaunchPolicy::default(),
     )?;
     launch_managed_acp_window(window_name, launch)
 }
@@ -899,6 +956,29 @@ pub fn launch_noninteractive(
         artifacts_dir,
         required_artifact,
         false,
+        AcpLaunchPolicy::default(),
+    )?;
+    launch_managed_acp_window(window_name, launch)
+}
+
+pub fn launch_noninteractive_with_policy(
+    window_name: &str,
+    run: &AgentRun,
+    vendor: VendorKind,
+    run_key: &str,
+    artifacts_dir: &Path,
+    required_artifact: Option<&Path>,
+    policy: AcpLaunchPolicy,
+) -> Result<()> {
+    let launch = build_managed_acp_launch(
+        window_name,
+        vendor,
+        run,
+        run_key,
+        artifacts_dir,
+        required_artifact,
+        false,
+        policy,
     )?;
     launch_managed_acp_window(window_name, launch)
 }

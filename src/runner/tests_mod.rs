@@ -245,6 +245,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
                 interactive: true,
                 modes: crate::state::LaunchModes::default(),
                 required_artifacts: Vec::new(),
+                policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -297,6 +298,7 @@ fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> Man
                 interactive: true,
                 modes: crate::state::LaunchModes::default(),
                 required_artifacts: Vec::new(),
+                policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -931,6 +933,7 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
                 interactive: true,
                 modes: crate::state::LaunchModes::default(),
                 required_artifacts: Vec::new(),
+                policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
         },
@@ -1152,6 +1155,9 @@ while IFS= read -r line; do
                 mkdir -p "$(dirname "$artifact")"
                 printf 'status = "ok"\n' > "$artifact"
             fi
+            if [ "$mode" = "mutate_workspace" ]; then
+                printf 'mutated\n' > tracked.txt
+            fi
             if [ -n "$thought_text" ]; then
                 printf '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"%s"}}}}\n' "$thought_text"
             fi
@@ -1314,6 +1320,63 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
             assert!(
                 msg.contains("agent CLI not found"),
                 "unexpected error: {msg}"
+            );
+        },
+    );
+}
+
+#[test]
+#[ignore = "managed ACP subprocess integration; run explicitly with --ignored"]
+fn acp_launch_with_final_validation_policy_rejects_workspace_mutation() {
+    let dir = tempfile::TempDir::new().unwrap();
+    init_git_repo(dir.path());
+    let script = write_test_acp_script(dir.path());
+    let run = launch_test_run(dir.path());
+    let artifacts_dir = dir.path().join("artifacts");
+    let verdict_path = artifacts_dir.join("final_validation_1.toml");
+    let live_summary_path = artifacts_dir.join("live_summary.final-validation-r1.txt");
+    let stamp_path = artifacts_dir
+        .join("run-finish")
+        .join("final-validation-run.toml");
+    let cause_path = artifacts_dir
+        .join("run-finish")
+        .join("final-validation-run.cause.txt");
+    with_test_env(
+        dir.path(),
+        &[
+            (
+                "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                Some(script.display().to_string()),
+            ),
+            ("ACP_TEST_MODE", Some("mutate_workspace".to_string())),
+            (
+                "ACP_TEST_ARTIFACT",
+                Some(verdict_path.display().to_string()),
+            ),
+        ],
+        || {
+            launch_noninteractive_with_policy(
+                "[FinalValidation]",
+                &run,
+                VendorKind::Codex,
+                "final-validation-run",
+                &artifacts_dir,
+                Some(&verdict_path),
+                crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
+            )
+            .expect("launch ACP run");
+
+            wait_for_run_label_to_finish("[FinalValidation]");
+            let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
+            assert_eq!(stamp.exit_code, 1);
+            let cause = fs::read_to_string(&cause_path).expect("read launch cause");
+            assert!(
+                cause.contains("read-only workspace policy"),
+                "unexpected cause text: {cause}"
+            );
+            assert_eq!(
+                fs::read_to_string(dir.path().join("tracked.txt")).expect("tracked file"),
+                "mutated\n"
             );
         },
     );

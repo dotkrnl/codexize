@@ -15,6 +15,7 @@ pub enum StageKey {
     PlanReview,
     Sharding,
     BuilderLoop,
+    FinalValidation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -88,6 +89,7 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
         build_review_stage(state, "plan-review", "Plan Review"),
         build_simple_stage(state, "sharding", "Sharding"),
         build_builder_stage(state),
+        build_final_validation_stage(state),
     ];
     for node in &mut nodes {
         collapse_tree(node);
@@ -329,6 +331,7 @@ fn stage_key_for(index: Option<usize>, path: &[usize]) -> Option<StageKey> {
         4 => Some(StageKey::PlanReview),
         5 => Some(StageKey::Sharding),
         6 => Some(StageKey::BuilderLoop),
+        7 => Some(StageKey::FinalValidation),
         _ => None,
     }
 }
@@ -743,6 +746,47 @@ fn build_builder_stage(state: &SessionState) -> Node {
     }
 }
 
+fn build_final_validation_stage(state: &SessionState) -> Node {
+    let runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "final-validation")
+        .collect();
+    let latest = latest_attempts(&runs);
+    let status = stage_status_from_runs(&latest, state, "final-validation");
+    let summary = stage_summary(state, "final-validation", "Final Validation", &latest);
+    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
+    for run in &runs {
+        rounds.entry(run.round).or_default().push(*run);
+    }
+    let mut children = Vec::new();
+    for (round_num, round_runs) in rounds {
+        let mut round_children = Vec::new();
+        for run in &round_runs {
+            round_children.push(agent_run_node(run));
+        }
+        let round_status = rollup_status(&round_runs);
+        children.push(Node {
+            label: format!("Round {}", round_num),
+            kind: NodeKind::Round,
+            status: round_status,
+            summary: String::new(),
+            children: round_children,
+            run_id: None,
+            leaf_run_id: None,
+        });
+    }
+    Node {
+        label: "Final Validation".to_string(),
+        kind: NodeKind::Stage,
+        status,
+        summary,
+        children,
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
+
 fn attempt_run_node(run: &RunRecord) -> Node {
     Node {
         label: format!("Attempt {}", run.attempt),
@@ -854,6 +898,7 @@ fn stage_status_from_runs(
             | ("sharding", Phase::ShardingRunning)
             | ("coder", Phase::ImplementationRound(_))
             | ("reviewer", Phase::ReviewRound(_))
+            | ("final-validation", Phase::FinalValidation(_))
     );
     if phase_matches && state.agent_error.is_some() {
         return NodeStatus::Failed;
@@ -900,6 +945,10 @@ fn stage_status_from_runs(
                     | Phase::PlanReviewRunning
                     | Phase::PlanReviewPaused
             ),
+            // Final validation is pending across every pre-validation phase.
+            // Done/BlockedNeedsUser without runs falls through to the
+            // skip/Done resolution below (yolo or nothing-to-do bypass).
+            ("final-validation", p) => !matches!(p, Phase::Done | Phase::BlockedNeedsUser),
             _ => false,
         };
         if is_pending {
@@ -913,6 +962,14 @@ fn stage_status_from_runs(
                 stage_key,
                 "spec-review" | "planning" | "plan-review" | "sharding"
             )
+        {
+            return NodeStatus::Skipped;
+        }
+        // Yolo and nothing-to-do skip final validation. Surface that bypass
+        // explicitly so the operator distinguishes "validated → done" from
+        // "skipped validation → done".
+        if stage_key == "final-validation"
+            && (state.modes.yolo || state.skip_to_impl_kind.is_some())
         {
             return NodeStatus::Skipped;
         }

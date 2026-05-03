@@ -4,7 +4,8 @@ use super::types::{CachedModel, QuotaError, VendorKind};
 use super::vendor;
 use crate::acp::AcpConfig;
 use crate::cache::{self, DashboardEntry, LoadedCache, QuotaPayload, ResetPayload};
-use crate::dashboard;
+use crate::dashboard::{self, LoadOutcome};
+use crate::selection::ScoreSource;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -106,26 +107,23 @@ fn assemble_from_cache_with_available(
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
         match dashboard::load_models() {
-            Ok(fresh) => {
-                let entries: Vec<DashboardEntry> = fresh
-                    .iter()
-                    .map(|m| DashboardEntry {
-                        vendor: m.vendor.clone(),
-                        name: m.name.clone(),
-                        overall_score: m.overall_score,
-                        current_score: m.current_score,
-                        standard_error: m.standard_error,
-                        axes: m.axes.clone(),
-                        axis_provenance: m.axis_provenance.clone(),
-                        ipbr_phase_scores: m.ipbr_phase_scores,
-                        score_source: m.score_source,
-                        ipbr_row_matched: m.ipbr_row_matched,
-                        display_order: m.display_order,
-                        fallback_from: m.fallback_from.clone(),
-                    })
-                    .collect();
+            Ok(LoadOutcome::Both(fresh)) => {
+                let entries = dashboard_models_to_entries(&fresh);
                 let _ = cache::save_dashboard(&entries);
                 entries
+            }
+            Ok(LoadOutcome::InventoryOnly {
+                models,
+                score_error,
+            }) => {
+                quota_errors.push(QuotaError {
+                    vendor: VendorKind::Claude,
+                    message: format!("dashboard fetch failed: {score_error}"),
+                });
+                resolve_score_failure_entries(
+                    cached_dashboard,
+                    dashboard_models_to_entries(&models),
+                )
             }
             Err(e) => {
                 quota_errors.push(QuotaError {
@@ -339,6 +337,48 @@ fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool
         };
         models.keys().any(|name| !reset_models.contains_key(name))
     })
+}
+
+/// On ipbr score fetch/parse failure: prefer the previously cached entries
+/// when they carry any ipbr-sourced rows, so a transient ipbr outage does
+/// not wipe out the last known ranking authority. Fall through to the
+/// inventory-only refresh only when no cached ipbr data exists, leaving
+/// inventory-visible models present with phase scores `None`. The caller
+/// MUST NOT persist the result — letting the next successful refresh write
+/// fresh ipbr data without first being suppressed by a cached inv-only
+/// snapshot.
+fn resolve_score_failure_entries(
+    cached: Vec<DashboardEntry>,
+    inventory_only: Vec<DashboardEntry>,
+) -> Vec<DashboardEntry> {
+    if cached
+        .iter()
+        .any(|entry| entry.score_source == ScoreSource::Ipbr)
+    {
+        cached
+    } else {
+        inventory_only
+    }
+}
+
+fn dashboard_models_to_entries(models: &[dashboard::DashboardModel]) -> Vec<DashboardEntry> {
+    models
+        .iter()
+        .map(|m| DashboardEntry {
+            vendor: m.vendor.clone(),
+            name: m.name.clone(),
+            overall_score: m.overall_score,
+            current_score: m.current_score,
+            standard_error: m.standard_error,
+            axes: m.axes.clone(),
+            axis_provenance: m.axis_provenance.clone(),
+            ipbr_phase_scores: m.ipbr_phase_scores,
+            score_source: m.score_source,
+            ipbr_row_matched: m.ipbr_row_matched,
+            display_order: m.display_order,
+            fallback_from: m.fallback_from.clone(),
+        })
+        .collect()
 }
 
 fn parse_vendor_str(s: &str) -> Option<VendorKind> {
@@ -1013,6 +1053,51 @@ mod tests {
             }
         }
         assert!(models.is_empty(), "no cache should yield empty model list");
+    }
+
+    #[test]
+    fn score_failure_prefers_cached_ipbr_entries_over_inventory_only() {
+        let mut cached_with_ipbr = make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0);
+        cached_with_ipbr.score_source = ScoreSource::Ipbr;
+        cached_with_ipbr.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+            idea: Some(70.0),
+            planning: Some(72.0),
+            build: Some(73.0),
+            review: Some(71.0),
+        };
+        let cached = vec![cached_with_ipbr];
+        let inv_only = vec![make_entry("claude-sonnet-4-6", "claude", 0.0, 0.0)];
+
+        let resolved = resolve_score_failure_entries(cached.clone(), inv_only);
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].score_source, ScoreSource::Ipbr);
+        assert_eq!(resolved[0].ipbr_phase_scores.build, Some(73.0));
+    }
+
+    #[test]
+    fn score_failure_falls_back_to_inventory_only_when_no_cached_ipbr() {
+        // No cached row carries `ScoreSource::Ipbr`, so the inventory-only
+        // refresh must still surface so the strip is not blank — phase
+        // scores stay `None` until ipbr recovers.
+        let cached = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+        let inv_only = vec![make_entry("gpt-5.4", "openai", 0.0, 0.0)];
+
+        let resolved = resolve_score_failure_entries(cached, inv_only);
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "gpt-5.4");
+        assert_eq!(resolved[0].score_source, ScoreSource::None);
+    }
+
+    #[test]
+    fn score_failure_falls_back_to_inventory_only_when_cache_is_empty() {
+        let inv_only = vec![make_entry("claude-sonnet-4-6", "claude", 0.0, 0.0)];
+
+        let resolved = resolve_score_failure_entries(Vec::new(), inv_only);
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "claude-sonnet-4-6");
     }
 
     #[test]

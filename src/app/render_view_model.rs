@@ -89,7 +89,7 @@ pub fn final_validation_report_lines(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled(format!("{indent}"), dim),
+        Span::styled(indent.to_string(), dim),
         Span::styled(
             "Validation report",
             Style::default().add_modifier(Modifier::BOLD),
@@ -98,13 +98,13 @@ pub fn final_validation_report_lines(
         Span::styled(status_text.to_string(), status_style),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(format!("{indent}"), dim),
+        Span::styled(indent.to_string(), dim),
         Span::styled("Summary: ", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(verdict.summary.clone()),
     ]));
     if !verdict.findings.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(format!("{indent}"), dim),
+            Span::styled(indent.to_string(), dim),
             Span::styled("Findings:", Style::default().add_modifier(Modifier::BOLD)),
         ]));
         for finding in &verdict.findings {
@@ -116,7 +116,7 @@ pub fn final_validation_report_lines(
     }
     if !verdict.gaps.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(format!("{indent}"), dim),
+            Span::styled(indent.to_string(), dim),
             Span::styled("Gaps:", Style::default().add_modifier(Modifier::BOLD)),
         ]));
         for gap in &verdict.gaps {
@@ -134,7 +134,7 @@ pub fn final_validation_report_lines(
     }
     if !verdict.new_tasks.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled(format!("{indent}"), dim),
+            Span::styled(indent.to_string(), dim),
             Span::styled(
                 "Follow-up tasks:",
                 Style::default().add_modifier(Modifier::BOLD),

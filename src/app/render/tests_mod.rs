@@ -2998,6 +2998,168 @@ fn main_panel_shows_full_lifecycle_for_both_run_modes() {
     }
 }
 
+fn final_validation_tree(run_id: u64) -> Vec<Node> {
+    vec![node(
+        "Final Validation",
+        NodeKind::Stage,
+        NodeStatus::Done,
+        Vec::new(),
+        None,
+        Some(run_id),
+    )]
+}
+
+fn write_validation_artifact(session_id: &str, round: u32, body: &str) {
+    let dir = crate::state::session_dir(session_id).join("artifacts");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("final_validation_{round}.toml")), body).unwrap();
+}
+
+fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().unwrap();
+    let prev = std::env::var_os("CODEXIZE_ROOT");
+    // SAFETY: serialized through test_fs_lock and always restored.
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    unsafe {
+        match prev {
+            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+            None => std::env::remove_var("CODEXIZE_ROOT"),
+        }
+    }
+    result.unwrap()
+}
+
+#[test]
+fn final_validation_done_run_renders_full_goal_met_report() {
+    with_temp_codexize_root(|| {
+        let mut run = run_record(101, RunStatus::Done);
+        run.stage = "final-validation".to_string();
+        run.round = 1;
+        let mut app = test_app(final_validation_tree(101), vec![run], Vec::new());
+        app.state.current_phase = Phase::Done;
+        write_validation_artifact(
+            &app.state.session_id,
+            1,
+            r#"status = "goal_met"
+summary = "All goals achieved"
+findings = ["Inspected src/ and tests/"]
+"#,
+        );
+
+        let lines = render_lines(&app, 20);
+        let joined = lines.join("\n");
+        assert!(joined.contains("Validation report"), "{joined}");
+        assert!(joined.contains("goal_met"), "{joined}");
+        assert!(joined.contains("All goals achieved"), "{joined}");
+        assert!(joined.contains("Inspected src/ and tests/"), "{joined}");
+    });
+}
+
+#[test]
+fn final_validation_goal_gap_report_includes_gap_citations() {
+    with_temp_codexize_root(|| {
+        let mut run = run_record(202, RunStatus::Done);
+        run.stage = "final-validation".to_string();
+        run.round = 1;
+        let mut app = test_app(final_validation_tree(202), vec![run], Vec::new());
+        app.state.current_phase = Phase::ImplementationRound(2);
+        write_validation_artifact(
+            &app.state.session_id,
+            1,
+            r#"status = "goal_gap"
+summary = "Missing retry logic"
+findings = []
+
+[[gaps]]
+description = "No retry on HTTP 503"
+checked = ["src/client.rs"]
+
+[[new_tasks]]
+title = "Add backoff"
+description = "Wire backoff into the HTTP client"
+test = "cargo test retry::"
+estimated_tokens = 5000
+"#,
+        );
+
+        let lines = render_lines(&app, 25);
+        let joined = lines.join("\n");
+        assert!(joined.contains("goal_gap"), "{joined}");
+        assert!(joined.contains("No retry on HTTP 503"), "{joined}");
+        assert!(joined.contains("src/client.rs"), "{joined}");
+        assert!(joined.contains("Add backoff"), "{joined}");
+    });
+}
+
+#[test]
+fn final_validation_needs_human_report_renders_with_citations() {
+    with_temp_codexize_root(|| {
+        let mut run = run_record(303, RunStatus::Done);
+        run.stage = "final-validation".to_string();
+        run.round = 1;
+        let mut app = test_app(final_validation_tree(303), vec![run], Vec::new());
+        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+        write_validation_artifact(
+            &app.state.session_id,
+            1,
+            r#"status = "needs_human"
+summary = "Operator must decide between A and B"
+findings = ["Workspace clean"]
+
+[[gaps]]
+description = "Ambiguity in spec section 3"
+checked = ["artifacts/spec.md"]
+"#,
+        );
+
+        let lines = render_lines(&app, 25);
+        let joined = lines.join("\n");
+        assert!(joined.contains("needs_human"), "{joined}");
+        assert!(joined.contains("Ambiguity in spec section 3"), "{joined}");
+        assert!(joined.contains("artifacts/spec.md"), "{joined}");
+    });
+}
+
+#[test]
+fn validation_origin_block_shows_force_ship_and_rewind_banner() {
+    with_temp_codexize_root(|| {
+        let mut app = test_app(final_validation_tree(404), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+
+        let lines = render_lines(&app, 12);
+        let joined = lines.join("\n");
+        assert!(joined.contains("Final validation blocked"), "{joined}");
+        assert!(joined.contains("Force ship"), "{joined}");
+        assert!(joined.contains("Rewind to spec review"), "{joined}");
+        assert!(
+            joined.contains("Other blocked-state transitions remain available"),
+            "{joined}"
+        );
+    });
+}
+
+#[test]
+fn block_banner_absent_when_block_origin_is_not_final_validation() {
+    with_temp_codexize_root(|| {
+        let mut app = test_app(final_validation_tree(505), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.block_origin = Some(crate::state::BlockOrigin::Brainstorm);
+
+        let lines = render_lines(&app, 12);
+        let joined = lines.join("\n");
+        assert!(!joined.contains("Final validation blocked"), "{joined}");
+        assert!(!joined.contains("Force ship"), "{joined}");
+    });
+}
+
 #[test]
 fn main_panel_shows_live_summary_tail_for_both_run_modes() {
     for interactive in [false, true] {

@@ -317,6 +317,13 @@ downstream reviewers — design around it, never against it. If a user
 statement is ambiguous, ask the operator. If two user statements conflict with
 each other, ask the operator. Never silently reinterpret.
 
+Spec structure reminder — include this stub exactly, even if it stays empty:
+
+    ## Out of scope
+    <!-- Each bullet here must either quote a user statement verbatim or say
+         explicitly that the exclusion was agreed in dialog with the operator.
+         You must not silently invent exclusions. If you are uncertain whether something is in or out of scope, ask instead of deciding silently. -->
+
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
   1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy
      reader can skim in 30 sec), then the full spec.
@@ -364,6 +371,9 @@ still waiting for the operator's input, never include this cue.
     }
 
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
+    // Keep the same out-of-scope reminder in yolo mode so specs do not invent
+    // exclusions; without dialog, the section should remain empty unless the
+    // exclusion is explicit in the idea text itself.
     format!(
         r#"{project_doc_instr}You have the operator's full trust. Make very good decisions — be bold and
 decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
@@ -391,6 +401,12 @@ assumption in a sibling `## Assumptions` section. If two user statements
 conflict with each other, list both verbatim and pick the narrowest reading
 consistent with the rest of the Idea, recording the choice under
 `## Assumptions`. Never silently reinterpret.
+Spec structure reminder — include this stub exactly, even if it stays empty:
+
+    ## Out of scope
+    <!-- Each bullet here must either quote a user statement verbatim or say
+         explicitly that the exclusion was agreed in dialog with the operator.
+         You must not silently invent exclusions. If you are uncertain whether something is in or out of scope, ask instead of deciding silently. -->
 
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
   1. {spec_path} — the design doc. Start with a TL;DR (3–6 bullets a lazy

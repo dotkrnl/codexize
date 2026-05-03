@@ -141,6 +141,24 @@ impl AcpLaunchPolicy {
             enforce_readonly_workspace: true,
         }
     }
+
+    /// ACP policy for the simplifier stage. Unlike final validation, the
+    /// simplifier is code-producing: it edits and commits repository files,
+    /// so the workspace is not read-only and shell access is unrestricted
+    /// (matching coder/reviewer). The mandatory artifact writes — the
+    /// simplification TOML and the live summary — are still listed
+    /// explicitly so the runtime can surface "you wrote outside the allowed
+    /// paths for *required* outputs" violations.
+    pub fn simplifier(
+        simplification_path: impl Into<PathBuf>,
+        live_summary_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            allowed_write_paths: vec![simplification_path.into(), live_summary_path.into()],
+            shell_policy: AcpShellCommandPolicy::FullAccess,
+            enforce_readonly_workspace: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

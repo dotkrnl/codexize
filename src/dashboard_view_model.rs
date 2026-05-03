@@ -1,8 +1,12 @@
+#[cfg(test)]
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
-use crate::dashboard::{DashboardModel, IngestEvent};
+use crate::dashboard::DashboardModel;
+#[cfg(test)]
+use crate::dashboard::IngestEvent;
 use crate::model_names;
+use crate::selection::{IpbrPhaseScores, ScoreSource};
 
 #[derive(Debug, Clone)]
 pub(crate) struct InventoryEntry {
@@ -11,6 +15,12 @@ pub(crate) struct InventoryEntry {
     pub(crate) display_order: usize,
 }
 
+/// Canonicalized score record produced by score ingestion. The `name`
+/// field is the normalized lookup key (see `normalize_ipbr_key`). For
+/// ipbr-sourced rows, `score_source = Ipbr` and `ipbr_row_matched = true`;
+/// the legacy aistupidlevel parser (kept only for tests) leaves
+/// `score_source = None` so the cosmetic `axes` cannot masquerade as
+/// ipbr authority.
 #[derive(Debug, Clone)]
 pub(crate) struct ScoreEntry {
     pub(crate) name: String,
@@ -21,6 +31,49 @@ pub(crate) struct ScoreEntry {
     pub(crate) axes: Vec<(String, f64)>,
     pub(crate) axis_provenance: BTreeMap<String, String>,
     pub(crate) display_order: usize,
+    /// Normalized canonical id from the ipbr feed, when present. Carried
+    /// through ingestion for the upcoming normalized-exact matching
+    /// layer; the current merge still keys on `name` only, so production
+    /// callers do not yet read it. Verified by `dashboard::tests`.
+    #[allow(dead_code)]
+    pub(crate) canonical_id: Option<String>,
+    /// Normalized alias keys from the ipbr feed. Same usage notes as
+    /// `canonical_id`.
+    #[allow(dead_code)]
+    pub(crate) aliases: Vec<String>,
+    pub(crate) ipbr_phase_scores: IpbrPhaseScores,
+    pub(crate) score_source: ScoreSource,
+    pub(crate) ipbr_row_matched: bool,
+}
+
+/// Normalize an ipbr lookup key per spec §"Model Matching":
+/// lowercase, replace runs of `.`, `_`, `/`, and ASCII whitespace with
+/// `-`, collapse repeated `-`, then trim leading/trailing `-`.
+pub(crate) fn normalize_ipbr_key(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_was_dash = true; // suppresses any leading `-`
+    for ch in input.chars() {
+        let mapped = if ch.is_ascii_uppercase() {
+            ch.to_ascii_lowercase()
+        } else {
+            ch
+        };
+        let is_separator = matches!(mapped, '.' | '_' | '/' | '-')
+            || (mapped.is_ascii() && mapped.is_ascii_whitespace());
+        if is_separator {
+            if !last_was_dash {
+                out.push('-');
+                last_was_dash = true;
+            }
+        } else {
+            out.push(mapped);
+            last_was_dash = false;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    out
 }
 
 pub(crate) fn merge(
@@ -84,9 +137,9 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             standard_error: sc.standard_error,
             axes: sc.axes,
             axis_provenance: sc.axis_provenance,
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-            score_source: crate::selection::ScoreSource::None,
-            ipbr_row_matched: false,
+            ipbr_phase_scores: sc.ipbr_phase_scores,
+            score_source: sc.score_source,
+            ipbr_row_matched: sc.ipbr_row_matched,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -153,6 +206,7 @@ pub fn synthesize_sibling(
     })
 }
 
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(crate) fn merged_axes(
     value: &Value,
@@ -207,6 +261,7 @@ pub(crate) fn merged_axes(
     Some((axes.into_iter().collect(), provenance, events))
 }
 
+#[cfg(test)]
 pub(crate) fn value_to_f64(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(n)) => n.as_f64(),
@@ -216,6 +271,7 @@ pub(crate) fn value_to_f64(value: Option<&Value>) -> Option<f64> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn value_to_string(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
@@ -241,12 +297,12 @@ fn dashboard_model_from_score(
         standard_error: sc.standard_error,
         axes: sc.axes.clone(),
         axis_provenance: sc.axis_provenance.clone(),
-        // Aistupidlevel score parsing populates cosmetic fields only.
-        // ipbr phase scores stay `None` until task 2 lands ingestion;
-        // selection MUST treat this model as unranked for now.
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
+        // ipbr-sourced rows propagate phase scores and `Ipbr` provenance;
+        // legacy aistupidlevel-sourced rows leave `score_source = None`
+        // so cosmetic `axes` cannot masquerade as ipbr authority.
+        ipbr_phase_scores: sc.ipbr_phase_scores,
+        score_source: sc.score_source,
+        ipbr_row_matched: sc.ipbr_row_matched,
         display_order: sc.display_order,
         fallback_from,
     }
@@ -295,6 +351,11 @@ mod tests {
             axes: vec![("correctness".to_string(), value)],
             axis_provenance: BTreeMap::new(),
             display_order: order,
+            canonical_id: None,
+            aliases: Vec::new(),
+            ipbr_phase_scores: IpbrPhaseScores::default(),
+            score_source: ScoreSource::None,
+            ipbr_row_matched: false,
         }
     }
 

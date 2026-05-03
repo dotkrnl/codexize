@@ -210,7 +210,9 @@ pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
     let Some(snap) = read_snapshot(snapshot_dir) else {
         return VerifyResult::Ok { warnings: vec![] };
     };
-    if stage == "coder" {
+    // Simplifier shares the coder's verify rules: HEAD may advance via
+    // `refactor:`/`style:` commits, but session control files must stay put.
+    if stage == "coder" || stage == "simplifier" {
         verify_coder(&snap)
     } else {
         verify_non_coder(&snap)

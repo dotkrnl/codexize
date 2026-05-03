@@ -244,7 +244,10 @@ impl App {
         }
         let dir = self.guard_dir_for(stage, task_id, round, attempt);
         let session_dir = session_state::session_dir(&self.state.session_id);
-        if stage == "coder" {
+        // Simplifier is code-producing like the coder: it must be allowed to
+        // advance HEAD via `refactor:`/`style:` commits, while still being
+        // forbidden from editing orchestrator control files.
+        if stage == "coder" || stage == "simplifier" {
             let _ = guard::capture_coder(&dir, &session_dir, round);
             false
         } else {
@@ -394,6 +397,33 @@ impl App {
         None
     }
 
+    /// Detect a simplifier exit that left uncommitted repository edits.
+    /// The simplifier's mandatory writes (`simplification.toml` and the
+    /// live-summary file) live under the gitignored session directory and
+    /// therefore never appear in `git status`, so a dirty tree at exit is
+    /// the sign of source edits the simplifier should have committed or
+    /// reverted. No-op under the test harness.
+    pub(super) fn simplifier_dirty_tree_reason(
+        &self,
+        run: &crate::state::RunRecord,
+    ) -> Option<String> {
+        #[cfg(test)]
+        if self.test_launch_harness.is_some() {
+            return None;
+        }
+        let stamp_path = self.finish_stamp_path_for(run);
+        let Ok(stamp) = crate::runner::read_finish_stamp(&stamp_path) else {
+            return None;
+        };
+        if stamp.working_tree_clean {
+            return None;
+        }
+        Some(Self::failed_unverified_reason(
+            &stamp_path,
+            "working tree not clean on exit",
+        ))
+    }
+
     pub(super) fn normalized_failure_reason(
         &mut self,
         run: &crate::state::RunRecord,
@@ -498,6 +528,20 @@ impl App {
                     final_validation::validate(&verdict_path)
                         .err()
                         .map(|err| format!("artifact_invalid: {err}"))
+                };
+                (true, reason)
+            }
+            "simplifier" => {
+                let simplification_path = session_dir
+                    .join("rounds")
+                    .join(format!("{:03}", run.round))
+                    .join("simplification.toml");
+                let reason = if !Self::artifact_present(&simplification_path) {
+                    Some("artifact_missing".to_string())
+                } else if let Err(err) = crate::simplification::validate(&simplification_path) {
+                    Some(format!("artifact_invalid: {err}"))
+                } else {
+                    self.simplifier_dirty_tree_reason(run)
                 };
                 (true, reason)
             }
@@ -1986,10 +2030,18 @@ impl App {
                     }
                 }
             }
-            Phase::Simplification(_) => {
-                // Launch/finalization for the simplifier stage lands in a
-                // follow-up task; the variant exists today so the build
-                // succeeds with the new state machine in place.
+            Phase::Simplification(round) => {
+                // The artifact-validation gate above has already accepted
+                // the simplification TOML; on success we hand control to
+                // FinalValidation. The simplifier's verdict is advisory
+                // only — final validation makes its own call against
+                // idea + spec, so we don't branch on the parsed status here.
+                self.finalize_run_record(run.id, true, None);
+                self.clear_agent_error();
+                let _ = session_state::transitions::enter_final_validation(
+                    &mut self.state,
+                    round,
+                )?;
             }
             Phase::IdeaInput
             | Phase::SpecReviewPaused

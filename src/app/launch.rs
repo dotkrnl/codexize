@@ -4,7 +4,7 @@ use crate::{
     adapters::{AgentRun, EffortLevel, run_label_with_model},
     artifacts::ArtifactKind,
     brainstorm_sync::{default_metadata_path, metadata::load as load_brainstorm_metadata},
-    runner::{launch_interactive, launch_noninteractive},
+    runner::{launch_interactive, launch_noninteractive, launch_noninteractive_with_policy},
     selection::{
         CachedModel, VendorKind,
         config::SelectionPhase,
@@ -1739,13 +1739,14 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive(
+            launch_noninteractive_with_policy(
                 &window_name,
                 &run,
                 vendor_kind,
                 &run_key,
                 &artifacts_dir,
                 Some(&verdict_path),
+                crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
             )
         };
         match launch_result {

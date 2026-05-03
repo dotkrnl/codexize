@@ -8,6 +8,11 @@ use ratatui::widgets::{Paragraph, Widget};
 // ----- fixtures -----
 
 fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> CachedModel {
+    // Test fixtures used to feed scoring through legacy aistupidlevel
+    // axes; the spec now restricts ranking and sampling weights to
+    // authoritative ipbr phase scores. Mirror the same numeric value into
+    // every ipbr phase so existing tests that vary only `axis_score` keep
+    // their relative ordering and percentage shape under the new pipeline.
     CachedModel {
         vendor: VendorKind::Codex,
         name: name.to_string(),
@@ -26,9 +31,14 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
             ("stability".to_string(), axis_score),
         ],
         axis_provenance: std::collections::BTreeMap::new(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+            idea: Some(axis_score),
+            planning: Some(axis_score),
+            build: Some(axis_score),
+            review: Some(axis_score),
+        },
+        score_source: crate::selection::ScoreSource::Ipbr,
+        ipbr_row_matched: true,
         quota_percent: Some(100),
         quota_resets_at: None,
         display_order,
@@ -1249,4 +1259,158 @@ fn full_table_expands_quota_and_phase_labels_when_space_permits() {
 
     assert!(row.contains("Quota"));
     assert!(row.contains("Idea"));
+}
+
+// ----- new ipbr-pipeline display contracts -----
+
+fn unscored_inventory_model(
+    vendor: VendorKind,
+    name: &str,
+    quota: Option<u8>,
+    display_order: usize,
+) -> CachedModel {
+    CachedModel {
+        vendor,
+        name: name.to_string(),
+        overall_score: 99.0,
+        current_score: 99.0,
+        standard_error: 0.0,
+        axes: Vec::new(),
+        axis_provenance: std::collections::BTreeMap::new(),
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        score_source: crate::selection::ScoreSource::None,
+        ipbr_row_matched: false,
+        quota_percent: quota,
+        quota_resets_at: None,
+        display_order,
+        fallback_from: None,
+    }
+}
+
+#[test]
+fn full_table_inventory_only_model_renders_as_unscored_for_current_phase() {
+    // Spec: inventory/CLI-visible models with no ipbr phase score remain
+    // visible (via vendor backfill) but render with no sampling weight and
+    // no rank-1 highlight for any phase.
+    let mut ranked = vendor_model_with_axis_score(VendorKind::Codex, "gpt-ranked", 90.0, 0);
+    ranked.quota_percent = Some(80);
+    let inventory_only = unscored_inventory_model(VendorKind::Claude, "inv", Some(80), 0);
+
+    let models = vec![ranked, inventory_only];
+    let versions = build_version_index(&models);
+
+    let (lines, _) =
+        responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+    let rows = render_to_text(&lines, 120);
+
+    let inv_row = rows
+        .iter()
+        .find(|r| r.contains("inv"))
+        .expect("inventory-only row should still render via vendor backfill");
+    // Sampling cells must show 0% for the unscored model — it has no
+    // pool weight in any phase. The ranked model is the only sampling
+    // candidate and gets ~99%.
+    assert!(
+        inv_row.contains("Idea  0") || inv_row.contains("I  0") || inv_row.contains("I 0"),
+        "inventory-only Idea cell should render as 0% (unscored): {inv_row:?}"
+    );
+    assert!(
+        inv_row.contains("Build  0") || inv_row.contains("B  0") || inv_row.contains("B 0"),
+        "inventory-only Build cell should render as 0% (unscored): {inv_row:?}"
+    );
+}
+
+#[test]
+fn full_table_unknown_quota_renders_as_unknown_not_exhausted() {
+    // Spec: missing quota displays as unknown (DarkGray), not exhausted
+    // (Red). Selection still treats it as effective-30, but the dot color
+    // must distinguish unknown from known-zero.
+    let mut model = vendor_model_with_axis_score(VendorKind::Codex, "gpt-unknown", 80.0, 0);
+    model.quota_percent = None;
+    let models = vec![model];
+    let versions = build_version_index(&models);
+
+    let (lines, _) =
+        responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+
+    let area = Rect::new(0, 0, 120, lines.len() as u16);
+    let mut buf = Buffer::empty(area);
+    Paragraph::new(lines).render(area, &mut buf);
+    let row: String = (0..area.width)
+        .map(|x| buf.cell((x, 0)).map(|c| c.symbol()).unwrap_or(" "))
+        .collect();
+    let dot_col = row.find(STATUS_DOT).expect("status dot") as u16;
+    assert_eq!(buf.cell((dot_col, 0)).unwrap().fg, Color::DarkGray);
+}
+
+#[test]
+fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
+    // Spec: known zero quota = exhausted (red dot) AND must not be
+    // auto-selected. The pool scorer drops zero-quota candidates, so the
+    // sampling cell should render at 0%.
+    let mut zero_quota = vendor_model_with_axis_score(VendorKind::Codex, "gpt-zero", 90.0, 0);
+    zero_quota.quota_percent = Some(0);
+    let healthy = vendor_model_with_axis_score(VendorKind::Claude, "claude-ok", 90.0, 0);
+    let models = vec![zero_quota, healthy];
+    let versions = build_version_index(&models);
+
+    let (lines, _) =
+        responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+
+    let area = Rect::new(0, 0, 120, lines.len() as u16);
+    let mut buf = Buffer::empty(area);
+    Paragraph::new(lines.clone()).render(area, &mut buf);
+    let rows: Vec<String> = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect()
+        })
+        .collect();
+
+    let zero_row_y = rows
+        .iter()
+        .position(|r| r.contains("zero"))
+        .expect("zero-quota row visible");
+    let dot_col = rows[zero_row_y].find(STATUS_DOT).expect("dot") as u16;
+    assert_eq!(
+        buf.cell((dot_col, zero_row_y as u16)).unwrap().fg,
+        Color::Red,
+        "known zero quota must render exhausted (red dot)"
+    );
+
+    // Pool-derived sampling: zero-quota model gets weight 0 → 0% in every
+    // phase even though its phase score equals the healthy model's.
+    let zero_row = &rows[zero_row_y];
+    assert!(
+        zero_row.contains("Build  0") || zero_row.contains("B  0") || zero_row.contains("B 0"),
+        "exhausted model must show 0% sampling: {zero_row:?}"
+    );
+}
+
+#[test]
+fn full_table_sampling_percentage_sourced_from_pool_weights_not_phase_score() {
+    // The percentage rendered in the sampling column is the pool-derived
+    // softmax weight (× relative-quota factor) — not the raw phase score.
+    // With two ipbr-ranked models at scores 90 and 75, the pool softmax
+    // assigns the lower-scored model a small but nonzero share (well below
+    // its share of phase-score totals, which would be 75/(90+75) ≈ 45%).
+    let high = vendor_model_with_axis_score(VendorKind::Codex, "gpt-high", 90.0, 0);
+    let low = vendor_model_with_axis_score(VendorKind::Claude, "low", 75.0, 0);
+    let models = vec![high, low];
+    let versions = build_version_index(&models);
+
+    let (lines, _) =
+        responsive_models_area(&models, &versions, &[], 120, 50, ModelsAreaMode::FullTable);
+    let rows = render_to_text(&lines, 120);
+
+    let low_row = rows.iter().find(|r| r.contains("low")).expect("low row");
+    // 15-point softmax gap → lower-scored share is ~6-8%. Phase-score
+    // proportional rendering would have put it near 45.
+    assert!(
+        low_row.contains("Build  6")
+            || low_row.contains("Build  7")
+            || low_row.contains("Build  8"),
+        "sampling percentage must come from pool weights (~6-8%), not phase score (~45%): {low_row:?}"
+    );
 }

@@ -1509,13 +1509,8 @@ impl App {
             return Ok(());
         }
 
-        if self.state.validation_attempts >= session_state::transitions::VALIDATION_ATTEMPT_CAP {
-            self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
-            return Ok(());
-        }
-
-        self.state.validation_attempts += 1;
-        self.transition_to_phase(Phase::FinalValidation(round))
+        let _ = session_state::transitions::enter_final_validation(&mut self.state, round)?;
+        Ok(())
     }
 
     fn append_goal_gap_tasks(

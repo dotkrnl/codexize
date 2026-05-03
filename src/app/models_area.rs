@@ -19,7 +19,7 @@ use crate::selection::{
     CachedModel, QuotaError, VendorKind,
     config::SelectionPhase,
     display::{phase_rank, visible_models},
-    ranking::{VersionIndex, selection_probability},
+    ranking::{VersionIndex, candidate_pool_weights, phase_rank_score},
 };
 
 use super::models::{vendor_color, vendor_prefix};
@@ -174,14 +174,39 @@ fn render_full_table(
     let name_width =
         name_budget_for(width, vendor_width, quota_col, prob_col, reset_col).max(name_width_min());
 
-    // Probabilities are normalised against the global total over every
-    // assembled model (not just the visible subset) so that filtering does
-    // not artificially inflate percentages.
-    let prob_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
-        selection_probability(model, phase, versions)
+    // Sampling probability cells are sourced from the candidate-pool
+    // scorer in ranking.rs: softmax over phase rank weighted by relative
+    // quota pressure, normalized within the assembled set. That keeps the
+    // % column distinct from the rank column (bolding flags rank-1, the
+    // number reports the row's sampling share). Models without an ipbr
+    // phase score or with known zero quota receive weight 0.
+    let model_refs: Vec<&CachedModel> = models.iter().collect();
+    let idea_weights = candidate_pool_weights(&model_refs, SelectionPhase::Idea);
+    let planning_weights = candidate_pool_weights(&model_refs, SelectionPhase::Planning);
+    let build_weights = candidate_pool_weights(&model_refs, SelectionPhase::Build);
+    let review_weights = candidate_pool_weights(&model_refs, SelectionPhase::Review);
+
+    let weight_for = |phase: SelectionPhase, model: &CachedModel| -> f64 {
+        let weights = match phase {
+            SelectionPhase::Idea => &idea_weights,
+            SelectionPhase::Planning => &planning_weights,
+            SelectionPhase::Build => &build_weights,
+            SelectionPhase::Review => &review_weights,
+        };
+        models
+            .iter()
+            .position(|candidate| std::ptr::eq(candidate, model))
+            .map(|index| weights[index])
+            .unwrap_or(0.0)
     };
-    let total_for =
-        |phase: SelectionPhase| -> f64 { models.iter().map(|m| prob_for(phase, m)).sum() };
+    let total_for = |phase: SelectionPhase| -> f64 {
+        match phase {
+            SelectionPhase::Idea => idea_weights.iter().sum(),
+            SelectionPhase::Planning => planning_weights.iter().sum(),
+            SelectionPhase::Build => build_weights.iter().sum(),
+            SelectionPhase::Review => review_weights.iter().sum(),
+        }
+    };
 
     let total_idea = total_for(SelectionPhase::Idea);
     let total_planning = total_for(SelectionPhase::Planning);
@@ -196,7 +221,7 @@ fn render_full_table(
     let max_for = |totals: f64, phase: SelectionPhase| -> u8 {
         models
             .iter()
-            .map(|m| probability_percent(prob_for(phase, m), totals))
+            .map(|m| probability_percent(weight_for(phase, m), totals))
             .max()
             .unwrap_or(0)
     };
@@ -210,15 +235,22 @@ fn render_full_table(
         .filter(|m| visible_set.contains(&m.name))
         .collect();
 
-    // Sort globally by Build score descending, tie-break vendor then name
+    // Order rows by ipbr Build phase rank (rank 1 first). Unranked models
+    // sort to the bottom so cosmetic summaries cannot lift them above
+    // ipbr-ranked peers.
     visible_models_list.sort_by(|a, b| {
-        let prob_a = prob_for(SelectionPhase::Build, a);
-        let prob_b = prob_for(SelectionPhase::Build, b);
-        prob_b
-            .partial_cmp(&prob_a)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.vendor.cmp(&b.vendor))
-            .then_with(|| a.name.cmp(&b.name))
+        let rank_a = phase_rank_score(a, SelectionPhase::Build);
+        let rank_b = phase_rank_score(b, SelectionPhase::Build);
+        match (rank_a, rank_b) {
+            (Some(sa), Some(sb)) => sb
+                .partial_cmp(&sa)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.vendor.cmp(&b.vendor))
+                .then_with(|| a.name.cmp(&b.name)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.vendor.cmp(&b.vendor).then_with(|| a.name.cmp(&b.name)),
+        }
     });
 
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -287,13 +319,15 @@ fn render_full_table(
         match prob_col {
             ProbColumn::IpbrVerbose => {
                 let idea_pct =
-                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct =
-                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
+                    probability_percent(weight_for(SelectionPhase::Idea, model), total_idea);
+                let planning_pct = probability_percent(
+                    weight_for(SelectionPhase::Planning, model),
+                    total_planning,
+                );
                 let build_pct =
-                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                    probability_percent(weight_for(SelectionPhase::Build, model), total_build);
                 let review_pct =
-                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
+                    probability_percent(weight_for(SelectionPhase::Review, model), total_review);
 
                 spans.push(Span::raw(" "));
                 spans.push(if vendor_failed {
@@ -342,13 +376,15 @@ fn render_full_table(
             }
             ProbColumn::Ipbr => {
                 let idea_pct =
-                    probability_percent(prob_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct =
-                    probability_percent(prob_for(SelectionPhase::Planning, model), total_planning);
+                    probability_percent(weight_for(SelectionPhase::Idea, model), total_idea);
+                let planning_pct = probability_percent(
+                    weight_for(SelectionPhase::Planning, model),
+                    total_planning,
+                );
                 let build_pct =
-                    probability_percent(prob_for(SelectionPhase::Build, model), total_build);
+                    probability_percent(weight_for(SelectionPhase::Build, model), total_build);
                 let review_pct =
-                    probability_percent(prob_for(SelectionPhase::Review, model), total_review);
+                    probability_percent(weight_for(SelectionPhase::Review, model), total_review);
 
                 spans.push(Span::raw(" "));
                 spans.push(if vendor_failed {
@@ -400,10 +436,10 @@ fn render_full_table(
                 spans.push(top_rank_prob_span(
                     model,
                     vendor_failed,
-                    prob_for(SelectionPhase::Idea, model),
-                    prob_for(SelectionPhase::Planning, model),
-                    prob_for(SelectionPhase::Build, model),
-                    prob_for(SelectionPhase::Review, model),
+                    weight_for(SelectionPhase::Idea, model),
+                    weight_for(SelectionPhase::Planning, model),
+                    weight_for(SelectionPhase::Build, model),
+                    weight_for(SelectionPhase::Review, model),
                     total_idea,
                     total_planning,
                     total_build,
@@ -609,12 +645,16 @@ fn render_compact_quota(
         VendorKind::Gemini,
     ];
 
+    // Pick the vendor's representative by inventory ordering
+    // (`display_order`, then name). Cosmetic `current_score` cannot drive
+    // visibility — that role belongs to ipbr phase rank in the full table
+    // and to inventory order here.
     let mut vendors_to_render = Vec::new();
     for vendor in order {
-        if let Some(model) = models.iter().filter(|m| m.vendor == vendor).max_by(|a, b| {
-            a.current_score
-                .partial_cmp(&b.current_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+        if let Some(model) = models.iter().filter(|m| m.vendor == vendor).min_by(|a, b| {
+            a.display_order
+                .cmp(&b.display_order)
+                .then_with(|| a.name.cmp(&b.name))
         }) {
             vendors_to_render.push((vendor, model));
         }

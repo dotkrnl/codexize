@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    app::AppStartupOrigin,
     app::tree::{flatten_visible_rows, node_key_at_path},
     state::{
         Message, MessageKind, MessageSender, Node, NodeKind, NodeStatus, RunRecord, RunStatus,
@@ -48,6 +49,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         input_cursor: 0,
         pending_view_path: None,
         confirm_back: false,
+        startup_origin: AppStartupOrigin::Default,
         run_launched: false,
         quota_errors: Vec::new(),
         quota_retry_delay: Duration::from_secs(60),

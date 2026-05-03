@@ -408,6 +408,10 @@ fn palette_new_with_args_creates_session_immediately() {
         let state = SessionState::load(&selection.session_id).expect("load new session");
         assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
         assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert!(
+            state.agent_runs.is_empty(),
+            "picker create should persist selection state only"
+        );
     });
 }
 
@@ -472,6 +476,10 @@ fn palette_idea_alias_creates_session_immediately() {
         let state = SessionState::load(&selection.session_id).expect("load new session");
         assert_eq!(state.idea_text.as_deref(), Some("ship cheap mode"));
         assert_eq!(state.current_phase, Phase::BrainstormRunning);
+        assert!(
+            state.agent_runs.is_empty(),
+            "picker create should not launch or track brainstorm"
+        );
     });
 }
 

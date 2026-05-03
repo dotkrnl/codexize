@@ -947,6 +947,54 @@ fn event_poll_duration_uses_fast_cadence_only_for_visible_live_summary_spinner()
 }
 
 #[test]
+fn picker_created_startup_draws_before_auto_launch() {
+    with_temp_root(|| {
+        let session_id = "picker-created-first-frame";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.idea_text = Some("Ship the picker handoff".to_string());
+        state.save().expect("save session");
+
+        let mut app = App::new_with_startup_origin(
+            SessionState::load(session_id).expect("load session"),
+            AppStartupOrigin::PickerCreated,
+        );
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            10,
+            1,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some("# Spec\n".to_string()),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        app.maybe_auto_launch();
+        assert!(
+            app.state.agent_runs.is_empty(),
+            "picker-created startup must wait for the first visible frame"
+        );
+
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| app.draw(frame)).expect("draw");
+
+        assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
+        assert!(
+            app.state.agent_runs.is_empty(),
+            "successful draw alone must not backdoor a launch"
+        );
+    });
+}
+
+#[test]
 fn update_agent_progress_reloads_persisted_interactive_agent_text() {
     with_temp_root(|| {
         let session_id = "interactive-output-reload";

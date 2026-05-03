@@ -1436,6 +1436,85 @@ fn final_validation_auto_launches_via_maybe_auto_launch() {
 }
 
 #[test]
+fn picker_created_brainstorm_auto_launches_after_first_frame() {
+    with_temp_root(|| {
+        let session_id = "picker-created-auto-launch";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.idea_text = Some("Launch after first frame".to_string());
+        state.save().expect("save session");
+
+        let mut app = App::new_with_startup_origin(
+            SessionState::load(session_id).expect("load session"),
+            AppStartupOrigin::PickerCreated,
+        );
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            10,
+            1,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some("# Spec\n".to_string()),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        app.on_frame_drawn();
+        app.maybe_auto_launch();
+
+        let run = app
+            .state
+            .agent_runs
+            .last()
+            .expect("picker-created startup should launch after the first frame");
+        assert_eq!(run.stage, "brainstorm");
+        assert_eq!(run.round, 1);
+    });
+}
+
+#[test]
+fn default_startup_brainstorm_auto_launch_is_not_gated() {
+    with_temp_root(|| {
+        let session_id = "default-auto-launch";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.idea_text = Some("Resume should not wait".to_string());
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            10,
+            1,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some("# Spec\n".to_string()),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        app.maybe_auto_launch();
+
+        let run = app
+            .state
+            .agent_runs
+            .last()
+            .expect("default startup should auto-launch immediately");
+        assert_eq!(run.stage, "brainstorm");
+    });
+}
+
+#[test]
 fn final_validation_launch_without_models_records_agent_error() {
     with_temp_root(|| {
         let session_id = "final-validation-no-models";

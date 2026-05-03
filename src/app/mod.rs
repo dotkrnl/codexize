@@ -227,6 +227,13 @@ struct TestLaunchHarness {
 
 pub const RESPONSIVE_HEIGHT_THRESHOLD: u16 = 60;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AppStartupOrigin {
+    #[default]
+    Default,
+    PickerCreated,
+}
+
 pub struct App {
     state: SessionState,
     nodes: Vec<Node>,
@@ -267,6 +274,7 @@ pub struct App {
     input_cursor: usize,
     pending_view_path: Option<std::path::PathBuf>,
     confirm_back: bool,
+    startup_origin: AppStartupOrigin,
     run_launched: bool,
     quota_errors: Vec<QuotaError>,
     quota_retry_delay: Duration,

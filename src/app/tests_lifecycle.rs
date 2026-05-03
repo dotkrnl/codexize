@@ -3528,3 +3528,102 @@ fn poll_agent_run_does_not_close_split_for_non_interactive_run_on_exit() {
         );
     });
 }
+
+#[test]
+fn skip_to_impl_round_entry_writes_review_scope() {
+    with_temp_root(|| {
+        let session_id = "skip-to-impl-review-scope";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        // Synthetic-artifacts generation expects spec.md and tasks.toml.
+        std::fs::write(artifacts.join("spec.md"), "# spec\n").expect("spec");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"Task 1\"\ndescription = \"d\"\ntest = \"cargo test\"\nestimated_tokens = 100\n",
+        )
+        .expect("tasks");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::SkipToImplPending;
+        state.skip_to_impl_rationale = Some("small change".to_string());
+        state.skip_to_impl_kind = Some(crate::artifacts::SkipToImplKind::SkipToImpl);
+
+        let mut app = idle_app(state);
+        app.accept_skip_to_implementation()
+            .expect("skip-to-impl accept");
+
+        // Round-entry hook in `transition_to_phase` must produce
+        // `review_scope.toml` even though no reviewer ever runs on this path.
+        let scope_path = session_dir
+            .join("rounds")
+            .join("001")
+            .join("review_scope.toml");
+        assert!(
+            scope_path.exists(),
+            "skip-to-impl entry into ImplementationRound(1) must pin review_scope.toml so the simplifier has a base SHA",
+        );
+        assert_eq!(app.state.current_phase, Phase::ImplementationRound(1));
+    });
+}
+
+#[test]
+fn final_validation_goal_gap_round_entry_writes_review_scope() {
+    with_temp_root(|| {
+        let session_id = "goal-gap-review-scope";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+
+        let mut state = SessionState::new(session_id.to_string());
+        // The state graph allows FinalValidation(R) -> ImplementationRound(R+1)
+        // for goal-gap reruns; jumping directly there exercises the round-entry
+        // hook in transition_to_phase.
+        state.current_phase = Phase::FinalValidation(2);
+        state.validation_attempts = 2;
+        let mut app = idle_app(state);
+
+        app.transition_to_phase(Phase::ImplementationRound(3))
+            .expect("goal-gap rerun transition");
+
+        let scope_path = session_dir
+            .join("rounds")
+            .join("003")
+            .join("review_scope.toml");
+        assert!(
+            scope_path.exists(),
+            "goal-gap rerun entry into ImplementationRound(R+1) must pin review_scope.toml for the next simplifier pass",
+        );
+    });
+}
+
+#[test]
+fn impl_round_entry_preserves_existing_review_scope() {
+    with_temp_root(|| {
+        let session_id = "impl-round-scope-idempotent";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        // Pin the file with a sentinel SHA before transitioning so we can
+        // confirm the round-entry hook is idempotent on resume.
+        std::fs::write(
+            round_dir.join("review_scope.toml"),
+            "base_sha = \"already-pinned\"\n",
+        )
+        .expect("seed scope");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::ShardingRunning;
+        let mut app = idle_app(state);
+
+        app.transition_to_phase(Phase::ImplementationRound(1))
+            .expect("sharding -> impl transition");
+
+        let contents =
+            std::fs::read_to_string(round_dir.join("review_scope.toml")).expect("read scope");
+        assert!(
+            contents.contains("already-pinned"),
+            "round entry must not overwrite an existing review_scope.toml; got {contents:?}",
+        );
+    });
+}

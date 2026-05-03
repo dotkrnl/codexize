@@ -71,7 +71,7 @@ Before exiting, write `{simplification_path}` in this exact TOML shape
     status        = "simplified" | "no_changes" | "skipped"
     summary       = "<one-paragraph human-readable summary of what you did>"
     commits       = ["sha1", "sha2"]   # commits you added; may be empty
-    files_touched = ["src/foo.rs"]      # advisory; from `git diff --name-only $BASE..HEAD` of your commits
+    files_touched = ["src/foo.rs"]      # advisory; output of `git diff --name-only $BASE..HEAD`
 
 Status meaning:
   - simplified — you made one or more behavior-preserving edits and

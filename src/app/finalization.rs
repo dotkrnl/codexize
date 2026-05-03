@@ -300,10 +300,7 @@ impl App {
         // capture the round base never shell out to `git` from the test
         // process; production callers always go through `git_rev_parse_head`.
         #[cfg(test)]
-        {
-            let _ = std::fs::write(&scope_file, "base_sha = \"test-base\"\n");
-            return;
-        }
+        let _ = std::fs::write(&scope_file, "base_sha = \"test-base\"\n");
         #[cfg(not(test))]
         if let Some(sha) = git_rev_parse_head() {
             let _ = std::fs::write(&scope_file, format!("base_sha = \"{sha}\"\n"));

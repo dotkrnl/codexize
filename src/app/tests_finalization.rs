@@ -2186,10 +2186,7 @@ fn skip_to_impl_coder_completion_enters_simplification_when_not_yolo() {
         // `Simplification(1)` before any final validation.
         assert_eq!(app.state.current_phase, Phase::Simplification(1));
         assert_eq!(app.state.validation_attempts, 0);
-        assert_eq!(
-            app.state.simplification_attempts.get(&1).copied(),
-            Some(1)
-        );
+        assert_eq!(app.state.simplification_attempts.get(&1).copied(), Some(1));
     });
 }
 
@@ -2215,10 +2212,9 @@ fn queue_empty_review_blocks_when_simplification_cap_is_already_exhausted() {
         // Validation attempts must not advance from this branch — that cap
         // is only consumed once the simplifier hands control to
         // FinalValidation, which is gated separately.
-        state.simplification_attempts.insert(
-            1,
-            session_state::transitions::SIMPLIFICATION_ATTEMPT_CAP,
-        );
+        state
+            .simplification_attempts
+            .insert(1, session_state::transitions::SIMPLIFICATION_ATTEMPT_CAP);
         state.builder.current_task = Some(1);
         state.agent_runs.push(RunRecord {
             id: 12,
@@ -2491,10 +2487,7 @@ estimated_tokens = 200
         // through Simplification(2) before reaching FinalValidation(2).
         assert_eq!(app.state.current_phase, Phase::Simplification(2));
         assert_eq!(app.state.validation_attempts, 1);
-        assert_eq!(
-            app.state.simplification_attempts.get(&2).copied(),
-            Some(1)
-        );
+        assert_eq!(app.state.simplification_attempts.get(&2).copied(), Some(1));
 
         // Simulate the simplifier handing control back to FinalValidation;
         // launch/finalization for the simplifier itself lands in a

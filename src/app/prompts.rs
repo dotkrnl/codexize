@@ -337,11 +337,22 @@ pub(super) fn final_validation_prompt(
     spec_text: &str,
     verdict_path: &std::path::Path,
     live_summary_path: &std::path::Path,
+    simplification_path: Option<&std::path::Path>,
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     let project_doc_instr = project_doc_instr();
     let verdict_str = verdict_path.display().to_string();
     let live_summary_str = live_summary_path.display().to_string();
+    // Pass the simplifier's self-report only when a TOML exists for this
+    // round. The validator may inspect it for context but its own verdict
+    // remains independent — the simplifier's claim is never authoritative.
+    let simplification_block = match simplification_path {
+        Some(path) if path.exists() => format!(
+            "\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n",
+            path.display()
+        ),
+        _ => String::new(),
+    };
     render(
         FINAL_VALIDATION_TEMPLATE,
         &[
@@ -350,6 +361,7 @@ pub(super) fn final_validation_prompt(
             ("spec_text", spec_text),
             ("verdict", &verdict_str),
             ("live_summary", &live_summary_str),
+            ("simplification_block", &simplification_block),
             ("instr", &instr),
         ],
     )

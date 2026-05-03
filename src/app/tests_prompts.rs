@@ -321,7 +321,7 @@ fn final_validation_prompt_embeds_idea_spec_and_precedence_rules() {
     let idea = "Make the validator agent run end-to-end every milestone.";
     let spec = "# Spec\n\n## User-stated requirements (authoritative)\n- run\n\n## Out of scope\n- migration\n";
 
-    let prompt = final_validation_prompt(idea, spec, verdict, live);
+    let prompt = final_validation_prompt(idea, spec, verdict, live, None);
 
     // Raw idea text and final spec text must appear verbatim.
     assert!(
@@ -600,6 +600,7 @@ fn every_prompt_builder_renders_without_unbound_placeholders() {
             "# Spec body",
             &round.join("final_validation_2.toml"),
             &live,
+            None,
         );
         for interactive in [false, true] {
             let _ = recovery_prompt(
@@ -843,6 +844,7 @@ fn prompt_snapshots_match_fixtures() {
                 "# Spec\n\n## User-stated requirements (authoritative)\n- pinned\n\n## Out of scope\n- pinned\n",
                 &final_verdict_r3,
                 &live,
+                None,
             ),
         );
 

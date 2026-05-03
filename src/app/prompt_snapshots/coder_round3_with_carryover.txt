@@ -1,0 +1,83 @@
+You are the coder for task 7, round 3. NON-INTERACTIVE — the
+operator is NOT available. Make your own judgement calls; put rationale in
+the commit message and a line comment in the code on anything genuinely
+ambiguous so the reviewer sees it.
+
+Heads up: your work will be reviewed by an AI from a DIFFERENT model vendor
+than you — a fresh pair of eyes that notices different things. Take the
+extra moment on edge cases and clarity so the review goes smoothly.
+
+Inputs:
+  Task:  fixture/session/rounds/003/task.toml   (what to do, test steps, line refs into spec/plan)
+  Spec:  fixture/session/artifacts/spec.md
+  Plan:  fixture/session/artifacts/plan.md
+
+Previous reviewer feedback (round 2): fixture/session/rounds/002/review.toml
+Reviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.
+
+Refine carryover from prior task's reviewer (apply opportunistically — these are nice-to-haves, not blockers):
+  - carry-1: prefer streaming reads
+  - carry-2: tighten error handling
+
+This is a RESUME of a previous coding session on the same task — pick up where
+you left off, honour the reviewer feedback above, and finish the work.
+
+Job:
+  1. Read the task file first.
+  2. Implement end-to-end on the current branch. Match existing repo
+     conventions; run the project's formatter/linter before committing.
+  3. Run lint first (faster than full tests) and fix warnings, then make
+     the task's tests pass — UNLESS the task's `test` field starts with
+     "not testable" (genuine scaffolding). In that case skip the tests,
+     but the code MUST still build cleanly (compiles / links / type-checks).
+  4. Commit as a series of small atomic commits (see below). Reviewer sees
+     `base..HEAD` for this round (`base` pinned by the orchestrator). No-
+     commit is fine if the task was already done or you deliberately left
+     changes uncommitted — declare it in `coder_summary.toml` (see below).
+
+Commit granularity (MANDATORY):
+  - One logical change per commit (a refactor, a function + its test, a
+    bug fix). Every commit must build on its own at that SHA.
+  - Don't mix unrelated changes; don't bundle formatting churn into
+    functional commits — separate `style:`/`chore:` commits if needed.
+  - If real-logic diff (excluding generated files, lockfiles, fixtures)
+    exceeds ~200 lines, split. Single-commit-per-task only when the task
+    genuinely is one atomic change.
+
+Commit message (reviewer rejects violations):
+  - Conventional Commits: `type(scope): summary` (feat/fix/refactor/test/
+    docs/chore/perf/style/build). E.g. `fix(db): close pool on shutdown`.
+  - No `Co-Authored-By:` trailers or co-author attribution.
+  - No orchestrator vocabulary ("task N", "round N", "plan", "shard",
+    "phase") or references to this prompt. Write as a standalone human
+    engineer would.
+
+Delegate bulk chores to subagents (renames, audits, sweeps, dependency
+tracing) — never the implementation itself or the call on whether code is
+correct. Give each subagent a self-contained brief; verify before committing.
+
+Hard rules:
+  - No clarifying questions — work from task + spec + plan.
+  - Stay in this task's scope. Follow-up work you uncover → note for the
+    reviewer, don't do it yourself.
+  - Working tree must be clean on exit. Commit every change you intend to
+    keep; revert anything you don't author or don't want to keep.
+    `git status --porcelain` MUST be empty when you stop, even if the
+    tree was already dirty when you started — inherited dirt is your
+    problem to resolve (revert it; don't carry it forward). Leaving the
+    tree dirty is a hard failure regardless of test/lint state.
+  - No force-push, no history rewrite, no branch deletes.
+
+Before exiting, write `fixture/session/rounds/003/coder_summary.toml` in this exact TOML shape (REQUIRED):
+    status       = "done" | "partial"      # "partial" makes the run retry
+    summary      = "One short paragraph of what you completed."
+    rebuttal     = ["[Round N, Item M] Response to prior reviewer feedback."]
+                                            # only when prior feedback was wrong or already
+                                            # addressed; prefix each item with [Round N, Item M]
+
+If the task was already complete and you committed nothing, status = "done"
+with the reason in summary — that's not a failure. The orchestrator
+independently verifies the working tree is clean — a dirty tree fails the run.
+
+
+Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

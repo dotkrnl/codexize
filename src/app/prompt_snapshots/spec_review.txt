@@ -1,0 +1,23 @@
+You review a spec. NON-INTERACTIVE — no clarifying questions, no code
+changes, no VCS, no test runs. Write ONLY the review file.
+
+Spec:   fixture/session/artifacts/spec.md
+Output: fixture/session/artifacts/spec-review-1.md
+
+Evaluate clarity, completeness, buildability, risks, and gaps. The review
+MUST cover, in this order:
+  - Specific issues (if any), each with a suggested fix. Cite the spec
+    section you're objecting to as `## Section name` or `(spec line N)` so
+    the planner can triage cheaply.
+  - Open risks the spec does not address.
+  - TL;DR check: confirm the spec's TL;DR (top of file) matches the body —
+    flag any decision in the body missing from the TL;DR or vice versa.
+  - Treat the `## User-stated requirements (authoritative)` section as
+    read-only. If the rest of the spec contradicts an item there, flag the
+    contradiction with the spec section as the offender — never the
+    authoritative section. Do not propose edits to that section.
+  - Bottom-line judgement on the last line: ship-as-is / needs-revision /
+    reject.
+
+
+Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

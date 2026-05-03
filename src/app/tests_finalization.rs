@@ -1454,11 +1454,16 @@ fn approved_review_with_feedback_emits_advisory_message() {
 
         app.poll_agent_run();
 
-        // The pipeline should still advance (not halted by advisory feedback)
+        // The pipeline should still advance (not halted by advisory feedback).
+        // Converged-review approval routes through the simplifier before
+        // FinalValidation, so any of those forward phases is acceptable.
         assert!(
             matches!(
                 app.state.current_phase,
-                Phase::ImplementationRound(_) | Phase::FinalValidation(_) | Phase::Done
+                Phase::ImplementationRound(_)
+                    | Phase::Simplification(_)
+                    | Phase::FinalValidation(_)
+                    | Phase::Done
             ),
             "Approved verdict must advance pipeline, got {:?}",
             app.state.current_phase
@@ -2006,9 +2011,9 @@ fn archived_stamps_not_consulted_by_coder_gate() {
 }
 
 #[test]
-fn queue_empty_approved_review_enters_final_validation_when_not_yolo() {
+fn queue_empty_approved_review_enters_simplification_when_not_yolo() {
     with_temp_root(|| {
-        let session_id = "review-to-final-validation";
+        let session_id = "review-to-simplification";
         let session_dir = session_state::session_dir(session_id);
         let artifacts = session_dir.join("artifacts");
         let round_dir = session_dir.join("rounds").join("001");
@@ -2070,15 +2075,22 @@ fn queue_empty_approved_review_enters_final_validation_when_not_yolo() {
 
         app.poll_agent_run();
 
-        assert_eq!(app.state.current_phase, Phase::FinalValidation(1));
-        assert_eq!(app.state.validation_attempts, 1);
+        assert_eq!(app.state.current_phase, Phase::Simplification(1));
+        // Simplification gates entry into FinalValidation; the validation
+        // counter must not advance until the simplifier completes.
+        assert_eq!(app.state.validation_attempts, 0);
+        assert_eq!(
+            app.state.simplification_attempts.get(&1).copied(),
+            Some(1),
+            "simplification attempt counter must advance on entry"
+        );
         assert_eq!(app.state.builder.done_task_ids(), vec![1]);
         assert!(!app.state.builder.has_unfinished_tasks());
     });
 }
 
 #[test]
-fn queue_empty_approved_review_bypasses_final_validation_in_yolo() {
+fn queue_empty_approved_review_bypasses_simplification_in_yolo() {
     with_temp_root(|| {
         let session_id = "review-to-done-yolo";
         let session_dir = session_state::session_dir(session_id);
@@ -2129,9 +2141,9 @@ fn queue_empty_approved_review_bypasses_final_validation_in_yolo() {
 }
 
 #[test]
-fn skip_to_impl_coder_completion_enters_final_validation_when_not_yolo() {
+fn skip_to_impl_coder_completion_enters_simplification_when_not_yolo() {
     with_temp_root(|| {
-        let session_id = "skip-to-impl-final-validation";
+        let session_id = "skip-to-impl-simplification";
         let session_dir = session_state::session_dir(session_id);
         let artifacts = session_dir.join("artifacts");
         let round_dir = session_dir.join("rounds").join("001");
@@ -2169,15 +2181,22 @@ fn skip_to_impl_coder_completion_enters_final_validation_when_not_yolo() {
 
         app.poll_agent_run();
 
-        assert_eq!(app.state.current_phase, Phase::FinalValidation(1));
-        assert_eq!(app.state.validation_attempts, 1);
+        // Skip-to-impl shares the simplification gate with the converging
+        // loop path: round-1 implementation completes go through
+        // `Simplification(1)` before any final validation.
+        assert_eq!(app.state.current_phase, Phase::Simplification(1));
+        assert_eq!(app.state.validation_attempts, 0);
+        assert_eq!(
+            app.state.simplification_attempts.get(&1).copied(),
+            Some(1)
+        );
     });
 }
 
 #[test]
-fn queue_empty_review_blocks_when_validation_cap_is_already_exhausted() {
+fn queue_empty_review_blocks_when_simplification_cap_is_already_exhausted() {
     with_temp_root(|| {
-        let session_id = "review-validation-cap";
+        let session_id = "review-simplification-cap";
         let session_dir = session_state::session_dir(session_id);
         let artifacts = session_dir.join("artifacts");
         let round_dir = session_dir.join("rounds").join("001");
@@ -2191,7 +2210,15 @@ fn queue_empty_review_blocks_when_validation_cap_is_already_exhausted() {
 
         let mut state = SessionState::new(session_id.to_string());
         state.current_phase = Phase::ReviewRound(1);
-        state.validation_attempts = session_state::transitions::VALIDATION_ATTEMPT_CAP;
+        // Pre-exhaust the per-round simplifier cap so the entry guard routes
+        // straight to BlockedNeedsUser instead of launching the simplifier.
+        // Validation attempts must not advance from this branch — that cap
+        // is only consumed once the simplifier hands control to
+        // FinalValidation, which is gated separately.
+        state.simplification_attempts.insert(
+            1,
+            session_state::transitions::SIMPLIFICATION_ATTEMPT_CAP,
+        );
         state.builder.current_task = Some(1);
         state.agent_runs.push(RunRecord {
             id: 12,
@@ -2225,13 +2252,16 @@ fn queue_empty_review_blocks_when_validation_cap_is_already_exhausted() {
         app.poll_agent_run();
 
         assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+        // Simplification blocks must populate `BlockOrigin::Simplification`
+        // so the force-ship runtime guard (FinalValidation-only) stays shut.
         assert_eq!(
             app.state.block_origin,
-            Some(crate::state::BlockOrigin::FinalValidation)
+            Some(crate::state::BlockOrigin::Simplification)
         );
+        assert_eq!(app.state.validation_attempts, 0);
         assert_eq!(
-            app.state.validation_attempts,
-            session_state::transitions::VALIDATION_ATTEMPT_CAP
+            app.state.simplification_attempts.get(&1).copied(),
+            Some(session_state::transitions::SIMPLIFICATION_ATTEMPT_CAP)
         );
     });
 }
@@ -2368,7 +2398,7 @@ estimated_tokens = 250
 }
 
 #[test]
-fn goal_gap_follow_up_review_reenters_final_validation_and_goal_met_finishes() {
+fn goal_gap_follow_up_review_reenters_simplification_then_final_validation() {
     with_temp_root(|| {
         let session_id = "final-validation-second-pass";
         let session_dir = session_state::session_dir(session_id);
@@ -2457,6 +2487,25 @@ estimated_tokens = 200
         write_finish_stamp_for_run(&app, &review_run, 0, "");
 
         app.poll_agent_run();
+        // After the goal-gap rerun, the converged ReviewRound(2) routes
+        // through Simplification(2) before reaching FinalValidation(2).
+        assert_eq!(app.state.current_phase, Phase::Simplification(2));
+        assert_eq!(app.state.validation_attempts, 1);
+        assert_eq!(
+            app.state.simplification_attempts.get(&2).copied(),
+            Some(1)
+        );
+
+        // Simulate the simplifier handing control back to FinalValidation;
+        // launch/finalization for the simplifier itself lands in a
+        // follow-up task, but the post-simplifier transition is fixed by
+        // the state graph.
+        let outcome = session_state::transitions::enter_final_validation(&mut app.state, 2)
+            .expect("post-simplifier final validation entry");
+        assert!(matches!(
+            outcome,
+            session_state::transitions::FinalValidationEntry::Entered { attempt: 2 }
+        ));
         assert_eq!(app.state.current_phase, Phase::FinalValidation(2));
         assert_eq!(app.state.validation_attempts, 2);
 

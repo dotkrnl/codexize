@@ -555,6 +555,10 @@ pub(super) fn strip_review_banner(path: &std::path::Path) -> std::io::Result<()>
     std::fs::write(path, stripped)
 }
 
+// `capture_round_base` writes a deterministic placeholder in `cfg(test)`
+// builds so transitions never shell out to git from the test process; this
+// helper is only reachable on the production path.
+#[cfg_attr(test, allow(dead_code))]
 pub(super) fn git_rev_parse_head() -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])

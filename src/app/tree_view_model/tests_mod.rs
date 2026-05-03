@@ -1081,10 +1081,7 @@ fn simplification_pending_before_simplification_phase() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(1);
     let nodes = build_tree(&state);
-    let stage = nodes
-        .iter()
-        .find(|n| n.label == "Simplification")
-        .unwrap();
+    let stage = nodes.iter().find(|n| n.label == "Simplification").unwrap();
     assert_eq!(stage.status, NodeStatus::Pending);
     assert!(stage.children.is_empty());
 }
@@ -1115,10 +1112,7 @@ fn simplification_skipped_under_yolo_done() {
     state.current_phase = Phase::Done;
     state.modes.yolo = true;
     let nodes = build_tree(&state);
-    let stage = nodes
-        .iter()
-        .find(|n| n.label == "Simplification")
-        .unwrap();
+    let stage = nodes.iter().find(|n| n.label == "Simplification").unwrap();
     assert_eq!(stage.status, NodeStatus::Skipped);
 }
 
@@ -1135,10 +1129,7 @@ fn simplification_groups_runs_by_round() {
     state.agent_runs.push(r2);
 
     let nodes = build_tree(&state);
-    let stage = nodes
-        .iter()
-        .find(|n| n.label == "Simplification")
-        .unwrap();
+    let stage = nodes.iter().find(|n| n.label == "Simplification").unwrap();
     let mut run_ids = Vec::new();
     collect_run_ids(stage, &mut run_ids);
     assert!(run_ids.contains(&30));

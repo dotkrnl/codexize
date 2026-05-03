@@ -100,6 +100,18 @@ impl App {
         suppressed_container_runs: &BTreeSet<u64>,
     ) -> Vec<PipelineLine> {
         let mut lines = Vec::new();
+        if matches!(self.state.current_phase, crate::state::Phase::BlockedNeedsUser)
+            && self.state.block_origin == Some(crate::state::BlockOrigin::FinalValidation)
+        {
+            let width = self.body_inner_width.min(u16::MAX as usize) as u16;
+            for line in super::super::render_view_model::final_validation_block_banner_lines(width)
+            {
+                lines.push(PipelineLine {
+                    line,
+                    kind: PipelineLineKind::Other,
+                });
+            }
+        }
         for index in 0..self.visible_rows.len() {
             let Some(node) = self.node_for_row(index) else {
                 continue;
@@ -352,6 +364,16 @@ impl App {
             {
                 last.kind = kind;
             }
+            if run.stage == "final-validation" {
+                let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
+                let indent = format!(" {} ", "│ ".repeat(depth));
+                for report_line in self.final_validation_report_lines_for_run(run, &indent) {
+                    lines.push(PipelineLine {
+                        line: report_line,
+                        kind: PipelineLineKind::Other,
+                    });
+                }
+            }
             return lines;
         }
 
@@ -446,6 +468,28 @@ impl App {
             line,
             kind: PipelineLineKind::RunningLeafTail { run_id: run.id },
         })
+    }
+
+    /// Read and parse the final-validation verdict matching `run.round` and
+    /// format it for the dashboard body. Returns an empty Vec when the
+    /// artifact is missing or fails to parse — invalid verdicts are routed
+    /// through the runtime fail-closed path elsewhere; here we just stay
+    /// quiet rather than render half-truths.
+    pub(super) fn final_validation_report_lines_for_run(
+        &self,
+        run: &RunRecord,
+        indent: &str,
+    ) -> Vec<Line<'static>> {
+        let path = crate::state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join(format!("final_validation_{}.toml", run.round));
+        if !path.exists() {
+            return Vec::new();
+        }
+        let Ok(verdict) = crate::final_validation::validate(&path) else {
+            return Vec::new();
+        };
+        super::super::render_view_model::final_validation_report_lines(&verdict, indent)
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {

@@ -58,6 +58,134 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
+/// Render the parsed final-validation verdict for the dashboard body.
+///
+/// Always emits the full report (status, summary, findings, gaps with
+/// citations, and any pushed gap tasks) regardless of verdict — per spec,
+/// goal validation is high-trust and the operator should always see what
+/// the validator checked.
+pub fn final_validation_report_lines(
+    verdict: &crate::final_validation::ValidationVerdict,
+    indent: &str,
+) -> Vec<Line<'static>> {
+    use crate::final_validation::ValidationStatus;
+    let dim = Style::default().fg(Color::DarkGray);
+    let (status_text, status_style) = match verdict.status {
+        ValidationStatus::GoalMet => (
+            "goal_met",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+        ValidationStatus::GoalGap => (
+            "goal_gap",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        ValidationStatus::NeedsHuman => (
+            "needs_human",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(format!("{indent}"), dim),
+        Span::styled(
+            "Validation report",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · ", dim),
+        Span::styled(status_text.to_string(), status_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(format!("{indent}"), dim),
+        Span::styled("Summary: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(verdict.summary.clone()),
+    ]));
+    if !verdict.findings.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{indent}"), dim),
+            Span::styled("Findings:", Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        for finding in &verdict.findings {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{indent}  • "), dim),
+                Span::raw(finding.clone()),
+            ]));
+        }
+    }
+    if !verdict.gaps.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{indent}"), dim),
+            Span::styled("Gaps:", Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        for gap in &verdict.gaps {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{indent}  • "), dim),
+                Span::raw(gap.description.clone()),
+            ]));
+            for citation in &gap.checked {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{indent}      checked: "), dim),
+                    Span::styled(citation.clone(), Style::default().fg(Color::Cyan)),
+                ]));
+            }
+        }
+    }
+    if !verdict.new_tasks.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{indent}"), dim),
+            Span::styled(
+                "Follow-up tasks:",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        for task in &verdict.new_tasks {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{indent}  • "), dim),
+                Span::raw(task.title.clone()),
+            ]));
+        }
+    }
+    lines
+}
+
+/// Banner shown when `BlockedNeedsUser` was entered with
+/// `block_origin = FinalValidation`. Highlights the two prominent
+/// affordances (force-ship → Done, rewind to spec review) while explicitly
+/// noting that the other blocked-state transitions remain available.
+pub fn final_validation_block_banner_lines(width: u16) -> Vec<Line<'static>> {
+    let dim = Style::default().fg(Color::DarkGray);
+    let highlight = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let bar = "─".repeat(width.max(1) as usize);
+    vec![
+        Line::from(Span::styled(bar.clone(), dim)),
+        Line::from(vec![
+            Span::styled(
+                "Final validation blocked. ",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Operator action required."),
+        ]),
+        Line::from(vec![
+            Span::styled("→ ", highlight),
+            Span::styled("Force ship to Done", highlight),
+            Span::styled("    ", Style::default()),
+            Span::styled("→ ", highlight),
+            Span::styled("Rewind to spec review", highlight),
+        ]),
+        Line::from(Span::styled(
+            "Other blocked-state transitions remain available.".to_string(),
+            dim,
+        )),
+        Line::from(Span::styled(bar, dim)),
+    ]
+}
+
 pub fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi_codes(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -307,5 +435,91 @@ mod tests {
     fn stage_error_content_uses_default_error_details() {
         let lines = stage_error_content(StageId::Brainstorm, None, 80);
         assert!(format!("{:?}", lines).contains("(no error details)"));
+    }
+
+    fn lines_text(lines: &[Line<'_>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn validation_report_renders_goal_met_summary_and_findings() {
+        use crate::final_validation::{ValidationStatus, ValidationVerdict};
+        let verdict = ValidationVerdict {
+            status: ValidationStatus::GoalMet,
+            summary: "All goals achieved".to_string(),
+            findings: vec!["Inspected src/ and tests/".to_string()],
+            gaps: Vec::new(),
+            new_tasks: Vec::new(),
+        };
+        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        assert!(text.contains("goal_met"));
+        assert!(text.contains("All goals achieved"));
+        assert!(text.contains("Inspected src/ and tests/"));
+    }
+
+    #[test]
+    fn validation_report_renders_goal_gap_with_citations_and_tasks() {
+        use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask};
+        let verdict = ValidationVerdict {
+            status: ValidationStatus::GoalGap,
+            summary: "Missing retry logic".to_string(),
+            findings: Vec::new(),
+            gaps: vec![Gap {
+                description: "No retry on HTTP 503".to_string(),
+                checked: vec!["src/client.rs".to_string(), "src/lib.rs".to_string()],
+            }],
+            new_tasks: vec![ValidatorGapTask {
+                title: "Add backoff".to_string(),
+                description: "Wire backoff".to_string(),
+                test: "cargo test retry::".to_string(),
+                estimated_tokens: 5000,
+            }],
+        };
+        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        assert!(text.contains("goal_gap"));
+        assert!(text.contains("No retry on HTTP 503"));
+        assert!(text.contains("src/client.rs"));
+        assert!(text.contains("src/lib.rs"));
+        assert!(text.contains("Add backoff"));
+    }
+
+    #[test]
+    fn validation_report_renders_needs_human_with_gap_citations() {
+        use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict};
+        let verdict = ValidationVerdict {
+            status: ValidationStatus::NeedsHuman,
+            summary: "Operator must decide".to_string(),
+            findings: vec!["clean tree".to_string()],
+            gaps: vec![Gap {
+                description: "A or B?".to_string(),
+                checked: vec!["artifacts/spec.md".to_string()],
+            }],
+            new_tasks: Vec::new(),
+        };
+        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        assert!(text.contains("needs_human"));
+        assert!(text.contains("Operator must decide"));
+        assert!(text.contains("A or B?"));
+        assert!(text.contains("artifacts/spec.md"));
+    }
+
+    #[test]
+    fn block_banner_highlights_force_ship_and_rewind() {
+        let text = lines_text(&final_validation_block_banner_lines(60));
+        assert!(text.contains("Final validation blocked"));
+        assert!(text.contains("Force ship"));
+        assert!(text.contains("Rewind to spec review"));
+        // Other transitions remain available — do not remove them, just
+        // de-emphasise.
+        assert!(text.contains("Other blocked-state transitions remain available"));
     }
 }

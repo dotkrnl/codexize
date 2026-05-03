@@ -25,10 +25,6 @@ const SHARDING_TEMPLATE: &str = include_str!("prompts/sharding.md");
 const FINAL_VALIDATION_TEMPLATE: &str = include_str!("prompts/final_validation.md");
 const CODER_TEMPLATE: &str = include_str!("prompts/coder.md");
 const REVIEWER_TEMPLATE: &str = include_str!("prompts/reviewer.md");
-// Used by tests today; the launch wiring that calls `simplifier_prompt`
-// outside of tests is added by the follow-up task that introduces the
-// `Simplification(R)` phase plumbing.
-#[allow(dead_code)]
 const SIMPLIFIER_TEMPLATE: &str = include_str!("prompts/simplifier.md");
 const RECOVERY_INTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_interactive.md");
 const RECOVERY_NONINTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_noninteractive.md");
@@ -727,7 +723,6 @@ pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
 /// pass over the round's `base_sha..HEAD` diff. The simplifier writes
 /// `simplification_path` and a live summary, and produces `refactor:` /
 /// `style:` commits when it has work to do.
-#[allow(dead_code)]
 pub(super) fn simplifier_prompt(
     session_dir: &std::path::Path,
     review_scope_file: &std::path::Path,

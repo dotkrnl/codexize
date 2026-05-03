@@ -1622,6 +1622,7 @@ impl App {
             Phase::BuilderRecovery(_) => self.launch_recovery(),
             Phase::BuilderRecoveryPlanReview(_) => self.launch_recovery_plan_review(),
             Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
+            Phase::Simplification(_) => self.launch_simplifier(),
             Phase::FinalValidation(_) => self.launch_final_validation(),
             _ => {}
         }

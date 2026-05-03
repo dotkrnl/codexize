@@ -1,35 +1,39 @@
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 pub use crate::dashboard_view_model::synthesize_sibling;
 use crate::dashboard_view_model::{
-    InventoryEntry, ScoreEntry, inv_only, merge, scores_only, value_to_f64, value_to_string,
+    InventoryEntry, ScoreEntry, inv_only, merge, normalize_ipbr_key, scores_only,
 };
+use crate::selection::{IpbrPhaseScores, ScoreSource};
 
-/// Counter events emitted by ingestion. Production callers stream them
-/// to stderr; tests read the in-memory log to assert labels without a
-/// subprocess capture.
+/// Counter events emitted by legacy aistupidlevel axis ingestion. Kept
+/// `#[cfg(test)]` because the production score path is now ipbr; only
+/// fixture-driven tests still drive these.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IngestEvent {
     AxisDropped { reason: String },
     AxisParseFail { suite: String, axis: String },
 }
 
-fn ingest_events() -> &'static Mutex<Vec<IngestEvent>> {
+#[cfg(test)]
+fn ingest_events() -> &'static std::sync::Mutex<Vec<IngestEvent>> {
+    use std::sync::{Mutex, OnceLock};
     static EVENTS: OnceLock<Mutex<Vec<IngestEvent>>> = OnceLock::new();
     EVENTS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// Snapshot of every ingest event recorded since process start (or since
-/// the last `clear_ingest_events`). Intended for test assertions.
+/// Snapshot of every ingest event recorded since the last
+/// `clear_ingest_events`. Test-only.
+#[cfg(test)]
 pub fn ingest_events_snapshot() -> Vec<IngestEvent> {
-    // SAFETY: `ingest_events()` guards a `Vec<IngestEvent>` whose only
-    // mutators are `push`/`clear` — neither can panic — so the mutex
-    // poison branch is only defensive for future mutators.
+    // SAFETY: the guarded `Vec` has no panicking mutators, so the mutex
+    // cannot be poisoned. The fallback branch is purely defensive.
     ingest_events()
         .lock()
         .unwrap_or_else(|err| err.into_inner())
@@ -38,17 +42,16 @@ pub fn ingest_events_snapshot() -> Vec<IngestEvent> {
 
 #[cfg(test)]
 fn clear_ingest_events() {
-    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
-    // panicking mutators, so the mutex cannot be poisoned here.
+    // SAFETY: see `ingest_events_snapshot`.
     ingest_events()
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .clear();
 }
 
+#[cfg(test)]
 fn record_axis_dropped(reason: &str) {
-    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
-    // panicking mutators, so the mutex cannot be poisoned here.
+    // SAFETY: see `ingest_events_snapshot`.
     ingest_events()
         .lock()
         .unwrap_or_else(|err| err.into_inner())
@@ -57,9 +60,9 @@ fn record_axis_dropped(reason: &str) {
         });
 }
 
+#[cfg(test)]
 fn record_axis_parse_fail(suite: &str, axis: &str) {
-    // SAFETY: see `ingest_events_snapshot` — the guarded `Vec` has no
-    // panicking mutators, so the mutex cannot be poisoned here.
+    // SAFETY: see `ingest_events_snapshot`.
     ingest_events()
         .lock()
         .unwrap_or_else(|err| err.into_inner())
@@ -70,7 +73,9 @@ fn record_axis_parse_fail(suite: &str, axis: &str) {
 }
 
 pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
-pub const DASHBOARD_URL: &str = "https://aistupidlevel.info/dashboard/cached";
+/// Source of truth for per-phase rank scores. Replaces the old
+/// `aistupidlevel.info/dashboard/cached` JSON feed.
+pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
@@ -165,18 +170,125 @@ fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
 }
 
 fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
-    let payload = client
-        .get(DASHBOARD_URL)
+    let body = client
+        .get(IPBR_SCOREBOARD_URL)
         .send()
         .and_then(|r| r.error_for_status())
-        .context("dashboard request failed")?
-        .json::<Value>()
-        .context("dashboard response was not valid JSON")?;
-
-    parse_dashboard_scores(&payload)
+        .context("ipbr scoreboard request failed")?
+        .text()
+        .context("ipbr scoreboard response body unreadable")?;
+    parse_ipbr_scoreboard(&body)
 }
 
+/// TOML schema for the ipbr scoreboard. Unknown fields are ignored by
+/// serde for forward compatibility per spec §"Error Handling".
+#[derive(Debug, Deserialize, Default)]
+struct IpbrScoreboard {
+    #[serde(default)]
+    models: Vec<IpbrModelRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IpbrModelRow {
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    canonical_id: Option<String>,
+    #[serde(default)]
+    vendor: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    scores: Option<IpbrScoresRow>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct IpbrScoresRow {
+    #[serde(default)]
+    i_adj: Option<f64>,
+    #[serde(default)]
+    p_adj: Option<f64>,
+    #[serde(default)]
+    b_adj: Option<f64>,
+    #[serde(default)]
+    r: Option<f64>,
+}
+
+fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
+    let board: IpbrScoreboard =
+        toml::from_str(body).context("ipbr scoreboard was not valid TOML")?;
+
+    let mut entries = Vec::new();
+    for (i, row) in board.models.into_iter().enumerate() {
+        let display_norm = normalize_ipbr_key(&row.display_name);
+        if display_norm.is_empty() {
+            // No usable display_name: cannot index this row. Skip rather
+            // than abort the whole feed; spec §"Error Handling" only
+            // forces failure for malformed feed-level structure.
+            continue;
+        }
+        let scores_row = row.scores.unwrap_or_default();
+        let phase_scores = IpbrPhaseScores {
+            idea: scores_row.i_adj,
+            planning: scores_row.p_adj,
+            build: scores_row.b_adj,
+            review: scores_row.r,
+        };
+        let cosmetic = mean_present_phase_scores(&phase_scores).unwrap_or(0.0);
+        let canonical_id = row
+            .canonical_id
+            .as_deref()
+            .map(normalize_ipbr_key)
+            .filter(|key| !key.is_empty());
+        let aliases: Vec<String> = row
+            .aliases
+            .iter()
+            .map(|alias| normalize_ipbr_key(alias))
+            .filter(|key| !key.is_empty())
+            .collect();
+
+        entries.push(ScoreEntry {
+            name: display_norm,
+            vendor: row.vendor.trim().to_ascii_lowercase(),
+            // `overall_score` and `current_score` are cosmetic only —
+            // selection MUST NOT use them as a phase-score fallback.
+            overall_score: cosmetic,
+            current_score: cosmetic,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            axis_provenance: BTreeMap::new(),
+            display_order: i,
+            canonical_id,
+            aliases,
+            ipbr_phase_scores: phase_scores,
+            score_source: ScoreSource::Ipbr,
+            // Every parsed ipbr row IS an ipbr-matched row; downstream
+            // merging into inventory will preserve this flag when the row
+            // attaches to an inventory model.
+            ipbr_row_matched: true,
+        });
+    }
+
+    anyhow::ensure!(!entries.is_empty(), "ipbr scoreboard returned no models");
+    Ok(entries)
+}
+
+fn mean_present_phase_scores(scores: &IpbrPhaseScores) -> Option<f64> {
+    let values: Vec<f64> = [scores.idea, scores.planning, scores.build, scores.review]
+        .into_iter()
+        .flatten()
+        .collect();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f64>() / values.len() as f64)
+    }
+}
+
+#[cfg(test)]
 fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
+    use crate::dashboard_view_model::{value_to_f64, value_to_string};
+
     let data = payload.get("data").unwrap_or(payload);
     let model_scores = data
         .get("modelScores")
@@ -228,6 +340,14 @@ fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
             axes,
             axis_provenance,
             display_order: i,
+            canonical_id: None,
+            aliases: Vec::new(),
+            // Legacy aistupidlevel rows MUST NOT pretend to be ipbr
+            // authority. Per spec, only ipbr provenance can drive
+            // automatic phase selection.
+            ipbr_phase_scores: IpbrPhaseScores::default(),
+            score_source: ScoreSource::None,
+            ipbr_row_matched: false,
         });
     }
 
@@ -235,6 +355,7 @@ fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
     Ok(entries)
 }
 
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, String>)> {
     let (axes, provenance, events) = crate::dashboard_view_model::merged_axes(value)?;
@@ -685,6 +806,7 @@ mod tests {
     /// Serializes the two ingest-counter tests so the in-memory event log
     /// can be cleared and inspected without races from parallel tests.
     fn ingest_counter_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
@@ -775,5 +897,168 @@ mod tests {
             )),
             "expected at least one axis_dropped reason=contextwindow event, got {events:?}"
         );
+    }
+
+    // -------------------------------------------------------------------
+    // ipbr scoreboard.toml parsing
+    // -------------------------------------------------------------------
+
+    const IPBR_FIXTURE: &str = r#"
+[[models]]
+display_name = "Claude Opus 4.7"
+canonical_id = "anthropic/claude-opus-4-7"
+vendor = "anthropic"
+aliases = ["claude-opus-4.7", "claude_opus_4_7"]
+unknown_top_level = "ignored"
+
+[models.scores]
+i_adj = 92.5
+p_adj = 91.0
+b_adj = 90.0
+r = 89.5
+unused_extra = 7.0
+
+[[models]]
+display_name = "GPT-5.4"
+canonical_id = "openai/gpt-5-4"
+vendor = "openai"
+aliases = ["gpt5.4"]
+
+[models.scores]
+i_adj = 80.0
+b_adj = 78.0
+r = 77.0
+# p_adj omitted on purpose
+
+[[models]]
+display_name = "Gemini 2.5 Pro"
+vendor = "google"
+# scores table missing entirely
+"#;
+
+    #[test]
+    fn parse_ipbr_normalizes_keys_and_maps_phase_scores() {
+        let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
+        assert_eq!(entries.len(), 3, "all three rows should parse");
+
+        let opus = entries
+            .iter()
+            .find(|e| e.name == "claude-opus-4-7")
+            .unwrap();
+        assert_eq!(opus.vendor, "anthropic");
+        assert_eq!(opus.score_source, ScoreSource::Ipbr);
+        assert!(opus.ipbr_row_matched);
+        assert_eq!(
+            opus.canonical_id.as_deref(),
+            Some("anthropic-claude-opus-4-7")
+        );
+        // Aliases are normalized: punctuation/underscores collapse to `-`,
+        // so two distinct surface forms can produce the same key.
+        assert_eq!(
+            opus.aliases,
+            vec!["claude-opus-4-7".to_string(), "claude-opus-4-7".to_string(),]
+        );
+        assert_eq!(opus.ipbr_phase_scores.idea, Some(92.5));
+        assert_eq!(opus.ipbr_phase_scores.planning, Some(91.0));
+        assert_eq!(opus.ipbr_phase_scores.build, Some(90.0));
+        assert_eq!(opus.ipbr_phase_scores.review, Some(89.5));
+        // Cosmetic overall_score = mean of present phase scores.
+        let expected = (92.5 + 91.0 + 90.0 + 89.5) / 4.0;
+        assert!((opus.overall_score - expected).abs() < 1e-9);
+        assert_eq!(opus.current_score, opus.overall_score);
+        // axes/standard_error are not populated by ipbr ingestion.
+        assert!(opus.axes.is_empty());
+        assert_eq!(opus.standard_error, 0.0);
+    }
+
+    #[test]
+    fn parse_ipbr_row_missing_one_phase_marks_only_that_phase_absent() {
+        let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
+        let gpt = entries.iter().find(|e| e.name == "gpt-5-4").unwrap();
+
+        // Only the omitted field is None; remaining phases stay present.
+        assert_eq!(gpt.ipbr_phase_scores.idea, Some(80.0));
+        assert_eq!(gpt.ipbr_phase_scores.planning, None);
+        assert_eq!(gpt.ipbr_phase_scores.build, Some(78.0));
+        assert_eq!(gpt.ipbr_phase_scores.review, Some(77.0));
+        assert_eq!(gpt.score_source, ScoreSource::Ipbr);
+        assert!(gpt.ipbr_row_matched);
+
+        let mean = (80.0 + 78.0 + 77.0) / 3.0;
+        assert!((gpt.overall_score - mean).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_ipbr_row_missing_all_phases_is_parseable_but_carries_no_ranking_authority() {
+        let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
+        let gemini = entries.iter().find(|e| e.name == "gemini-2-5-pro").unwrap();
+
+        assert_eq!(gemini.ipbr_phase_scores, IpbrPhaseScores::default());
+        // Cosmetic summary defaults to 0.0 when no phases are present, so
+        // it cannot accidentally rank above genuine ipbr data — and per
+        // spec it must not be treated as a phase fallback regardless.
+        assert_eq!(gemini.overall_score, 0.0);
+        assert_eq!(gemini.current_score, 0.0);
+        // Provenance is still ipbr because the row itself came from ipbr;
+        // selection layers must consult ipbr_phase_scores, not provenance.
+        assert_eq!(gemini.score_source, ScoreSource::Ipbr);
+        assert!(gemini.ipbr_row_matched);
+    }
+
+    #[test]
+    fn parse_ipbr_ignores_unknown_top_level_and_score_fields() {
+        // The fixture exercises both an unknown top-level row field and an
+        // unknown nested score field; parsing must not error.
+        let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("unknown fields must be ignored");
+        assert!(entries.iter().any(|e| e.name == "claude-opus-4-7"));
+    }
+
+    #[test]
+    fn parse_ipbr_malformed_feed_surfaces_existing_failure_path() {
+        // Non-TOML payload follows the existing fetch/parse failure path.
+        let err = parse_ipbr_scoreboard("not = valid = toml").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("ipbr scoreboard was not valid TOML"),
+            "expected feed-level parse failure, got {err}"
+        );
+
+        // A structurally-correct but empty feed surfaces the same kind of
+        // "no models" failure as the previous score path so the dashboard
+        // refresh error is preserved.
+        let err = parse_ipbr_scoreboard("").unwrap_err();
+        assert!(
+            err.to_string().contains("returned no models"),
+            "expected no-models error, got {err}"
+        );
+    }
+
+    #[test]
+    fn parse_ipbr_scoreboard_is_what_load_scores_uses() {
+        // Smoke-check the production fetch boundary: the URL constant
+        // points at the documented ipbr endpoint and the parser the
+        // fetcher delegates to is `parse_ipbr_scoreboard`. This pins the
+        // production wiring without performing a network round-trip.
+        assert_eq!(IPBR_SCOREBOARD_URL, "https://ipbr.dev/scoreboard.toml");
+        // Confirm the parser is a real function (compiles) by exercising
+        // a minimal valid feed through it.
+        let entries =
+            parse_ipbr_scoreboard("[[models]]\ndisplay_name = \"x\"\nvendor = \"v\"\n").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "x");
+        assert_eq!(entries[0].vendor, "v");
+    }
+
+    #[test]
+    fn normalize_ipbr_key_handles_punctuation_and_whitespace() {
+        use crate::dashboard_view_model::normalize_ipbr_key;
+        assert_eq!(normalize_ipbr_key("Claude Opus 4.1"), "claude-opus-4-1");
+        assert_eq!(
+            normalize_ipbr_key("anthropic/claude_opus"),
+            "anthropic-claude-opus"
+        );
+        assert_eq!(normalize_ipbr_key("--gpt..5__4--"), "gpt-5-4");
+        assert_eq!(normalize_ipbr_key("   "), "");
+        assert_eq!(normalize_ipbr_key(""), "");
     }
 }

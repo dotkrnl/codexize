@@ -1661,6 +1661,123 @@ fn simplifier_launch_reuses_most_recent_coder_model_for_round() {
 }
 
 #[test]
+fn simplifier_picks_chronologically_latest_coder_run_across_tasks() {
+    // Multi-task rounds expose the "highest attempt is not newest run" trap:
+    // task 1 attempt 2 has a higher attempt counter than task 2 attempt 1,
+    // but task 2 ran later in wall time and reflects what the round most
+    // recently settled on. The simplifier must follow run recency (by id),
+    // not the attempt number, so an `attempt`-keyed selector would regress.
+    with_temp_root(|| {
+        let session_id = "simplifier-mixed-task-recency";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        write_review_scope(&round_dir, "base-mixed");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(1);
+        // Task 1 retried once (attempts 1 then 2 on claude). Task 2 then ran
+        // its first attempt on codex, which is the chronologically most
+        // recent coder run for round 1 even though its attempt counter is
+        // lower than task 1's second try.
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "claude-sonnet-4-6".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder T1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 2,
+            model: "claude-sonnet-4-6".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder T1]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 3,
+            stage: "coder".to_string(),
+            task_id: Some(2),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Round 1 Coder T2]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 10, 10),
+            ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet-4-6",
+                10,
+                10,
+                10,
+            ),
+        ];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"no_changes\"\nsummary = \"diff is tight\"\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_simplifier_with_model(None));
+
+        let run = app
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| run.stage == "simplifier")
+            .expect("simplifier run recorded");
+        assert_eq!(
+            run.model, "gpt-5",
+            "simplifier must follow the chronologically latest coder run \
+             (task 2 attempt 1, id 3), not the highest attempt number \
+             (task 1 attempt 2, id 2)"
+        );
+        assert_eq!(run.vendor, "codex");
+    });
+}
+
+#[test]
 fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
     with_temp_root(|| {
         let session_id = "simplifier-retry-reuse";

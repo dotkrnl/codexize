@@ -1797,13 +1797,19 @@ impl App {
     /// resolve its `(model, vendor_kind, vendor_tag)` triple. Returns
     /// `None` when no matching run exists or its persisted vendor string
     /// no longer parses (e.g. after a vendor rename).
+    ///
+    /// "Most recent" is by run id (monotonic via `next_agent_run_id`),
+    /// not by `attempt`: when a round contains multiple tasks, a later
+    /// task's attempt=1 is newer than an earlier task's attempt=2, and
+    /// the simplifier should follow the model the round most recently
+    /// settled on.
     fn round_stage_model(&self, stage: &str, round: u32) -> Option<(String, VendorKind, String)> {
         let last = self
             .state
             .agent_runs
             .iter()
             .filter(|run| run.stage == stage && run.round == round)
-            .max_by_key(|run| run.attempt)?;
+            .max_by_key(|run| run.id)?;
         let vendor_kind = crate::selection::vendor::str_to_vendor(&last.vendor)?;
         Some((
             last.model.clone(),

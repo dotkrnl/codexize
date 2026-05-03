@@ -1,5 +1,5 @@
-use super::config::{SELECTION_CONFIG, SelectionPhase};
-use super::types::{CachedModel, VendorKind};
+use super::config::SelectionPhase;
+use super::types::{CachedModel, ScoreSource, VendorKind};
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -46,21 +46,10 @@ fn record_zero_as_missing(axis: &str, phase: &str) {
 }
 
 const ZERO_THRESHOLD: f64 = 1e-9;
+const RANK_SOFTMAX_TEMPERATURE: f64 = 5.5;
+const UNKNOWN_QUOTA_PERCENT: u8 = 30;
 
-/// Linear variance-penalty factor (0..1) applied once, outside the role
-/// score exponent, so a noisy reading doesn't get cubed into oblivion.
-fn variance_factor(standard_error: f64) -> f64 {
-    let standard_error = standard_error.max(0.0);
-    if standard_error == 0.0 {
-        return 1.0;
-    }
-    let cfg = &SELECTION_CONFIG;
-    let mut penalty = standard_error * cfg.std_err_penalty_multiplier;
-    if standard_error >= cfg.high_variance_std_err {
-        penalty += cfg.high_variance_extra_penalty;
-    }
-    (1.0 - penalty / 100.0).clamp(0.0, 1.0)
-}
+pub type CandidateRef<'a> = &'a CachedModel;
 
 pub(crate) fn extract_version(name: &str) -> Option<(u32, u32)> {
     let bytes = name.as_bytes();
@@ -99,7 +88,8 @@ pub(crate) fn extract_version(name: &str) -> Option<(u32, u32)> {
 }
 
 /// Per-vendor version ranking built once from the final assembled model set.
-/// Used to apply version penalties during probability calculation.
+/// Retained for callers that still thread a version index through selection.
+/// Ranking and pool weights do not apply version penalties.
 #[derive(Debug, Clone)]
 pub struct VersionIndex {
     per_vendor: BTreeMap<VendorKind, Vec<(u32, u32)>>,
@@ -142,90 +132,101 @@ pub fn build_version_index(models: &[CachedModel]) -> VersionIndex {
     VersionIndex { per_vendor }
 }
 
-/// Consolidated probability calculation for CachedModel.
-/// Combines quota weight, role weight with exponent, variance factor,
-/// version penalty, vendor bias, and flash-tier penalty.
+/// Return the authoritative ipbr rank score for `phase`, if this model has one.
+pub fn phase_rank_score(model: &CachedModel, phase: SelectionPhase) -> Option<f64> {
+    if model.score_source != ScoreSource::Ipbr {
+        return None;
+    }
+
+    match phase {
+        SelectionPhase::Idea => model.ipbr_phase_scores.idea,
+        SelectionPhase::Planning => model.ipbr_phase_scores.planning,
+        SelectionPhase::Build => model.ipbr_phase_scores.build,
+        SelectionPhase::Review => model.ipbr_phase_scores.review,
+    }
+}
+
+/// Return pool-scoped sampling weights in the same order as `candidates`.
+pub fn candidate_pool_weights(candidates: &[CandidateRef<'_>], phase: SelectionPhase) -> Vec<f64> {
+    // Keep output parallel to the input slice; ineligible candidates are "dropped" as zero weights.
+    let mut weights = vec![0.0; candidates.len()];
+    let mut survivors = Vec::new();
+
+    for (index, model) in candidates.iter().enumerate() {
+        let Some(score) = phase_rank_score(model, phase) else {
+            continue;
+        };
+        let Some(effective_quota) = effective_quota_percent(model) else {
+            continue;
+        };
+
+        survivors.push((index, score, effective_quota));
+    }
+
+    if survivors.is_empty() {
+        return weights;
+    }
+
+    let max_score = survivors
+        .iter()
+        .map(|(_, score, _)| *score)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let exp_weights: Vec<f64> = survivors
+        .iter()
+        .map(|(_, score, _)| ((score - max_score) / RANK_SOFTMAX_TEMPERATURE).exp())
+        .collect();
+    let exp_total: f64 = exp_weights.iter().sum();
+    let pool_best_quota = survivors
+        .iter()
+        .map(|(_, _, quota)| *quota)
+        .max()
+        .unwrap_or(UNKNOWN_QUOTA_PERCENT);
+
+    for ((index, _, quota), exp_weight) in survivors.iter().zip(exp_weights.iter()) {
+        let rank_weight = exp_weight / exp_total;
+        let quota_factor = relative_quota_factor(pool_best_quota - *quota);
+        weights[*index] = rank_weight * quota_factor;
+    }
+
+    weights
+}
+
+fn effective_quota_percent(model: &CachedModel) -> Option<u8> {
+    match model.quota_percent {
+        Some(0) => None,
+        Some(quota) => Some(quota),
+        None => Some(UNKNOWN_QUOTA_PERCENT),
+    }
+}
+
+fn relative_quota_factor(deficit: u8) -> f64 {
+    if deficit <= 20 {
+        return 1.0;
+    }
+    if deficit >= 40 {
+        return 0.10;
+    }
+
+    let t = ((f64::from(deficit) - 20.0) / 20.0).clamp(0.0, 1.0);
+    let smooth = t * t * (3.0 - 2.0 * t);
+    1.0 - 0.90 * smooth
+}
+
+/// Compatibility wrapper for legacy single-model callers.
 pub fn selection_probability(
     model: &CachedModel,
     phase: SelectionPhase,
-    version_index: &VersionIndex,
+    _version_index: &VersionIndex,
 ) -> f64 {
-    let cfg = &SELECTION_CONFIG;
-
-    // Quota weight (concave curve, 1.0 at soft threshold)
-    let quota = model.quota_percent.unwrap_or(50) as f64;
-    let quota_weight = cfg.quota_weight(quota);
-    if quota_weight <= 0.0 {
+    if model.quota_percent == Some(0) {
         return 0.0;
     }
 
-    // Role score: extract axis values, compute mean (arithmetic for Idea, geometric for others)
-    let axis_score = compute_axis_score(model, phase.axes(), phase) / 100.0;
-    let role_weight = axis_score
-        .max(cfg.min_role_score_weight)
-        .powi(cfg.role_score_exponent);
-
-    // Variance factor (linear penalty for standard error)
-    let variance_factor = variance_factor(model.standard_error);
-
-    // Version penalty (per-step multiplier based on version rank)
-    let version_rank = version_index.version_rank(model.vendor, &model.name);
-    let version_penalty = if phase.is_interactive() {
-        cfg.version_penalty_per_step_interactive
-            .powi(version_rank as i32)
-    } else {
-        cfg.version_penalty_per_step_headless
-            .powi(version_rank as i32)
-    };
-
-    // Vendor bias (optional multiplier for specific vendor/phase combinations)
-    let vendor_bias = cfg.vendor_bias(model.vendor, &model.name, phase);
-
-    // Flash-tier penalty (aggressive derank for flash/nano models)
-    let flash_penalty = if is_flash_tier(model) {
-        cfg.flash_tier_penalty
-    } else {
-        1.0
-    };
-
-    quota_weight * role_weight * variance_factor * version_penalty * vendor_bias * flash_penalty
+    phase_rank_score(model, phase).unwrap_or(0.0)
 }
 
-/// Extract and aggregate axis scores for the given phase.
-/// Mirrors the logic in raw_axis_score but works with CachedModel.
-/// Axis values at or below `ZERO_THRESHOLD` are treated identically to
-/// missing axes: both use the `overall_score / 100` backfill.
-fn compute_axis_score(model: &CachedModel, axes: &[&str], phase: SelectionPhase) -> f64 {
-    let mut values: Vec<f64> = axes
-        .iter()
-        .filter_map(|axis| model.axis(axis).filter(|v| *v > ZERO_THRESHOLD))
-        .collect();
-
-    // Backfill missing-or-zero axes with overall_score / 100
-    while values.len() < axes.len() && !axes.is_empty() {
-        values.push(model.overall_score / 100.0);
-    }
-
-    if values.is_empty() {
-        return model.overall_score.clamp(0.0, 100.0);
-    }
-
-    // Idea uses arithmetic mean (rewards breadth), others use geometric (punishes inconsistency)
-    let score = match phase {
-        SelectionPhase::Idea => values.iter().sum::<f64>() / values.len() as f64 * 100.0,
-        SelectionPhase::Planning | SelectionPhase::Build | SelectionPhase::Review => {
-            let floor = SELECTION_CONFIG.min_role_score_weight;
-            let log_sum: f64 = values.iter().map(|v| v.max(floor).ln()).sum();
-            (log_sum / values.len() as f64).exp() * 100.0
-        }
-    };
-    score.clamp(0.0, 100.0)
-}
-
-/// Stamp `fallback:overall` provenance on every axis that `compute_axis_score`
-/// will backfill (missing or zero-as-missing), and emit counter events for
-/// zero-as-missing substitutions. Must be called once per model before
-/// selection probabilities are used.
+/// Stamp `fallback:overall` provenance on missing or zero-as-missing legacy
+/// axes, and emit counter events for zero-as-missing substitutions.
 pub fn stamp_selection_provenance(model: &mut CachedModel) {
     let mut seen = std::collections::HashSet::new();
     for phase in SelectionPhase::ALL {
@@ -254,11 +255,6 @@ pub fn stamp_selection_provenance(model: &mut CachedModel) {
     }
 }
 
-fn is_flash_tier(model: &CachedModel) -> bool {
-    model.vendor == VendorKind::Gemini
-        && (model.name.contains("flash") || model.name.contains("nano"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +281,130 @@ mod tests {
             display_order: 1,
             fallback_from: None,
         }
+    }
+
+    fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel {
+        CachedModel {
+            name: name.to_string(),
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                idea: Some(score + 1.0),
+                planning: Some(score + 2.0),
+                build: Some(score),
+                review: Some(score + 3.0),
+            },
+            score_source: crate::selection::ScoreSource::Ipbr,
+            ipbr_row_matched: true,
+            quota_percent,
+            ..sample_cached_model()
+        }
+    }
+
+    #[test]
+    fn phase_rank_score_maps_each_phase_to_ipbr_field() {
+        let model = CachedModel {
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                idea: Some(11.0),
+                planning: Some(22.0),
+                build: Some(33.0),
+                review: Some(44.0),
+            },
+            score_source: crate::selection::ScoreSource::Ipbr,
+            ipbr_row_matched: true,
+            ..sample_cached_model()
+        };
+
+        assert_eq!(phase_rank_score(&model, SelectionPhase::Idea), Some(11.0));
+        assert_eq!(
+            phase_rank_score(&model, SelectionPhase::Planning),
+            Some(22.0)
+        );
+        assert_eq!(phase_rank_score(&model, SelectionPhase::Build), Some(33.0));
+        assert_eq!(phase_rank_score(&model, SelectionPhase::Review), Some(44.0));
+    }
+
+    #[test]
+    fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
+        let missing_phase = CachedModel {
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                build: None,
+                ..crate::selection::IpbrPhaseScores::default()
+            },
+            score_source: crate::selection::ScoreSource::Ipbr,
+            ipbr_row_matched: true,
+            ..sample_cached_model()
+        };
+        let cosmetic_only = CachedModel {
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                build: Some(99.0),
+                ..crate::selection::IpbrPhaseScores::default()
+            },
+            score_source: crate::selection::ScoreSource::Aistupidlevel,
+            ipbr_row_matched: false,
+            ..sample_cached_model()
+        };
+
+        assert_eq!(
+            phase_rank_score(&missing_phase, SelectionPhase::Build),
+            None
+        );
+        assert_eq!(
+            phase_rank_score(&cosmetic_only, SelectionPhase::Build),
+            None
+        );
+    }
+
+    #[test]
+    fn candidate_pool_weights_softmax_matches_pairwise_calibration() {
+        let high = ipbr_model("high", 90.0, Some(80));
+        let gap_5_low = ipbr_model("gap-5-low", 85.0, Some(80));
+        let gap_15_low = ipbr_model("gap-15-low", 75.0, Some(80));
+
+        let gap_5_weights = candidate_pool_weights(&[&high, &gap_5_low], SelectionPhase::Build);
+        let gap_5_low_share = gap_5_weights[1] / gap_5_weights.iter().sum::<f64>();
+        assert!(
+            (0.25..=0.30).contains(&gap_5_low_share),
+            "5-point gap lower-score share should be 25-30%, got {gap_5_low_share}"
+        );
+
+        let gap_15_weights = candidate_pool_weights(&[&high, &gap_15_low], SelectionPhase::Build);
+        let gap_15_low_share = gap_15_weights[1] / gap_15_weights.iter().sum::<f64>();
+        assert!(
+            (0.06..=0.08).contains(&gap_15_low_share),
+            "15-point gap lower-score share should be 6-8%, got {gap_15_low_share}"
+        );
+    }
+
+    #[test]
+    fn relative_quota_factor_uses_smooth_deficit_curve() {
+        assert_eq!(relative_quota_factor(20), 1.0);
+        assert!((relative_quota_factor(30) - 0.55).abs() <= 0.03);
+        assert_eq!(relative_quota_factor(40), 0.10);
+        assert_eq!(relative_quota_factor(80), 0.10);
+    }
+
+    #[test]
+    fn candidate_pool_weights_keeps_unknown_quota_selectable_as_effective_30() {
+        let known_best = ipbr_model("known-best", 90.0, Some(50));
+        let unknown = ipbr_model("unknown", 90.0, None);
+        let exhausted = ipbr_model("exhausted", 90.0, Some(0));
+
+        let weights =
+            candidate_pool_weights(&[&known_best, &unknown, &exhausted], SelectionPhase::Build);
+
+        assert!(weights[0] > 0.0);
+        assert!(weights[1] > 0.0);
+        assert_eq!(weights[2], 0.0);
+        assert!((weights[0] - weights[1]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn candidate_pool_weights_all_unknown_quota_has_uniform_quota_factor() {
+        let a = ipbr_model("a", 90.0, None);
+        let b = ipbr_model("b", 90.0, None);
+        let weights = candidate_pool_weights(&[&a, &b], SelectionPhase::Build);
+
+        assert!((weights[0] - weights[1]).abs() < 1e-9);
+        assert!(weights.iter().all(|weight| *weight > 0.0));
     }
 
     #[test]
@@ -365,224 +485,40 @@ mod tests {
     }
 
     #[test]
-    fn selection_probability_applies_quota_weight() {
+    fn selection_probability_wrapper_uses_ipbr_phase_rank_only() {
         let index = build_version_index(&[]);
-        let mut model_high_quota = sample_cached_model();
-        model_high_quota.quota_percent = Some(80);
-        let mut model_low_quota = sample_cached_model();
-        model_low_quota.quota_percent = Some(5);
-
-        let prob_high = selection_probability(&model_high_quota, SelectionPhase::Build, &index);
-        let prob_low = selection_probability(&model_low_quota, SelectionPhase::Build, &index);
-
-        assert!(prob_high > prob_low);
-    }
-
-    #[test]
-    fn selection_probability_returns_zero_for_zero_quota() {
-        let index = build_version_index(&[]);
-        let mut model = sample_cached_model();
-        model.quota_percent = Some(0);
-
-        let prob = selection_probability(&model, SelectionPhase::Build, &index);
-
-        assert_eq!(prob, 0.0);
-    }
-
-    #[test]
-    fn selection_probability_applies_role_weight_exponent() {
-        let index = build_version_index(&[]);
-        let mut model_high_axis = sample_cached_model();
-        model_high_axis.axes = vec![
-            ("codequality".to_string(), 0.95),
-            ("correctness".to_string(), 0.95),
-            ("debugging".to_string(), 0.95),
-            ("safety".to_string(), 0.95),
-        ];
-        let mut model_low_axis = sample_cached_model();
-        model_low_axis.axes = vec![
-            ("codequality".to_string(), 0.50),
-            ("correctness".to_string(), 0.50),
-            ("debugging".to_string(), 0.50),
-            ("safety".to_string(), 0.50),
-        ];
-
-        let prob_high = selection_probability(&model_high_axis, SelectionPhase::Build, &index);
-        let prob_low = selection_probability(&model_low_axis, SelectionPhase::Build, &index);
-
-        // With exponent = 3, difference should be amplified
-        assert!(prob_high > prob_low);
-        let ratio = prob_high / prob_low;
-        assert!(ratio > 5.0); // Should be significantly larger due to cubing
-    }
-
-    #[test]
-    fn selection_probability_applies_variance_factor() {
-        let index = build_version_index(&[]);
-        let mut model_low_variance = sample_cached_model();
-        model_low_variance.standard_error = 1.0;
-        let mut model_high_variance = sample_cached_model();
-        model_high_variance.standard_error = 8.0;
-
-        let prob_low_var =
-            selection_probability(&model_low_variance, SelectionPhase::Build, &index);
-        let prob_high_var =
-            selection_probability(&model_high_variance, SelectionPhase::Build, &index);
-
-        assert!(prob_low_var > prob_high_var);
-    }
-
-    #[test]
-    fn selection_probability_applies_version_penalty() {
-        let models = vec![
-            CachedModel {
-                name: "gpt-5.5".to_string(),
-                ..sample_cached_model()
-            },
-            CachedModel {
-                name: "gpt-5.2".to_string(),
-                ..sample_cached_model()
-            },
-        ];
-        let index = build_version_index(&models);
-
-        let prob_new = selection_probability(&models[0], SelectionPhase::Build, &index);
-        let prob_old = selection_probability(&models[1], SelectionPhase::Build, &index);
-
-        assert!(prob_new > prob_old);
-    }
-
-    #[test]
-    fn selection_probability_uses_different_version_penalty_for_interactive() {
-        let models = vec![
-            CachedModel {
-                name: "gpt-5.5".to_string(),
-                ..sample_cached_model()
-            },
-            CachedModel {
-                name: "gpt-5.2".to_string(),
-                ..sample_cached_model()
-            },
-        ];
-        let index = build_version_index(&models);
-
-        let idea_new = selection_probability(&models[0], SelectionPhase::Idea, &index);
-        let idea_old = selection_probability(&models[1], SelectionPhase::Idea, &index);
-        let build_new = selection_probability(&models[0], SelectionPhase::Build, &index);
-        let build_old = selection_probability(&models[1], SelectionPhase::Build, &index);
-
-        // Interactive phases penalize old versions more aggressively
-        let idea_ratio = idea_new / idea_old;
-        let build_ratio = build_new / build_old;
-        assert!(idea_ratio > build_ratio);
-    }
-
-    #[test]
-    fn selection_probability_applies_vendor_bias() {
-        let index = build_version_index(&[]);
-        let claude_opus = CachedModel {
-            vendor: VendorKind::Claude,
-            name: "claude-opus-4-7".to_string(),
-            ..sample_cached_model()
-        };
-        let codex_model = CachedModel {
-            vendor: VendorKind::Codex,
-            name: "gpt-5.5".to_string(),
-            ..sample_cached_model()
-        };
-
-        // Claude Opus gets 1.5× bias for Idea phase (per SELECTION_CONFIG)
-        let claude_idea = selection_probability(&claude_opus, SelectionPhase::Idea, &index);
-        let codex_idea = selection_probability(&codex_model, SelectionPhase::Idea, &index);
-
-        // Codex gets 1.5× bias for Review phase
-        let claude_review = selection_probability(&claude_opus, SelectionPhase::Review, &index);
-        let codex_review = selection_probability(&codex_model, SelectionPhase::Review, &index);
-
-        // Verify bias is applied (exact ratio depends on other factors, but should be noticeable)
-        assert!(claude_idea > codex_idea * 1.2); // Approximate check accounting for other factors
-        assert!(codex_review > claude_review * 1.2);
-    }
-
-    #[test]
-    fn selection_probability_applies_flash_tier_penalty() {
-        let index = build_version_index(&[]);
-        let flash_model = CachedModel {
-            vendor: VendorKind::Gemini,
-            name: "gemini-2.5-flash".to_string(),
-            ..sample_cached_model()
-        };
-        let pro_model = CachedModel {
+        let mut high_variance_old_flash = ipbr_model("gemini-2.5-flash", 90.0, Some(80));
+        high_variance_old_flash.vendor = VendorKind::Gemini;
+        high_variance_old_flash.standard_error = 99.0;
+        let low_variance_pro = CachedModel {
             vendor: VendorKind::Gemini,
             name: "gemini-2.5-pro".to_string(),
-            ..sample_cached_model()
+            standard_error: 0.0,
+            ..ipbr_model("gemini-2.5-pro", 80.0, Some(80))
         };
 
-        let flash_prob = selection_probability(&flash_model, SelectionPhase::Build, &index);
-        let pro_prob = selection_probability(&pro_model, SelectionPhase::Build, &index);
+        let flash_prob =
+            selection_probability(&high_variance_old_flash, SelectionPhase::Build, &index);
+        let pro_prob = selection_probability(&low_variance_pro, SelectionPhase::Build, &index);
 
-        // Flash should be heavily penalized (0.05 multiplier)
-        assert!(pro_prob > flash_prob * 10.0);
+        assert_eq!(flash_prob, 90.0);
+        assert_eq!(pro_prob, 80.0);
     }
 
     #[test]
-    fn compute_axis_score_uses_arithmetic_mean_for_idea() {
-        let model = CachedModel {
-            axes: vec![
-                ("complexity".to_string(), 0.8),
-                ("edgecases".to_string(), 0.6),
-            ],
-            ..sample_cached_model()
-        };
+    fn selection_probability_wrapper_excludes_zero_quota_and_unranked_models() {
+        let index = build_version_index(&[]);
+        let exhausted = ipbr_model("exhausted", 90.0, Some(0));
+        let unranked = sample_cached_model();
 
-        let score = compute_axis_score(&model, SelectionPhase::Idea.axes(), SelectionPhase::Idea);
-
-        // Should be (0.8 + 0.6) / 2 * 100 = 70.0 (plus backfilled values)
-        // With 4 axes and 2 provided, backfill with overall_score/100 = 0.88
-        // (0.8 + 0.6 + 0.88 + 0.88) / 4 * 100 = 79.0
-        assert!((score - 79.0).abs() < 1.0);
-    }
-
-    #[test]
-    fn compute_axis_score_uses_geometric_mean_for_build() {
-        let model = CachedModel {
-            axes: vec![
-                ("codequality".to_string(), 0.9),
-                ("correctness".to_string(), 0.9),
-                ("debugging".to_string(), 0.1), // Weak axis should pull down geometric mean
-                ("safety".to_string(), 0.9),
-            ],
-            ..sample_cached_model()
-        };
-
-        let score = compute_axis_score(&model, SelectionPhase::Build.axes(), SelectionPhase::Build);
-
-        // Geometric mean with weak axis floored at min_role_score_weight
-        assert!(score < 70.0);
-    }
-
-    #[test]
-    fn is_flash_tier_detects_flash_models() {
-        assert!(is_flash_tier(&CachedModel {
-            vendor: VendorKind::Gemini,
-            name: "gemini-2.5-flash".to_string(),
-            ..sample_cached_model()
-        }));
-        assert!(is_flash_tier(&CachedModel {
-            vendor: VendorKind::Gemini,
-            name: "gemini-nano".to_string(),
-            ..sample_cached_model()
-        }));
-        assert!(!is_flash_tier(&CachedModel {
-            vendor: VendorKind::Gemini,
-            name: "gemini-2.5-pro".to_string(),
-            ..sample_cached_model()
-        }));
-        assert!(!is_flash_tier(&CachedModel {
-            vendor: VendorKind::Claude,
-            name: "claude-flash".to_string(), // Not Gemini
-            ..sample_cached_model()
-        }));
+        assert_eq!(
+            selection_probability(&exhausted, SelectionPhase::Build, &index),
+            0.0
+        );
+        assert_eq!(
+            selection_probability(&unranked, SelectionPhase::Build, &index),
+            0.0
+        );
     }
 
     fn selection_counter_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -590,76 +526,6 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-    }
-
-    #[test]
-    fn zero_axis_produces_same_score_as_absent_axis() {
-        let model_with_zero = CachedModel {
-            axes: vec![
-                ("codequality".to_string(), 0.85),
-                ("correctness".to_string(), 0.0),
-                ("debugging".to_string(), 0.85),
-                ("safety".to_string(), 0.85),
-            ],
-            overall_score: 70.0,
-            ..sample_cached_model()
-        };
-        let model_without = CachedModel {
-            axes: vec![
-                ("codequality".to_string(), 0.85),
-                ("debugging".to_string(), 0.85),
-                ("safety".to_string(), 0.85),
-            ],
-            overall_score: 70.0,
-            ..sample_cached_model()
-        };
-        let score_zero = compute_axis_score(
-            &model_with_zero,
-            SelectionPhase::Build.axes(),
-            SelectionPhase::Build,
-        );
-        let score_absent = compute_axis_score(
-            &model_without,
-            SelectionPhase::Build.axes(),
-            SelectionPhase::Build,
-        );
-        assert!(
-            (score_zero - score_absent).abs() < 1e-9,
-            "zero ({score_zero}) should equal absent ({score_absent})"
-        );
-    }
-
-    #[test]
-    fn floor_keeps_one_zero_within_thirty_percent() {
-        let index = build_version_index(&[]);
-        let mut model_with_zero = CachedModel {
-            axes: vec![
-                ("codequality".to_string(), 0.95),
-                ("correctness".to_string(), 0.95),
-                ("debugging".to_string(), 0.95),
-                ("safety".to_string(), 0.0),
-            ],
-            overall_score: 88.0,
-            ..sample_cached_model()
-        };
-        stamp_selection_provenance(&mut model_with_zero);
-        let all_present = CachedModel {
-            axes: vec![
-                ("codequality".to_string(), 0.95),
-                ("correctness".to_string(), 0.95),
-                ("debugging".to_string(), 0.95),
-                ("safety".to_string(), 0.95),
-            ],
-            overall_score: 88.0,
-            ..sample_cached_model()
-        };
-        let prob_zero = selection_probability(&model_with_zero, SelectionPhase::Build, &index);
-        let prob_all = selection_probability(&all_present, SelectionPhase::Build, &index);
-        let ratio = prob_zero / prob_all;
-        assert!(
-            ratio > 0.70,
-            "model with one zero axis should be within 30%: ratio={ratio}"
-        );
     }
 
     #[test]

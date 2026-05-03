@@ -803,7 +803,7 @@ impl App {
         };
         if let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) {
             // `/exit` is a local codexize control for interactive ACP runs,
-            // not agent prompt text, so the runner is cancelled by run label.
+            // not agent prompt text, so the runner completes this run by label.
             crate::runner::request_run_label_exit(&run.window_name);
         }
     }

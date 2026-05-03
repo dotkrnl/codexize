@@ -1,7 +1,15 @@
 use super::super::ranking::build_version_index;
 use super::*;
+use crate::selection::types::{IpbrPhaseScores, ScoreSource};
 
 fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
+    sample_model_with_score(vendor, name, quota, 85.0)
+}
+
+/// Like [`sample_model`] but lets the caller pin the ipbr phase score.
+/// Useful for tests that want to differentiate models by rank without
+/// touching quota.
+fn sample_model_with_score(vendor: VendorKind, name: &str, quota: u8, score: f64) -> CachedModel {
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -15,9 +23,14 @@ fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
             ("safety".to_string(), 0.85),
         ],
         axis_provenance: std::collections::BTreeMap::new(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
+        ipbr_phase_scores: IpbrPhaseScores {
+            idea: Some(score),
+            planning: Some(score),
+            build: Some(score),
+            review: Some(score),
+        },
+        score_source: ScoreSource::Ipbr,
+        ipbr_row_matched: true,
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,
@@ -33,20 +46,88 @@ fn pick_for_phase_returns_none_for_empty() {
 }
 
 #[test]
-fn pick_for_phase_applies_relative_cutoff() {
+fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
+    // High-quota model has quota_factor 1.0; low-quota has factor 0.10
+    // (deficit 79 → ≥40 floor). Both have the same ipbr score, so the
+    // weighted sample with seed=1 deterministically chooses "high".
     let models = vec![
         sample_model(VendorKind::Claude, "high", 80),
-        sample_model(VendorKind::Codex, "low", 1), // Very low quota
+        sample_model(VendorKind::Codex, "low", 1),
     ];
     let index = build_version_index(&models);
 
-    // With cutoff ratio 1/3 and quota=1, the low-quota model should be excluded
-    // quota_weight(1) ≈ 0.0016, quota_weight(80) = 1.0, ratio < 1/3
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
         .expect("should pick high-quota model");
     assert_eq!(chosen.name, "high");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+}
+
+#[test]
+fn pick_for_phase_excludes_known_zero_quota() {
+    let models = vec![
+        sample_model(VendorKind::Claude, "exhausted", 0),
+        sample_model(VendorKind::Codex, "available", 80),
+    ];
+    let index = build_version_index(&models);
+
+    TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+        .expect("non-exhausted candidate exists");
+    assert_eq!(chosen.name, "available");
+    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+}
+
+#[test]
+fn pick_for_phase_excludes_models_missing_phase_score() {
+    let mut models = vec![
+        sample_model(VendorKind::Claude, "ranked", 80),
+        sample_model(VendorKind::Codex, "missing-build", 80),
+    ];
+    // Strip the Build phase score from the second model — it should be
+    // unselectable for Build but its presence in the slice must not
+    // poison the pool.
+    models[1].ipbr_phase_scores.build = None;
+    let index = build_version_index(&models);
+
+    TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+        .expect("ranked candidate exists");
+    assert_eq!(chosen.name, "ranked");
+    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+}
+
+#[test]
+fn pick_for_phase_unknown_quota_remains_selectable() {
+    // None quota → effective 30 inside the pool scorer. With only one
+    // candidate the effective-30 baseline still produces a non-zero weight.
+    let mut model = sample_model(VendorKind::Claude, "unknown-quota", 0);
+    model.quota_percent = None;
+    let models = vec![model];
+    let index = build_version_index(&models);
+
+    TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+        .expect("unknown quota stays selectable");
+    assert_eq!(chosen.name, "unknown-quota");
+    assert_eq!(chosen.quota_percent, None);
+    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+}
+
+#[test]
+fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
+    // Every candidate is either exhausted or unranked for the phase;
+    // the function must surface the no-eligible-model condition rather
+    // than fall back to unscored data.
+    let mut unranked = sample_model(VendorKind::Claude, "unranked", 80);
+    unranked.ipbr_phase_scores = IpbrPhaseScores::default();
+    unranked.score_source = ScoreSource::None;
+    unranked.ipbr_row_matched = false;
+    let models = vec![sample_model(VendorKind::Claude, "exhausted", 0), unranked];
+    let index = build_version_index(&models);
+
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index);
+    assert!(chosen.is_none());
 }
 
 #[test]
@@ -67,29 +148,6 @@ fn pick_for_phase_respects_vendor_filter() {
     .expect("should pick claude");
     assert_eq!(chosen.vendor, VendorKind::Claude);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
-}
-
-#[test]
-fn pick_for_phase_uses_unfiltered_max_for_cutoff() {
-    // High-prob Claude model sets the cutoff bar, even when filtering to Codex
-    let models = vec![
-        sample_model(VendorKind::Claude, "high-claude", 90),
-        sample_model(VendorKind::Codex, "medium-codex", 50),
-        sample_model(VendorKind::Codex, "low-codex", 10),
-    ];
-    let index = build_version_index(&models);
-
-    // Filter to Codex only — cutoff still based on Claude's high prob
-    let chosen = pick_for_phase(
-        &models,
-        SelectionPhase::Build,
-        Some(VendorKind::Codex),
-        &index,
-    );
-
-    // medium-codex should survive cutoff; low-codex should not
-    assert!(chosen.is_some());
-    assert_eq!(chosen.unwrap().vendor, VendorKind::Codex);
 }
 
 #[test]
@@ -157,36 +215,12 @@ fn select_excluding_excludes_listed_models() {
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
-#[test]
-fn select_excluding_applies_diversity_bonus() {
-    let models = vec![
-        sample_model(VendorKind::Claude, "same-vendor", 80),
-        sample_model(VendorKind::Codex, "other-vendor", 80),
-    ];
-    let index = build_version_index(&models);
-
-    // Both have same quota, but Codex gets 1.3× diversity bonus
-    // With bonus, Codex has 1.3× the probability, so should win most samples
-    let mut codex_count = 0;
-    for seed in 1000..1100_u64 {
-        TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chose_codex = select_excluding(
-            &models,
-            SelectionPhase::Build,
-            &[],
-            Some(VendorKind::Claude),
-            &index,
-        )
-        .is_some_and(|chosen| chosen.vendor == VendorKind::Codex);
-        if chose_codex {
-            codex_count += 1;
-        }
-    }
-
-    // Codex should win at least 50% of the time (actual ratio should be ~1.3:1 or 56.5%)
-    assert!(codex_count > 50, "Codex won {} out of 100", codex_count);
-    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
-}
+// Removed: `select_excluding_applies_diversity_bonus` covered the legacy
+// 1.3× last-failed-vendor multiplier, which was a post-softmax modifier
+// forbidden by spec §5.3 / §6. `select_excluding` now ignores
+// `last_failed_vendor`; verifying the absent behavior would have to fight
+// the global TEST_SAMPLE_SEED, so the contract is documented in source
+// (`src/selection/selection.rs::select_excluding`) instead.
 
 #[test]
 fn select_excluding_returns_none_when_all_excluded() {
@@ -221,7 +255,6 @@ fn weighted_sample_uses_weights_for_random() {
     let m2 = sample_model(VendorKind::Codex, "low-weight", 80);
     let candidates = vec![(&m1, 1000.0), (&m2, 1.0)];
 
-    // High weight should almost always win
     let mut high_count = 0;
     for seed in 1..100_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
@@ -231,7 +264,7 @@ fn weighted_sample_uses_weights_for_random() {
         }
     }
 
-    assert!(high_count > 90); // Should win most of the time
+    assert!(high_count > 90);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -247,11 +280,6 @@ fn opus_sonnet_codex_kimi() -> Vec<CachedModel> {
 
 #[test]
 fn pick_with_effort_normal_does_not_filter_ineligible_models() {
-    // With only ineligible models in the slice, Normal effort still
-    // returns a candidate — proving the eligibility filter is not
-    // applied. The Tough variant of this scenario exercises the
-    // degraded-fallback path; here we want the *non-degraded* selection
-    // to ignore eligibility entirely.
     let models = vec![
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
@@ -438,9 +466,6 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
 
 #[test]
 fn select_for_review_normal_can_pick_ineligible_vendor() {
-    // Under Normal effort, the reviewer can pick a Kimi model — proving
-    // it is delegating to the original `select_for_review` rather than
-    // running the tough-eligible filter.
     let models = vec![
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
@@ -537,11 +562,6 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
 
 #[test]
 fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
-    // Coder used Claude-opus and Codex (so both eligible options used);
-    // sonnet is "fresh" but ineligible. Reviewer must reuse Claude-opus.
-    // Codex is omitted entirely (exhausted upstream by quota filtering),
-    // so the only eligible model is Claude-opus, which the coder used.
-    // Sonnet is fresh-vendor + fresh-model but ineligible.
     let models = vec![
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
         sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
@@ -568,8 +588,6 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
 
 #[test]
 fn select_for_review_tough_degrades_when_no_eligible_remain() {
-    // Only Kimi/Gemini exist — no eligible model at all. Must still
-    // launch via the unfiltered fallback.
     let models = vec![
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),

@@ -1,5 +1,5 @@
-use super::config::{SELECTION_CONFIG, SelectionPhase};
-use super::ranking::{VersionIndex, selection_probability};
+use super::config::SelectionPhase;
+use super::ranking::{VersionIndex, candidate_pool_weights};
 use super::types::{CachedModel, VendorKind};
 use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
@@ -51,74 +51,67 @@ impl Deref for SelectionOutcome<'_> {
     }
 }
 
-/// Select a model for the given phase using relative cutoff + weighted random.
-///
-/// `vendor_filter`: Optional hard inclusion filter. If `Some(v)`, only models
-/// from vendor `v` are considered.
-///
-/// `max_prob` for the cutoff is computed over the full unfiltered slice to
-/// ensure filtering doesn't accidentally lower the cutoff and admit more models.
-pub fn pick_for_phase<'a>(
-    models: &'a [CachedModel],
-    phase: SelectionPhase,
-    vendor_filter: Option<VendorKind>,
-    version_index: &VersionIndex,
-) -> Option<&'a CachedModel> {
-    if models.is_empty() {
-        return None;
-    }
-
-    // Compute probabilities for all models
-    let probabilities: Vec<f64> = models
-        .iter()
-        .map(|m| selection_probability(m, phase, version_index))
-        .collect();
-
-    // Find max probability across ALL models (before vendor filtering)
-    let max_prob = probabilities.iter().copied().fold(0.0_f64, f64::max);
-
-    if max_prob <= 0.0 {
-        return None;
-    }
-
-    // Apply relative cutoff
-    let cutoff = max_prob * SELECTION_CONFIG.min_selection_probability_ratio;
-
-    // Build candidate list: apply cutoff and vendor filter
-    let mut candidates: Vec<(&CachedModel, f64)> = models
-        .iter()
-        .zip(probabilities.iter())
-        .filter(|(model, prob)| **prob >= cutoff && vendor_filter.is_none_or(|v| v == model.vendor))
-        .map(|(model, prob)| (model, *prob))
-        .collect();
-
+/// Score `candidates` with the candidate-pool sampler and weighted-sample
+/// the result. Hard pre-filters (vendor, eligibility tier, retry exclusion,
+/// diversity tier) MUST already be applied to the slice. The pool scorer
+/// drops `quota_percent == Some(0)` and rows missing the ipbr phase score
+/// for `phase`; if every candidate is dropped this returns `None`, which
+/// callers surface as the existing no-eligible-model condition.
+fn pool_pick<'a>(candidates: &[&'a CachedModel], phase: SelectionPhase) -> Option<&'a CachedModel> {
     if candidates.is_empty() {
         return None;
     }
 
-    // Sort by probability descending for deterministic tie-breaking
-    candidates.sort_by(|(left_model, left_prob), (right_model, right_prob)| {
-        right_prob
-            .partial_cmp(left_prob)
+    let weights = candidate_pool_weights(candidates, phase);
+    let mut weighted: Vec<(&'a CachedModel, f64)> = candidates
+        .iter()
+        .copied()
+        .zip(weights.iter().copied())
+        .filter(|(_, weight)| *weight > 0.0)
+        .collect();
+
+    if weighted.is_empty() {
+        return None;
+    }
+
+    weighted.sort_by(|(left_model, left_weight), (right_model, right_weight)| {
+        right_weight
+            .partial_cmp(left_weight)
             .unwrap_or(Ordering::Equal)
             .then_with(|| left_model.name.cmp(&right_model.name))
     });
 
-    // Weighted random sampling
-    weighted_sample(&candidates)
+    weighted_sample(&weighted)
+}
+
+/// Select a model for the given phase using the candidate-pool scorer.
+///
+/// `vendor_filter`: hard inclusion filter applied before the pool scorer —
+/// vendor preferences are not multiplied into the post-softmax weights.
+pub fn pick_for_phase<'a>(
+    models: &'a [CachedModel],
+    phase: SelectionPhase,
+    vendor_filter: Option<VendorKind>,
+    _version_index: &VersionIndex,
+) -> Option<&'a CachedModel> {
+    let candidates: Vec<&'a CachedModel> = models
+        .iter()
+        .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
+        .collect();
+
+    pool_pick(&candidates, phase)
 }
 
 /// Effort-aware variant of [`pick_for_phase`].
 ///
-/// For [`EffortLevel::Tough`], runs the existing weighted-random selection
-/// over the tough-eligible subset (Claude-opus and all Codex models). The
-/// relative cutoff is computed from the *subset's* `max_prob` so a high-prob
-/// sonnet or Kimi cannot raise the bar and exclude every eligible candidate.
-/// Falls back to the full unfiltered slice only when the subset selection
-/// returns `None`, so the run still launches if no eligible model has quota.
+/// For [`EffortLevel::Tough`], samples over the tough-eligible subset
+/// (Claude-opus and all Codex models) using the candidate-pool scorer.
+/// Falls back to the full slice only when the tough-eligible pool collapses
+/// — for example, every tough-eligible model is exhausted (`quota_percent
+/// == Some(0)`) or unranked for the phase — so the run still launches.
 ///
-/// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight to
-/// [`pick_for_phase`] so non-tough behavior is byte-identical.
+/// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight
+/// to [`pick_for_phase`].
 pub fn pick_for_phase_with_effort<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
@@ -128,19 +121,14 @@ pub fn pick_for_phase_with_effort<'a>(
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
     if cheap {
-        let eligible: Vec<CachedModel> = models
+        let eligible: Vec<&'a CachedModel> = models
             .iter()
-            .filter(|m| is_cheap_eligible(m))
-            .cloned()
+            .filter(|model| is_cheap_eligible(model))
+            .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
             .collect();
 
-        if !eligible.is_empty()
-            && let Some(chosen) = pick_for_phase(&eligible, phase, vendor_filter, version_index)
-            && let Some(found) = models
-                .iter()
-                .find(|m| m.vendor == chosen.vendor && m.name == chosen.name)
-        {
-            return Some(SelectionOutcome::ok(found));
+        if let Some(chosen) = pool_pick(&eligible, phase) {
+            return Some(SelectionOutcome::ok(chosen));
         }
 
         return pick_for_phase(models, phase, vendor_filter, version_index).map(|model| {
@@ -162,80 +150,60 @@ pub fn pick_for_phase_with_effort<'a>(
         EffortLevel::Tough => {}
     }
 
-    let eligible: Vec<CachedModel> = models
+    let eligible: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|m| is_tough_eligible(m))
-        .cloned()
+        .filter(|model| is_tough_eligible(model))
+        .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
         .collect();
 
-    if !eligible.is_empty()
-        && let Some(chosen) = pick_for_phase(&eligible, phase, vendor_filter, version_index)
-    {
-        // Map the borrowed pick (over the local `eligible` Vec) back to a
-        // reference into the caller's slice so the returned lifetime is `'a`.
-        if let Some(found) = models
-            .iter()
-            .find(|m| m.vendor == chosen.vendor && m.name == chosen.name)
-        {
-            return Some(SelectionOutcome::ok(found));
-        }
+    if let Some(chosen) = pool_pick(&eligible, phase) {
+        return Some(SelectionOutcome::ok(chosen));
     }
 
+    // Degraded fallback: no tough-eligible model has any pool weight at all
+    // (all exhausted or unranked). Fall back to the full slice so the run
+    // still launches.
     pick_for_phase(models, phase, vendor_filter, version_index).map(SelectionOutcome::ok)
 }
 
 /// Select a model for review with unused-vendor preference.
 ///
-/// Prefers models from vendors not yet used, then falls back to any unused
-/// model. All weighted by Review phase probability.
+/// Tier 1 prefers different vendor *and* different model. Tier 2 falls back
+/// to any unused model. Each tier is a hard filter; the candidate-pool
+/// scorer is applied within the tier.
 pub fn select_for_review<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    version_index: &VersionIndex,
+    _version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
-    // 1. Different vendor AND different model
-    let fresh_vendor: Vec<(&CachedModel, f64)> = models
+    let tier_1: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|m| {
-            !used_vendors.contains(&m.vendor) && !used_models.contains(&(m.vendor, m.name.clone()))
-        })
-        .map(|m| {
-            (
-                m,
-                selection_probability(m, SelectionPhase::Review, version_index),
-            )
+        .filter(|model| {
+            !used_vendors.contains(&model.vendor)
+                && !used_models.contains(&(model.vendor, model.name.clone()))
         })
         .collect();
-
-    if let Some(model) = weighted_sample(&fresh_vendor) {
-        return Some(model);
+    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review) {
+        return Some(chosen);
     }
 
-    // 2. Same vendor but different model
-    let fresh_model: Vec<(&CachedModel, f64)> = models
+    let tier_2: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|m| !used_models.contains(&(m.vendor, m.name.clone())))
-        .map(|m| {
-            (
-                m,
-                selection_probability(m, SelectionPhase::Review, version_index),
-            )
-        })
+        .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
         .collect();
-
-    weighted_sample(&fresh_model)
+    pool_pick(&tier_2, SelectionPhase::Review)
 }
 
 /// Effort-aware variant of [`select_for_review`].
 ///
 /// For [`EffortLevel::Tough`], applies [`is_tough_eligible`] to each
-/// diversity tier (fresh-vendor, then fresh-model) before sampling. Only
-/// when every tough-eligible model is unavailable in *both* tiers does it
-/// degrade to the unfiltered selection — eligibility dominates diversity.
-/// In particular, if the only tough-eligible model with quota was already
-/// used by the coder, the reviewer reuses it rather than picking a fresh
-/// sonnet or Kimi.
+/// diversity tier (fresh-vendor, fresh-model, then any-eligible) before
+/// running the pool scorer. Only when every tough-eligible model is unable
+/// to score in *all three* tiers does it degrade to the unfiltered
+/// selection — eligibility dominates diversity. In particular, if the only
+/// tough-eligible model with quota was already used by the coder, the
+/// reviewer reuses it rather than picking a fresh sonnet or Kimi.
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates to
 /// [`select_for_review`].
@@ -248,11 +216,13 @@ pub fn select_for_review_with_effort<'a>(
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
     if cheap {
-        let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_cheap_eligible(m)).collect();
-        if let Some(model) =
-            select_for_review_from_eligible(&eligible, used_vendors, used_models, version_index)
+        let eligible: Vec<&'a CachedModel> = models
+            .iter()
+            .filter(|model| is_cheap_eligible(model))
+            .collect();
+        if let Some(chosen) = select_for_review_from_eligible(&eligible, used_vendors, used_models)
         {
-            return Some(SelectionOutcome::ok(model));
+            return Some(SelectionOutcome::ok(chosen));
         }
 
         return select_for_review(models, used_vendors, used_models, version_index).map(|model| {
@@ -274,14 +244,14 @@ pub fn select_for_review_with_effort<'a>(
         EffortLevel::Tough => {}
     }
 
-    let eligible: Vec<&CachedModel> = models.iter().filter(|m| is_tough_eligible(m)).collect();
+    let eligible: Vec<&'a CachedModel> = models
+        .iter()
+        .filter(|model| is_tough_eligible(model))
+        .collect();
 
-    select_for_review_from_eligible(&eligible, used_vendors, used_models, version_index)
+    select_for_review_from_eligible(&eligible, used_vendors, used_models)
         .map(SelectionOutcome::ok)
         .or_else(|| {
-            // Degraded fallback: no tough-eligible model has any quota at all —
-            // run the original diversity logic over the full slice so the review
-            // still launches.
             select_for_review(models, used_vendors, used_models, version_index)
                 .map(SelectionOutcome::ok)
         })
@@ -291,122 +261,56 @@ fn select_for_review_from_eligible<'a>(
     eligible: &[&'a CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
     // Tier 1: eligible AND fresh-vendor AND fresh-model.
-    let fresh_vendor: Vec<(&CachedModel, f64)> = eligible
+    let tier_1: Vec<&'a CachedModel> = eligible
         .iter()
-        .filter(|m| {
-            !used_vendors.contains(&m.vendor) && !used_models.contains(&(m.vendor, m.name.clone()))
+        .copied()
+        .filter(|model| {
+            !used_vendors.contains(&model.vendor)
+                && !used_models.contains(&(model.vendor, model.name.clone()))
         })
-        .map(|m| {
-            (
-                *m,
-                selection_probability(m, SelectionPhase::Review, version_index),
-            )
-        })
-        .filter(|(_, prob)| *prob > 0.0)
         .collect();
-    if let Some(model) = weighted_sample(&fresh_vendor) {
-        return Some(model);
+    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review) {
+        return Some(chosen);
     }
 
     // Tier 2: eligible AND fresh-model (any vendor).
-    let fresh_model: Vec<(&CachedModel, f64)> = eligible
+    let tier_2: Vec<&'a CachedModel> = eligible
         .iter()
-        .filter(|m| !used_models.contains(&(m.vendor, m.name.clone())))
-        .map(|m| {
-            (
-                *m,
-                selection_probability(m, SelectionPhase::Review, version_index),
-            )
-        })
-        .filter(|(_, prob)| *prob > 0.0)
+        .copied()
+        .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
         .collect();
-    if let Some(model) = weighted_sample(&fresh_model) {
-        return Some(model);
+    if let Some(chosen) = pool_pick(&tier_2, SelectionPhase::Review) {
+        return Some(chosen);
     }
 
     // Tier 3: any eligible model, even if used by the coder.
     // This is "eligibility dominates diversity": prefer reusing Claude-opus
     // over a fresh sonnet/Kimi when no fresh eligible model is available.
-    let any_eligible: Vec<(&CachedModel, f64)> = eligible
-        .iter()
-        .map(|m| {
-            (
-                *m,
-                selection_probability(m, SelectionPhase::Review, version_index),
-            )
-        })
-        .filter(|(_, prob)| *prob > 0.0)
-        .collect();
-    if let Some(model) = weighted_sample(&any_eligible) {
-        return Some(model);
-    }
-
-    None
+    pool_pick(eligible, SelectionPhase::Review)
 }
 
-/// Select a model excluding a list of models, with diversity bonus for non-last-failed vendors.
-///
-/// `excluded`: Models matching any (vendor, name) pair are excluded.
-/// `last_failed_vendor`: If `Some(v)`, models from vendors other than `v` receive
-/// a 1.3× diversity bonus before cutoff and sampling.
+/// Select a model excluding a list of models. The `last_failed_vendor`
+/// diversity boost from the legacy probability chain is intentionally
+/// dropped: spec §5.3 / §6 forbid post-softmax policy multipliers.
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     excluded: &[(VendorKind, String)],
-    last_failed_vendor: Option<VendorKind>,
-    version_index: &VersionIndex,
+    _last_failed_vendor: Option<VendorKind>,
+    _version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
     if models.is_empty() {
         return None;
     }
 
-    // Compute probabilities with diversity bonus
-    let mut candidates: Vec<(&CachedModel, f64)> = models
+    let candidates: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|m| !excluded.contains(&(m.vendor, m.name.clone())))
-        .map(|m| {
-            let mut prob = selection_probability(m, phase, version_index);
-            if last_failed_vendor.is_some_and(|v| v != m.vendor) {
-                prob *= 1.3;
-            }
-            (m, prob)
-        })
+        .filter(|model| !excluded.contains(&(model.vendor, model.name.clone())))
         .collect();
 
-    if candidates.is_empty() {
-        return None;
-    }
-
-    // Find max probability (after diversity bonus)
-    let max_prob = candidates
-        .iter()
-        .map(|(_, prob)| *prob)
-        .fold(0.0_f64, f64::max);
-
-    if max_prob <= 0.0 {
-        return None;
-    }
-
-    // Apply relative cutoff
-    let cutoff = max_prob * SELECTION_CONFIG.min_selection_probability_ratio;
-    candidates.retain(|(_, prob)| *prob >= cutoff);
-
-    if candidates.is_empty() {
-        return None;
-    }
-
-    // Sort by probability descending for deterministic tie-breaking
-    candidates.sort_by(|(left_model, left_prob), (right_model, right_prob)| {
-        right_prob
-            .partial_cmp(left_prob)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| left_model.name.cmp(&right_model.name))
-    });
-
-    weighted_sample(&candidates)
+    pool_pick(&candidates, phase)
 }
 
 /// Weighted random sampling from candidates.
@@ -419,7 +323,6 @@ fn weighted_sample<'a>(candidates: &[(&'a CachedModel, f64)]) -> Option<&'a Cach
     let total: f64 = candidates.iter().map(|(_, weight)| *weight).sum();
 
     if total <= 0.0 {
-        // All weights zero — return lowest-ranked (first after sort)
         return candidates.first().map(|(model, _)| *model);
     }
 
@@ -434,7 +337,6 @@ fn weighted_sample<'a>(candidates: &[(&'a CachedModel, f64)]) -> Option<&'a Cach
         }
     }
 
-    // Floating-point rounding — return last
     candidates.last().map(|(model, _)| *model)
 }
 

@@ -4,8 +4,9 @@ use crate::{
     artifacts::{
         ArtifactKind, RecoveryArtifact, ReviewStatus as RecoveryStatus, SkipToImplProposal,
     },
-    coder_summary, review,
+    coder_summary,
     final_validation::{self, ValidationStatus},
+    review,
     selection::{
         self, VendorKind,
         config::SelectionPhase,

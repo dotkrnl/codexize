@@ -924,6 +924,17 @@ impl App {
 
     pub(super) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
         session_state::transitions::execute_transition(&mut self.state, next_phase)?;
+        // Pin the round's review scope at round entry — including the
+        // skip-to-impl path that has no reviewer stage and goal-gap re-runs
+        // that create a fresh implementation round — so the simplifier can
+        // consistently use `base_sha..HEAD`. `capture_round_base` is
+        // idempotent on resume.
+        if let Phase::ImplementationRound(round) = next_phase {
+            let round_dir = session_state::session_dir(&self.state.session_id)
+                .join("rounds")
+                .join(format!("{round:03}"));
+            self.capture_round_base(&round_dir);
+        }
         self.agent_line_count = 0;
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;

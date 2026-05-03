@@ -124,9 +124,14 @@ mod tests {
                 ("stability".to_string(), 0.85),
             ],
             axis_provenance: std::collections::BTreeMap::new(),
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-            score_source: crate::selection::ScoreSource::None,
-            ipbr_row_matched: false,
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                idea: Some(85.0),
+                planning: Some(85.0),
+                build: Some(85.0),
+                review: Some(85.0),
+            },
+            score_source: crate::selection::ScoreSource::Ipbr,
+            ipbr_row_matched: true,
             quota_percent: Some(quota),
             quota_resets_at: None,
             display_order: 0,
@@ -206,21 +211,17 @@ mod tests {
     fn phase_rank_assigns_dense_ranks() {
         let models = vec![
             CachedModel {
-                axes: vec![
-                    ("codequality".to_string(), 0.95),
-                    ("correctness".to_string(), 0.95),
-                    ("debugging".to_string(), 0.95),
-                    ("safety".to_string(), 0.95),
-                ],
+                ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                    build: Some(95.0),
+                    ..crate::selection::IpbrPhaseScores::default()
+                },
                 ..sample_model(VendorKind::Claude, "top", 80)
             },
             CachedModel {
-                axes: vec![
-                    ("codequality".to_string(), 0.50),
-                    ("correctness".to_string(), 0.50),
-                    ("debugging".to_string(), 0.50),
-                    ("safety".to_string(), 0.50),
-                ],
+                ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                    build: Some(50.0),
+                    ..crate::selection::IpbrPhaseScores::default()
+                },
                 ..sample_model(VendorKind::Codex, "mid", 80)
             },
             CachedModel {

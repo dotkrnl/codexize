@@ -5,6 +5,7 @@ use crate::{
         ArtifactKind, RecoveryArtifact, ReviewStatus as RecoveryStatus, SkipToImplProposal,
     },
     coder_summary, review,
+    final_validation::{self, ValidationStatus},
     selection::{
         self, VendorKind,
         config::SelectionPhase,
@@ -478,6 +479,19 @@ impl App {
                     Some("artifact_missing".to_string())
                 } else {
                     review::validate(&review_path)
+                        .err()
+                        .map(|err| format!("artifact_invalid: {err}"))
+                };
+                (true, reason)
+            }
+            "final-validation" => {
+                let verdict_path = session_dir
+                    .join("artifacts")
+                    .join(format!("final_validation_{}.toml", run.round));
+                let reason = if !Self::artifact_present(&verdict_path) {
+                    Some("artifact_missing".to_string())
+                } else {
+                    final_validation::validate(&verdict_path)
                         .err()
                         .map(|err| format!("artifact_invalid: {err}"))
                 };
@@ -1489,6 +1503,40 @@ impl App {
         self.complete_run_finalization(run, failure_reason)
     }
 
+    fn enter_final_validation_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
+        if yolo {
+            self.transition_to_phase(Phase::Done)?;
+            return Ok(());
+        }
+
+        if self.state.validation_attempts >= session_state::transitions::VALIDATION_ATTEMPT_CAP {
+            self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
+            return Ok(());
+        }
+
+        self.state.validation_attempts += 1;
+        self.transition_to_phase(Phase::FinalValidation(round))
+    }
+
+    fn append_goal_gap_tasks(
+        &mut self,
+        session_dir: &std::path::Path,
+        new_tasks: &[tasks::Task],
+    ) -> Result<()> {
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+        let mut parsed = tasks::validate(&tasks_path)?;
+        // REVIEWER: validator gap tasks are appended in emitted order because the
+        // spec requires conservative ingestion rather than local re-prioritizing.
+        parsed.tasks.extend(new_tasks.iter().cloned());
+        let text = toml::to_string_pretty(&parsed)?;
+        std::fs::write(&tasks_path, text)?;
+        session_state::transitions::append_final_validation_gap_tasks(
+            &mut self.state,
+            new_tasks.iter().map(|task| (task.id, task.title.clone())),
+        );
+        Ok(())
+    }
+
     pub(super) fn complete_run_finalization(
         &mut self,
         run: &crate::state::RunRecord,
@@ -1520,6 +1568,11 @@ impl App {
             }
             if matches!(error.as_str(), "Operator Killed" | "user_forced_retry") {
                 self.clear_agent_error();
+                return Ok(());
+            }
+            if run.stage == "final-validation" {
+                self.record_agent_error(error);
+                self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
                 return Ok(());
             }
             let failed_run = self
@@ -1660,7 +1713,11 @@ impl App {
                 let _ = write_review_scope_artifact(&round_dir, &scope.base_sha);
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
-                self.transition_to_phase(Phase::ReviewRound(round))?;
+                if round == 1 && self.state.skip_to_impl_rationale.is_some() {
+                    self.enter_final_validation_or_done(1, run.modes.yolo)?;
+                } else {
+                    self.transition_to_phase(Phase::ReviewRound(round))?;
+                }
             }
             Phase::ReviewRound(round) => {
                 let review_path = session_dir
@@ -1741,7 +1798,7 @@ impl App {
                                     );
                                 }
                                 if !self.state.builder.has_unfinished_tasks() {
-                                    self.transition_to_phase(Phase::Done)?;
+                                    self.enter_final_validation_or_done(round, run.modes.yolo)?;
                                 } else {
                                     self.transition_to_phase(Phase::ImplementationRound(
                                         round + 1,
@@ -1764,7 +1821,7 @@ impl App {
                                     );
                                 }
                                 if !self.state.builder.has_unfinished_tasks() {
-                                    self.transition_to_phase(Phase::Done)?;
+                                    self.enter_final_validation_or_done(round, run.modes.yolo)?;
                                 } else {
                                     self.transition_to_phase(Phase::ImplementationRound(
                                         round + 1,
@@ -1894,13 +1951,39 @@ impl App {
             Phase::BuilderRecoverySharding(round) => {
                 self.handle_recovery_sharding_completed(run, round)?;
             }
+            Phase::FinalValidation(round) => {
+                let verdict_path = session_dir
+                    .join("artifacts")
+                    .join(format!("final_validation_{round}.toml"));
+                let verdict = final_validation::validate(&verdict_path)
+                    .with_context(|| format!("invalid {}", verdict_path.display()))?;
+                self.finalize_run_record(run.id, true, None);
+                self.clear_agent_error();
+                match verdict.status {
+                    ValidationStatus::GoalMet => {
+                        self.transition_to_phase(Phase::Done)?;
+                    }
+                    ValidationStatus::GoalGap => {
+                        let verdict_artifact = format!("artifacts/final_validation_{round}.toml");
+                        let new_tasks = final_validation::normalize_gap_tasks(
+                            verdict.new_tasks,
+                            self.state.builder.max_task_id(),
+                            &verdict_artifact,
+                        );
+                        self.append_goal_gap_tasks(&session_dir, &new_tasks)?;
+                        self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                    }
+                    ValidationStatus::NeedsHuman => {
+                        self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
+                    }
+                }
+            }
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
-            | Phase::FinalValidation(_)
             | Phase::Done => {}
         }
         Ok(())

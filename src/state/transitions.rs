@@ -299,6 +299,27 @@ pub fn apply_revise_with_new_tasks(
     assigned
 }
 
+pub fn append_final_validation_gap_tasks(
+    state: &mut SessionState,
+    tasks: impl IntoIterator<Item = (u32, String)>,
+) {
+    for (task_id, title) in tasks {
+        state.builder.task_titles.insert(task_id, title.clone());
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(task_id),
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: Some(title),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+    }
+    state.builder.sync_legacy_queue_views();
+}
+
 pub fn queue_recovery_stage(
     state: &mut SessionState,
     round: u32,

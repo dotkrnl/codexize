@@ -403,3 +403,265 @@ fn interactive_live_summary_instruction_requires_immediate_creation() {
     assert!(prompt.contains("every 2–3 min"));
     assert!(prompt.contains("Keep this file current until you exit."));
 }
+
+#[test]
+fn brainstorm_prompts_drop_skill_invocation_and_carry_no_skill_clause() {
+    with_temp_root(|| {
+        let session_dir = session_state::session_dir("brainstorm-no-skill");
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let spec_path = artifacts.join("spec.md");
+        let summary_path = artifacts.join("session_summary.toml");
+        let live_summary = artifacts.join("live_summary.txt");
+
+        for yolo in [false, true] {
+            let prompt = brainstorm_prompt(
+                "verify the brainstorm prompt removed the legacy skill plumbing",
+                &spec_path.display().to_string(),
+                &summary_path.display().to_string(),
+                &live_summary.display().to_string(),
+                None,
+                yolo,
+            );
+            assert!(
+                !prompt.contains("Invoke your brainstorming skill"),
+                "old skill-invocation line must be gone"
+            );
+            assert!(
+                !prompt.contains("Use that installed package for brainstorming."),
+                "old package-path plumbing must be gone"
+            );
+            assert!(
+                prompt.contains("Do not invoke any skill"),
+                "embedded prompt must explicitly forbid harness skills"
+            );
+            assert!(
+                prompt.contains("brainstorming\nskill, writing-plans skill, or any other"),
+                "no-skill clause must enumerate the affected skills"
+            );
+            assert!(
+                prompt.contains("verify the brainstorm prompt removed the legacy skill plumbing"),
+                "idea text must still be embedded verbatim"
+            );
+        }
+    });
+}
+
+#[test]
+fn planning_prompts_drop_skill_invocation_and_carry_no_skill_clause() {
+    let spec = std::path::Path::new("artifacts/spec.md");
+    let plan = std::path::Path::new("artifacts/plan.md");
+    let live = std::path::Path::new("artifacts/live_summary.planning.txt");
+    let reviews: Vec<std::path::PathBuf> = vec![
+        std::path::PathBuf::from("artifacts/spec-review-1.md"),
+        std::path::PathBuf::from("artifacts/spec-review-2.md"),
+    ];
+
+    for yolo in [false, true] {
+        let prompt = planning_prompt(spec, &reviews, plan, live, yolo);
+        assert!(
+            !prompt.contains("Invoke your superpowers:writing-plans skill"),
+            "old skill-invocation line must be gone"
+        );
+        assert!(
+            prompt.contains("Do not invoke any skill"),
+            "planner prompt must carry the no-skill clause"
+        );
+        assert!(
+            prompt.contains("writing-plans skill, or any other"),
+            "no-skill clause must enumerate writing-plans"
+        );
+        assert!(prompt.contains("artifacts/spec-review-1.md"));
+        assert!(prompt.contains("artifacts/spec-review-2.md"));
+    }
+}
+
+#[test]
+fn simplifier_prompt_describes_behavior_preserving_pass_with_required_outputs() {
+    use std::path::Path;
+    let session_dir = std::path::Path::new("/tmp/simplifier-prompt-fixture");
+    let review_scope = Path::new("/tmp/simplifier-prompt-fixture/rounds/001/review_scope.toml");
+    let simplification = Path::new("/tmp/simplifier-prompt-fixture/rounds/001/simplification.toml");
+    let live = Path::new("/tmp/simplifier-prompt-fixture/artifacts/live_summary.simplifier.txt");
+
+    let prompt = simplifier_prompt(session_dir, review_scope, simplification, live);
+
+    assert!(prompt.contains("preserve exact functionality"));
+    assert!(prompt.contains("`refactor:`"));
+    assert!(prompt.contains("`style:`"));
+    assert!(prompt.contains("Do not invoke any skill"));
+    assert!(prompt.contains("base_sha..HEAD"));
+    assert!(prompt.contains(review_scope.display().to_string().as_str()));
+    assert!(prompt.contains(simplification.display().to_string().as_str()));
+    // The verdict TOML contract must list every status variant.
+    assert!(prompt.contains("\"simplified\" | \"no_changes\" | \"skipped\""));
+    // No behavior-changing or out-of-scope rewrites.
+    assert!(prompt.contains("No API changes"));
+    assert!(prompt.contains("No dependency upgrades"));
+    // Ends with the live-summary instruction.
+    assert!(prompt.contains("Immediately create"));
+    assert!(prompt.contains("Keep this file current until you exit."));
+}
+
+/// Every `.md` template shipped under `src/app/prompts/` must have at least
+/// one matching `include_str!` call site in `src/app/prompts.rs`. Catches
+/// orphaned templates (renamed or never wired up) before they ship.
+#[test]
+fn every_prompt_template_is_referenced_by_a_call_site() {
+    let templates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/prompts");
+    let prompts_rs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/prompts.rs");
+    let prompts_source =
+        std::fs::read_to_string(&prompts_rs).expect("read src/app/prompts.rs source");
+
+    let mut orphans = Vec::new();
+    for entry in std::fs::read_dir(&templates_dir).expect("read templates dir") {
+        let entry = entry.expect("template dir entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap();
+        let needle = format!("include_str!(\"prompts/{name}\")");
+        if !prompts_source.contains(&needle) {
+            orphans.push(name.to_string());
+        }
+    }
+    assert!(
+        orphans.is_empty(),
+        "unreferenced templates in src/app/prompts/: {:?}",
+        orphans
+    );
+}
+
+/// `{name}` placeholders in any of the shipped templates must all resolve to
+/// a binding when rendered through their public prompt-builder. The unbound
+/// case is a `panic!` from `prompt_render::render` — by exercising every
+/// builder once with realistic-shape inputs we surface template/Rust drift
+/// before it lands in a live run.
+#[test]
+fn every_prompt_builder_renders_without_unbound_placeholders() {
+    use std::path::{Path, PathBuf};
+    with_temp_root(|| {
+        let dir = session_state::session_dir("prompt-coverage-fixture");
+        let artifacts = dir.join("artifacts");
+        let round = dir.join("rounds").join("002");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::create_dir_all(&round).unwrap();
+
+        let spec = artifacts.join("spec.md");
+        let plan = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let live = artifacts.join("live_summary.txt");
+        let summary = artifacts.join("session_summary.toml");
+        let recovery = round.join("recovery.toml");
+        let task_file = round.join("task.toml");
+        let review_scope = round.join("review_scope.toml");
+        let simplification_toml = round.join("simplification.toml");
+        let review = round.join("review.toml");
+        let plan_review = artifacts.join("plan-review-2.md");
+        let triggering_review = round.join("review.toml");
+
+        // Cover both rounds == 1 and rounds > 1 paths so prior_block /
+        // prior_reviews placeholders resolve through the >1 branch too.
+        let _ = spec_review_prompt(
+            &spec.display().to_string(),
+            &artifacts.join("spec-review-1.md").display().to_string(),
+            &live.display().to_string(),
+        );
+        let _ = plan_review_prompt(
+            &spec.display().to_string(),
+            &plan.display().to_string(),
+            &plan_review.display().to_string(),
+            2,
+            &live.display().to_string(),
+        );
+
+        for yolo in [false, true] {
+            let _ = brainstorm_prompt(
+                "idea text",
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                None,
+                yolo,
+            );
+            let _ = planning_prompt(
+                &spec,
+                &[PathBuf::from("artifacts/spec-review-1.md")],
+                &plan,
+                &live,
+                yolo,
+            );
+        }
+
+        let _ = sharding_prompt(&spec, &plan, &tasks_path, &live);
+        let _ = final_validation_prompt(
+            "raw idea body",
+            "# Spec body",
+            &round.join("final_validation_2.toml"),
+            &live,
+        );
+        for interactive in [false, true] {
+            let _ = recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2, 3],
+                &[1, 2, 3, 4, 5],
+                &live,
+                &recovery,
+                interactive,
+            );
+        }
+        let _ = recovery_plan_review_prompt(
+            &spec,
+            &plan,
+            &triggering_review,
+            &recovery,
+            &live,
+            &plan_review,
+        );
+        let _ = recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5);
+
+        let _ = coder_prompt(
+            &dir,
+            7,
+            2,
+            &task_file,
+            &live,
+            true,
+            &["carry-1".to_string(), "carry-2".to_string()],
+        );
+        let _ = reviewer_prompt(ReviewerPromptInputs {
+            session_dir: &dir,
+            task_id: 7,
+            round: 2,
+            task_file: &task_file,
+            review_scope_file: &review_scope,
+            coder_summary_file: Some(Path::new("artifacts/coder_summary_2.toml")),
+            review_file: &review,
+            live_summary_path: &live,
+        });
+        let _ = simplifier_prompt(&dir, &review_scope, &simplification_toml, &live);
+    });
+}
+
+/// Literal `{` and `}` characters inside templates (used by TOML/Rust
+/// snippets in the prompt body) survive rendering as single braces — the
+/// `{{`/`}}` escape is handled by the renderer, not delegated to format!().
+#[test]
+fn shipped_templates_emit_literal_braces_unescaped() {
+    let session_dir = std::path::Path::new("/tmp/literal-brace-fixture");
+    let spec = session_dir.join("artifacts/spec.md");
+    let plan = session_dir.join("artifacts/plan.md");
+    let tasks_path = session_dir.join("artifacts/tasks.toml");
+    let live = session_dir.join("artifacts/live_summary.txt");
+
+    let sharding = sharding_prompt(&spec, &plan, &tasks_path, &live);
+    // The sharding prompt embeds a TOML snippet with `{ path, lines }`
+    // arrays; both literal braces must come through as single characters.
+    assert!(sharding.contains("{ path, lines }"));
+    assert!(sharding.contains("{ path = \"artifacts/spec.md\", lines = \"10-45\" }"));
+}

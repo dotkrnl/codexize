@@ -1085,7 +1085,11 @@ fn brainstorm_prompts_require_authoritative_user_requirements() {
 }
 
 #[test]
-fn brainstorm_prompt_adds_vendor_package_path_without_losing_existing_rules() {
+fn brainstorm_prompt_ignores_legacy_package_path_and_embeds_no_skill_clause() {
+    // The brainstorming workflow lives inline in the prompt now — passing
+    // a package path through the legacy parameter must not leak into the
+    // rendered prompt and must not displace the no-skill clause or the
+    // pipeline-specific framing the rest of the runtime depends on.
     with_temp_root(|| {
         let session_dir = session_state::session_dir("brainstorm-package-path");
         let artifacts = session_dir.join("artifacts");
@@ -1105,8 +1109,10 @@ fn brainstorm_prompt_adds_vendor_package_path_without_losing_existing_rules() {
                 yolo,
             );
 
-            assert!(prompt.contains(package_path));
-            assert!(prompt.contains("Use that installed package for brainstorming."));
+            assert!(!prompt.contains(package_path));
+            assert!(!prompt.contains("Use that installed package for brainstorming."));
+            assert!(!prompt.contains("Invoke your brainstorming skill"));
+            assert!(prompt.contains("Do not invoke any skill"));
             assert!(prompt.contains("## User-stated requirements (authoritative)"));
             assert!(
                 prompt
@@ -1188,8 +1194,12 @@ mode = "native"
                 .join("prompts")
                 .join("brainstorm.md");
             let prompt = std::fs::read_to_string(prompt_path).unwrap();
-            assert!(prompt.contains("/vendor/codex/brainstorming"));
-            assert!(prompt.contains("Use that installed package for brainstorming."));
+            // The brainstorm prompt embeds its workflow inline and explicitly
+            // refuses to invoke any harness-loaded skill or installed package
+            // — the old "Use that installed package..." plumbing was removed.
+            assert!(!prompt.contains("/vendor/codex/brainstorming"));
+            assert!(!prompt.contains("Use that installed package for brainstorming."));
+            assert!(prompt.contains("Do not invoke any skill"));
         });
 
         // SAFETY: with_temp_root serializes filesystem/env-sensitive tests.

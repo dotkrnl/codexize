@@ -108,7 +108,25 @@ pub struct DashboardModel {
     pub fallback_from: Option<String>,
 }
 
-pub fn load_models() -> Result<Vec<DashboardModel>> {
+/// Outcome of a dashboard refresh. The InventoryOnly variant exists so the
+/// caller can preserve cached ipbr score data when only the score source
+/// fails — collapsing it into a successful `Vec<DashboardModel>` would let
+/// the cache layer save inventory-only entries and discard previously
+/// fetched ipbr phase scores.
+pub enum LoadOutcome {
+    /// Both inventory and ipbr scores refreshed; safe to persist.
+    Both(Vec<DashboardModel>),
+    /// Inventory refreshed but ipbr scores failed. Callers MUST prefer
+    /// previously cached ipbr score data when available; only when there
+    /// is no cached ipbr data should they fall back to these
+    /// inventory-only models (with all phase scores `None`).
+    InventoryOnly {
+        models: Vec<DashboardModel>,
+        score_error: anyhow::Error,
+    },
+}
+
+pub fn load_models() -> Result<LoadOutcome> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -119,9 +137,16 @@ pub fn load_models() -> Result<Vec<DashboardModel>> {
     let scores = load_scores(&client);
 
     match (inventory, scores) {
-        (Ok(inv), Ok(sc)) => Ok(merge(inv, sc)),
-        (Ok(inv), Err(_)) => Ok(inv_only(inv)),
-        (Err(_), Ok(sc)) => Ok(scores_only(sc)),
+        (Ok(inv), Ok(sc)) => Ok(LoadOutcome::Both(merge(inv, sc))),
+        (Ok(inv), Err(score_error)) => Ok(LoadOutcome::InventoryOnly {
+            models: inv_only(inv),
+            score_error,
+        }),
+        // Inventory failed but scores succeeded: ipbr authority is intact,
+        // so this is still a "Both" outcome from the cache's perspective —
+        // saving these score-only entries does not discard any cached ipbr
+        // data that this fetch already replaced with fresh ipbr data.
+        (Err(_), Ok(sc)) => Ok(LoadOutcome::Both(scores_only(sc))),
         (Err(e1), Err(e2)) => {
             anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
         }

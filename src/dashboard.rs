@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub use crate::dashboard_view_model::synthesize_sibling;
 use crate::dashboard_view_model::{
-    InventoryEntry, ScoreEntry, inv_only, merge, normalize_ipbr_key, scores_only,
+    inv_only, merge_with_warnings, normalize_ipbr_key, scores_only, InventoryEntry, ScoreEntry,
 };
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 
@@ -115,7 +115,10 @@ pub struct DashboardModel {
 /// fetched ipbr phase scores.
 pub enum LoadOutcome {
     /// Both inventory and ipbr scores refreshed; safe to persist.
-    Both(Vec<DashboardModel>),
+    Both {
+        models: Vec<DashboardModel>,
+        warnings: Vec<String>,
+    },
     /// Inventory refreshed but ipbr scores failed. Callers MUST prefer
     /// previously cached ipbr score data when available; only when there
     /// is no cached ipbr data should they fall back to these
@@ -137,7 +140,13 @@ pub fn load_models() -> Result<LoadOutcome> {
     let scores = load_scores(&client);
 
     match (inventory, scores) {
-        (Ok(inv), Ok(sc)) => Ok(LoadOutcome::Both(merge(inv, sc))),
+        (Ok(inv), Ok(sc)) => {
+            let merged = merge_with_warnings(inv, sc);
+            Ok(LoadOutcome::Both {
+                models: merged.models,
+                warnings: merged.warnings,
+            })
+        }
         (Ok(inv), Err(score_error)) => Ok(LoadOutcome::InventoryOnly {
             models: inv_only(inv),
             score_error,
@@ -146,7 +155,10 @@ pub fn load_models() -> Result<LoadOutcome> {
         // so this is still a "Both" outcome from the cache's perspective —
         // saving these score-only entries does not discard any cached ipbr
         // data that this fetch already replaced with fresh ipbr data.
-        (Err(_), Ok(sc)) => Ok(LoadOutcome::Both(scores_only(sc))),
+        (Err(_), Ok(sc)) => Ok(LoadOutcome::Both {
+            models: scores_only(sc),
+            warnings: Vec::new(),
+        }),
         (Err(e1), Err(e2)) => {
             anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
         }

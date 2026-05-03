@@ -107,7 +107,11 @@ fn assemble_from_cache_with_available(
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
         match dashboard::load_models() {
-            Ok(LoadOutcome::Both(fresh)) => {
+            Ok(LoadOutcome::Both {
+                models: fresh,
+                warnings,
+            }) => {
+                quota_errors.extend(dashboard_warnings_to_quota_errors(warnings));
                 let entries = dashboard_models_to_entries(&fresh);
                 let _ = cache::save_dashboard(&entries);
                 entries
@@ -377,6 +381,19 @@ fn dashboard_models_to_entries(models: &[dashboard::DashboardModel]) -> Vec<Dash
             ipbr_row_matched: m.ipbr_row_matched,
             display_order: m.display_order,
             fallback_from: m.fallback_from.clone(),
+        })
+        .collect()
+}
+
+fn dashboard_warnings_to_quota_errors(warnings: Vec<String>) -> Vec<QuotaError> {
+    warnings
+        .into_iter()
+        .map(|message| QuotaError {
+            // Dashboard refresh diagnostics are currently displayed
+            // through the shared QuotaError list; Claude is the existing
+            // sentinel for dashboard-sourced notices.
+            vendor: VendorKind::Claude,
+            message: format!("dashboard warning: {message}"),
         })
         .collect()
 }
@@ -1098,6 +1115,19 @@ mod tests {
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
+        let errors =
+            dashboard_warnings_to_quota_errors(vec!["ipbr normalized key 'x' collided".into()]);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].vendor, VendorKind::Claude);
+        assert_eq!(
+            errors[0].message,
+            "dashboard warning: ipbr normalized key 'x' collided"
+        );
     }
 
     #[test]

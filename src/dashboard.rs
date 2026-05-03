@@ -220,8 +220,12 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
 
     let mut entries = Vec::new();
     for (i, row) in board.models.into_iter().enumerate() {
-        let display_norm = normalize_ipbr_key(&row.display_name);
-        if display_norm.is_empty() {
+        // The merge key shape must remain compatible with `load_inventory`,
+        // which only lowercases (no kebab/punctuation collapse). The richer
+        // `normalize_ipbr_key` form is exposed via `canonical_id`/`aliases`
+        // for the upcoming normalized-exact matching task.
+        let display_key = row.display_name.trim().to_ascii_lowercase();
+        if display_key.is_empty() {
             // No usable display_name: cannot index this row. Skip rather
             // than abort the whole feed; spec §"Error Handling" only
             // forces failure for malformed feed-level structure.
@@ -248,7 +252,7 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
             .collect();
 
         entries.push(ScoreEntry {
-            name: display_norm,
+            name: display_key,
             vendor: row.vendor.trim().to_ascii_lowercase(),
             // `overall_score` and `current_score` are cosmetic only —
             // selection MUST NOT use them as a phase-score fallback.
@@ -905,7 +909,7 @@ mod tests {
 
     const IPBR_FIXTURE: &str = r#"
 [[models]]
-display_name = "Claude Opus 4.7"
+display_name = "claude-opus-4-7"
 canonical_id = "anthropic/claude-opus-4-7"
 vendor = "anthropic"
 aliases = ["claude-opus-4.7", "claude_opus_4_7"]
@@ -931,13 +935,13 @@ r = 77.0
 # p_adj omitted on purpose
 
 [[models]]
-display_name = "Gemini 2.5 Pro"
+display_name = "gemini-2.5-pro"
 vendor = "google"
 # scores table missing entirely
 "#;
 
     #[test]
-    fn parse_ipbr_normalizes_keys_and_maps_phase_scores() {
+    fn parse_ipbr_preserves_inventory_compatible_name_and_normalizes_canonical_id_aliases() {
         let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
         assert_eq!(entries.len(), 3, "all three rows should parse");
 
@@ -948,6 +952,9 @@ vendor = "google"
         assert_eq!(opus.vendor, "anthropic");
         assert_eq!(opus.score_source, ScoreSource::Ipbr);
         assert!(opus.ipbr_row_matched);
+        // canonical_id is fully normalized via `normalize_ipbr_key` for the
+        // upcoming matching task — distinct from `name`, which preserves the
+        // inventory lookup shape.
         assert_eq!(
             opus.canonical_id.as_deref(),
             Some("anthropic-claude-opus-4-7")
@@ -972,9 +979,20 @@ vendor = "google"
     }
 
     #[test]
+    fn parse_ipbr_name_is_lowercase_only_to_match_inventory_lookup_shape() {
+        // Inventory rows store names via `trim().to_ascii_lowercase()`. A
+        // dotted form like `gpt-5.4` must round-trip on the score side so
+        // the existing exact-match merge still enriches inventory-visible
+        // models. Normalized/kebab forms belong to canonical_id/aliases.
+        let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
+        let gpt = entries.iter().find(|e| e.name == "gpt-5.4").unwrap();
+        assert_eq!(gpt.canonical_id.as_deref(), Some("openai-gpt-5-4"));
+    }
+
+    #[test]
     fn parse_ipbr_row_missing_one_phase_marks_only_that_phase_absent() {
         let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
-        let gpt = entries.iter().find(|e| e.name == "gpt-5-4").unwrap();
+        let gpt = entries.iter().find(|e| e.name == "gpt-5.4").unwrap();
 
         // Only the omitted field is None; remaining phases stay present.
         assert_eq!(gpt.ipbr_phase_scores.idea, Some(80.0));
@@ -991,7 +1009,7 @@ vendor = "google"
     #[test]
     fn parse_ipbr_row_missing_all_phases_is_parseable_but_carries_no_ranking_authority() {
         let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
-        let gemini = entries.iter().find(|e| e.name == "gemini-2-5-pro").unwrap();
+        let gemini = entries.iter().find(|e| e.name == "gemini-2.5-pro").unwrap();
 
         assert_eq!(gemini.ipbr_phase_scores, IpbrPhaseScores::default());
         // Cosmetic summary defaults to 0.0 when no phases are present, so

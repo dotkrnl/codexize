@@ -16,8 +16,10 @@ pub(crate) struct InventoryEntry {
 }
 
 /// Canonicalized score record produced by score ingestion. The `name`
-/// field is the normalized lookup key (see `normalize_ipbr_key`). For
-/// ipbr-sourced rows, `score_source = Ipbr` and `ipbr_row_matched = true`;
+/// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
+/// the existing exact-match merge keeps working; richer normalization is
+/// exposed via `canonical_id` / `aliases` for the upcoming matching task.
+/// For ipbr-sourced rows, `score_source = Ipbr` and `ipbr_row_matched = true`;
 /// the legacy aistupidlevel parser (kept only for tests) leaves
 /// `score_source = None` so the cosmetic `axes` cannot masquerade as
 /// ipbr authority.

@@ -31,6 +31,39 @@ pub(super) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     result.expect("test panicked")
 }
 
+/// Like `with_temp_root`, but also chdir's to the temp dir for the duration
+/// of `f`. Use when a test exercises code paths that read files relative to
+/// `cwd` — e.g. `prompts::project_doc_instr` reads `CLAUDE.md` / `AGENTS.md`
+/// from the current directory, so prompt snapshots must run under a clean
+/// cwd to stay deterministic regardless of what's checked into the repo
+/// root. Serialized via `test_fs_lock`; chdir is process-global.
+pub(super) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let prev_root = std::env::var_os("CODEXIZE_ROOT");
+    let prev_cwd = std::env::current_dir().ok();
+
+    // SAFETY: env + cwd mutation is serialized by `test_fs_lock`.
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+    let chdir_result = std::env::set_current_dir(temp.path());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(temp.path())));
+    if let (Ok(()), Some(p)) = (&chdir_result, prev_cwd) {
+        let _ = std::env::set_current_dir(p);
+    }
+    unsafe {
+        match prev_root {
+            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+            None => std::env::remove_var("CODEXIZE_ROOT"),
+        }
+    }
+    chdir_result.expect("chdir into tempdir for snapshot test");
+    result.expect("test panicked")
+}
+
 pub(super) fn mk_state_with_runs() -> SessionState {
     let mut state = SessionState::new("t".to_string());
     state.current_phase = Phase::SpecReviewRunning;

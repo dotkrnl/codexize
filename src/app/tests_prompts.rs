@@ -665,3 +665,296 @@ fn shipped_templates_emit_literal_braces_unescaped() {
     assert!(sharding.contains("{ path, lines }"));
     assert!(sharding.contains("{ path = \"artifacts/spec.md\", lines = \"10-45\" }"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full rendered-output snapshot tests for every prompt builder.
+//
+// These guard against accidental drift in template files or prompt-builder
+// glue: any byte-level change to a rendered prompt is caught here, not just
+// the substring assertions above. Brainstorm, planner, and simplifier prompts
+// changed by design in this iteration; their snapshots must be reviewed when
+// they update. Every other prompt is expected to stay stable; a snapshot
+// mismatch on those is a real prompt regression.
+//
+// Regenerate with `UPDATE_PROMPT_SNAPSHOTS=1 cargo test app::tests_prompts`,
+// then review the diff and commit the updated fixture.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn snapshot_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/app/prompt_snapshots")
+        .join(format!("{name}.txt"))
+}
+
+fn assert_prompt_snapshot(name: &str, actual: &str) {
+    let path = snapshot_path(name);
+    if std::env::var("UPDATE_PROMPT_SNAPSHOTS").is_ok() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("snapshot dir");
+        }
+        std::fs::write(&path, actual).expect("write snapshot");
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "missing snapshot {} ({}). Run with `UPDATE_PROMPT_SNAPSHOTS=1` to create it.\n--- actual ---\n{}",
+            path.display(),
+            err,
+            actual
+        )
+    });
+    assert_eq!(
+        actual, expected,
+        "prompt snapshot drift for {name}: rerun `UPDATE_PROMPT_SNAPSHOTS=1 cargo test app::tests_prompts` and review the diff before committing"
+    );
+}
+
+#[test]
+fn prompt_snapshots_match_fixtures() {
+    use std::path::{Path, PathBuf};
+    with_temp_root_and_cwd(|_root| {
+        // Use stable, *relative* path strings so every snapshot is
+        // byte-deterministic across runs. The test cwd is a tempdir, so
+        // these resolve to a per-run sandbox; the rendered prompt only
+        // embeds the relative-path text, which is identical across runs.
+        let session_dir = PathBuf::from("fixture/session");
+        let artifacts = session_dir.join("artifacts");
+        let round1 = session_dir.join("rounds/001");
+        let round3 = session_dir.join("rounds/003");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::create_dir_all(&round1).unwrap();
+        std::fs::create_dir_all(&round3).unwrap();
+
+        let spec = artifacts.join("spec.md");
+        let plan = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let summary = artifacts.join("session_summary.toml");
+        let live = artifacts.join("live_summary.txt");
+        let recovery = round1.join("recovery.toml");
+        let task_file_r1 = round1.join("task.toml");
+        let task_file_r3 = round3.join("task.toml");
+        let review_scope_r1 = round1.join("review_scope.toml");
+        let review_scope_r3 = round3.join("review_scope.toml");
+        let simplification = round1.join("simplification.toml");
+        let review_r1 = round1.join("review.toml");
+        let review_r3 = round3.join("review.toml");
+        let final_verdict_r3 = round3.join("final_validation_3.toml");
+        let spec_review_out = artifacts.join("spec-review-1.md");
+        let plan_review_r1_out = artifacts.join("plan-review-1.md");
+        let plan_review_r3_out = artifacts.join("plan-review-3.md");
+
+        // Live summary instructions (the smallest templates).
+        assert_prompt_snapshot(
+            "live_summary",
+            &live_summary_instruction(Path::new("artifacts/live_summary.txt")),
+        );
+        assert_prompt_snapshot(
+            "live_summary_interactive",
+            &live_summary_instruction_interactive(Path::new(
+                "artifacts/live_summary.interactive.txt",
+            )),
+        );
+
+        // Spec review.
+        assert_prompt_snapshot(
+            "spec_review",
+            &spec_review_prompt(
+                &spec.display().to_string(),
+                &spec_review_out.display().to_string(),
+                &live.display().to_string(),
+            ),
+        );
+
+        // Plan review at round 1 (no prior reviews) and round 3 (has prior
+        // reviews to embed). Both branches go through the same template.
+        assert_prompt_snapshot(
+            "plan_review_round1",
+            &plan_review_prompt(
+                &spec.display().to_string(),
+                &plan.display().to_string(),
+                &plan_review_r1_out.display().to_string(),
+                1,
+                &live.display().to_string(),
+            ),
+        );
+        assert_prompt_snapshot(
+            "plan_review_round3",
+            &plan_review_prompt(
+                &spec.display().to_string(),
+                &plan.display().to_string(),
+                &plan_review_r3_out.display().to_string(),
+                3,
+                &live.display().to_string(),
+            ),
+        );
+
+        // Brainstorm: yolo and interactive. Both intentionally changed in
+        // this iteration to embed the workflow + no-skill clause.
+        let idea = "fictional idea text used only to pin the snapshot";
+        assert_prompt_snapshot(
+            "brainstorm_interactive",
+            &brainstorm_prompt(
+                idea,
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                None,
+                false,
+            ),
+        );
+        assert_prompt_snapshot(
+            "brainstorm_yolo",
+            &brainstorm_prompt(
+                idea,
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                None,
+                true,
+            ),
+        );
+
+        // Planning: yolo and interactive, both with two prior spec reviews
+        // to exercise the reviews block.
+        let spec_reviews = vec![
+            PathBuf::from("artifacts/spec-review-1.md"),
+            PathBuf::from("artifacts/spec-review-2.md"),
+        ];
+        assert_prompt_snapshot(
+            "planning_interactive",
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, false),
+        );
+        assert_prompt_snapshot(
+            "planning_yolo",
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, true),
+        );
+
+        // Sharding.
+        assert_prompt_snapshot(
+            "sharding",
+            &sharding_prompt(&spec, &plan, &tasks_path, &live),
+        );
+
+        // Final validation.
+        assert_prompt_snapshot(
+            "final_validation",
+            &final_validation_prompt(
+                "fictional idea body — pinned for snapshot",
+                "# Spec\n\n## User-stated requirements (authoritative)\n- pinned\n\n## Out of scope\n- pinned\n",
+                &final_verdict_r3,
+                &live,
+            ),
+        );
+
+        // Recovery (interactive + non-interactive).
+        assert_prompt_snapshot(
+            "recovery_interactive",
+            &recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2, 3],
+                &[1, 2, 3, 4, 5],
+                &live,
+                &recovery,
+                true,
+            ),
+        );
+        assert_prompt_snapshot(
+            "recovery_noninteractive",
+            &recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2, 3],
+                &[1, 2, 3, 4, 5],
+                &live,
+                &recovery,
+                false,
+            ),
+        );
+        assert_prompt_snapshot(
+            "recovery_plan_review",
+            &recovery_plan_review_prompt(
+                &spec,
+                &plan,
+                &review_r1,
+                &recovery,
+                &live,
+                &plan_review_r1_out,
+            ),
+        );
+        assert_prompt_snapshot(
+            "recovery_sharding",
+            &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
+        );
+
+        // Coder: round 1 with no prior review and no carryover, plus round 3
+        // with carryover and resume to exercise every conditional block.
+        assert_prompt_snapshot(
+            "coder_round1",
+            &coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]),
+        );
+        // For round 3 the prior review exists, so the prev_review block
+        // renders. Touch the file so `coder_prompt` sees it.
+        let prev_review_path = session_dir.join("rounds/002/review.toml");
+        std::fs::create_dir_all(prev_review_path.parent().unwrap()).unwrap();
+        std::fs::write(&prev_review_path, "status = \"refine\"\n").unwrap();
+        assert_prompt_snapshot(
+            "coder_round3_with_carryover",
+            &coder_prompt(
+                &session_dir,
+                7,
+                3,
+                &task_file_r3,
+                &live,
+                true,
+                &[
+                    "carry-1: prefer streaming reads".to_string(),
+                    "carry-2: tighten error handling".to_string(),
+                ],
+            ),
+        );
+
+        // Reviewer: round 1 (no prior reviews, no coder summary path), and
+        // round 3 with both — both branches of the optional blocks.
+        assert_prompt_snapshot(
+            "reviewer_round1",
+            &reviewer_prompt(ReviewerPromptInputs {
+                session_dir: &session_dir,
+                task_id: 7,
+                round: 1,
+                task_file: &task_file_r1,
+                review_scope_file: &review_scope_r1,
+                coder_summary_file: None,
+                review_file: &review_r1,
+                live_summary_path: &live,
+            }),
+        );
+        let coder_summary_path = round3.join("coder_summary.toml");
+        assert_prompt_snapshot(
+            "reviewer_round3_with_summary",
+            &reviewer_prompt(ReviewerPromptInputs {
+                session_dir: &session_dir,
+                task_id: 7,
+                round: 3,
+                task_file: &task_file_r3,
+                review_scope_file: &review_scope_r3,
+                coder_summary_file: Some(&coder_summary_path),
+                review_file: &review_r3,
+                live_summary_path: &live,
+            }),
+        );
+
+        // Simplifier — new prompt; intentionally has its own snapshot from
+        // day one.
+        assert_prompt_snapshot(
+            "simplifier",
+            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live),
+        );
+    });
+}

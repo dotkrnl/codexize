@@ -1,6 +1,6 @@
 #[cfg(test)]
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::dashboard::DashboardModel;
 #[cfg(test)]
@@ -48,6 +48,12 @@ pub(crate) struct ScoreEntry {
     pub(crate) ipbr_row_matched: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct MergeResult {
+    pub(crate) models: Vec<DashboardModel>,
+    pub(crate) warnings: Vec<String>,
+}
+
 /// Normalize an ipbr lookup key per spec §"Model Matching":
 /// lowercase, replace runs of `.`, `_`, `/`, and ASCII whitespace with
 /// `-`, collapse repeated `-`, then trim leading/trailing `-`.
@@ -78,17 +84,31 @@ pub(crate) fn normalize_ipbr_key(input: &str) -> String {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn merge(
     inventory: Vec<InventoryEntry>,
     scores: Vec<ScoreEntry>,
 ) -> Vec<DashboardModel> {
-    let score_map: HashMap<String, &ScoreEntry> =
-        scores.iter().map(|s| (s.name.clone(), s)).collect();
+    merge_with_warnings(inventory, scores).models
+}
+
+pub(crate) fn merge_with_warnings(
+    inventory: Vec<InventoryEntry>,
+    scores: Vec<ScoreEntry>,
+) -> MergeResult {
+    let ipbr_lookup = build_ipbr_lookup(&scores);
+    let legacy_score_map: HashMap<String, &ScoreEntry> = scores
+        .iter()
+        .filter(|s| s.score_source != ScoreSource::Ipbr)
+        .map(|s| (s.name.clone(), s))
+        .collect();
 
     let mut models: Vec<DashboardModel> = inventory
         .into_iter()
         .map(|inv| {
-            if let Some(sc) = score_map.get(&inv.name) {
+            if let Some(sc) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) {
+                dashboard_model_from_score(inv.name, &inv.vendor, sc, None)
+            } else if let Some(sc) = legacy_score_map.get(&inv.name) {
                 dashboard_model_from_score(inv.name, &inv.vendor, sc, None)
             } else if let Some(sc) = sibling_score(&inv.name, &scores) {
                 dashboard_model_from_score(inv.name, &inv.vendor, sc, Some(sc.name.clone()))
@@ -125,7 +145,10 @@ pub(crate) fn merge(
     }
 
     models.sort_by_key(|m| m.display_order);
-    models
+    MergeResult {
+        models,
+        warnings: ipbr_lookup.warnings,
+    }
 }
 
 pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
@@ -287,6 +310,7 @@ fn dashboard_model_from_score(
     sc: &ScoreEntry,
     fallback_from: Option<String>,
 ) -> DashboardModel {
+    let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
         name,
         vendor: if !inventory_vendor.is_empty() {
@@ -302,9 +326,17 @@ fn dashboard_model_from_score(
         // ipbr-sourced rows propagate phase scores and `Ipbr` provenance;
         // legacy aistupidlevel-sourced rows leave `score_source = None`
         // so cosmetic `axes` cannot masquerade as ipbr authority.
-        ipbr_phase_scores: sc.ipbr_phase_scores,
-        score_source: sc.score_source,
-        ipbr_row_matched: sc.ipbr_row_matched,
+        ipbr_phase_scores: if is_sibling_fallback {
+            IpbrPhaseScores::default()
+        } else {
+            sc.ipbr_phase_scores
+        },
+        score_source: if is_sibling_fallback {
+            ScoreSource::None
+        } else {
+            sc.score_source
+        },
+        ipbr_row_matched: !is_sibling_fallback && sc.ipbr_row_matched,
         display_order: sc.display_order,
         fallback_from,
     }
@@ -329,6 +361,77 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
                 .partial_cmp(&b.overall_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
+}
+
+struct IpbrLookup<'a> {
+    matches: HashMap<String, &'a ScoreEntry>,
+    warnings: Vec<String>,
+}
+
+fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup<'_> {
+    let mut owners: HashMap<String, usize> = HashMap::new();
+    let mut collisions: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+
+    for (index, score) in scores.iter().enumerate() {
+        if score.score_source != ScoreSource::Ipbr {
+            continue;
+        }
+
+        for key in ipbr_keys_for_score(score) {
+            match owners.get(&key).copied() {
+                Some(owner) if owner != index => {
+                    collisions.entry(key).or_default().extend([owner, index]);
+                }
+                Some(_) => {}
+                None => {
+                    owners.insert(key, index);
+                }
+            }
+        }
+    }
+
+    for key in collisions.keys() {
+        owners.remove(key);
+    }
+
+    let matches = owners
+        .into_iter()
+        .map(|(key, index)| (key, &scores[index]))
+        .collect();
+    let warnings = collisions
+        .into_iter()
+        .map(|(key, row_indexes)| {
+            let rows = row_indexes
+                .into_iter()
+                .map(|index| scores[index].name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("ipbr normalized key '{key}' collided across rows: {rows}; key ignored")
+        })
+        .collect();
+
+    IpbrLookup { matches, warnings }
+}
+
+fn ipbr_keys_for_score(score: &ScoreEntry) -> BTreeSet<String> {
+    let mut keys = BTreeSet::new();
+    let display_key = normalize_ipbr_key(&score.name);
+    if !display_key.is_empty() {
+        keys.insert(display_key);
+    }
+    if let Some(canonical_id) = &score.canonical_id {
+        let key = normalize_ipbr_key(canonical_id);
+        if !key.is_empty() {
+            keys.insert(key);
+        }
+    }
+    for alias in &score.aliases {
+        let key = normalize_ipbr_key(alias);
+        if !key.is_empty() {
+            keys.insert(key);
+        }
+    }
+    keys
 }
 
 fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
@@ -361,6 +464,31 @@ mod tests {
         }
     }
 
+    fn ipbr_score(
+        name: &str,
+        canonical_id: Option<&str>,
+        aliases: &[&str],
+        value: f64,
+        order: usize,
+    ) -> ScoreEntry {
+        ScoreEntry {
+            canonical_id: canonical_id.map(normalize_ipbr_key),
+            aliases: aliases
+                .iter()
+                .map(|alias| normalize_ipbr_key(alias))
+                .collect(),
+            ipbr_phase_scores: IpbrPhaseScores {
+                idea: Some(value),
+                planning: Some(value + 1.0),
+                build: Some(value + 2.0),
+                review: Some(value + 3.0),
+            },
+            score_source: ScoreSource::Ipbr,
+            ipbr_row_matched: true,
+            ..score(name, value, order)
+        }
+    }
+
     fn inventory(name: &str, order: usize) -> InventoryEntry {
         InventoryEntry {
             name: name.to_string(),
@@ -386,6 +514,110 @@ mod tests {
 
         assert_eq!(synthesized.fallback_from.as_deref(), Some("gpt-5.4"));
         assert_eq!(unscored.overall_score, 0.0);
+    }
+
+    #[test]
+    fn merge_matches_inventory_by_normalized_ipbr_aliases() {
+        let models = merge(
+            vec![inventory("claude-opus-4.1", 0)],
+            vec![ipbr_score(
+                "Claude Opus 4",
+                None,
+                &["claude_opus_4_1"],
+                91.0,
+                3,
+            )],
+        );
+
+        let model = models
+            .iter()
+            .find(|model| model.name == "claude-opus-4.1")
+            .expect("inventory model should remain visible");
+
+        assert_eq!(model.score_source, ScoreSource::Ipbr);
+        assert_eq!(model.ipbr_phase_scores.build, Some(93.0));
+        assert_eq!(model.fallback_from, None);
+    }
+
+    #[test]
+    fn merge_matches_inventory_by_normalized_provider_path_aliases() {
+        let models = merge(
+            vec![inventory("anthropic/claude-opus-4", 0)],
+            vec![ipbr_score(
+                "Claude Opus 4",
+                Some("anthropic/claude-opus-4"),
+                &[],
+                88.0,
+                2,
+            )],
+        );
+
+        let model = models
+            .iter()
+            .find(|model| model.name == "anthropic/claude-opus-4")
+            .expect("provider-path inventory model should remain visible");
+
+        assert_eq!(model.score_source, ScoreSource::Ipbr);
+        assert_eq!(model.ipbr_phase_scores.review, Some(91.0));
+        assert_eq!(model.fallback_from, None);
+    }
+
+    #[test]
+    fn merge_excludes_collided_normalized_ipbr_keys_and_warns() {
+        let result = merge_with_warnings(
+            vec![inventory("claude-opus-4.1", 0)],
+            vec![
+                ipbr_score("Claude Opus 4.1", None, &[], 90.0, 1),
+                ipbr_score("Other Opus", None, &["claude_opus_4_1"], 70.0, 2),
+            ],
+        );
+
+        let model = result
+            .models
+            .iter()
+            .find(|model| model.name == "claude-opus-4.1")
+            .expect("inventory model should remain visible after collision");
+
+        assert_eq!(model.score_source, ScoreSource::None);
+        assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("claude-opus-4-1"));
+    }
+
+    #[test]
+    fn merge_keeps_unmatched_inventory_model_visible_and_unscored() {
+        let models = merge(
+            vec![inventory("unlisted-model", 0)],
+            vec![ipbr_score("Claude Opus 4", None, &[], 86.0, 1)],
+        );
+
+        let model = models
+            .iter()
+            .find(|model| model.name == "unlisted-model")
+            .expect("inventory-only model should remain visible");
+
+        assert_eq!(model.score_source, ScoreSource::None);
+        assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
+        assert!(!model.ipbr_row_matched);
+    }
+
+    #[test]
+    fn merge_marks_ipbr_sibling_synthesis_as_cosmetic_only() {
+        let models = merge(
+            vec![inventory("gpt-5.5", 0)],
+            vec![ipbr_score("gpt-5.4", None, &[], 86.0, 1)],
+        );
+
+        let model = models
+            .iter()
+            .find(|model| model.name == "gpt-5.5")
+            .expect("sibling synthesized model should remain visible");
+
+        assert_eq!(model.fallback_from.as_deref(), Some("gpt-5.4"));
+        assert_eq!(model.overall_score, 86.0);
+        assert_eq!(model.score_source, ScoreSource::None);
+        assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
+        assert!(!model.ipbr_row_matched);
     }
 
     #[test]

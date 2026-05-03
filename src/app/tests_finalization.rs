@@ -2594,3 +2594,68 @@ fn final_validation_missing_verdict_fails_closed_to_blocked() {
         );
     });
 }
+
+#[test]
+fn final_validation_invalid_verdict_fails_closed_to_blocked() {
+    with_temp_root(|| {
+        let session_id = "final-validation-invalid-verdict";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(
+            artifacts.join("final_validation_1.toml"),
+            r#"status = "goal_met"
+summary = "claims success despite declaring a gap"
+findings = ["checked workspace status"]
+
+[[gaps]]
+description = "this is invalid for goal_met"
+checked = ["artifacts/spec.md"]
+"#,
+        )
+        .expect("verdict");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::FinalValidation(1);
+        let run = RunRecord {
+            id: 11,
+            stage: "final-validation".to_string(),
+            task_id: None,
+            round: 1,
+            attempt: 1,
+            model: "test-model".to_string(),
+            vendor: "test-vendor".to_string(),
+            window_name: "[FinalValidation]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        };
+        state.agent_runs.push(run.clone());
+
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+        write_finish_stamp_for_run(&app, &run, 0, "");
+
+        app.poll_agent_run();
+
+        assert_eq!(app.state.current_phase, Phase::BlockedNeedsUser);
+        assert_eq!(
+            app.state.block_origin,
+            Some(crate::state::BlockOrigin::FinalValidation)
+        );
+        assert!(
+            app.state
+                .agent_error
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("artifact_invalid:"),
+            "invalid final validation verdict must fail closed"
+        );
+    });
+}

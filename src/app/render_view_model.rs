@@ -73,7 +73,9 @@ pub fn final_validation_report_lines(
     let (status_text, status_style) = match verdict.status {
         ValidationStatus::GoalMet => (
             "goal_met",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         ValidationStatus::GoalGap => (
             "goal_gap",
@@ -165,9 +167,7 @@ pub fn final_validation_block_banner_lines(width: u16) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled(
                 "Final validation blocked. ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::raw("Operator action required."),
         ]),

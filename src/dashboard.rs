@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub use crate::dashboard_view_model::synthesize_sibling;
 use crate::dashboard_view_model::{
-    inv_only, merge_with_warnings, normalize_ipbr_key, scores_only, InventoryEntry, ScoreEntry,
+    InventoryEntry, ScoreEntry, inv_only, merge_with_warnings, normalize_ipbr_key, scores_only,
 };
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 

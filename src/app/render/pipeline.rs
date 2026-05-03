@@ -100,8 +100,10 @@ impl App {
         suppressed_container_runs: &BTreeSet<u64>,
     ) -> Vec<PipelineLine> {
         let mut lines = Vec::new();
-        if matches!(self.state.current_phase, crate::state::Phase::BlockedNeedsUser)
-            && self.state.block_origin == Some(crate::state::BlockOrigin::FinalValidation)
+        if matches!(
+            self.state.current_phase,
+            crate::state::Phase::BlockedNeedsUser
+        ) && self.state.block_origin == Some(crate::state::BlockOrigin::FinalValidation)
         {
             let width = self.body_inner_width.min(u16::MAX as usize) as u16;
             for line in super::super::render_view_model::final_validation_block_banner_lines(width)

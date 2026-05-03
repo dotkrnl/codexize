@@ -1509,13 +1509,22 @@ impl App {
         self.complete_run_finalization(run, failure_reason)
     }
 
-    fn enter_final_validation_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
+    /// Route a converged round into the simplifier (normal path) or jump
+    /// directly to `Done` (yolo). The simplifier is the gate for every
+    /// non-yolo entry into `FinalValidation`; yolo continues to bypass both
+    /// stages because the operator has waived the safety net.
+    ///
+    /// The cap-to-block branch inside `enter_simplification` populates
+    /// `block_origin = Simplification`, which intentionally does *not*
+    /// unlock force-ship — that escape hatch remains tied to
+    /// `BlockOrigin::FinalValidation`.
+    fn enter_simplification_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
         if yolo {
             self.transition_to_phase(Phase::Done)?;
             return Ok(());
         }
 
-        let _ = session_state::transitions::enter_final_validation(&mut self.state, round)?;
+        let _ = session_state::transitions::enter_simplification(&mut self.state, round)?;
         Ok(())
     }
 
@@ -1715,7 +1724,7 @@ impl App {
                 self.finalize_run_record(run.id, true, None);
                 self.clear_agent_error();
                 if round == 1 && self.state.skip_to_impl_rationale.is_some() {
-                    self.enter_final_validation_or_done(1, run.modes.yolo)?;
+                    self.enter_simplification_or_done(1, run.modes.yolo)?;
                 } else {
                     self.transition_to_phase(Phase::ReviewRound(round))?;
                 }
@@ -1799,7 +1808,7 @@ impl App {
                                     );
                                 }
                                 if !self.state.builder.has_unfinished_tasks() {
-                                    self.enter_final_validation_or_done(round, run.modes.yolo)?;
+                                    self.enter_simplification_or_done(round, run.modes.yolo)?;
                                 } else {
                                     self.transition_to_phase(Phase::ImplementationRound(
                                         round + 1,
@@ -1822,7 +1831,7 @@ impl App {
                                     );
                                 }
                                 if !self.state.builder.has_unfinished_tasks() {
-                                    self.enter_final_validation_or_done(round, run.modes.yolo)?;
+                                    self.enter_simplification_or_done(round, run.modes.yolo)?;
                                 } else {
                                     self.transition_to_phase(Phase::ImplementationRound(
                                         round + 1,

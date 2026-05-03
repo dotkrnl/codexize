@@ -1062,6 +1062,15 @@ fn brainstorm_prompts_require_authoritative_user_requirements() {
             );
             assert!(prompt.contains("Use the user's own wording, not a paraphrase."));
             assert!(prompt.contains("Never silently reinterpret."));
+            assert!(prompt.contains("must not silently invent exclusions"));
+            assert!(
+                prompt
+                    .contains("If you are uncertain whether something is in or out of scope, ask")
+            );
+            assert!(prompt.contains("## Out of scope"));
+            assert!(
+                prompt.contains("Each bullet here must either quote a user statement verbatim")
+            );
             if yolo {
                 assert!(prompt.contains("pick the narrowest reasonable reading"));
                 assert!(prompt.contains("recording the choice under\n`## Assumptions`"));

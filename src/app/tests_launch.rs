@@ -1378,8 +1378,8 @@ fn final_validation_launch_falls_back_when_selected_model_missing() {
             selection::VendorKind::Claude,
             "claude-opus-4-7",
             10,
-            10,
             1,
+            10,
         )];
         app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
             TestLaunchHarness {
@@ -1544,6 +1544,318 @@ fn final_validation_launch_without_models_records_agent_error() {
                 .contains("model list not yet loaded")
         );
         assert!(app.state.agent_runs.is_empty());
+    });
+}
+
+#[test]
+fn simplifier_launch_reuses_most_recent_coder_model_for_round() {
+    with_temp_root(|| {
+        let session_id = "simplifier-coder-model";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        // Simplifier needs review_scope.toml to exist; round entry writes it
+        // by Task 3 (round-entry hook), so seed it explicitly here.
+        write_review_scope(&round_dir, "base-simp");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(1);
+        // The most recent coder run for round 1 is attempt 2 with claude.
+        // The first attempt (codex/gpt-5) must NOT be picked.
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 2,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 2,
+            model: "claude-sonnet-4-6".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 10, 10),
+            ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet-4-6",
+                10,
+                10,
+                10,
+            ),
+        ];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"no_changes\"\nsummary = \"diff is tight\"\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_simplifier_with_model(None));
+
+        let run = app
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| run.stage == "simplifier")
+            .expect("simplifier run recorded");
+        assert_eq!(run.round, 1);
+        assert_eq!(run.task_id, None);
+        assert_eq!(run.attempt, 1);
+        assert_eq!(run.model, "claude-sonnet-4-6");
+        assert_eq!(run.vendor, "claude");
+        assert!(
+            run.window_name.starts_with("[Simplifier] "),
+            "window label must start with `[Simplifier] `, got {}",
+            run.window_name
+        );
+        // Required artifact must land where finalization looks for it.
+        let simplification_path = round_dir.join("simplification.toml");
+        assert!(
+            simplification_path.exists(),
+            "harness should have written simplification.toml"
+        );
+        // Live summary path follows the standard per-run convention.
+        let live_summary_path = session_dir.join("artifacts").join(format!(
+            "live_summary.{}.txt",
+            App::run_key_for("simplifier", None, 1, 1)
+        ));
+        let prompt_path = session_dir.join("prompts").join("simplifier-r1.md");
+        let prompt = std::fs::read_to_string(&prompt_path).expect("prompt file");
+        assert!(prompt.contains(&simplification_path.display().to_string()));
+        assert!(prompt.contains(&live_summary_path.display().to_string()));
+        assert!(prompt.contains(&round_dir.join("review_scope.toml").display().to_string()));
+    });
+}
+
+#[test]
+fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
+    with_temp_root(|| {
+        let session_id = "simplifier-retry-reuse";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("002");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        write_review_scope(&round_dir, "base-r2");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(2);
+        // A coder ran on this round, but the simplifier already locked in a
+        // different model on its first attempt; retries must keep that model.
+        state.agent_runs.push(RunRecord {
+            id: 7,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 2,
+            attempt: 1,
+            model: "claude-sonnet-4-6".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 2 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+        state.agent_runs.push(RunRecord {
+            id: 8,
+            stage: "simplifier".to_string(),
+            task_id: None,
+            round: 2,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Simplifier]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Failed,
+            error: Some("exit(1)".to_string()),
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 10, 10),
+            ranked_model(
+                selection::VendorKind::Claude,
+                "claude-sonnet-4-6",
+                10,
+                10,
+                10,
+            ),
+        ];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"no_changes\"\nsummary = \"clean diff\"\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_simplifier_with_model(None));
+
+        let run = app
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| run.stage == "simplifier" && run.attempt == 2)
+            .expect("simplifier retry run recorded");
+        assert_eq!(
+            run.model, "gpt-5",
+            "simplifier retry must reuse the prior simplifier model, not the coder's"
+        );
+        assert_eq!(run.vendor, "codex");
+    });
+}
+
+#[test]
+fn simplifier_refuses_to_launch_without_review_scope() {
+    with_temp_root(|| {
+        let session_id = "simplifier-missing-scope";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        // Deliberately do NOT write review_scope.toml.
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(1);
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Claude,
+            "claude-opus-4-7",
+            10,
+            1,
+            10,
+        )];
+        // No harness queued — if the launcher reaches the harness layer the
+        // expect-on-pop will panic, signalling the missing scope guard
+        // failed to short-circuit.
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::new(),
+            },
+        )));
+
+        assert!(!app.launch_simplifier_with_model(None));
+        assert!(
+            app.state
+                .agent_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("invalid review scope"),
+            "missing review scope must surface as an explicit launcher error: {:?}",
+            app.state.agent_error
+        );
+        assert!(app.state.agent_runs.is_empty());
+    });
+}
+
+#[test]
+fn simplifier_auto_launches_via_maybe_auto_launch() {
+    with_temp_root(|| {
+        let session_id = "simplifier-auto-launch";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        write_review_scope(&round_dir, "base-auto");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(1);
+        // Provide a prior coder run so the simplifier model resolves through
+        // round_stage_model (Q5/b precedence) rather than falling through to
+        // the primary picker, which test fixtures do not feed real ipbr
+        // scores into.
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: 1,
+            attempt: 1,
+            model: "gpt-5".to_string(),
+            vendor: "codex".to_string(),
+            window_name: "[Round 1 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Codex,
+            "gpt-5",
+            10,
+            10,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"no_changes\"\nsummary = \"clean\"\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        app.maybe_auto_launch();
+        let run = app
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| run.stage == "simplifier")
+            .expect("auto-launch must record a simplifier run");
+        assert_eq!(run.round, 1);
     });
 }
 

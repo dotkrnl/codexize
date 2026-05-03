@@ -123,6 +123,7 @@ const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcpCancelReason {
     Terminate,
+    Complete,
 }
 
 #[derive(Debug)]
@@ -166,6 +167,15 @@ fn test_input_receivers()
 -> &'static Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpInput>>> {
     static RECEIVERS: OnceLock<Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpInput>>>> =
         OnceLock::new();
+    RECEIVERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(test)]
+fn test_cancel_receivers()
+-> &'static Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpCancelReason>>> {
+    static RECEIVERS: OnceLock<
+        Mutex<std::collections::HashMap<String, mpsc::Receiver<AcpCancelReason>>>,
+    > = OnceLock::new();
     RECEIVERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -570,15 +580,28 @@ fn run_managed_acp_launch(
     let mut waiting_for_interactive_prompt = false;
 
     let outcome = loop {
-        if cancel_rx.try_recv().is_ok() {
+        if let Ok(reason) = cancel_rx.try_recv() {
             waiting_for_input.store(false, Ordering::SeqCst);
             thought_text.finish_turn(&launch, MessageKind::AgentThought);
             agent_text.finish_turn(&launch, MessageKind::AgentText);
             session.close().map_err(|err| anyhow!("{err}"))?;
-            break ManagedAcpOutcome {
-                exit_code: 143,
-                signal_received: "TERM".to_string(),
-            };
+            match reason {
+                AcpCancelReason::Terminate => {
+                    break ManagedAcpOutcome {
+                        exit_code: 143,
+                        signal_received: "TERM".to_string(),
+                    };
+                }
+                AcpCancelReason::Complete => {
+                    if let Some(path) = launch.required_artifact.as_deref() {
+                        validate_toml_artifacts(&[path])?;
+                    }
+                    break ManagedAcpOutcome {
+                        exit_code: 0,
+                        signal_received: String::new(),
+                    };
+                }
+            }
         }
 
         while let Ok(input) = input_rx.try_recv() {
@@ -793,7 +816,7 @@ pub fn request_run_label_interactive_input_for_test(window_name: &str) {
     let mut guard = active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (cancel_tx, _) = mpsc::channel();
+    let (cancel_tx, cancel_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
     let waiting_for_input = std::sync::Arc::new(AtomicBool::new(true));
@@ -801,6 +824,10 @@ pub fn request_run_label_interactive_input_for_test(window_name: &str) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(window_name.to_string(), input_rx);
+    test_cancel_receivers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(window_name.to_string(), cancel_rx);
     guard.insert(
         window_name.to_string(),
         ManagedAcpRun {
@@ -837,10 +864,12 @@ pub fn cancel_run_labels_matching(base: &str) {
 }
 
 pub fn request_run_label_exit(window_name: &str) {
-    // Until the interactive ACP command surface lands, local `/exit` requests
-    // resolve by closing the managed ACP session directly so task-finish and
-    // yolo cleanup still terminate the child process deterministically.
-    cancel_run_labels_matching(window_name);
+    if let Some(mut run) = take_managed_acp_run(window_name) {
+        let _ = run.cancel_tx.send(AcpCancelReason::Complete);
+        if let Some(handle) = run.join.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 pub fn send_run_label_input(window_name: &str, text: String) -> bool {
@@ -871,6 +900,10 @@ pub fn shutdown_all_runs() {
     #[cfg(test)]
     {
         test_input_receivers()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        test_cancel_receivers()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();

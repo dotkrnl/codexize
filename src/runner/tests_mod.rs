@@ -1,4 +1,12 @@
 use super::*;
+use std::sync::{Mutex, OnceLock};
+
+fn active_run_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn test_validate_toml_artifacts_all_valid() {
@@ -50,6 +58,42 @@ fn test_validate_toml_artifacts_mix_missing_and_malformed() {
     let msg = format!("{:#}", result.unwrap_err());
     assert!(msg.contains("missing"));
     assert!(msg.contains("malformed"));
+}
+
+#[test]
+fn request_run_label_exit_completes_interactive_stages_without_term() {
+    let _guard = active_run_test_lock();
+    for window_name in ["[Brainstorm]", "[Planning]", "[Recovery]"] {
+        shutdown_all_runs();
+        request_run_label_interactive_input_for_test(window_name);
+
+        request_run_label_exit(window_name);
+
+        let receiver = test_cancel_receivers()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(window_name)
+            .expect("cancel receiver");
+        assert_eq!(receiver.try_recv().unwrap(), AcpCancelReason::Complete);
+        assert!(!run_label_is_active(window_name));
+    }
+}
+
+#[test]
+fn cancel_run_labels_matching_still_terminates_run() {
+    let _guard = active_run_test_lock();
+    shutdown_all_runs();
+    request_run_label_interactive_input_for_test("[Recovery Terminate Test]");
+
+    cancel_run_labels_matching("[Recovery Terminate Test]");
+
+    let receiver = test_cancel_receivers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove("[Recovery Terminate Test]")
+        .expect("cancel receiver");
+    assert_eq!(receiver.try_recv().unwrap(), AcpCancelReason::Terminate);
+    assert!(!run_label_is_active("[Recovery Terminate Test]"));
 }
 
 #[test]
@@ -1484,7 +1528,8 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
             request_run_label_exit("[Brainstorm]");
             wait_for_run_label_to_finish("[Brainstorm]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp after exit");
-            assert_eq!(stamp.exit_code, 143);
+            assert_eq!(stamp.exit_code, 0);
+            assert_eq!(stamp.signal_received, "");
         },
     );
 }

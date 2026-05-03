@@ -1295,7 +1295,7 @@ impl App {
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
-            self.try_test_launch(Some(&tasks_path), &run_key, &artifacts_dir)
+            self.try_test_launch(Some(&recovery_path), &run_key, &artifacts_dir)
         {
             result
         } else {
@@ -1306,7 +1306,7 @@ impl App {
                     vendor_kind,
                     &run_key,
                     &artifacts_dir,
-                    Some(&tasks_path),
+                    Some(&recovery_path),
                 )
             } else {
                 launch_noninteractive(
@@ -1315,7 +1315,7 @@ impl App {
                     vendor_kind,
                     &run_key,
                     &artifacts_dir,
-                    Some(&tasks_path),
+                    Some(&recovery_path),
                 )
             }
         };

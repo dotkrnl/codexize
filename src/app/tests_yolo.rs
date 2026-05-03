@@ -162,7 +162,17 @@ fn yolo_exit_artifact_readiness_covers_all_supported_stages() {
         .expect("session summary");
         std::fs::write(artifacts.join("spec-review-3.md"), "# Review\n").expect("review");
         std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan");
-        std::fs::write(artifacts.join("tasks.toml"), "[[tasks]]\nid = 1\n").expect("tasks");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            r#"[[tasks]]
+id = 1
+title = "Ready"
+description = "ready"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+        )
+        .expect("tasks");
         std::fs::write(
             round_dir.join("coder_summary.toml"),
             "status = \"done\"\nsummary = \"ok\"\n",
@@ -175,7 +185,7 @@ fn yolo_exit_artifact_readiness_covers_all_supported_stages() {
         .expect("review verdict");
         std::fs::write(
             round_dir.join("recovery.toml"),
-            "status = \"agent_pivot\"\nsummary = \"ok\"\nfeedback = []\n",
+            "status = \"agent_pivot\"\ntrigger = \"agent_pivot\"\ninteractive = false\nsummary = \"ok\"\nfeedback = [\"ok\"]\n",
         )
         .expect("recovery summary");
 
@@ -205,6 +215,52 @@ fn yolo_exit_artifact_readiness_covers_all_supported_stages() {
         assert!(
             !app.yolo_exit_artifact_ready(&brainstorm),
             "brainstorm needs both spec.md and session_summary.toml"
+        );
+    });
+}
+
+#[test]
+fn yolo_recovery_exit_waits_for_valid_recovery_artifacts() {
+    with_temp_root(|| {
+        let session_id = "yolo-recovery-validity";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        let round_dir = session_dir.join("rounds").join("002");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::create_dir_all(&round_dir).expect("round dir");
+        std::fs::write(artifacts.join("spec.md"), "# Spec\n").expect("spec");
+        std::fs::write(artifacts.join("plan.md"), "# Plan\n").expect("plan");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            r#"[[tasks]]
+id = 1
+title = "Ready"
+description = "ready"
+test = "cargo test"
+estimated_tokens = 10
+"#,
+        )
+        .expect("tasks");
+
+        let state = SessionState::new(session_id.to_string());
+        let app = idle_app(state);
+        let run = make_stage_run(8, "recovery", 2, 1);
+
+        std::fs::write(round_dir.join("recovery.toml"), "status = \"approved\"\n")
+            .expect("partial recovery");
+        assert!(
+            !app.yolo_exit_artifact_ready(&run),
+            "partial recovery.toml must not trigger yolo TERM"
+        );
+
+        std::fs::write(
+            round_dir.join("recovery.toml"),
+            "status = \"approved\"\ntrigger = \"agent_pivot\"\ninteractive = false\nsummary = \"recovered\"\nfeedback = []\n",
+        )
+        .expect("valid recovery");
+        assert!(
+            app.yolo_exit_artifact_ready(&run),
+            "valid recovery artifacts should trigger yolo exit"
         );
     });
 }

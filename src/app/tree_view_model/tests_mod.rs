@@ -35,7 +35,7 @@ fn test_build_tree_single_stage() {
     let mut state = SessionState::new("test".to_string());
     state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
     let nodes = build_tree(&state);
-    assert_eq!(nodes.len(), 7); // Idea + 6 stages
+    assert_eq!(nodes.len(), 8); // Idea + 6 stages + Final Validation
     let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
     assert_eq!(brainstorm.kind, NodeKind::Stage);
     assert_eq!(brainstorm.status, NodeStatus::Done);
@@ -981,4 +981,77 @@ fn test_task_node_tough_badge() {
         "Tough task should end with [tough], got: {}",
         task2.label
     );
+}
+
+#[test]
+fn final_validation_running_renders_as_normal_stage() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::FinalValidation(2);
+    let mut validator = run(42, "final-validation", RunStatus::Running);
+    validator.round = 2;
+    validator.window_name = "[FinalValidation] opus".to_string();
+    state.agent_runs.push(validator);
+
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Final Validation")
+        .expect("final validation stage missing");
+    assert_eq!(stage.kind, NodeKind::Stage);
+    assert_eq!(stage.status, NodeStatus::Running);
+    assert_eq!(stage.summary, "final validation running");
+    // Single round + single attempt collapses, so the stage carries the leaf
+    // run id directly — that is what wires the live-summary tail to the
+    // stage row in the dashboard.
+    assert_eq!(stage.leaf_run_id, Some(42));
+}
+
+#[test]
+fn final_validation_pending_before_validation_phase() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::PlanningRunning;
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Final Validation")
+        .unwrap();
+    assert_eq!(stage.status, NodeStatus::Pending);
+    assert!(stage.children.is_empty());
+}
+
+#[test]
+fn final_validation_skipped_under_yolo_done() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Done;
+    state.modes.yolo = true;
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Final Validation")
+        .unwrap();
+    assert_eq!(stage.status, NodeStatus::Skipped);
+}
+
+#[test]
+fn final_validation_groups_runs_by_round() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::FinalValidation(2);
+    let mut r1 = run(10, "final-validation", RunStatus::Done);
+    r1.round = 1;
+    r1.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(r1);
+    let mut r2 = run(20, "final-validation", RunStatus::Running);
+    r2.round = 2;
+    state.agent_runs.push(r2);
+
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Final Validation")
+        .unwrap();
+    let mut run_ids = Vec::new();
+    collect_run_ids(stage, &mut run_ids);
+    assert!(run_ids.contains(&10));
+    assert!(run_ids.contains(&20));
+    assert_eq!(stage.status, NodeStatus::Running);
 }

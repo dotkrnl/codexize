@@ -15,6 +15,7 @@ mod models_area;
 mod models_area_view_model;
 mod observation;
 pub(crate) mod palette;
+mod prompt_render;
 mod prompts;
 mod render;
 mod render_view_model;

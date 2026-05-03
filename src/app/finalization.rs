@@ -143,6 +143,7 @@ impl App {
             "recovery" => SelectionPhase::Planning,
             "coder" => SelectionPhase::Build,
             "reviewer" => SelectionPhase::Review,
+            "simplifier" => SelectionPhase::Build,
             _ => SelectionPhase::Build,
         }
     }

@@ -79,11 +79,14 @@ fn try_main() -> Result<()> {
         return Ok(());
     }
 
-    let session_id = match plan {
+    let (session_id, startup_origin) = match plan {
         LaunchPlan::DirectCreate { idea, modes } => {
             // Direct creation always produces a fresh session, so the
             // resume-ignored warnings do not apply here.
-            picker::create_session(&idea, modes)?
+            (
+                picker::create_session(&idea, modes)?,
+                app::AppStartupOrigin::Default,
+            )
         }
         LaunchPlan::Picker { create_modes } => {
             let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
@@ -100,14 +103,21 @@ fn try_main() -> Result<()> {
                     eprintln!("{warning}");
                 }
             }
-            selection.session_id
+            (
+                selection.session_id,
+                if selection.created {
+                    app::AppStartupOrigin::PickerCreated
+                } else {
+                    app::AppStartupOrigin::Default
+                },
+            )
         }
     };
 
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume::resume_session(&mut state);
 
-    let result = app::App::new(state).run(&mut terminal);
+    let result = app::App::new_with_startup_origin(state, startup_origin).run(&mut terminal);
     tui::stop(&mut terminal)?;
     result
 }

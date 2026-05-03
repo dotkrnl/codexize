@@ -128,7 +128,14 @@ impl App {
         }
     }
 
-    pub fn new(mut state: SessionState) -> Self {
+    pub fn new(state: SessionState) -> Self {
+        Self::new_with_startup_origin(state, AppStartupOrigin::Default)
+    }
+
+    pub fn new_with_startup_origin(
+        mut state: SessionState,
+        startup_origin: AppStartupOrigin,
+    ) -> Self {
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         if state.builder.task_titles.is_empty() {
             let tasks_path = session_state::session_dir(&state.session_id)
@@ -174,6 +181,7 @@ impl App {
             input_cursor: 0,
             pending_view_path: None,
             confirm_back: false,
+            startup_origin,
             run_launched: false,
             quota_errors: Vec::new(),
             quota_retry_delay: Duration::from_secs(60),
@@ -370,6 +378,12 @@ impl App {
 
     /// Called once per successful frame draw to advance spinner-driven UI state.
     pub(crate) fn on_frame_drawn(&mut self) {
+        // Consume the picker-created startup origin only after a successful
+        // draw so cached models cannot auto-launch brainstorm before the first
+        // visible session frame lands on screen.
+        if self.startup_origin == AppStartupOrigin::PickerCreated {
+            self.startup_origin = AppStartupOrigin::Default;
+        }
         self.spinner_tick = self.spinner_tick.wrapping_add(1);
     }
 
@@ -1561,6 +1575,9 @@ impl App {
     /// run is already launched, if models aren't loaded, or if the last run
     /// errored (user needs to intervene).
     pub(super) fn maybe_auto_launch(&mut self) {
+        if self.startup_origin == AppStartupOrigin::PickerCreated {
+            return;
+        }
         if self.run_launched || self.state.agent_error.is_some() || self.models.is_empty() {
             return;
         }

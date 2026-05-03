@@ -644,6 +644,14 @@ fn test_phase_badge_variants() {
 
     let (badge, _, _) = phase_badge(Phase::ImplementationRound(3));
     assert_eq!(badge, "coding r3");
+
+    let (badge, color, prefix) = phase_badge(Phase::Simplification(2));
+    assert_eq!(badge, "simplification r2");
+    assert_eq!(color, Color::Cyan);
+    assert_eq!(prefix, "●");
+
+    let (badge, _, _) = phase_badge(Phase::FinalValidation(2));
+    assert_eq!(badge, "final validation r2");
 }
 
 #[test]

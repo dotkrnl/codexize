@@ -1055,3 +1055,93 @@ fn final_validation_groups_runs_by_round() {
     assert!(run_ids.contains(&20));
     assert_eq!(stage.status, NodeStatus::Running);
 }
+
+#[test]
+fn simplification_running_renders_as_normal_stage() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Simplification(2);
+    let mut simplifier = run(77, "simplifier", RunStatus::Running);
+    simplifier.round = 2;
+    simplifier.window_name = "[Simplifier] opus".to_string();
+    state.agent_runs.push(simplifier);
+
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Simplification")
+        .expect("simplification stage missing");
+    assert_eq!(stage.kind, NodeKind::Stage);
+    assert_eq!(stage.status, NodeStatus::Running);
+    assert_eq!(stage.summary, "simplification running");
+    assert_eq!(stage.leaf_run_id, Some(77));
+}
+
+#[test]
+fn simplification_pending_before_simplification_phase() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::ImplementationRound(1);
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Simplification")
+        .unwrap();
+    assert_eq!(stage.status, NodeStatus::Pending);
+    assert!(stage.children.is_empty());
+}
+
+#[test]
+fn simplification_precedes_final_validation_in_tree_order() {
+    let state = SessionState::new("test".to_string());
+    let nodes = build_tree(&state);
+    let simpl_index = nodes
+        .iter()
+        .position(|n| n.label == "Simplification")
+        .expect("simplification stage missing");
+    let final_index = nodes
+        .iter()
+        .position(|n| n.label == "Final Validation")
+        .expect("final validation stage missing");
+    assert!(
+        simpl_index < final_index,
+        "Simplification must appear before Final Validation in the tree, got simpl={} final={}",
+        simpl_index,
+        final_index
+    );
+}
+
+#[test]
+fn simplification_skipped_under_yolo_done() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Done;
+    state.modes.yolo = true;
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Simplification")
+        .unwrap();
+    assert_eq!(stage.status, NodeStatus::Skipped);
+}
+
+#[test]
+fn simplification_groups_runs_by_round() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Simplification(2);
+    let mut r1 = run(30, "simplifier", RunStatus::Done);
+    r1.round = 1;
+    r1.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(r1);
+    let mut r2 = run(40, "simplifier", RunStatus::Running);
+    r2.round = 2;
+    state.agent_runs.push(r2);
+
+    let nodes = build_tree(&state);
+    let stage = nodes
+        .iter()
+        .find(|n| n.label == "Simplification")
+        .unwrap();
+    let mut run_ids = Vec::new();
+    collect_run_ids(stage, &mut run_ids);
+    assert!(run_ids.contains(&30));
+    assert!(run_ids.contains(&40));
+    assert_eq!(stage.status, NodeStatus::Running);
+}

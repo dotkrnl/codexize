@@ -12,11 +12,14 @@ pub const TTL: Duration = Duration::from_secs(30 * 60);
 
 /// Bump from v3 → v4 because dashboard entries now carry ipbr-specific
 /// phase-score fields and a row-match flag. v3 entries cached old
-/// aistupidlevel scores in axes/`overall_score`; treating those as v4
+/// aistupidlevel scores in `axes`/`overall_score`; treating those as v4
 /// would let stale aistupidlevel data masquerade as ipbr authority on
-/// load, which the spec explicitly forbids. Quota cache shape and TTL
-/// are unchanged; quotas will simply be re-fetched on first run after
-/// the bump.
+/// load, which the spec explicitly forbids.
+///
+/// Versioning applies to the dashboard section only. Quota and quota-
+/// reset sections are loaded independently under their own TTL, because
+/// their schema is unchanged across this bump and the task requires
+/// provider quota cache behavior to stay intact.
 pub const CACHE_VERSION: u32 = 4;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
@@ -32,6 +35,23 @@ pub struct CacheFile {
     pub quotas: Option<Section<QuotaPayload>>,
     #[serde(default)]
     pub quota_resets: Option<Section<ResetPayload>>,
+}
+
+/// Lenient parse used during load. The dashboard payload is held as raw
+/// JSON so we can decide whether to deserialize it based on the file's
+/// `version`, while quota / quota-reset sections — whose schema is stable
+/// across this version bump — deserialize directly and survive a
+/// dashboard-only schema change.
+#[derive(Deserialize, Debug)]
+struct VersionedFile {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    dashboard: Option<serde_json::Value>,
+    #[serde(default)]
+    quotas: Option<Section<QuotaPayload>>,
+    #[serde(default)]
+    quota_resets: Option<Section<ResetPayload>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -144,24 +164,33 @@ fn load_at(dir: &Path) -> LoadedCache {
         Ok(t) => t,
         Err(_) => return empty,
     };
-    let file: CacheFile = match serde_json::from_str(&text) {
-        Ok(f) => f,
+    let parsed: VersionedFile = match serde_json::from_str(&text) {
+        Ok(p) => p,
         Err(_) => return empty,
     };
-    if file.version != CACHE_VERSION {
-        return empty;
-    }
+
+    // Dashboard payload is dropped on any version mismatch so old
+    // aistupidlevel-shaped entries cannot be read as ipbr phase
+    // authority. Quota / quota-reset sections fall through unchanged.
+    let dashboard_section = if parsed.version == CACHE_VERSION {
+        parsed
+            .dashboard
+            .and_then(|raw| serde_json::from_value::<Section<Vec<DashboardEntry>>>(raw).ok())
+    } else {
+        None
+    };
+
     let now = now_secs();
     LoadedCache {
-        dashboard: file.dashboard.map(|s| LoadedSection {
+        dashboard: dashboard_section.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= DASHBOARD_TTL.as_secs(),
             data: s.data,
         }),
-        quotas: file.quotas.map(|s| LoadedSection {
+        quotas: parsed.quotas.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
             data: s.data,
         }),
-        quota_resets: file.quota_resets.map(|s| LoadedSection {
+        quota_resets: parsed.quota_resets.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
             data: s.data,
         }),
@@ -209,25 +238,37 @@ fn save_quota_resets_at(dir: &Path, payload: &ResetPayload) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn load_raw_or_default(dir: &Path) -> CacheFile {
+    let empty = CacheFile {
+        version: CACHE_VERSION,
+        dashboard: None,
+        quotas: None,
+        quota_resets: None,
+    };
     let text = match fs::read_to_string(dir.join("models.json")) {
         Ok(t) => t,
-        Err(_) => {
-            return CacheFile {
-                version: CACHE_VERSION,
-                dashboard: None,
-                quotas: None,
-                quota_resets: None,
-            };
-        }
+        Err(_) => return empty,
     };
-    match serde_json::from_str::<CacheFile>(&text) {
-        Ok(f) if f.version == CACHE_VERSION => f,
-        _ => CacheFile {
-            version: CACHE_VERSION,
-            dashboard: None,
-            quotas: None,
-            quota_resets: None,
-        },
+    let parsed: VersionedFile = match serde_json::from_str(&text) {
+        Ok(p) => p,
+        Err(_) => return empty,
+    };
+
+    // Same per-section policy as `load_at`: drop the dashboard payload on
+    // version mismatch but preserve quota / quota-reset sections so a
+    // dashboard schema bump never invalidates valid quota cache data.
+    let dashboard = if parsed.version == CACHE_VERSION {
+        parsed
+            .dashboard
+            .and_then(|raw| serde_json::from_value::<Section<Vec<DashboardEntry>>>(raw).ok())
+    } else {
+        None
+    };
+
+    CacheFile {
+        version: CACHE_VERSION,
+        dashboard,
+        quotas: parsed.quotas,
+        quota_resets: parsed.quota_resets,
     }
 }
 
@@ -374,6 +415,10 @@ mod tests {
     /// MUST NOT be readable as a v4 dashboard. Otherwise old aistupidlevel
     /// scores could masquerade as ipbr phase authority on load — the
     /// exact failure mode the task 1 schema bump is meant to prevent.
+    ///
+    /// Versioning applies to the dashboard section only: an unrelated
+    /// quota section in the same file must still load under its normal
+    /// TTL, so a dashboard schema bump never forces a quota re-fetch.
     #[test]
     fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
         let dir = TempDir::new().unwrap();
@@ -411,9 +456,66 @@ mod tests {
             loaded.dashboard.is_none(),
             "v3 dashboard must not be readable under v{CACHE_VERSION}"
         );
+        let quotas = loaded
+            .quotas
+            .expect("quota section is independent of dashboard schema version");
         assert!(
-            loaded.quotas.is_none(),
-            "v3 sections are dropped wholesale; quotas will be re-fetched"
+            !quotas.expired,
+            "quota TTL is unaffected by a dashboard schema bump"
+        );
+        assert_eq!(
+            quotas
+                .data
+                .get("claude")
+                .unwrap()
+                .get("claude-sonnet")
+                .unwrap(),
+            &Some(75)
+        );
+    }
+
+    /// When the dashboard section is dropped because of a version
+    /// mismatch, any subsequent save must not lose unrelated cached
+    /// quotas. Otherwise a stale dashboard schema would silently force a
+    /// quota re-fetch on the next save path.
+    #[test]
+    fn save_after_version_mismatch_preserves_quotas() {
+        let dir = TempDir::new().unwrap();
+        let v3_payload = serde_json::json!({
+            "version": 3,
+            "dashboard": {
+                "fetched_at": now_secs(),
+                "data": []
+            },
+            "quotas": {
+                "fetched_at": now_secs(),
+                "data": sample_quotas()
+            }
+        });
+        fs::create_dir_all(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            serde_json::to_string(&v3_payload).unwrap(),
+        )
+        .unwrap();
+
+        // Saving a fresh dashboard should rewrite the file at v4 while
+        // carrying the existing quota section forward untouched.
+        save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+
+        let loaded = load_at(dir.path());
+        assert!(loaded.dashboard.is_some(), "v4 dashboard rewritten on save");
+        let quotas = loaded
+            .quotas
+            .expect("v3 quota section must survive the dashboard rewrite");
+        assert_eq!(
+            quotas
+                .data
+                .get("claude")
+                .unwrap()
+                .get("claude-sonnet")
+                .unwrap(),
+            &Some(75)
         );
     }
 
@@ -490,9 +592,10 @@ mod tests {
     }
 
     #[test]
-    fn version_mismatch_returns_none() {
+    fn version_mismatch_drops_dashboard_only() {
         let dir = TempDir::new().unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+        save_quotas_at(dir.path(), &sample_quotas()).unwrap();
         let path = dir.path().join("models.json");
         let mut file: CacheFile =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -500,12 +603,18 @@ mod tests {
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
         let loaded = load_at(dir.path());
-        assert!(loaded.dashboard.is_none());
-        assert!(loaded.quotas.is_none());
+        assert!(
+            loaded.dashboard.is_none(),
+            "dashboard payload is dropped on any version mismatch"
+        );
+        assert!(
+            loaded.quotas.is_some(),
+            "quota section is independent of dashboard schema version"
+        );
     }
 
     #[test]
-    fn v2_cache_file_returns_none() {
+    fn v2_cache_file_drops_dashboard_only() {
         let dir = TempDir::new().unwrap();
         save_dashboard_at(dir.path(), &sample_entries()).unwrap();
         save_quotas_at(dir.path(), &sample_quotas()).unwrap();
@@ -517,7 +626,10 @@ mod tests {
 
         let loaded = load_at(dir.path());
         assert!(loaded.dashboard.is_none());
-        assert!(loaded.quotas.is_none());
+        assert!(
+            loaded.quotas.is_some(),
+            "v2 quota section keeps loading under the existing TTL"
+        );
     }
 
     #[test]

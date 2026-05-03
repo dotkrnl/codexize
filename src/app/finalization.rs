@@ -285,8 +285,9 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Capture HEAD at round start so the reviewer can inspect `base_sha..HEAD`.
-    /// Idempotent on resume: the original base is preserved.
+    /// Capture HEAD at round start so the reviewer (and the simplifier) can
+    /// inspect `base_sha..HEAD`. Idempotent on resume: the original base is
+    /// preserved.
     pub(super) fn capture_round_base(&self, round_dir: &std::path::Path) {
         let scope_file = round_dir.join("review_scope.toml");
         if scope_file.exists() {
@@ -295,11 +296,15 @@ impl App {
         if let Some(parent) = scope_file.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        // Use a deterministic placeholder in test builds so transitions that
+        // capture the round base never shell out to `git` from the test
+        // process; production callers always go through `git_rev_parse_head`.
         #[cfg(test)]
-        if self.test_launch_harness.is_some() {
+        {
             let _ = std::fs::write(&scope_file, "base_sha = \"test-base\"\n");
             return;
         }
+        #[cfg(not(test))]
         if let Some(sha) = git_rev_parse_head() {
             let _ = std::fs::write(&scope_file, format!("base_sha = \"{sha}\"\n"));
         }

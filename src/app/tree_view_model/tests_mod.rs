@@ -35,7 +35,7 @@ fn test_build_tree_single_stage() {
     let mut state = SessionState::new("test".to_string());
     state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
     let nodes = build_tree(&state);
-    assert_eq!(nodes.len(), 8); // Idea + 6 stages + Final Validation
+    assert_eq!(nodes.len(), 9); // Idea + 6 stages + Simplification + Final Validation
     let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
     assert_eq!(brainstorm.kind, NodeKind::Stage);
     assert_eq!(brainstorm.status, NodeStatus::Done);

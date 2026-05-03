@@ -10,7 +10,7 @@ pub use transitions::execute_transition;
 use crate::{adapters::EffortLevel, selection::SelectionPhase};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 /// An event logged to the run's events.toml audit trail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +40,7 @@ pub enum BlockOrigin {
     BuilderRecovery,
     GitGuard,
     FinalValidation,
+    Simplification,
 }
 
 impl BlockOrigin {
@@ -59,6 +60,7 @@ impl BlockOrigin {
             "reviewer" => Self::Review,
             "recovery" => Self::BuilderRecovery,
             "final-validation" => Self::FinalValidation,
+            "simplifier" => Self::Simplification,
             _ => return None,
         })
     }
@@ -344,6 +346,11 @@ pub struct SessionState {
     /// on entry; the orchestrator hard-blocks before the 4th run starts.
     #[serde(default)]
     pub validation_attempts: u32,
+    /// Number of `Simplification(round)` runs entered, keyed by the round
+    /// being simplified. Increments on entry; the orchestrator hard-blocks
+    /// before the 4th run for a given round (`SIMPLIFICATION_ATTEMPT_CAP`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub simplification_attempts: BTreeMap<u32, u32>,
     /// Origin of the most recent `BlockedNeedsUser` transition. Cleared when
     /// the session moves out of `BlockedNeedsUser`. The force-ship guard reads
     /// this field to decide whether `BlockedNeedsUser -> Done` is allowed.
@@ -371,6 +378,7 @@ impl SessionState {
             skip_to_impl_kind: None,
             pending_guard_decision: None,
             validation_attempts: 0,
+            simplification_attempts: BTreeMap::new(),
             block_origin: None,
         }
     }

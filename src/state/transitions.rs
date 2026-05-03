@@ -118,6 +118,13 @@ pub fn block_with_origin(state: &mut SessionState, origin: BlockOrigin) -> Resul
 /// Hard-coded per spec §4 — there is no runtime override.
 pub const VALIDATION_ATTEMPT_CAP: u32 = 3;
 
+/// Hard cap on `Simplification(round)` runs for a given round. The 4th
+/// attempted entry for the same round auto-routes to `BlockedNeedsUser` with
+/// `block_origin = Simplification`. Force-ship is *not* unlocked from a
+/// simplification block — that escape hatch remains tied to
+/// `BlockOrigin::FinalValidation`.
+pub const SIMPLIFICATION_ATTEMPT_CAP: u32 = 3;
+
 /// Outcome of [`enter_final_validation`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinalValidationEntry {
@@ -150,6 +157,44 @@ pub fn enter_final_validation(
     let attempt = state.validation_attempts;
     execute_transition(state, target)?;
     Ok(FinalValidationEntry::Entered { attempt })
+}
+
+/// Outcome of [`enter_simplification`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimplificationEntry {
+    /// The session entered `Simplification(round)`. `attempt` is the
+    /// 1-indexed simplifier attempt for this round (1, 2, or 3).
+    Entered { attempt: u32 },
+    /// The cap for this round was already at the limit on entry; the
+    /// session was routed to `BlockedNeedsUser` with
+    /// `block_origin = Simplification` and the simplifier must not be
+    /// launched.
+    CapExceeded,
+}
+
+/// Single throat for entering `Simplification(round)`. Increments the
+/// per-round entry in `simplification_attempts` on success; on the 4th
+/// attempt for the same round (cap already exhausted) blocks instead so the
+/// simplifier never spawns. Callers MUST gate the simplifier launch on
+/// `Entered`.
+pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<SimplificationEntry> {
+    let attempts = state
+        .simplification_attempts
+        .get(&round)
+        .copied()
+        .unwrap_or(0);
+    if attempts >= SIMPLIFICATION_ATTEMPT_CAP {
+        block_with_origin(state, BlockOrigin::Simplification)?;
+        return Ok(SimplificationEntry::CapExceeded);
+    }
+    let target = Phase::Simplification(round);
+    // Validate before incrementing so an illegal source phase cannot leak a
+    // stale attempt count into the persisted state.
+    validate_transition(&state.current_phase, &target).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let next = attempts + 1;
+    state.simplification_attempts.insert(round, next);
+    execute_transition(state, target)?;
+    Ok(SimplificationEntry::Entered { attempt: next })
 }
 
 pub fn prepare_new_session_for_brainstorm(
@@ -682,6 +727,20 @@ pub const RECOVERY_PLAN_REVIEWER_IO: StageIO = StageIO {
     writes: &["artifacts/plan_review.toml"],
 };
 
+/// Behavior-preserving cleanup pass that fires on every normal entry into
+/// `FinalValidation`. The simplifier reads spec/plan, the round's review
+/// scope (for `base_sha..HEAD`), and the live summary, and writes its
+/// verdict to `rounds/{round}/simplification.toml`.
+pub const SIMPLIFIER_IO: StageIO = StageIO {
+    stage: "simplifier",
+    pointer_artifacts: &[
+        "artifacts/spec.md",
+        "rounds/{round}/review_scope.toml",
+        "artifacts/live_summary.txt",
+    ],
+    writes: &["rounds/{round}/simplification.toml"],
+};
+
 /// Recovery-mode sharding: regenerates the task queue from the recovered
 /// spec/plan while preserving completed task history.
 pub const RECOVERY_SHARDER_IO: StageIO = StageIO {
@@ -711,6 +770,7 @@ pub fn stage_io_with_mode(stage: &str, mode: Option<&str>) -> Option<&'static St
         ("sharder", _) => Some(&SHARDER_IO),
         ("coder", _) => Some(&CODER_IO),
         ("reviewer", _) => Some(&REVIEWER_IO),
+        ("simplifier", _) => Some(&SIMPLIFIER_IO),
         ("recovery", _) => Some(&RECOVERY_IO),
         _ => None,
     }
@@ -1184,7 +1244,9 @@ mod tests {
     fn final_validation_round_trip_through_execute_transition() {
         with_temp_root(|| {
             let mut state = SessionState::new("fv-round-trip".to_string());
+            // Normal route: ReviewRound -> Simplification -> FinalValidation -> Done.
             state.current_phase = Phase::ReviewRound(2);
+            execute_transition(&mut state, Phase::Simplification(2)).unwrap();
             execute_transition(&mut state, Phase::FinalValidation(2)).unwrap();
             assert_eq!(state.current_phase, Phase::FinalValidation(2));
             execute_transition(&mut state, Phase::Done).unwrap();
@@ -1198,8 +1260,9 @@ mod tests {
             let mut state = SessionState::new("fv-cap-increment".to_string());
             assert_eq!(state.validation_attempts, 0);
 
-            // Attempt 1: ReviewRound(1) -> FinalValidation(1).
+            // Attempt 1: ReviewRound(1) -> Simplification(1) -> FinalValidation(1).
             state.current_phase = Phase::ReviewRound(1);
+            execute_transition(&mut state, Phase::Simplification(1)).unwrap();
             let outcome = enter_final_validation(&mut state, 1).unwrap();
             assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 1 });
             assert_eq!(state.current_phase, Phase::FinalValidation(1));
@@ -1208,6 +1271,7 @@ mod tests {
             // Attempt 2: simulate goal_gap pivot then re-validation.
             execute_transition(&mut state, Phase::ImplementationRound(2)).unwrap();
             execute_transition(&mut state, Phase::ReviewRound(2)).unwrap();
+            execute_transition(&mut state, Phase::Simplification(2)).unwrap();
             let outcome = enter_final_validation(&mut state, 2).unwrap();
             assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 2 });
             assert_eq!(state.validation_attempts, 2);
@@ -1215,6 +1279,7 @@ mod tests {
             // Attempt 3.
             execute_transition(&mut state, Phase::ImplementationRound(3)).unwrap();
             execute_transition(&mut state, Phase::ReviewRound(3)).unwrap();
+            execute_transition(&mut state, Phase::Simplification(3)).unwrap();
             let outcome = enter_final_validation(&mut state, 3).unwrap();
             assert_eq!(outcome, FinalValidationEntry::Entered { attempt: 3 });
             assert_eq!(state.validation_attempts, 3);
@@ -1229,7 +1294,7 @@ mod tests {
             // Pretend three validation rounds already ran and the coder loop
             // just produced new work for round 4.
             state.validation_attempts = VALIDATION_ATTEMPT_CAP;
-            state.current_phase = Phase::ReviewRound(4);
+            state.current_phase = Phase::Simplification(4);
 
             let outcome = enter_final_validation(&mut state, 4).unwrap();
 
@@ -1240,6 +1305,95 @@ mod tests {
             // is unlocked.
             assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
             assert_eq!(state.block_origin, Some(BlockOrigin::FinalValidation));
+        });
+    }
+
+    #[test]
+    fn simplifier_io_lookup_and_paths() {
+        let io = stage_io("simplifier").expect("simplifier StageIO is registered");
+        assert_eq!(io.stage, "simplifier");
+        assert!(io.pointer_artifacts.contains(&"artifacts/spec.md"));
+        assert!(
+            io.pointer_artifacts
+                .contains(&"rounds/{round}/review_scope.toml")
+        );
+        assert!(io.writes.contains(&"rounds/{round}/simplification.toml"));
+    }
+
+    #[test]
+    fn block_origin_simplification_does_not_unlock_force_ship() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("force-ship-simplification".to_string());
+            state.current_phase = Phase::BlockedNeedsUser;
+            state.block_origin = Some(BlockOrigin::Simplification);
+            let err =
+                execute_transition(&mut state, Phase::Done).expect_err("expected guard failure");
+            assert!(format!("{err:#}").contains("force-ship"));
+            assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+        });
+    }
+
+    #[test]
+    fn enter_simplification_increments_per_round_counter() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("simplify-counter".to_string());
+            state.current_phase = Phase::ReviewRound(1);
+            let outcome = enter_simplification(&mut state, 1).unwrap();
+            assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
+            assert_eq!(state.current_phase, Phase::Simplification(1));
+            assert_eq!(state.simplification_attempts.get(&1).copied(), Some(1));
+
+            // Rewind back to the review and re-enter to exercise increment.
+            execute_transition(&mut state, Phase::ReviewRound(1)).unwrap();
+            let outcome = enter_simplification(&mut state, 1).unwrap();
+            assert_eq!(outcome, SimplificationEntry::Entered { attempt: 2 });
+            assert_eq!(state.simplification_attempts.get(&1).copied(), Some(2));
+
+            // A different round starts at 1 again.
+            execute_transition(&mut state, Phase::FinalValidation(1)).unwrap();
+            execute_transition(&mut state, Phase::ImplementationRound(2)).unwrap();
+            execute_transition(&mut state, Phase::ReviewRound(2)).unwrap();
+            let outcome = enter_simplification(&mut state, 2).unwrap();
+            assert_eq!(outcome, SimplificationEntry::Entered { attempt: 1 });
+            assert_eq!(state.simplification_attempts.get(&2).copied(), Some(1));
+        });
+    }
+
+    #[test]
+    fn enter_simplification_caps_fourth_entry_into_blocked() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("simplify-cap".to_string());
+            // Pretend three simplifier attempts already ran for round 4.
+            state
+                .simplification_attempts
+                .insert(4, SIMPLIFICATION_ATTEMPT_CAP);
+            state.current_phase = Phase::ReviewRound(4);
+
+            let outcome = enter_simplification(&mut state, 4).unwrap();
+
+            assert_eq!(outcome, SimplificationEntry::CapExceeded);
+            // The cap path must not increment past the limit.
+            assert_eq!(
+                state.simplification_attempts.get(&4).copied(),
+                Some(SIMPLIFICATION_ATTEMPT_CAP)
+            );
+            // Block origin must be Simplification (force-ship is *not* unlocked).
+            assert_eq!(state.current_phase, Phase::BlockedNeedsUser);
+            assert_eq!(state.block_origin, Some(BlockOrigin::Simplification));
+        });
+    }
+
+    #[test]
+    fn enter_simplification_rejects_illegal_source_phase() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("simplify-illegal-source".to_string());
+            state.current_phase = Phase::PlanningRunning;
+
+            let err = enter_simplification(&mut state, 1).expect_err("must reject");
+            assert!(format!("{err:#}").contains("Cannot transition"));
+            // No half-applied state.
+            assert!(!state.simplification_attempts.contains_key(&1));
+            assert_eq!(state.current_phase, Phase::PlanningRunning);
         });
     }
 

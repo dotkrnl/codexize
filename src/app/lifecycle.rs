@@ -3,6 +3,7 @@ use super::*;
 use crate::{
     artifacts::{ArtifactKind, Spec},
     cache,
+    logic::rules::retry_phase_for_stage,
     selection::{self, ranking::build_version_index},
     state::{
         self as session_state, MessageKind, Node, NodeKind, NodeStatus, Phase, PipelineItemStatus,
@@ -65,32 +66,11 @@ fn retry_stage_for_label(label: &str) -> Option<&'static str> {
     }
 }
 
-fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
-    match stage {
-        "brainstorm" => Some(Phase::BrainstormRunning),
-        "spec-review" => Some(Phase::SpecReviewRunning),
-        "planning" => Some(Phase::PlanningRunning),
-        "plan-review" => Some(Phase::PlanReviewRunning),
-        "sharding" => Some(Phase::ShardingRunning),
-        _ => None,
-    }
-}
-
 fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
-    run.task_id
-        .map(RetryTarget::Task)
-        .or_else(|| stage_str(&run.stage).map(RetryTarget::Stage))
-}
-
-fn stage_str(stage: &str) -> Option<&'static str> {
-    match stage {
-        "brainstorm" => Some("brainstorm"),
-        "spec-review" => Some("spec-review"),
-        "planning" => Some("planning"),
-        "plan-review" => Some("plan-review"),
-        "sharding" => Some("sharding"),
-        _ => None,
-    }
+    crate::logic::rules::retry_target_for_run(run).map(|target| match target {
+        crate::logic::rules::RetryTarget::Task(task_id) => RetryTarget::Task(task_id),
+        crate::logic::rules::RetryTarget::Stage(stage) => RetryTarget::Stage(stage),
+    })
 }
 
 impl App {

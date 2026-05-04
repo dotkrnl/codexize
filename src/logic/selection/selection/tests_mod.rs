@@ -236,7 +236,7 @@ fn select_excluding_returns_none_when_all_excluded() {
 #[test]
 fn weighted_sample_returns_none_for_empty() {
     let candidates: Vec<(&CachedModel, f64)> = vec![];
-    assert!(weighted_sample(&candidates).is_none());
+    assert!(weighted_sample(&candidates, 1).is_none());
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn weighted_sample_returns_first_when_all_zero_weight() {
     let m2 = sample_model(VendorKind::Codex, "second", 80);
     let candidates = vec![(&m1, 0.0), (&m2, 0.0)];
 
-    let chosen = weighted_sample(&candidates).expect("should pick first");
+    let chosen = weighted_sample(&candidates, 1).expect("should pick first");
     assert_eq!(chosen.name, "first");
 }
 
@@ -258,7 +258,7 @@ fn weighted_sample_uses_weights_for_random() {
     let mut high_count = 0;
     for seed in 1..100_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
-        let chosen = weighted_sample(&candidates).expect("should pick");
+        let chosen = weighted_sample(&candidates, seed).expect("should pick");
         if chosen.name == "high-weight" {
             high_count += 1;
         }

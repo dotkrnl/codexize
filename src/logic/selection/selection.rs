@@ -5,7 +5,6 @@ use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
 use std::cmp::Ordering;
 use std::ops::Deref;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -57,7 +56,11 @@ impl Deref for SelectionOutcome<'_> {
 /// drops `quota_percent == Some(0)` and rows missing the ipbr phase score
 /// for `phase`; if every candidate is dropped this returns `None`, which
 /// callers surface as the existing no-eligible-model condition.
-fn pool_pick<'a>(candidates: &[&'a CachedModel], phase: SelectionPhase) -> Option<&'a CachedModel> {
+fn pool_pick<'a>(
+    candidates: &[&'a CachedModel],
+    phase: SelectionPhase,
+    sample_seed: u64,
+) -> Option<&'a CachedModel> {
     if candidates.is_empty() {
         return None;
     }
@@ -81,25 +84,42 @@ fn pool_pick<'a>(candidates: &[&'a CachedModel], phase: SelectionPhase) -> Optio
             .then_with(|| left_model.name.cmp(&right_model.name))
     });
 
-    weighted_sample(&weighted)
+    weighted_sample(&weighted, sample_seed)
 }
 
 /// Select a model for the given phase using the candidate-pool scorer.
 ///
 /// `vendor_filter`: hard inclusion filter applied before the pool scorer —
 /// vendor preferences are not multiplied into the post-softmax weights.
+#[cfg(test)]
 pub fn pick_for_phase<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     vendor_filter: Option<VendorKind>,
+    version_index: &VersionIndex,
+) -> Option<&'a CachedModel> {
+    pick_for_phase_with_seed(
+        models,
+        phase,
+        vendor_filter,
+        version_index,
+        test_sample_seed(),
+    )
+}
+
+pub fn pick_for_phase_with_seed<'a>(
+    models: &'a [CachedModel],
+    phase: SelectionPhase,
+    vendor_filter: Option<VendorKind>,
     _version_index: &VersionIndex,
+    sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let candidates: Vec<&'a CachedModel> = models
         .iter()
         .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
         .collect();
 
-    pool_pick(&candidates, phase)
+    pool_pick(&candidates, phase, sample_seed)
 }
 
 /// Effort-aware variant of [`pick_for_phase`].
@@ -112,6 +132,7 @@ pub fn pick_for_phase<'a>(
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates straight
 /// to [`pick_for_phase`].
+#[cfg(test)]
 pub fn pick_for_phase_with_effort<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
@@ -120,6 +141,26 @@ pub fn pick_for_phase_with_effort<'a>(
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
+    pick_for_phase_with_effort_and_seed(
+        models,
+        phase,
+        vendor_filter,
+        version_index,
+        effort,
+        cheap,
+        test_sample_seed(),
+    )
+}
+
+pub fn pick_for_phase_with_effort_and_seed<'a>(
+    models: &'a [CachedModel],
+    phase: SelectionPhase,
+    vendor_filter: Option<VendorKind>,
+    version_index: &VersionIndex,
+    effort: EffortLevel,
+    cheap: bool,
+    sample_seed: u64,
+) -> Option<SelectionOutcome<'a>> {
     if cheap {
         let eligible: Vec<&'a CachedModel> = models
             .iter()
@@ -127,25 +168,32 @@ pub fn pick_for_phase_with_effort<'a>(
             .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
             .collect();
 
-        if let Some(chosen) = pool_pick(&eligible, phase) {
+        if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
             return Some(SelectionOutcome::ok(chosen));
         }
 
-        return pick_for_phase(models, phase, vendor_filter, version_index).map(|model| {
-            SelectionOutcome::with_warning(
-                model,
-                SelectionWarning::CheapFallback {
-                    phase,
-                    reason: "no_eligible_with_quota",
-                },
-            )
-        });
+        return pick_for_phase_with_seed(models, phase, vendor_filter, version_index, sample_seed)
+            .map(|model| {
+                SelectionOutcome::with_warning(
+                    model,
+                    SelectionWarning::CheapFallback {
+                        phase,
+                        reason: "no_eligible_with_quota",
+                    },
+                )
+            });
     }
 
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return pick_for_phase(models, phase, vendor_filter, version_index)
-                .map(SelectionOutcome::ok);
+            return pick_for_phase_with_seed(
+                models,
+                phase,
+                vendor_filter,
+                version_index,
+                sample_seed,
+            )
+            .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
@@ -156,14 +204,15 @@ pub fn pick_for_phase_with_effort<'a>(
         .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
         .collect();
 
-    if let Some(chosen) = pool_pick(&eligible, phase) {
+    if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
         return Some(SelectionOutcome::ok(chosen));
     }
 
     // Degraded fallback: no tough-eligible model has any pool weight at all
     // (all exhausted or unranked). Fall back to the full slice so the run
     // still launches.
-    pick_for_phase(models, phase, vendor_filter, version_index).map(SelectionOutcome::ok)
+    pick_for_phase_with_seed(models, phase, vendor_filter, version_index, sample_seed)
+        .map(SelectionOutcome::ok)
 }
 
 /// Select a model for review with unused-vendor preference.
@@ -171,11 +220,28 @@ pub fn pick_for_phase_with_effort<'a>(
 /// Tier 1 prefers different vendor *and* different model. Tier 2 falls back
 /// to any unused model. Each tier is a hard filter; the candidate-pool
 /// scorer is applied within the tier.
+#[cfg(test)]
 pub fn select_for_review<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
+    version_index: &VersionIndex,
+) -> Option<&'a CachedModel> {
+    select_for_review_with_seed(
+        models,
+        used_vendors,
+        used_models,
+        version_index,
+        test_sample_seed(),
+    )
+}
+
+pub fn select_for_review_with_seed<'a>(
+    models: &'a [CachedModel],
+    used_vendors: &[VendorKind],
+    used_models: &[(VendorKind, String)],
     _version_index: &VersionIndex,
+    sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let tier_1: Vec<&'a CachedModel> = models
         .iter()
@@ -184,7 +250,7 @@ pub fn select_for_review<'a>(
                 && !used_models.contains(&(model.vendor, model.name.clone()))
         })
         .collect();
-    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review) {
+    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
         return Some(chosen);
     }
 
@@ -192,7 +258,7 @@ pub fn select_for_review<'a>(
         .iter()
         .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
         .collect();
-    pool_pick(&tier_2, SelectionPhase::Review)
+    pool_pick(&tier_2, SelectionPhase::Review, sample_seed)
 }
 
 /// Effort-aware variant of [`select_for_review`].
@@ -207,6 +273,7 @@ pub fn select_for_review<'a>(
 ///
 /// For [`EffortLevel::Low`] and [`EffortLevel::Normal`], delegates to
 /// [`select_for_review`].
+#[cfg(test)]
 pub fn select_for_review_with_effort<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
@@ -215,17 +282,45 @@ pub fn select_for_review_with_effort<'a>(
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
+    select_for_review_with_effort_and_seed(
+        models,
+        used_vendors,
+        used_models,
+        version_index,
+        effort,
+        cheap,
+        test_sample_seed(),
+    )
+}
+
+pub fn select_for_review_with_effort_and_seed<'a>(
+    models: &'a [CachedModel],
+    used_vendors: &[VendorKind],
+    used_models: &[(VendorKind, String)],
+    version_index: &VersionIndex,
+    effort: EffortLevel,
+    cheap: bool,
+    sample_seed: u64,
+) -> Option<SelectionOutcome<'a>> {
     if cheap {
         let eligible: Vec<&'a CachedModel> = models
             .iter()
             .filter(|model| is_cheap_eligible(model))
             .collect();
-        if let Some(chosen) = select_for_review_from_eligible(&eligible, used_vendors, used_models)
+        if let Some(chosen) =
+            select_for_review_from_eligible(&eligible, used_vendors, used_models, sample_seed)
         {
             return Some(SelectionOutcome::ok(chosen));
         }
 
-        return select_for_review(models, used_vendors, used_models, version_index).map(|model| {
+        return select_for_review_with_seed(
+            models,
+            used_vendors,
+            used_models,
+            version_index,
+            sample_seed,
+        )
+        .map(|model| {
             SelectionOutcome::with_warning(
                 model,
                 SelectionWarning::CheapFallback {
@@ -238,8 +333,14 @@ pub fn select_for_review_with_effort<'a>(
 
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return select_for_review(models, used_vendors, used_models, version_index)
-                .map(SelectionOutcome::ok);
+            return select_for_review_with_seed(
+                models,
+                used_vendors,
+                used_models,
+                version_index,
+                sample_seed,
+            )
+            .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
@@ -249,11 +350,17 @@ pub fn select_for_review_with_effort<'a>(
         .filter(|model| is_tough_eligible(model))
         .collect();
 
-    select_for_review_from_eligible(&eligible, used_vendors, used_models)
+    select_for_review_from_eligible(&eligible, used_vendors, used_models, sample_seed)
         .map(SelectionOutcome::ok)
         .or_else(|| {
-            select_for_review(models, used_vendors, used_models, version_index)
-                .map(SelectionOutcome::ok)
+            select_for_review_with_seed(
+                models,
+                used_vendors,
+                used_models,
+                version_index,
+                sample_seed,
+            )
+            .map(SelectionOutcome::ok)
         })
 }
 
@@ -261,6 +368,7 @@ fn select_for_review_from_eligible<'a>(
     eligible: &[&'a CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
+    sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     // Tier 1: eligible AND fresh-vendor AND fresh-model.
     let tier_1: Vec<&'a CachedModel> = eligible
@@ -271,7 +379,7 @@ fn select_for_review_from_eligible<'a>(
                 && !used_models.contains(&(model.vendor, model.name.clone()))
         })
         .collect();
-    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review) {
+    if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
         return Some(chosen);
     }
 
@@ -281,25 +389,44 @@ fn select_for_review_from_eligible<'a>(
         .copied()
         .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
         .collect();
-    if let Some(chosen) = pool_pick(&tier_2, SelectionPhase::Review) {
+    if let Some(chosen) = pool_pick(&tier_2, SelectionPhase::Review, sample_seed) {
         return Some(chosen);
     }
 
     // Tier 3: any eligible model, even if used by the coder.
     // This is "eligibility dominates diversity": prefer reusing Claude-opus
     // over a fresh sonnet/Kimi when no fresh eligible model is available.
-    pool_pick(eligible, SelectionPhase::Review)
+    pool_pick(eligible, SelectionPhase::Review, sample_seed)
 }
 
 /// Select a model excluding a list of models. The `last_failed_vendor`
 /// diversity boost from the legacy probability chain is intentionally
 /// dropped: spec §5.3 / §6 forbid post-softmax policy multipliers.
+#[cfg(test)]
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     excluded: &[(VendorKind, String)],
     _last_failed_vendor: Option<VendorKind>,
+    version_index: &VersionIndex,
+) -> Option<&'a CachedModel> {
+    select_excluding_with_seed(
+        models,
+        phase,
+        excluded,
+        None,
+        version_index,
+        test_sample_seed(),
+    )
+}
+
+pub fn select_excluding_with_seed<'a>(
+    models: &'a [CachedModel],
+    phase: SelectionPhase,
+    excluded: &[(VendorKind, String)],
+    _last_failed_vendor: Option<VendorKind>,
     _version_index: &VersionIndex,
+    sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     if models.is_empty() {
         return None;
@@ -310,12 +437,15 @@ pub fn select_excluding<'a>(
         .filter(|model| !excluded.contains(&(model.vendor, model.name.clone())))
         .collect();
 
-    pool_pick(&candidates, phase)
+    pool_pick(&candidates, phase, sample_seed)
 }
 
 /// Weighted random sampling from candidates.
 /// Returns None if candidates is empty or all weights are zero.
-fn weighted_sample<'a>(candidates: &[(&'a CachedModel, f64)]) -> Option<&'a CachedModel> {
+fn weighted_sample<'a>(
+    candidates: &[(&'a CachedModel, f64)],
+    sample_seed: u64,
+) -> Option<&'a CachedModel> {
     if candidates.is_empty() {
         return None;
     }
@@ -326,7 +456,7 @@ fn weighted_sample<'a>(candidates: &[(&'a CachedModel, f64)]) -> Option<&'a Cach
         return candidates.first().map(|(model, _)| *model);
     }
 
-    let seed = sample_seed() as f64;
+    let seed = sample_seed as f64;
     let r = (seed % 1_000_000.0) / 1_000_000.0 * total;
 
     let mut cumulative = 0.0;
@@ -340,18 +470,13 @@ fn weighted_sample<'a>(candidates: &[(&'a CachedModel, f64)]) -> Option<&'a Cach
     candidates.last().map(|(model, _)| *model)
 }
 
-fn sample_seed() -> u64 {
-    #[cfg(test)]
-    {
-        let seeded = TEST_SAMPLE_SEED.load(AtomicOrdering::Relaxed);
-        if seeded != 0 {
-            return seeded;
-        }
+#[cfg(test)]
+fn test_sample_seed() -> u64 {
+    let seeded = TEST_SAMPLE_SEED.load(AtomicOrdering::Relaxed);
+    if seeded != 0 {
+        return seeded;
     }
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as u64
+    1
 }
 
 #[cfg(test)]

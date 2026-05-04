@@ -36,6 +36,17 @@ pub enum ClientUpdate {
         boundary: AcpTextBoundary,
         identity: Option<String>,
     },
+    /// Lifecycle transition for a single `tool_call_id`. The dispatcher
+    /// emits at most one `Start` (the first time the id is observed in a
+    /// non-terminal status) and at most one `Finish` (the first time it
+    /// is observed in a terminal status). The runner timestamps each
+    /// transition when it receives the `AcpRuntimeEvent` that this
+    /// update produces, so consumers see arrival-ordered events even for
+    /// short tool calls that start and finish between poll cycles.
+    ToolCallActivity {
+        tool_call_id: String,
+        kind: ToolCallActivityKind,
+    },
     SessionInfoUpdate {
         title: Option<String>,
     },
@@ -48,11 +59,26 @@ pub enum ClientUpdate {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallActivityKind {
+    Start,
+    Finish,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpRuntimeEvent {
     Lifecycle(AcpLifecycleEvent),
     Text(AcpTextEvent),
     Completion(AcpCompletionEvent),
+    /// Runner-observable lifecycle transition for a single `tool_call_id`.
+    /// Emitted at most once per id per kind. Carries no timestamp itself;
+    /// the runner stamps `Instant::now()` as it consumes the event so the
+    /// idle-adjusted clock pauses at the moment the runner saw the
+    /// transition rather than at the App's next poll.
+    ToolCallActivity {
+        tool_call_id: String,
+        kind: ToolCallActivityKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +215,9 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
             boundary,
             identity,
         })),
+        ClientUpdate::ToolCallActivity { tool_call_id, kind } => {
+            Some(AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind })
+        }
         ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
             AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
         }),

@@ -14,7 +14,7 @@ pub use config::{
 };
 pub use events::{
     AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary,
-    AcpTextEvent, ClientUpdate, translate_update,
+    AcpTextEvent, ClientUpdate, ToolCallActivityKind, translate_update,
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};

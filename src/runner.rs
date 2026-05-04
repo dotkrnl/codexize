@@ -3,7 +3,7 @@ use crate::{
     acp::{
         AcpCompletionEvent, AcpConfig, AcpConnector, AcpLaunchPolicy, AcpLaunchRequest,
         AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, PromptPayload, SubprocessConnector,
-        translate_update,
+        ToolCallActivityKind, translate_update,
     },
     adapters::AgentRun,
     selection::VendorKind,
@@ -133,10 +133,27 @@ enum AcpInput {
     Interrupt(String),
 }
 
+/// Runner→App tool-call lifecycle transition. The runner stamps
+/// `observed_at` at the moment it receives the ACP `session/update` for
+/// the transition; the App applies transitions in arrival (timestamp)
+/// order so the watchdog idle-clock correctly accounts for tool calls
+/// that begin and end between consecutive App polls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallTransition {
+    pub tool_call_id: String,
+    pub kind: ToolCallActivityKind,
+    pub observed_at: Instant,
+}
+
 #[derive(Debug)]
 struct ManagedAcpRun {
     cancel_tx: mpsc::Sender<AcpCancelReason>,
     input_tx: mpsc::Sender<AcpInput>,
+    /// Receives lifecycle transitions emitted by the runner thread. The
+    /// App drains this on its main poll cadence and applies them to the
+    /// per-run watchdog state. Held inside the mutex-protected
+    /// `active_acp_runs()` map, so consumers must lock before draining.
+    tool_call_transition_rx: mpsc::Receiver<ToolCallTransition>,
     finished: std::sync::Arc<AtomicBool>,
     waiting_for_input: std::sync::Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
@@ -603,6 +620,7 @@ fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
     input_rx: mpsc::Receiver<AcpInput>,
+    transition_tx: mpsc::Sender<ToolCallTransition>,
     waiting_for_input: std::sync::Arc<AtomicBool>,
 ) -> Result<ManagedAcpOutcome> {
     let head_before = git_rev_parse_head().unwrap_or_default();
@@ -755,6 +773,17 @@ fn run_managed_acp_launch(
                 }
                 thread::sleep(ACP_POLL_INTERVAL)
             }
+            Some(AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind }) => {
+                // Stamp `observed_at` at the moment the runner saw the
+                // transition. The send is best-effort: if the receiver has
+                // been dropped (e.g. App teardown), a missing pause/resume
+                // signal is preferable to crashing the runner.
+                let _ = transition_tx.send(ToolCallTransition {
+                    tool_call_id,
+                    kind,
+                    observed_at: Instant::now(),
+                });
+            }
             Some(AcpRuntimeEvent::Lifecycle(_)) | None => thread::sleep(ACP_POLL_INTERVAL),
         }
     };
@@ -768,12 +797,14 @@ fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel_rx: mpsc::Receiver<AcpCancelReason>,
     input_rx: mpsc::Receiver<AcpInput>,
+    transition_tx: mpsc::Sender<ToolCallTransition>,
     waiting_for_input: std::sync::Arc<AtomicBool>,
 ) {
     match run_managed_acp_launch(
         launch.clone(),
         cancel_rx,
         input_rx,
+        transition_tx,
         std::sync::Arc::clone(&waiting_for_input),
     ) {
         Ok(_) => {
@@ -845,13 +876,20 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
 
     let (cancel_tx, cancel_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
+    let (transition_tx, transition_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
     let waiting_for_input = std::sync::Arc::new(AtomicBool::new(false));
     let finished_flag = std::sync::Arc::clone(&finished);
     let waiting_for_input_flag = std::sync::Arc::clone(&waiting_for_input);
     let launch_window = window_name.to_string();
     let handle = thread::spawn(move || {
-        finalize_managed_acp_launch(launch, cancel_rx, input_rx, waiting_for_input_flag);
+        finalize_managed_acp_launch(
+            launch,
+            cancel_rx,
+            input_rx,
+            transition_tx,
+            waiting_for_input_flag,
+        );
         finished_flag.store(true, Ordering::SeqCst);
     });
     guard.insert(
@@ -859,6 +897,7 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
         ManagedAcpRun {
             cancel_tx,
             input_tx,
+            tool_call_transition_rx: transition_rx,
             finished,
             waiting_for_input,
             join: Some(handle),
@@ -904,6 +943,7 @@ fn request_run_label_for_test(window_name: &str, waiting: bool) {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (cancel_tx, cancel_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
+    let (_transition_tx, transition_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
     let waiting_for_input = std::sync::Arc::new(AtomicBool::new(waiting));
     test_input_receivers()
@@ -919,6 +959,7 @@ fn request_run_label_for_test(window_name: &str, waiting: bool) {
         ManagedAcpRun {
             cancel_tx,
             input_tx,
+            tool_call_transition_rx: transition_rx,
             finished,
             waiting_for_input,
             join: None,
@@ -993,6 +1034,24 @@ pub fn interrupt_run_label_input(window_name: &str, text: String) -> bool {
         };
         run.input_tx.send(input).is_ok()
     })
+}
+
+/// Drain all queued tool-call lifecycle transitions across every managed
+/// ACP run currently active. Returned in `(window_name, transition)` pairs
+/// in arrival order per run; cross-run interleaving is preserved by the
+/// timestamp on each transition. Callers should apply transitions in
+/// `observed_at` order.
+pub fn drain_tool_call_transitions() -> Vec<(String, ToolCallTransition)> {
+    let guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut out = Vec::new();
+    for (window_name, run) in guard.iter() {
+        while let Ok(transition) = run.tool_call_transition_rx.try_recv() {
+            out.push((window_name.clone(), transition));
+        }
+    }
+    out
 }
 
 pub fn shutdown_all_runs() {

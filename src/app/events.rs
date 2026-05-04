@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
 use crate::state::{Message, MessageKind, MessageSender, NodeStatus, Phase, RunStatus};
 
 use super::palette::{self, PaletteCommand};
@@ -490,6 +491,59 @@ impl App {
                 self.scroll_viewport(step, true);
                 false
             }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn handle_app_command(&mut self, command: AppCommand) -> bool {
+        match command {
+            AppCommand::KeyPress(key) => self.handle_key(key_event_from_ui_key(key)),
+            AppCommand::PasteInput { text } => {
+                self.handle_paste(&text);
+                false
+            }
+            AppCommand::Quit => {
+                if self.has_running_agent() {
+                    self.open_quit_running_agent_modal();
+                    false
+                } else {
+                    true
+                }
+            }
+            AppCommand::OpenPalette => {
+                self.open_palette_browser();
+                false
+            }
+            AppCommand::StopAgent => {
+                self.stop_running_agent();
+                false
+            }
+            AppCommand::MoveFocus { delta } => {
+                self.scroll_or_move_focus(delta);
+                false
+            }
+            AppCommand::ToggleExpand => {
+                self.toggle_expand_focused();
+                false
+            }
+            AppCommand::OpenSplit => {
+                if let Some(target) = self.resolve_split_target_for_selected_row() {
+                    self.open_split_target(target);
+                }
+                false
+            }
+            AppCommand::CloseSplit => {
+                self.close_split();
+                false
+            }
+            AppCommand::SubmitInput { text } => {
+                self.input_buffer = text;
+                self.input_cursor = self.input_buffer.chars().count();
+                self.handle_input_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            }
+            // The remaining command variants are exercised by the stubbed
+            // runtime seam; legacy production handlers will claim them as the
+            // surrounding modal/palette split moves out of `App`.
             _ => false,
         }
     }
@@ -1281,4 +1335,31 @@ impl App {
             _ => false,
         }
     }
+}
+
+fn key_event_from_ui_key(key: UiKey) -> KeyEvent {
+    let code = match key.code {
+        UiKeyCode::Esc => KeyCode::Esc,
+        UiKeyCode::Enter => KeyCode::Enter,
+        UiKeyCode::Backspace => KeyCode::Backspace,
+        UiKeyCode::Delete => KeyCode::Delete,
+        UiKeyCode::Left => KeyCode::Left,
+        UiKeyCode::Right => KeyCode::Right,
+        UiKeyCode::Home => KeyCode::Home,
+        UiKeyCode::End => KeyCode::End,
+        UiKeyCode::Up => KeyCode::Up,
+        UiKeyCode::Down => KeyCode::Down,
+        UiKeyCode::PageUp => KeyCode::PageUp,
+        UiKeyCode::PageDown => KeyCode::PageDown,
+        UiKeyCode::Char(c) => KeyCode::Char(c),
+        UiKeyCode::Unknown => KeyCode::Null,
+    };
+    let mut modifiers = KeyModifiers::NONE;
+    if key.ctrl {
+        modifiers |= KeyModifiers::CONTROL;
+    }
+    if key.alt {
+        modifiers |= KeyModifiers::ALT;
+    }
+    KeyEvent::new(code, modifiers)
 }

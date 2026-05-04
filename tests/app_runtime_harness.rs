@@ -12,8 +12,8 @@
 use std::time::Duration;
 
 use codexize::app_runtime::{
-    AgentRunSummary, AppCommand, AppView, ModalKind, StageId, StatusMessage, StatusSeverity,
-    channel_pair,
+    AgentRunSummary, AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId,
+    StatusMessage, StatusSeverity, channel_pair, run_harness_until_exit,
 };
 use codexize::logic::pipeline::Phase;
 
@@ -118,4 +118,35 @@ fn agent_run_summary_is_constructible_from_public_surface() {
     assert_eq!(summary.stage.as_ref(), "planning");
     assert_eq!(summary.window_name.as_ref(), "codexize-run-7-planning");
     assert_eq!(summary.status, RunStatus::Running);
+}
+
+#[test]
+fn runtime_harness_drains_commands_and_publishes_views_until_exit() {
+    let (ui, runtime) = channel_pair();
+    ui.commands_tx
+        .send(AppCommand::OpenPalette)
+        .expect("send palette command");
+    ui.commands_tx
+        .send(AppCommand::Quit)
+        .expect("send quit command");
+
+    let mut harness = RuntimeHarness::new(AppView::empty("runtime-loop"));
+    let control = run_harness_until_exit(&mut harness, runtime).expect("run harness");
+
+    assert_eq!(control, RuntimeControl::Exit);
+    assert_eq!(
+        harness.commands(),
+        &[AppCommand::OpenPalette, AppCommand::Quit]
+    );
+
+    let first = ui
+        .views_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("first view");
+    let second = ui
+        .views_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("second view");
+    assert_eq!(first.session_id.as_ref(), "runtime-loop");
+    assert_eq!(second.session_id.as_ref(), "runtime-loop");
 }

@@ -47,7 +47,7 @@ const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
 
 impl App {
-    pub(super) fn draw(&mut self, frame: &mut Frame<'_>) {
+    pub(crate) fn draw(&mut self, frame: &mut Frame<'_>) {
         let area = frame.area();
         let term_h = area.height;
         let width = area.width;

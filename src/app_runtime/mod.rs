@@ -1,9 +1,11 @@
 //! Thin application runtime seam.
 //!
-//! The event pump still lives behind [`crate::app::App`] today; this module
-//! gives later moves a stable canonical path without changing public CLI
-//! behavior. It also reifies the runtime/UI seam as two value-typed
-//! enums plus a pair of channels:
+//! The production terminal event pump now enters through
+//! [`terminal::run_terminal_app`]. The loop still delegates legacy rendering
+//! and focus-local command handling to [`crate::app::App`], but terminal
+//! polling and orchestration live on this canonical runtime path. The module
+//! also reifies the runtime/UI seam as two value-typed enums plus a pair of
+//! channels:
 //!
 //! ```text
 //! ui  --AppCommand-->  app_runtime  --DataRequest-->  data
@@ -20,10 +22,15 @@
 
 pub mod command;
 pub mod harness;
+pub mod terminal;
 pub mod view;
 
-pub use command::AppCommand;
-pub use harness::{RuntimeChannels, UiChannels, channel_pair};
+pub use command::{AppCommand, UiKey, UiKeyCode};
+pub use harness::{
+    RuntimeChannels, RuntimeControl, RuntimeHarness, UiChannels, channel_pair,
+    run_harness_until_exit,
+};
+pub use terminal::run_terminal_app;
 pub use view::{AgentRunSummary, AppView, ModalKind, StageId, StatusMessage, StatusSeverity};
 
 pub use crate::app::App;

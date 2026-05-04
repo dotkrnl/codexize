@@ -13,11 +13,48 @@
 
 use super::view::StageId;
 
+/// UI-neutral key action emitted by terminal input collection.
+///
+/// This intentionally mirrors only operator-visible key intent, not the
+/// concrete crossterm event type. The legacy `App` still resolves these
+/// against its current focus while key dispatch migrates out of `app`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiKey {
+    pub code: UiKeyCode,
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
+/// Terminal-independent key identity used inside [`AppCommand::KeyPress`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiKeyCode {
+    Esc,
+    Enter,
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Home,
+    End,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Char(char),
+    Unknown,
+}
+
 /// Domain-level operator intent. Variants intentionally avoid encoding
 /// terminal-specific input (keysyms, scroll deltas in pixels, …) so the
 /// same enum can drive a non-terminal UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
+    /// UI-neutral key action. Kept as an incremental bridge so production
+    /// input collection leaves `app` before every focus-local command is
+    /// split into a narrower domain variant.
+    KeyPress(UiKey),
+    /// Paste text into whichever input surface currently owns editing.
+    PasteInput { text: String },
     /// Quit the application. Subject to the runtime's pending-agent and
     /// confirmation gating.
     Quit,

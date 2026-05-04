@@ -12,6 +12,7 @@
 //! the refactor will switch the production runtime to publish through
 //! [`UiChannels::views_tx`] instead of mutating the TUI struct in place.
 
+use anyhow::Result;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{AppCommand, AppView};
@@ -46,6 +47,56 @@ pub fn channel_pair() -> (UiChannels, RuntimeChannels) {
             views_tx,
         },
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeControl {
+    Continue,
+    Exit,
+}
+
+pub struct RuntimeHarness {
+    view: AppView,
+    commands: Vec<AppCommand>,
+}
+
+impl RuntimeHarness {
+    pub fn new(view: AppView) -> Self {
+        Self {
+            view,
+            commands: Vec::new(),
+        }
+    }
+
+    pub fn commands(&self) -> &[AppCommand] {
+        &self.commands
+    }
+
+    fn apply_command(&mut self, command: AppCommand) -> RuntimeControl {
+        let control = if matches!(command, AppCommand::Quit) {
+            RuntimeControl::Exit
+        } else {
+            RuntimeControl::Continue
+        };
+        self.commands.push(command);
+        control
+    }
+}
+
+/// Drive the app-runtime command/view seam without terminal UI.
+pub fn run_harness_until_exit(
+    harness: &mut RuntimeHarness,
+    runtime: RuntimeChannels,
+) -> Result<RuntimeControl> {
+    let mut control = RuntimeControl::Continue;
+    while let Ok(command) = runtime.commands_rx.try_recv() {
+        control = harness.apply_command(command);
+        runtime.views_tx.send(harness.view.clone())?;
+        if control == RuntimeControl::Exit {
+            break;
+        }
+    }
+    Ok(control)
 }
 
 #[cfg(test)]
@@ -97,10 +148,7 @@ mod tests {
         ui.commands_tx
             .send(AppCommand::Quit)
             .expect("ui sends quit");
-        let received = runtime
-            .commands_rx
-            .recv()
-            .expect("runtime drains command");
+        let received = runtime.commands_rx.recv().expect("runtime drains command");
         assert_eq!(received, AppCommand::Quit);
         stub_runtime_step(&mut view, received);
         runtime
@@ -129,10 +177,7 @@ mod tests {
                 .expect("ui sends command");
             let received = runtime.commands_rx.recv().expect("runtime drains");
             stub_runtime_step(&mut view, received);
-            runtime
-                .views_tx
-                .send(view.clone())
-                .expect("publish view");
+            runtime.views_tx.send(view.clone()).expect("publish view");
             let _ = ui.views_rx.recv().expect("ui receives view");
         }
 

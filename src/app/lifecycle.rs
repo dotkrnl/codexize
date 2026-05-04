@@ -13,7 +13,6 @@ use crate::{
     tui::AppTerminal,
 };
 use anyhow::Result;
-use crossterm::event::{self, Event};
 
 use super::{
     models::spawn_refresh,
@@ -74,6 +73,53 @@ fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
 }
 
 impl App {
+    pub(crate) fn current_app_view(&self) -> crate::app_runtime::AppView {
+        use crate::app_runtime::{
+            AgentRunSummary, AppView, ModalKind as RuntimeModalKind, StageId as RuntimeStageId,
+        };
+        use std::sync::Arc;
+
+        fn stage_id(stage: StageId) -> RuntimeStageId {
+            match stage {
+                StageId::Brainstorm => RuntimeStageId::Brainstorm,
+                StageId::SpecReview => RuntimeStageId::SpecReview,
+                StageId::Planning => RuntimeStageId::Planning,
+                StageId::PlanReview => RuntimeStageId::PlanReview,
+                StageId::Sharding => RuntimeStageId::Sharding,
+                StageId::Implementation => RuntimeStageId::Implementation,
+                StageId::Review => RuntimeStageId::Review,
+            }
+        }
+
+        fn modal_kind(modal: ModalKind) -> RuntimeModalKind {
+            match modal {
+                ModalKind::SkipToImpl => RuntimeModalKind::SkipToImpl,
+                ModalKind::GitGuard => RuntimeModalKind::GitGuard,
+                ModalKind::QuitRunningAgent => RuntimeModalKind::QuitRunningAgent,
+                ModalKind::InteractiveExitPrompt => RuntimeModalKind::InteractiveExitPrompt,
+                ModalKind::SpecReviewPaused => RuntimeModalKind::SpecReviewPaused,
+                ModalKind::PlanReviewPaused => RuntimeModalKind::PlanReviewPaused,
+                ModalKind::StageError(stage) => RuntimeModalKind::StageError(stage_id(stage)),
+            }
+        }
+
+        AppView {
+            session_id: Arc::from(self.state.session_id.as_str()),
+            phase: self.state.current_phase,
+            modal: self.active_modal().map(modal_kind),
+            status: None,
+            agent_runs: Arc::from(
+                self.state
+                    .agent_runs
+                    .iter()
+                    .map(AgentRunSummary::from_record)
+                    .collect::<Vec<_>>(),
+            ),
+            follow_tail: self.split_follow_tail,
+            agent_running: self.has_running_agent(),
+        }
+    }
+
     pub(super) fn active_modal(&self) -> Option<ModalKind> {
         if self.pending_quit_confirmation_run_id.is_some() {
             return Some(ModalKind::QuitRunningAgent);
@@ -345,48 +391,38 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
-        loop {
-            if let Some(path) = self.pending_view_path.take() {
-                let banner_inserted = prepend_review_banner(&path);
-                let _ = crate::tui::run_foreground(terminal, || {
-                    let _ = std::process::Command::new(
-                        std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
-                    )
-                    .arg(&path)
-                    .status();
-                    Ok(())
-                });
-                if banner_inserted {
-                    let _ = strip_review_banner(&path);
-                }
-            }
-            self.refresh_models_if_due();
-            self.poll_agent_run();
-            if self.pending_app_exit {
-                crate::runner::shutdown_all_runs();
-                return Ok(());
-            }
-            self.maybe_yolo_auto_resolve();
-            self.maybe_auto_launch();
-            self.update_agent_progress();
-            self.process_live_summary_changes();
-            self.apply_pending_tool_call_transitions();
-            self.tick_watchdog();
-            self.synchronize_split_target();
-            terminal.draw(|frame| self.draw(frame))?;
-            self.on_frame_drawn();
+        crate::app_runtime::run_terminal_app(self, terminal)
+    }
 
-            if event::poll(self.event_poll_duration())? {
-                match event::read()? {
-                    Event::Key(key) if self.handle_key(key) => {
-                        crate::runner::shutdown_all_runs();
-                        return Ok(());
-                    }
-                    Event::Paste(text) => self.handle_paste(&text),
-                    _ => {}
-                }
+    pub(crate) fn runtime_tick_before_draw(&mut self, terminal: &mut AppTerminal) -> Result<bool> {
+        if let Some(path) = self.pending_view_path.take() {
+            let banner_inserted = prepend_review_banner(&path);
+            let _ = crate::tui::run_foreground(terminal, || {
+                let _ = std::process::Command::new(
+                    std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
+                )
+                .arg(&path)
+                .status();
+                Ok(())
+            });
+            if banner_inserted {
+                let _ = strip_review_banner(&path);
             }
         }
+        self.refresh_models_if_due();
+        self.poll_agent_run();
+        if self.pending_app_exit {
+            crate::runner::shutdown_all_runs();
+            return Ok(true);
+        }
+        self.maybe_yolo_auto_resolve();
+        self.maybe_auto_launch();
+        self.update_agent_progress();
+        self.process_live_summary_changes();
+        self.apply_pending_tool_call_transitions();
+        self.tick_watchdog();
+        self.synchronize_split_target();
+        Ok(false)
     }
 
     /// Called once per successful frame draw to advance spinner-driven UI state.

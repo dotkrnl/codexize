@@ -1,11 +1,17 @@
 use anyhow::Result;
 use crossterm::{
-    event::{DisableBracketedPaste, EnableBracketedPaste},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
+use std::time::Duration;
+
+use crate::app_runtime::{AppCommand, AppView, UiKey, UiKeyCode};
 
 pub type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -74,6 +80,56 @@ where
     terminal.hide_cursor()?;
     terminal.clear()?;
     outcome
+}
+
+pub fn render_app<F>(terminal: &mut AppTerminal, _view: &AppView, draw: F) -> Result<()>
+where
+    F: FnOnce(&mut ratatui::Frame<'_>),
+{
+    terminal.draw(draw)?;
+    Ok(())
+}
+
+pub fn poll_command(timeout: Duration) -> Result<Option<AppCommand>> {
+    if !event::poll(timeout)? {
+        return Ok(None);
+    }
+    Ok(command_from_event(event::read()?))
+}
+
+pub fn command_from_event(event: Event) -> Option<AppCommand> {
+    match event {
+        Event::Key(key) => command_from_key_event(key),
+        Event::Paste(text) => Some(AppCommand::PasteInput { text }),
+        _ => None,
+    }
+}
+
+fn command_from_key_event(key: KeyEvent) -> Option<AppCommand> {
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    let code = match key.code {
+        KeyCode::Esc => UiKeyCode::Esc,
+        KeyCode::Enter => UiKeyCode::Enter,
+        KeyCode::Backspace => UiKeyCode::Backspace,
+        KeyCode::Delete => UiKeyCode::Delete,
+        KeyCode::Left => UiKeyCode::Left,
+        KeyCode::Right => UiKeyCode::Right,
+        KeyCode::Home => UiKeyCode::Home,
+        KeyCode::End => UiKeyCode::End,
+        KeyCode::Up => UiKeyCode::Up,
+        KeyCode::Down => UiKeyCode::Down,
+        KeyCode::PageUp => UiKeyCode::PageUp,
+        KeyCode::PageDown => UiKeyCode::PageDown,
+        KeyCode::Char(c) => UiKeyCode::Char(c),
+        _ => UiKeyCode::Unknown,
+    };
+    Some(AppCommand::KeyPress(UiKey {
+        code,
+        ctrl: key.modifiers.contains(KeyModifiers::CONTROL),
+        alt: key.modifiers.contains(KeyModifiers::ALT),
+    }))
 }
 
 /// Hard-wrap the input text into lines of at most `width` chars, preferring

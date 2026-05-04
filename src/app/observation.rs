@@ -1,9 +1,10 @@
 // observation.rs
 use super::*;
+use crate::data::observation::{LiveSummaryWatcher, build_live_summary_watcher};
 use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
-use notify::Watcher;
+#[cfg(test)]
 use std::sync::mpsc;
 impl App {
     pub(super) fn setup_watcher(&mut self) -> Result<()> {
@@ -12,20 +13,6 @@ impl App {
             self.live_summary_change_rx = None;
             return Ok(());
         };
-        let watch_path = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        if let Err(e) = std::fs::create_dir_all(&watch_path) {
-            self.surface_boundary_error(
-                format!("watcher setup failed: {e}, falling back to poll"),
-                false,
-            );
-            self.live_summary_watcher = None;
-            self.live_summary_change_rx = None;
-            return Ok(());
-        }
 
         #[cfg(test)]
         if !Self::test_uses_real_live_summary_watcher() {
@@ -35,43 +22,22 @@ impl App {
             return Ok(());
         }
 
-        let (tx, rx) = mpsc::channel();
-        let watched_file = path.clone();
-        let watcher_result = notify::RecommendedWatcher::new(
-            move |res: Result<notify::Event, notify::Error>| {
-                if let Ok(event) = res
-                    && event.paths.iter().any(|changed| changed == &watched_file)
-                {
-                    let _ = tx.send(());
-                }
-            },
-            notify::Config::default(),
-        );
-        match watcher_result {
-            Ok(mut watcher) => {
-                if let Err(e) = watcher.watch(&watch_path, notify::RecursiveMode::NonRecursive) {
-                    self.surface_boundary_error(
-                        format!("watcher setup failed: {e}, falling back to poll"),
-                        false,
-                    );
-                    self.live_summary_watcher = None;
-                    self.live_summary_change_rx = None;
-                    return Ok(());
-                }
+        match build_live_summary_watcher(&path) {
+            LiveSummaryWatcher::Active { watcher, rx } => {
                 self.live_summary_watcher = Some(watcher);
                 self.live_summary_change_rx = Some(rx);
-                Ok(())
             }
-            Err(e) => {
-                self.surface_boundary_error(
-                    format!("watcher init failed: {e}, falling back to poll"),
-                    false,
-                );
+            LiveSummaryWatcher::PollOnly { reason } => {
+                self.surface_boundary_error(reason, false);
                 self.live_summary_watcher = None;
                 self.live_summary_change_rx = None;
-                Ok(())
+            }
+            LiveSummaryWatcher::Disabled => {
+                self.live_summary_watcher = None;
+                self.live_summary_change_rx = None;
             }
         }
+        Ok(())
     }
 
     #[cfg(test)]

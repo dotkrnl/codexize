@@ -59,7 +59,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         spinner_tick: 0,
         live_summary_spinner_visible: false,
         live_summary_watcher: None,
-        live_summary_change_rx: None,
+        live_summary_change_events: None,
         live_summary_path: None,
         live_summary_cached_text: String::new(),
         live_summary_cached_mtime: None,

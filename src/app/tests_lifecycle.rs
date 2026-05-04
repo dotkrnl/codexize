@@ -334,7 +334,8 @@ fn live_summary_process_polls_even_when_watcher_has_no_event() {
         app.live_summary_cached_text = "old summary".to_string();
         app.live_summary_cached_mtime = Some(std::time::SystemTime::now());
         let (_tx, rx) = std::sync::mpsc::channel();
-        app.live_summary_change_rx = Some(rx);
+        app.live_summary_change_events =
+            Some(crate::data::events::LiveSummaryEvents::new(rx));
 
         app.process_live_summary_changes();
 

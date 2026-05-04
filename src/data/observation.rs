@@ -11,19 +11,24 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
+use crate::data::events::LiveSummaryEvents;
+
 /// How long without an mtime advance before a live-summary file is treated
 /// as stale and cleared from cache. Mirrors the operator-stated heartbeat
 /// expectation (spec §3.7).
 pub const LIVE_SUMMARY_STALE_AFTER: Duration = Duration::from_secs(60);
 
 /// Outcome of building a live-summary watcher: either a working
-/// (`watcher`, `rx`) pair, a degraded `PollOnly` fallback because the
-/// underlying notify backend rejected the path, or `Disabled` when no
+/// `Active { watcher, events }` pair, a degraded `PollOnly` fallback because
+/// the underlying notify backend rejected the path, or `Disabled` when no
 /// watcher is needed.
+///
+/// The `events` field is the typed drain handle the runtime consumes — the
+/// raw notify `mpsc::Receiver<()>` is no longer exposed.
 pub enum LiveSummaryWatcher {
     Active {
         watcher: RecommendedWatcher,
-        rx: mpsc::Receiver<()>,
+        events: LiveSummaryEvents,
     },
     PollOnly {
         reason: String,
@@ -95,7 +100,10 @@ pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatche
     );
     match watcher_result {
         Ok(mut watcher) => match watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
-            Ok(()) => LiveSummaryWatcher::Active { watcher, rx },
+            Ok(()) => LiveSummaryWatcher::Active {
+                watcher,
+                events: LiveSummaryEvents::new(rx),
+            },
             Err(e) => LiveSummaryWatcher::PollOnly {
                 reason: format!("watcher setup failed: {e}, falling back to poll"),
             },

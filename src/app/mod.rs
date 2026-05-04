@@ -61,7 +61,6 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::Rc,
-    sync::mpsc,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -287,7 +286,7 @@ pub struct App {
     spinner_tick: usize,
     live_summary_spinner_visible: bool,
     live_summary_watcher: Option<notify::RecommendedWatcher>,
-    live_summary_change_rx: Option<mpsc::Receiver<()>>,
+    live_summary_change_events: Option<crate::data::events::LiveSummaryEvents>,
     live_summary_path: Option<std::path::PathBuf>,
     live_summary_cached_text: String,
     live_summary_cached_mtime: Option<std::time::SystemTime>,

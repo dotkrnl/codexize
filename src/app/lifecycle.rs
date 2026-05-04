@@ -201,7 +201,7 @@ impl App {
             live_summary_spinner_visible: false,
             live_summary_path: None,
             live_summary_watcher: None,
-            live_summary_change_rx: None,
+            live_summary_change_events: None,
             live_summary_cached_text: String::new(),
             live_summary_cached_mtime: None,
             pending_drain_deadline: None,

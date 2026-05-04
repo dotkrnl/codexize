@@ -474,7 +474,7 @@ fn watcher_setup_uses_fast_synthetic_watcher_in_tests() {
         app.setup_watcher().expect("watcher setup should succeed");
 
         assert!(app.live_summary_watcher.is_none());
-        assert!(app.live_summary_change_rx.is_some());
+        assert!(app.live_summary_change_events.is_some());
         assert!(app.status_line.borrow().render().is_none());
         assert!(
             !session_state::session_dir(session_id)
@@ -499,7 +499,7 @@ fn watcher_setup_failure_surfaces_status_line_and_keeps_poll_fallback() {
         app.setup_watcher().expect("watcher setup should fall back");
 
         assert!(app.live_summary_watcher.is_none());
-        assert!(app.live_summary_change_rx.is_none());
+        assert!(app.live_summary_change_events.is_none());
 
         let status = app.status_line.borrow().render().expect("status flash");
         let rendered = status.to_string();

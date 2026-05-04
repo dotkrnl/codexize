@@ -1121,7 +1121,7 @@ pub fn terminate_run_label(window_name: &str) -> bool {
 /// in arrival order per run; cross-run interleaving is preserved by the
 /// timestamp on each transition. Callers should apply transitions in
 /// `observed_at` order.
-pub fn drain_tool_call_transitions() -> Vec<(String, ToolCallTransition)> {
+fn drain_tool_call_transitions() -> Vec<(String, ToolCallTransition)> {
     let guard = active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1132,6 +1132,21 @@ pub fn drain_tool_call_transitions() -> Vec<(String, ToolCallTransition)> {
         }
     }
     out
+}
+
+/// Drain queued tool-call lifecycle transitions as typed [`DataEvent`]s. The
+/// runtime uses this as its only entry point so the registry's per-run
+/// channels stay an internal detail of `data/runner`.
+pub fn drain_tool_call_events() -> Vec<crate::data::events::DataEvent> {
+    drain_tool_call_transitions()
+        .into_iter()
+        .map(
+            |(window_name, transition)| crate::data::events::DataEvent::ToolCallTransition {
+                window_name,
+                transition,
+            },
+        )
+        .collect()
 }
 
 pub fn shutdown_all_runs() {

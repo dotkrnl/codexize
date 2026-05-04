@@ -13,6 +13,7 @@
 //! seam is just the reified version of that surface as enums.
 
 use std::path::PathBuf;
+use std::sync::mpsc;
 
 use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
 use crate::data::runner::ToolCallTransition;
@@ -36,6 +37,43 @@ pub enum DataEvent {
         window_name: String,
         transition: ToolCallTransition,
     },
+}
+
+/// Typed drain handle for the live-summary `notify` watcher. Holds the raw
+/// notify channel as an implementation detail and adapts each filesystem
+/// notification into a [`DataEvent::LiveSummaryChanged`] so the runtime never
+/// has to know that the underlying signal is an `mpsc::Receiver<()>`.
+///
+/// Coalescing is the caller's responsibility: a single tick of writes may
+/// produce multiple `LiveSummaryChanged` events, but they are idempotent —
+/// the runtime re-reads the file once per non-empty drain.
+pub struct LiveSummaryEvents {
+    rx: mpsc::Receiver<()>,
+}
+
+impl LiveSummaryEvents {
+    /// Wrap a notify receiver. Constructed by [`crate::data::observation`]
+    /// when a watcher is built; not part of the public seam since the rx is
+    /// an internal detail.
+    pub(crate) fn new(rx: mpsc::Receiver<()>) -> Self {
+        Self { rx }
+    }
+
+    /// Drain every pending watcher signal as a typed [`DataEvent`]. Returns
+    /// an empty vector when nothing is queued. Non-blocking.
+    pub fn drain(&self) -> Vec<DataEvent> {
+        let mut out = Vec::new();
+        while self.rx.try_recv().is_ok() {
+            out.push(DataEvent::LiveSummaryChanged);
+        }
+        out
+    }
+}
+
+impl std::fmt::Debug for LiveSummaryEvents {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveSummaryEvents").finish_non_exhaustive()
+    }
 }
 
 /// Side-effect requests dispatched by the runtime to the data layer.

@@ -1,5 +1,8 @@
 // observation.rs
 use super::*;
+use crate::data::events::DataEvent;
+#[cfg(test)]
+use crate::data::events::LiveSummaryEvents;
 use crate::data::observation::{
     self, LiveSummaryProbe, LiveSummarySnapshot, LiveSummaryWatcher, build_live_summary_watcher,
     ensure_live_summary_watch_dir,
@@ -14,7 +17,7 @@ impl App {
     pub(super) fn setup_watcher(&mut self) -> Result<()> {
         let Some(path) = self.live_summary_path.clone() else {
             self.live_summary_watcher = None;
-            self.live_summary_change_rx = None;
+            self.live_summary_change_events = None;
             return Ok(());
         };
 
@@ -23,7 +26,7 @@ impl App {
         if let Err(reason) = ensure_live_summary_watch_dir(&path) {
             self.surface_boundary_error(reason, false);
             self.live_summary_watcher = None;
-            self.live_summary_change_rx = None;
+            self.live_summary_change_events = None;
             return Ok(());
         }
 
@@ -31,23 +34,23 @@ impl App {
         if !Self::test_uses_real_live_summary_watcher() {
             let (_tx, rx) = mpsc::channel();
             self.live_summary_watcher = None;
-            self.live_summary_change_rx = Some(rx);
+            self.live_summary_change_events = Some(LiveSummaryEvents::new(rx));
             return Ok(());
         }
 
         match build_live_summary_watcher(&path) {
-            LiveSummaryWatcher::Active { watcher, rx } => {
+            LiveSummaryWatcher::Active { watcher, events } => {
                 self.live_summary_watcher = Some(watcher);
-                self.live_summary_change_rx = Some(rx);
+                self.live_summary_change_events = Some(events);
             }
             LiveSummaryWatcher::PollOnly { reason } => {
                 self.surface_boundary_error(reason, false);
                 self.live_summary_watcher = None;
-                self.live_summary_change_rx = None;
+                self.live_summary_change_events = None;
             }
             LiveSummaryWatcher::Disabled => {
                 self.live_summary_watcher = None;
-                self.live_summary_change_rx = None;
+                self.live_summary_change_events = None;
             }
         }
         Ok(())
@@ -59,12 +62,16 @@ impl App {
     }
 
     pub(super) fn process_live_summary_changes(&mut self) {
-        if let Some(ref rx) = self.live_summary_change_rx {
-            let mut saw_change = false;
-            while rx.try_recv().is_ok() {
-                saw_change = true;
-            }
-            if saw_change {
+        // Drain typed `DataEvent::LiveSummaryChanged` notifications from the
+        // data-owned watcher seam. Multiple coalesced events still trigger a
+        // single re-read because the pipeline is idempotent on repeated
+        // reads of the same mtime.
+        if let Some(ref events) = self.live_summary_change_events {
+            let drained = events.drain();
+            if drained
+                .iter()
+                .any(|event| matches!(event, DataEvent::LiveSummaryChanged))
+            {
                 self.read_live_summary_pipeline();
             }
         }
@@ -176,15 +183,22 @@ impl App {
         self.maybe_refocus_to_progress();
     }
 
-    /// Drain runner-emitted tool-call lifecycle transitions and apply them
-    /// to the matching `WatchdogState` entries. Called from the main poll
-    /// loop alongside `process_live_summary_changes`.
+    /// Drain runner-emitted tool-call lifecycle events and apply them to
+    /// the matching `WatchdogState` entries. Called from the main poll loop
+    /// alongside `process_live_summary_changes`.
     pub(super) fn apply_pending_tool_call_transitions(&mut self) {
-        let transitions = runner::drain_tool_call_transitions();
-        if transitions.is_empty() {
+        let events = runner::drain_tool_call_events();
+        if events.is_empty() {
             return;
         }
-        for (window_name, transition) in transitions {
+        for event in events {
+            let DataEvent::ToolCallTransition {
+                window_name,
+                transition,
+            } = event
+            else {
+                continue;
+            };
             let Some(run_id) = self
                 .state
                 .agent_runs
@@ -338,6 +352,6 @@ impl App {
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         self.live_summary_watcher = None;
-        self.live_summary_change_rx = None;
+        self.live_summary_change_events = None;
     }
 }

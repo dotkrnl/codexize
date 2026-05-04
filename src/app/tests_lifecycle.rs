@@ -3716,3 +3716,650 @@ fn impl_round_entry_preserves_existing_review_scope() {
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// Watchdog AC1–AC8 integration coverage (spec §5).
+//
+// These tests drive the App's `tick_watchdog` loop with synthetic
+// `WatchdogState` entries. Idle elapsed is simulated by rewinding
+// `last_live_summary_event` rather than sleeping, so each scenario runs in
+// constant wall-clock time. The runner side is stubbed via
+// `request_run_label_active_for_test` so `force_interrupt_run_label` and
+// `terminate_run_label` reach a real `mpsc` channel that the test can drain.
+// ---------------------------------------------------------------------------
+
+const WATCHDOG_TEST_PROMPT_BODY: &str =
+    "Original coder prompt — keep this file current until you exit.";
+
+fn write_watchdog_test_prompt(session_id: &str, name: &str) -> std::path::PathBuf {
+    let dir = session_state::session_dir(session_id).join("prompts");
+    std::fs::create_dir_all(&dir).expect("prompts dir");
+    let path = dir.join(name);
+    std::fs::write(&path, WATCHDOG_TEST_PROMPT_BODY).expect("write prompt");
+    path
+}
+
+fn install_watchdog_run(
+    app: &mut App,
+    run_id: u64,
+    window_name: &str,
+    prompt_path: std::path::PathBuf,
+    effort: EffortLevel,
+) {
+    app.watchdog.register(
+        run_id,
+        effort,
+        window_name.to_string(),
+        prompt_path,
+        std::time::Instant::now(),
+    );
+}
+
+/// Rewind `last_live_summary_event` so `idle_elapsed(now) >= shift`. Mirrors
+/// "wait `shift` real seconds without writing a summary" without sleeping.
+fn fast_forward_idle(app: &mut App, run_id: u64, shift: Duration) {
+    let state = app
+        .watchdog
+        .get_mut(run_id)
+        .expect("watchdog state registered");
+    state.last_live_summary_event = std::time::Instant::now() - shift - Duration::from_millis(1);
+}
+
+#[test]
+fn watchdog_warning_emits_summarywarn_and_verbatim_prompt_interrupt() {
+    with_temp_root(|| {
+        let session_id = "watchdog-warn-ac1-ac7";
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(10, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Normal,
+        );
+        fast_forward_idle(&mut app, run.id, super::watchdog::WARN_AFTER_NORMAL);
+
+        app.tick_watchdog();
+
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert_eq!(
+            inputs.len(),
+            1,
+            "AC1: exactly one watchdog interrupt should have been queued",
+        );
+        let (kind, body) = &inputs[0];
+        assert_eq!(
+            *kind, "interrupt",
+            "AC1: warning must use AcpInput::Interrupt"
+        );
+        assert!(
+            body.contains("Liveness warning from codexize watchdog"),
+            "AC1: warning preamble missing"
+        );
+        assert!(
+            body.contains("ORIGINAL PROMPT"),
+            "AC7: warning body must contain ORIGINAL PROMPT marker"
+        );
+        assert!(
+            body.contains(WATCHDOG_TEST_PROMPT_BODY),
+            "AC7: warning body must contain the verbatim prompt text"
+        );
+        assert!(
+            body.contains("10 minutes"),
+            "AC1: remaining-minutes count must read from unscaled spec constants"
+        );
+
+        let summary_warn_count = app
+            .messages
+            .iter()
+            .filter(|m| {
+                m.run_id == run.id
+                    && m.kind == MessageKind::SummaryWarn
+                    && m.text.contains("watchdog warning")
+            })
+            .count();
+        assert_eq!(
+            summary_warn_count, 1,
+            "AC1: exactly one SummaryWarn for the warning",
+        );
+
+        // Idempotent: a second tick at the same elapsed must not re-send.
+        app.tick_watchdog();
+        let inputs_after = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert!(
+            inputs_after.is_empty(),
+            "AC1: warning must not re-arm; got {inputs_after:?}",
+        );
+        let summary_warn_count_after = app
+            .messages
+            .iter()
+            .filter(|m| m.kind == MessageKind::SummaryWarn && m.text.contains("watchdog warning"))
+            .count();
+        assert_eq!(
+            summary_warn_count_after, 1,
+            "AC1: SummaryWarn must not duplicate"
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_kill_sends_terminate_and_drops_state() {
+    with_temp_root(|| {
+        let session_id = "watchdog-kill-ac2-partial";
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(20, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Normal,
+        );
+        // Push elapsed past the kill threshold without ever crossing warn —
+        // mirrors a starved poll loop (spec §3.3) so AC2's "kill without prior
+        // warning" branch is exercised.
+        fast_forward_idle(&mut app, run.id, super::watchdog::KILL_AFTER_NORMAL);
+
+        app.tick_watchdog();
+
+        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
+        assert_eq!(cancels, vec!["terminate"], "AC2: kill must send Terminate");
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert!(
+            inputs.is_empty(),
+            "AC2: kill path must not also enqueue a warning interrupt"
+        );
+        let kill_summary = app
+            .messages
+            .iter()
+            .filter(|m| {
+                m.run_id == run.id
+                    && m.kind == MessageKind::SummaryWarn
+                    && m.text.contains("watchdog kill")
+            })
+            .count();
+        assert_eq!(kill_summary, 1, "AC2: exactly one kill SummaryWarn");
+        assert!(
+            app.watchdog.get(run.id).is_none(),
+            "AC2: kill must drop the per-run watchdog state",
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_kill_finalizes_failed_run_and_relaunches_with_different_vendor() {
+    with_temp_root(|| {
+        let session_id = "watchdog-kill-ac2-failover";
+        let session_dir = session_state::session_dir(session_id);
+        let round_dir = session_dir.join("rounds").join("001");
+        write_review_scope(&round_dir, "base123");
+
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(30, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 10, 1, 10),
+            ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 10, 2, 10),
+        ];
+        // The retry attempt #2 will go through the test-launch harness; let
+        // it succeed so the relaunch sticks and we can assert the vendor.
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: None,
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Normal,
+        );
+        fast_forward_idle(&mut app, run.id, super::watchdog::KILL_AFTER_NORMAL);
+
+        app.tick_watchdog();
+
+        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
+        assert_eq!(cancels, vec!["terminate"], "AC2: Terminate on cancel_tx");
+
+        // Simulate the runner thread reacting to Terminate: the active map
+        // entry is dropped and a finish stamp lands with exit_code 143.
+        crate::runner::cancel_run_labels_matching(&window_name);
+        let stamp = crate::runner::FinishStamp {
+            finished_at: chrono::Utc::now().to_rfc3339(),
+            exit_code: 143,
+            head_before: "base123".to_string(),
+            head_after: "base123".to_string(),
+            head_state: "stable".to_string(),
+            signal_received: "TERM".to_string(),
+            working_tree_clean: true,
+        };
+        let stamp_path = app.finish_stamp_path_for(&run);
+        std::fs::create_dir_all(stamp_path.parent().unwrap()).expect("stamp dir");
+        crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write stamp");
+        app.pending_drain_deadline = Some(Instant::now() - Duration::from_millis(1));
+
+        app.poll_agent_run();
+
+        let failed = app
+            .state
+            .agent_runs
+            .iter()
+            .find(|r| r.id == run.id)
+            .expect("original run record");
+        assert_eq!(failed.status, RunStatus::Failed, "AC2: original run failed");
+
+        let retry = app
+            .state
+            .agent_runs
+            .iter()
+            .find(|r| r.stage == "coder" && r.attempt == 2)
+            .expect("AC2: vendor failover must launch attempt 2 on a different vendor");
+        assert_ne!(
+            retry.vendor, run.vendor,
+            "AC2: retry vendor must differ from the watchdog-killed vendor"
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_uses_tough_thresholds() {
+    with_temp_root(|| {
+        let session_id = "watchdog-tough-ac3";
+        let mut state = coder_round_state(session_id);
+        let mut run = make_coder_run(40, 1, 1);
+        run.effort = EffortLevel::Tough;
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Tough,
+        );
+
+        // Past normal warn (10m) but below tough warn (15m): must not fire.
+        fast_forward_idle(
+            &mut app,
+            run.id,
+            super::watchdog::WARN_AFTER_NORMAL + Duration::from_secs(60),
+        );
+        app.tick_watchdog();
+        assert!(
+            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
+            "AC3: tough run must not warn at the normal-effort 10 min threshold",
+        );
+
+        // Cross the tough warn threshold (15m).
+        fast_forward_idle(&mut app, run.id, super::watchdog::WARN_AFTER_TOUGH);
+        app.tick_watchdog();
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert_eq!(
+            inputs.len(),
+            1,
+            "AC3: warning must fire after the tough warn threshold"
+        );
+        assert!(
+            inputs[0].1.contains("15 minutes"),
+            "AC3: remaining-minutes must reflect the tough kill-warn gap (30 - 15)"
+        );
+
+        // Cross the tough kill threshold (30m).
+        fast_forward_idle(&mut app, run.id, super::watchdog::KILL_AFTER_TOUGH);
+        app.tick_watchdog();
+        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
+        assert_eq!(
+            cancels,
+            vec!["terminate"],
+            "AC3: kill must fire after the tough kill threshold"
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_clock_pauses_during_tool_call_activity() {
+    with_temp_root(|| {
+        let session_id = "watchdog-toolcall-ac4";
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(50, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Normal,
+        );
+
+        // Anchor: 30 simulated minutes since the last summary write — but a
+        // single tool call has been in flight for the last 25 minutes,
+        // freezing the idle clock at 5 minutes idle-adjusted.
+        let now = std::time::Instant::now();
+        let state_mut = app
+            .watchdog
+            .get_mut(run.id)
+            .expect("watchdog state registered");
+        state_mut.last_live_summary_event = now - Duration::from_secs(30 * 60);
+        state_mut.pause_began_at = Some(now - Duration::from_secs(25 * 60));
+        state_mut.in_flight_tool_calls = 1;
+
+        app.tick_watchdog();
+        assert!(
+            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
+            "AC4: clock must stay paused while a tool call is in flight",
+        );
+        assert!(
+            crate::runner::drain_test_cancel_receiver_for(&window_name).is_empty(),
+            "AC4: kill must not fire while the clock is paused",
+        );
+
+        // A second concurrent tool call must not advance the clock further.
+        // Its terminal counterpart only releases the pause when in-flight
+        // count returns to zero.
+        let state_mut = app.watchdog.get_mut(run.id).expect("state");
+        state_mut.on_tool_call_started(now);
+        state_mut.on_tool_call_finished(now);
+        assert_eq!(
+            state_mut.in_flight_tool_calls, 1,
+            "AC4: counter (not bool) — concurrent calls do not unpause early"
+        );
+
+        // Now release the long-running call. Tool call ran for 25 minutes; the
+        // idle-adjusted clock advances to 30 - 25 = 5 minutes. Below warn.
+        let state_mut = app.watchdog.get_mut(run.id).expect("state");
+        state_mut.on_tool_call_finished(now);
+        assert_eq!(state_mut.in_flight_tool_calls, 0);
+        app.tick_watchdog();
+        assert!(
+            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
+            "AC4: 5 min idle-adjusted is below the 10 min warn threshold",
+        );
+
+        // Push raw idle to 40 minutes; tool-call subtracts 25 → 15 min idle
+        // adjusted, past warn.
+        if let Some(s) = app.watchdog.get_mut(run.id) {
+            s.last_live_summary_event = now - Duration::from_secs(40 * 60);
+        }
+        app.tick_watchdog();
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert_eq!(
+            inputs.len(),
+            1,
+            "AC4: warning must fire once tool-call-adjusted elapsed crosses warn"
+        );
+
+        // Push to 45 minutes → 20 min idle adjusted, past kill.
+        if let Some(s) = app.watchdog.get_mut(run.id) {
+            s.last_live_summary_event = now - Duration::from_secs(45 * 60);
+        }
+        app.tick_watchdog();
+        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
+        assert_eq!(
+            cancels,
+            vec!["terminate"],
+            "AC4: kill must fire after tool-call-adjusted elapsed crosses kill"
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_does_not_arm_for_interactive_runs() {
+    with_temp_root(|| {
+        let session_id = "watchdog-interactive-ac5";
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::PlanningRunning;
+        let mut interactive = make_planning_run(60, 1);
+        interactive.modes.interactive = true;
+        let window_name = interactive.window_name.clone();
+        state.agent_runs.push(interactive.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(interactive.id);
+        app.run_launched = true;
+        app.models = vec![
+            ranked_model(selection::VendorKind::Codex, "gpt-5", 1, 10, 10),
+            ranked_model(selection::VendorKind::Gemini, "gemini-2.5-pro", 2, 10, 10),
+        ];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness::default(),
+        )));
+
+        crate::runner::request_run_label_interactive_input_for_test(&window_name);
+
+        // Drive `start_run_tracking` for an interactive launch and assert
+        // the registry stays empty (AC5). The path mirrors the brainstorm
+        // launch — start_run_tracking is the only non-test entry point that
+        // registers the watchdog.
+        app.start_run_tracking(
+            "planning",
+            None,
+            1,
+            "gpt-5".to_string(),
+            "codex".to_string(),
+            window_name.clone(),
+            EffortLevel::Normal,
+            crate::state::LaunchModes {
+                yolo: false,
+                cheap: false,
+                interactive: true,
+            },
+            std::path::PathBuf::from("prompts/planning.md"),
+        );
+        assert!(
+            app.watchdog.is_empty(),
+            "AC5: interactive run must not register watchdog state"
+        );
+
+        // Even with a long-stale fake heartbeat, tick_watchdog is a no-op
+        // because nothing is registered.
+        app.tick_watchdog();
+        assert!(
+            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
+            "AC5: no warning must be sent for interactive runs"
+        );
+        assert!(
+            crate::runner::drain_test_cancel_receiver_for(&window_name).is_empty(),
+            "AC5: no Terminate must be sent for interactive runs"
+        );
+        let any_summary_warn = app
+            .messages
+            .iter()
+            .any(|m| m.kind == MessageKind::SummaryWarn);
+        assert!(
+            !any_summary_warn,
+            "AC5: no SummaryWarn must be appended for interactive runs",
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_warning_does_not_re_arm_after_summary_recovery() {
+    with_temp_root(|| {
+        let session_id = "watchdog-no-rearm-ac6";
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(70, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            prompt_path,
+            EffortLevel::Normal,
+        );
+
+        // Stage 1: cross warn — exactly one warning fires.
+        fast_forward_idle(&mut app, run.id, super::watchdog::WARN_AFTER_NORMAL);
+        app.tick_watchdog();
+        assert_eq!(
+            crate::runner::drain_test_input_receiver_for(&window_name).len(),
+            1,
+            "AC6: first warning must fire"
+        );
+
+        // Stage 2: the agent writes one summary — clock resets, but the
+        // `warned` flag stays true (operator answer 5: no re-arm).
+        if let Some(s) = app.watchdog.get_mut(run.id) {
+            s.on_live_summary_event(std::time::Instant::now());
+            assert!(
+                s.warned,
+                "AC6: warned flag must persist across summary writes"
+            );
+        }
+
+        // Stage 3: stall again past the kill threshold. Kill fires; no second
+        // warning.
+        fast_forward_idle(&mut app, run.id, super::watchdog::KILL_AFTER_NORMAL);
+        app.tick_watchdog();
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert!(
+            inputs.is_empty(),
+            "AC6: no second warning must be sent after recovery; got {inputs:?}",
+        );
+        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
+        assert_eq!(
+            cancels,
+            vec!["terminate"],
+            "AC6: kill must still fire on the second stall"
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_warning_falls_back_when_prompt_cannot_be_read() {
+    with_temp_root(|| {
+        let session_id = "watchdog-degraded-fallback";
+        let mut state = coder_round_state(session_id);
+        let run = make_coder_run(80, 1, 1);
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run.clone());
+        let mut app = idle_app(state);
+        app.current_run_id = Some(run.id);
+        app.run_launched = true;
+
+        crate::runner::request_run_label_active_for_test(&window_name);
+        // Point at a prompt path that does not exist on disk.
+        let missing_path = session_state::session_dir(session_id)
+            .join("prompts")
+            .join("does-not-exist.md");
+        install_watchdog_run(
+            &mut app,
+            run.id,
+            &window_name,
+            missing_path,
+            EffortLevel::Normal,
+        );
+        fast_forward_idle(&mut app, run.id, super::watchdog::WARN_AFTER_NORMAL);
+
+        app.tick_watchdog();
+
+        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
+        assert_eq!(inputs.len(), 1, "warning must still fire on read failure");
+        assert!(
+            inputs[0]
+                .1
+                .contains(super::watchdog::PROMPT_UNAVAILABLE_BODY),
+            "fallback body must use the documented degraded message",
+        );
+
+        crate::runner::cancel_run_labels_matching(&window_name);
+    });
+}
+
+#[test]
+fn watchdog_register_uses_compressed_threshold_from_env() {
+    with_temp_root(|| {
+        // SAFETY: `with_temp_root` serializes test-global env mutations via
+        // `test_fs_lock`, so this set/unset window is visible only to this
+        // test's `WatchdogRegistry::from_env()` call.
+        let prev = std::env::var_os(super::watchdog::SCALE_ENV_VAR);
+        unsafe {
+            std::env::set_var(super::watchdog::SCALE_ENV_VAR, "1000000");
+        }
+        let registry = super::watchdog::WatchdogRegistry::from_env();
+        let mut registry = registry;
+        let now = Instant::now();
+        registry.register(
+            1,
+            EffortLevel::Normal,
+            "[scaled]".to_string(),
+            std::path::PathBuf::from("/p"),
+            now,
+        );
+        let state = registry.get(1).expect("registered");
+        // 600 simulated seconds × 1_000_000 ns/s = 600 ms real wall clock.
+        assert_eq!(state.warn_threshold, Duration::from_millis(600));
+        assert_eq!(state.kill_threshold, Duration::from_millis(1200));
+        assert_eq!(state.warning_remaining_minutes, 10);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var(super::watchdog::SCALE_ENV_VAR, v),
+                None => std::env::remove_var(super::watchdog::SCALE_ENV_VAR),
+            }
+        }
+    });
+}

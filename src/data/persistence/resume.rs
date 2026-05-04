@@ -1,39 +1,9 @@
-use super::{Phase, SessionState, session_dir};
+//! Persisting resume flow that reads optional artifacts and logs progress.
+
 use crate::artifacts::{ArtifactKind, SkipToImplProposal};
-
-/// Errors that can occur when attempting to resume a session.
-#[derive(Debug)]
-pub enum ResumeError {
-    InvalidState(String),
-}
-
-impl std::fmt::Display for ResumeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ResumeError::InvalidState(msg) => write!(f, "Cannot resume: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for ResumeError {}
-
-/// Check whether the current state can be safely resumed.
-pub fn can_resume(state: &SessionState) -> Result<(), ResumeError> {
-    match state.current_phase {
-        Phase::Done => {
-            return Err(ResumeError::InvalidState(
-                "Cannot resume a completed session".to_string(),
-            ));
-        }
-        Phase::IdeaInput => {
-            return Err(ResumeError::InvalidState(
-                "No work to resume from IdeaInput phase".to_string(),
-            ));
-        }
-        _ => {}
-    }
-    Ok(())
-}
+use crate::logic::pipeline::phase::Phase;
+use crate::logic::pipeline::resume::{ResumeError, can_resume};
+use crate::logic::pipeline::state::{SessionState, session_dir};
 
 /// Resume a session, logging the resumption event.
 pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
@@ -88,7 +58,7 @@ mod tests {
     use std::fs;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::state::test_fs_lock()
+        let _guard = crate::logic::pipeline::state::test_fs_lock()
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();

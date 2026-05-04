@@ -1,4 +1,6 @@
 use super::*;
+use crate::adapters::EffortLevel;
+use serde::{Deserialize, Serialize};
 
 #[test]
 fn pending_guard_decision_defaults_to_none_when_absent() {

@@ -1,4 +1,4 @@
-use super::{PipelineItem, PipelineItemStatus};
+use crate::logic::pipeline::state::{PipelineItem, PipelineItemStatus};
 use serde::{Deserialize, Serialize};
 
 /// Tracks the builder loop — which tasks are pending, done, what iteration
@@ -434,5 +434,223 @@ impl BuilderState {
         self.last_verdict = Some("revise".to_string());
         self.sync_legacy_queue_views();
         assigned_ids
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_max_task_id_empty() {
+        let builder = BuilderState::default();
+        assert_eq!(builder.max_task_id(), 0);
+    }
+
+    #[test]
+    fn test_max_task_id_from_pipeline() {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(5),
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        assert_eq!(builder.max_task_id(), 5);
+    }
+
+    #[test]
+    fn test_max_task_id_from_recovery_snapshot() {
+        let builder = BuilderState {
+            recovery_prev_max_task_id: Some(10),
+            recovery_prev_task_ids: vec![1, 2, 10],
+            ..Default::default()
+        };
+        assert_eq!(builder.max_task_id(), 10);
+    }
+
+    #[test]
+    fn test_max_task_id_across_all_sources() {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(3),
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+        builder.done = vec![1, 2];
+        builder.task_titles.insert(7, "t7".to_string());
+        builder.recovery_prev_max_task_id = Some(5);
+        assert_eq!(builder.max_task_id(), 7);
+    }
+
+    fn make_builder_with_tasks(task_ids: &[u32]) -> BuilderState {
+        let mut builder = BuilderState::default();
+        for &tid in task_ids {
+            builder.push_pipeline_item(PipelineItem {
+                id: 0,
+                stage: "coder".to_string(),
+                task_id: Some(tid),
+                round: None,
+                status: PipelineItemStatus::Pending,
+                title: Some(format!("Task {tid}")),
+                mode: None,
+                trigger: None,
+                interactive: None,
+            });
+            builder.task_titles.insert(tid, format!("Task {tid}"));
+        }
+        builder
+    }
+
+    #[test]
+    fn test_apply_revise_basic_insertion() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3, 4]);
+        builder.pipeline_items[0].status = PipelineItemStatus::Approved;
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+
+        let new_ids = builder.apply_revise_with_new_tasks(
+            2,
+            vec![
+                ("Split A".into(), "desc".into(), "test".into(), 1000),
+                ("Split B".into(), "desc".into(), "test".into(), 1000),
+            ],
+        );
+
+        assert_eq!(new_ids.len(), 2);
+        assert_eq!(new_ids[0], 5);
+        assert_eq!(new_ids[1], 6);
+
+        let task_ids: Vec<Option<u32>> = builder
+            .pipeline_items
+            .iter()
+            .filter(|i| i.stage == "coder")
+            .map(|i| i.task_id)
+            .collect();
+        assert_eq!(task_ids.len(), 6);
+        assert_eq!(task_ids[0], Some(1));
+        assert_eq!(task_ids[1], Some(2));
+        assert_eq!(task_ids[2], Some(5));
+        assert_eq!(task_ids[3], Some(6));
+        assert_eq!(task_ids[4], Some(7));
+        assert_eq!(task_ids[5], Some(8));
+    }
+
+    #[test]
+    fn test_apply_revise_renumbers_only_pending() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3, 4]);
+        builder.pipeline_items[0].status = PipelineItemStatus::Approved;
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+
+        let _ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
+
+        assert_eq!(builder.pipeline_items[0].task_id, Some(1));
+        assert_eq!(
+            builder.pipeline_items[0].status,
+            PipelineItemStatus::Approved
+        );
+        assert_eq!(builder.pipeline_items[1].task_id, Some(2));
+        assert_eq!(builder.pipeline_items[1].status, PipelineItemStatus::Revise);
+    }
+
+    #[test]
+    fn test_apply_revise_monotonic_across_recovery() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+        builder.recovery_prev_max_task_id = Some(10);
+        builder.pipeline_items[0].status = PipelineItemStatus::Approved;
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+
+        let ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
+
+        assert_eq!(ids[0], 11);
+    }
+
+    #[test]
+    fn test_apply_revise_updates_task_titles() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+
+        let ids = builder.apply_revise_with_new_tasks(
+            2,
+            vec![("Replacement".into(), "d".into(), "t".into(), 1000)],
+        );
+
+        assert_eq!(
+            builder.task_titles.get(&ids[0]).map(|s| s.as_str()),
+            Some("Replacement")
+        );
+        let new_id_for_old_3 = ids[0] + 1;
+        assert_eq!(
+            builder
+                .task_titles
+                .get(&new_id_for_old_3)
+                .map(|s| s.as_str()),
+            Some("Task 3")
+        );
+        assert!(!builder.task_titles.contains_key(&3));
+    }
+
+    #[test]
+    fn test_apply_revise_empty_new_tasks_is_noop() {
+        let mut builder = make_builder_with_tasks(&[1, 2]);
+        let ids = builder.apply_revise_with_new_tasks(1, vec![]);
+        assert!(ids.is_empty());
+        assert_eq!(builder.pipeline_items.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_revise_syncs_legacy_views() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+        builder.pipeline_items[0].status = PipelineItemStatus::Approved;
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+
+        builder.apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
+
+        assert!(builder.done.contains(&1));
+        assert!(builder.pending.len() >= 2);
+        assert_eq!(builder.last_verdict.as_deref(), Some("revise"));
+    }
+
+    #[test]
+    fn test_apply_revise_skips_pending_coder_with_no_task_id() {
+        let mut builder = make_builder_with_tasks(&[1, 2, 3]);
+        builder.pipeline_items[1].status = PipelineItemStatus::Running;
+        builder.pipeline_items.push(PipelineItem {
+            id: builder.next_pipeline_id(),
+            stage: "coder".to_string(),
+            task_id: None,
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: Some("draft".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+        });
+
+        let ids = builder
+            .apply_revise_with_new_tasks(2, vec![("New".into(), "d".into(), "t".into(), 1000)]);
+
+        assert_eq!(ids.len(), 1);
+        let untyped_still_none = builder.pipeline_items.iter().any(|item| {
+            item.stage == "coder"
+                && item.title.as_deref() == Some("draft")
+                && item.task_id.is_none()
+        });
+        assert!(
+            untyped_still_none,
+            "no-task-id coder pending row must be left untouched"
+        );
     }
 }

@@ -37,8 +37,7 @@ mod tests_prompts;
 mod tests_split_sync;
 #[cfg(test)]
 mod tests_yolo;
-mod tree;
-mod tree_view_model;
+pub(crate) use crate::ui::tree;
 mod watchdog;
 mod yolo_exit;
 

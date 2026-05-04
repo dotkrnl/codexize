@@ -1036,6 +1036,47 @@ pub fn interrupt_run_label_input(window_name: &str, text: String) -> bool {
     })
 }
 
+/// Push an `AcpInput::Interrupt(text)` onto the run's input channel
+/// regardless of whether the runner reports it is waiting for input. Used
+/// by the watchdog warning path (spec §3.4) where the spec requires
+/// cancelling the in-flight ACP turn and queueing the warning as the next
+/// prompt — converting to `Prompt` (as `interrupt_run_label_input` would
+/// when waiting) would skip the cancel_prompt() side effect.
+pub fn force_interrupt_run_label(window_name: &str, text: String) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    cleanup_finished_acp_runs();
+    let guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.get(window_name).is_some_and(|run| {
+        if run.finished.load(Ordering::SeqCst) {
+            return false;
+        }
+        run.input_tx.send(AcpInput::Interrupt(text)).is_ok()
+    })
+}
+
+/// Best-effort `AcpCancelReason::Terminate` for the named run (spec §3.5).
+/// Unlike `cancel_run_labels_matching`, this does not remove the run from
+/// the active map or join the runner thread — the existing
+/// `poll_agent_run` finalize path observes `!active_run_exists` once the
+/// runner thread exits and routes the non-zero exit through the standard
+/// failed-run vendor failover. Returns `false` if no such run is active.
+pub fn terminate_run_label(window_name: &str) -> bool {
+    cleanup_finished_acp_runs();
+    let guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.get(window_name).is_some_and(|run| {
+        if run.finished.load(Ordering::SeqCst) {
+            return false;
+        }
+        run.cancel_tx.send(AcpCancelReason::Terminate).is_ok()
+    })
+}
+
 /// Drain all queued tool-call lifecycle transitions across every managed
 /// ACP run currently active. Returned in `(window_name, transition)` pairs
 /// in arrival order per run; cross-run interleaving is preserved by the

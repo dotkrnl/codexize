@@ -473,6 +473,23 @@ fn planning_prompts_drop_skill_invocation_and_carry_no_skill_clause() {
         );
         assert!(prompt.contains("artifacts/spec-review-1.md"));
         assert!(prompt.contains("artifacts/spec-review-2.md"));
+        if yolo {
+            assert!(
+                !prompt.contains("Ask escalation questions one at a time"),
+                "yolo planner must not ask escalation questions"
+            );
+        } else {
+            assert!(
+                prompt.contains("Ask escalation questions one at a time"),
+                "interactive planner must ask escalations one by one"
+            );
+            assert!(
+                prompt.contains(
+                    "Wait for the operator's answer before asking the next escalation question"
+                ),
+                "interactive planner must not bundle escalation questions"
+            );
+        }
     }
 }
 

@@ -1,8 +1,10 @@
 // observation.rs
 use super::*;
 use crate::data::observation::{
-    LiveSummaryWatcher, build_live_summary_watcher, ensure_live_summary_watch_dir,
+    self, LiveSummaryProbe, LiveSummarySnapshot, LiveSummaryWatcher, build_live_summary_watcher,
+    ensure_live_summary_watch_dir,
 };
+use crate::data::runner;
 use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
@@ -79,26 +81,23 @@ impl App {
             self.live_summary_cached_text.clear();
             return;
         };
-        let Ok(meta) = std::fs::metadata(&path) else {
-            self.live_summary_cached_text.clear();
-            self.live_summary_cached_mtime = None;
-            return;
-        };
-        let Ok(mtime) = meta.modified() else { return };
-        let stale = mtime
-            .elapsed()
-            .map(|d| d > std::time::Duration::from_secs(60))
-            .unwrap_or(true);
-        if stale {
-            self.live_summary_cached_text.clear();
-            return;
-        }
-        let should_read = match self.live_summary_cached_mtime {
-            None => true,
-            Some(cached) => mtime > cached,
-        };
-        if should_read {
-            self.read_live_summary_pipeline();
+        match observation::probe_live_summary(&path) {
+            LiveSummaryProbe::Missing => {
+                self.live_summary_cached_text.clear();
+                self.live_summary_cached_mtime = None;
+            }
+            LiveSummaryProbe::Stale => {
+                self.live_summary_cached_text.clear();
+            }
+            LiveSummaryProbe::Fresh { mtime } => {
+                let should_read = match self.live_summary_cached_mtime {
+                    None => true,
+                    Some(cached) => mtime > cached,
+                };
+                if should_read {
+                    self.read_live_summary_pipeline();
+                }
+            }
         }
     }
 
@@ -121,10 +120,14 @@ impl App {
         let Some(path) = self.live_summary_path.clone() else {
             return;
         };
-        let Ok(meta) = std::fs::metadata(&path) else {
-            return;
+        // Cheap mtime probe before reading content: avoids the disk read when
+        // the file is missing, stale, or unchanged since the last cached
+        // mtime. The watchdog still observes the mtime advance below so an
+        // unchanged-content write resets the idle clock per spec §3.7.
+        let mtime = match observation::probe_live_summary(&path) {
+            LiveSummaryProbe::Fresh { mtime } => mtime,
+            LiveSummaryProbe::Missing | LiveSummaryProbe::Stale => return,
         };
-        let Ok(mtime) = meta.modified() else { return };
         if let Some(cached_mtime) = self.live_summary_cached_mtime
             && mtime <= cached_mtime
         {
@@ -137,14 +140,8 @@ impl App {
         if let Some(state) = self.watchdog.get_mut(run_id) {
             state.on_live_summary_event(std::time::Instant::now());
         }
-        let stale = mtime
-            .elapsed()
-            .map(|d| d > std::time::Duration::from_secs(60))
-            .unwrap_or(true);
-        if stale {
-            return;
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
+        let Some(LiveSummarySnapshot { content, mtime }) = observation::read_live_summary(&path)
+        else {
             return;
         };
         let sanitized = render::sanitize_live_summary(&content);
@@ -183,7 +180,7 @@ impl App {
     /// to the matching `WatchdogState` entries. Called from the main poll
     /// loop alongside `process_live_summary_changes`.
     pub(super) fn apply_pending_tool_call_transitions(&mut self) {
-        let transitions = crate::runner::drain_tool_call_transitions();
+        let transitions = runner::drain_tool_call_transitions();
         if transitions.is_empty() {
             return;
         }
@@ -257,11 +254,11 @@ impl App {
         else {
             return;
         };
-        let prompt_body = std::fs::read_to_string(&prompt_path)
-            .unwrap_or_else(|_| super::watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
+        let prompt_body = observation::read_prompt_body(&prompt_path)
+            .unwrap_or_else(|| super::watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
         let warning_text =
             super::watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
-        let interrupt_sent = crate::runner::force_interrupt_run_label(&window_name, warning_text);
+        let interrupt_sent = runner::force_interrupt_run_label(&window_name, warning_text);
         let _ = self.state.log_event(format!(
             "watchdog_warning: run={run_id} window={window_name} idle_min={idle_minutes} \
              interrupt_sent={interrupt_sent}"
@@ -291,7 +288,7 @@ impl App {
         // vendor failover (spec §3.5). `finalize_run_record` will also
         // call remove() but the duplicate is a no-op.
         self.watchdog.remove(run_id);
-        let terminate_sent = crate::runner::terminate_run_label(&window_name);
+        let terminate_sent = runner::terminate_run_label(&window_name);
         let _ = self.state.log_event(format!(
             "watchdog_kill: run={run_id} window={window_name} idle_min={idle_minutes} \
              terminate_sent={terminate_sent}"
@@ -311,7 +308,11 @@ impl App {
     /// the next run starts with a clean slate.
     pub(super) fn drain_live_summary(&mut self, run: &crate::state::RunRecord) {
         let path = self.live_summary_path_for(run);
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        // The drain primitive removes the file even when the read fails,
+        // so the next run always starts clean.
+        if let Some(LiveSummarySnapshot { content, .. }) =
+            observation::drain_live_summary_file(&path)
+        {
             let sanitized = render::sanitize_live_summary(&content);
             if !sanitized.is_empty() && sanitized != self.live_summary_cached_text {
                 let msg = Message {
@@ -334,7 +335,6 @@ impl App {
                 }
             }
         }
-        let _ = std::fs::remove_file(&path);
         self.live_summary_cached_text.clear();
         self.live_summary_cached_mtime = None;
         self.live_summary_watcher = None;

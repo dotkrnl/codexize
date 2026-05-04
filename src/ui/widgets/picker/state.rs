@@ -1,6 +1,6 @@
+use super::helpers as picker_view_model;
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
-use crate::picker_view_model;
 use crate::state::{self as session_state, Modes, Phase, SessionState};
 use crate::tui::{AppTerminal, wrap_input};
 use crate::ui::chrome::{
@@ -17,12 +17,10 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph},
 };
-use std::{
-    fs,
-    time::{Duration, Instant, SystemTime},
-};
+use std::time::{Duration, Instant, SystemTime};
 
-mod render;
+#[path = "view.rs"]
+mod view;
 
 pub struct SessionEntry {
     pub session_id: String,
@@ -39,7 +37,7 @@ pub struct PickerSelection {
 }
 
 #[derive(Clone, Copy)]
-enum ConfirmKind {
+pub(super) enum ConfirmKind {
     Archive,
     Delete,
 }
@@ -241,8 +239,7 @@ impl SessionPicker {
                     }
                     ConfirmKind::Delete => {
                         if let Some(entry) = self.selected_entry() {
-                            let session_dir = crate::state::session_dir(&entry.session_id);
-                            fs::remove_dir_all(&session_dir)?;
+                            crate::data::picker_io::delete_session(&entry.session_id)?;
                             self.refresh()?;
                             self.status_line.push(
                                 "Session deleted".to_string(),
@@ -426,59 +423,7 @@ impl SessionPicker {
 }
 
 pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
-    let sessions_dir = crate::state::codexize_root().join("sessions");
-
-    if !sessions_dir.exists() {
-        fs::create_dir_all(&sessions_dir)?;
-        return Ok(Vec::new());
-    }
-
-    let mut entries = Vec::new();
-
-    for entry in fs::read_dir(&sessions_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if !path.is_dir() {
-            continue;
-        }
-
-        let session_id = match path.file_name().and_then(|n| n.to_str()) {
-            Some(id) => id.to_string(),
-            None => continue,
-        };
-
-        let toml_path = path.join("session.toml");
-        if !toml_path.exists() {
-            continue;
-        }
-
-        let state = match SessionState::load(&session_id) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let last_modified = fs::metadata(&toml_path)?.modified()?;
-
-        entries.push(SessionEntry {
-            session_id,
-            idea_summary: state
-                .title
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| truncate_idea(&state.idea_text)),
-            current_phase: state.current_phase,
-            modes: state.modes,
-            last_modified,
-            archived: state.archived,
-        });
-    }
-
-    entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_modified));
-
-    Ok(entries)
+    crate::data::picker_io::scan_sessions()
 }
 
 /// Create a new session on disk and emit the standard creation events.
@@ -509,6 +454,7 @@ pub fn generate_session_id() -> String {
     now.format("%Y%m%d-%H%M%S-%9f").to_string()
 }
 
+#[cfg(test)]
 fn truncate_idea(idea: &Option<String>) -> String {
     match idea {
         Some(text) if text.chars().count() > 80 => {
@@ -519,7 +465,7 @@ fn truncate_idea(idea: &Option<String>) -> String {
     }
 }
 
-fn format_relative_time(time: SystemTime, now: SystemTime) -> String {
+pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String {
     let duration = now.duration_since(time).unwrap_or_default();
     let secs = duration.as_secs();
 
@@ -534,7 +480,7 @@ fn format_relative_time(time: SystemTime, now: SystemTime) -> String {
     }
 }
 
-fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
+pub(super) fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
     match phase {
         Phase::IdeaInput => ("idea".to_string(), Color::DarkGray, "○"),
         Phase::BrainstormRunning => ("brainstorm".to_string(), Color::Cyan, "●"),
@@ -560,7 +506,7 @@ fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
     }
 }
 
-fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
+pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
     let mut labels = Vec::new();
     if modes.yolo {
         labels.push("[YOLO]");
@@ -572,4 +518,5 @@ fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
 }
 
 #[cfg(test)]
+#[path = "tests_mod.rs"]
 mod tests_mod;

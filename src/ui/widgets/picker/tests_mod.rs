@@ -117,7 +117,7 @@ fn scan_sessions_skips_directories_without_session_toml() {
     with_temp_codexize_root(|| {
         let _ = scan_sessions().unwrap();
         let stray = crate::state::codexize_root().join("sessions").join("stray");
-        fs::create_dir_all(&stray).unwrap();
+        std /* test fixture IO */ ::fs::create_dir_all(&stray).unwrap();
         // No session.toml inside; the entry must be ignored.
         let entries = scan_sessions().unwrap();
         assert!(
@@ -451,7 +451,8 @@ fn create_session_helper_logs_session_created_and_mode_events() {
         // Reading the raw file keeps the test independent of any
         // structured-log accessor.
         let events_path = crate::state::session_dir(&session_id).join("events.toml");
-        let log = std::fs::read_to_string(&events_path).expect("events.toml exists");
+        let log = std /* test fixture IO */ ::fs::read_to_string(&events_path)
+            .expect("events.toml exists");
         assert!(log.contains("session created"), "log: {log}");
         assert!(log.contains("mode=yolo"), "yolo logged: {log}");
         assert!(!log.contains("mode=cheap"), "cheap not logged: {log}");

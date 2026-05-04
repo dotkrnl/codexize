@@ -12,9 +12,13 @@ use chrono::Offset;
 use std::collections::BTreeSet;
 
 #[cfg(test)]
-use super::state::ModelRefreshState;
+use crate::app::ModelRefreshState;
+
+#[path = "input_sheet.rs"]
 mod input_sheet;
+#[path = "pipeline.rs"]
 mod pipeline;
+#[path = "split_view.rs"]
 mod split_view;
 
 use self::pipeline::PipelineWidget;
@@ -36,14 +40,14 @@ use super::{
         format_running_transcript_leaf, format_stalled_transcript_leaf, keymap,
     },
     models_area,
-    render_view_model::{
+    sheet::bottom_sheet_without_rule,
+    state::{
         guard_content, is_last_sibling, modal_accent_color, modal_title, skip_to_impl_content,
         spinner_frame, stage_error_content, status_highlight_bg,
     },
-    sheet::bottom_sheet_without_rule,
 };
 
-pub use super::render_view_model::sanitize_live_summary;
+pub use super::state::sanitize_live_summary;
 
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
@@ -508,6 +512,6 @@ impl App {
         }
     }
 }
-
 #[cfg(test)]
+#[path = "tests_mod.rs"]
 mod tests_mod;

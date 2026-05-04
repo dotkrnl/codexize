@@ -120,8 +120,7 @@ impl App {
         ) && self.state.block_origin == Some(crate::state::BlockOrigin::FinalValidation)
         {
             let width = self.body_inner_width.min(u16::MAX as usize) as u16;
-            for line in super::super::render_view_model::final_validation_block_banner_lines(width)
-            {
+            for line in super::super::state::final_validation_block_banner_lines(width) {
                 lines.push(PipelineLine {
                     line,
                     kind: PipelineLineKind::Other,
@@ -505,7 +504,7 @@ impl App {
         let Ok(verdict) = crate::final_validation::validate(&path) else {
             return Vec::new();
         };
-        super::super::render_view_model::final_validation_report_lines(&verdict, indent)
+        super::super::state::final_validation_report_lines(&verdict, indent)
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {

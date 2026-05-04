@@ -1,7 +1,7 @@
-pub use crate::ui::chat_widget;
-pub(crate) use crate::ui::chat_widget_view_model;
 pub use crate::ui::chrome;
 pub use crate::ui::clock;
+pub(crate) use crate::ui::widgets::chat::state as chat_widget_view_model;
+pub use crate::ui::widgets::chat::view as chat_widget;
 mod events;
 mod expansion;
 mod finalization;
@@ -10,14 +10,14 @@ pub use crate::ui::footer;
 pub(crate) mod guard;
 mod lifecycle;
 pub(crate) mod models;
-pub use crate::ui::models_area;
+pub use crate::ui::widgets::models_area::view as models_area;
 mod observation;
 pub(crate) use crate::ui::palette;
 mod prompt_render;
 pub(crate) mod prompts;
-mod render;
 mod review_banner;
-pub(crate) use crate::ui::render_view_model;
+pub(crate) use crate::ui::render::state as render_view_model;
+pub(crate) use crate::ui::render::view as render;
 pub use crate::ui::sheet;
 pub use crate::ui::split;
 mod state;
@@ -36,8 +36,8 @@ mod tests_prompts;
 mod tests_split_sync;
 #[cfg(test)]
 mod tests_yolo;
-pub(crate) use crate::ui::tree;
-mod watchdog;
+pub(crate) use crate::ui::widgets::tree::view as tree;
+pub(crate) mod watchdog;
 mod yolo_exit;
 
 pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
@@ -50,10 +50,8 @@ use crate::{
     state::{Message, Node, SessionState},
 };
 
-use self::{
-    state::ModelRefreshState,
-    tree::{NodeKey, VisibleNodeRow},
-};
+pub(crate) use self::state::ModelRefreshState;
+use self::tree::{NodeKey, VisibleNodeRow};
 
 use std::{
     cell::RefCell,

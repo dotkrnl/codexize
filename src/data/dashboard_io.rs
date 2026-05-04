@@ -5,8 +5,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-pub use crate::dashboard_view_model::synthesize_sibling;
-use crate::dashboard_view_model::{
+pub use crate::data::dashboard_model::synthesize_sibling;
+use crate::data::dashboard_model::{
     InventoryEntry, ScoreEntry, inv_only, merge_with_warnings, normalize_ipbr_key, scores_only,
 };
 use crate::selection::{IpbrPhaseScores, ScoreSource};
@@ -328,7 +328,7 @@ fn mean_present_phase_scores(scores: &IpbrPhaseScores) -> Option<f64> {
 
 #[cfg(test)]
 fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
-    use crate::dashboard_view_model::{value_to_f64, value_to_string};
+    use crate::data::dashboard_model::{value_to_f64, value_to_string};
 
     let data = payload.get("data").unwrap_or(payload);
     let model_scores = data
@@ -399,7 +399,7 @@ fn parse_dashboard_scores(payload: &Value) -> Result<Vec<ScoreEntry>> {
 #[cfg(test)]
 #[allow(clippy::type_complexity)]
 fn merged_axes(value: &Value) -> Option<(Vec<(String, f64)>, BTreeMap<String, String>)> {
-    let (axes, provenance, events) = crate::dashboard_view_model::merged_axes(value)?;
+    let (axes, provenance, events) = crate::data::dashboard_model::merged_axes(value)?;
     for event in events {
         match event {
             IngestEvent::AxisDropped { reason } => record_axis_dropped(&reason),
@@ -437,12 +437,12 @@ mod tests {
 
     fn fixture_cached_models() -> Vec<CachedModel> {
         let payload: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
+            "../../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
         ))
         .expect("fixture should be valid JSON");
         let pinned_phase_scores: BTreeMap<String, BTreeMap<String, f64>> =
             serde_json::from_str(include_str!(
-                "../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
+                "../../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
             ))
             .expect("post-change artifact should be valid JSON");
         parse_dashboard_scores(&payload)
@@ -546,7 +546,7 @@ mod tests {
     fn fixture_postchange_selection_probability_matches_artifact() {
         let snapshot = fixture_postchange_snapshot();
         let expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
+            "../../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
         ))
         .expect("post-change artifact should be valid JSON");
         let actual = serde_json::to_value(snapshot).unwrap();
@@ -601,7 +601,7 @@ mod tests {
         // unchanged as required by spec §4.2 / §8.
         let prechange: BTreeMap<String, BTreeMap<String, f64>> =
             serde_json::from_str(include_str!(
-                "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+                "../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
             ))
             .unwrap();
         let postchange = fixture_postchange_snapshot();
@@ -663,7 +663,7 @@ mod tests {
 
         let prechange: BTreeMap<String, BTreeMap<String, f64>> =
             serde_json::from_str(include_str!(
-                "../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+                "../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
             ))
             .unwrap();
         let postchange = fixture_postchange_snapshot();
@@ -727,7 +727,7 @@ mod tests {
 
     fn fixture_score_entries() -> Vec<ScoreEntry> {
         let payload: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
+            "../../tests/fixtures/aistupidlevel_2026-04-26_subset.json"
         ))
         .expect("fixture should be valid JSON");
         parse_dashboard_scores(&payload).expect("fixture should parse")
@@ -1123,7 +1123,7 @@ vendor = "google"
 
     #[test]
     fn normalize_ipbr_key_handles_punctuation_and_whitespace() {
-        use crate::dashboard_view_model::normalize_ipbr_key;
+        use crate::data::dashboard_model::normalize_ipbr_key;
         assert_eq!(normalize_ipbr_key("Claude Opus 4.1"), "claude-opus-4-1");
         assert_eq!(
             normalize_ipbr_key("anthropic/claude_opus"),

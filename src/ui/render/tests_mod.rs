@@ -3110,8 +3110,9 @@ fn final_validation_tree(run_id: u64) -> Vec<Node> {
 
 fn write_validation_artifact(session_id: &str, round: u32, body: &str) {
     let dir = crate::state::session_dir(session_id).join("artifacts");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(format!("final_validation_{round}.toml")), body).unwrap();
+    std /* test fixture IO */ ::fs::create_dir_all(&dir).unwrap();
+    std /* test fixture IO */ ::fs::write(dir.join(format!("final_validation_{round}.toml")), body)
+        .unwrap();
 }
 
 fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {

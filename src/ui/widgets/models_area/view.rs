@@ -22,14 +22,14 @@ use crate::selection::{
     ranking::{VersionIndex, candidate_pool_weights, phase_rank_score},
 };
 
-use super::models_area_view_model::{
+use super::state::{
     ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, ResetColumn, VERY_WIDE_THRESHOLD, choose_mode,
     format_name_with_freshness, name_budget_for, name_width_min, probability_color,
     probability_percent,
 };
 use crate::app::models::{vendor_color, vendor_prefix};
 
-pub use super::models_area_view_model::ModelsAreaMode;
+pub use super::state::ModelsAreaMode;
 
 /// Lines reserved by surrounding chrome before the models area:
 /// top rule (1) + bottom rule (1) + keymap (1) + pipeline body floor (8).
@@ -723,4 +723,5 @@ fn render_compact_quota(
 }
 
 #[cfg(test)]
+#[path = "tests_mod.rs"]
 mod tests_mod;

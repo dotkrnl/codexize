@@ -1,4 +1,4 @@
-use super::tree::VisibleNodeRow;
+use crate::app::tree::VisibleNodeRow;
 use crate::app::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
 use crate::tui::wrap_input;

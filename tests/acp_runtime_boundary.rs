@@ -43,22 +43,25 @@ fn startup_and_app_runtime_do_not_require_tmux() {
     );
 
     for path in [
-        "src/app/lifecycle.rs",
-        "src/app/finalization.rs",
+        "src/app/lifecycle",
+        "src/app/finalization",
         "src/app/prompts.rs",
         "src/app/yolo_exit.rs",
         "src/data/preflight.rs",
         "src/ui/preflight.rs",
     ] {
-        let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
-        assert!(
-            !text.contains("Command::new(\"tmux\")"),
-            "{path} should not shell out to tmux as an ACP runtime boundary"
-        );
-        assert!(
-            !text.contains("TmuxContext"),
-            "{path} should not require tmux context"
-        );
+        for (file, text) in collect_rust_sources(path) {
+            assert!(
+                !text.contains("Command::new(\"tmux\")"),
+                "{} should not shell out to tmux as an ACP runtime boundary",
+                file.display()
+            );
+            assert!(
+                !text.contains("TmuxContext"),
+                "{} should not require tmux context",
+                file.display()
+            );
+        }
     }
 }
 
@@ -66,17 +69,52 @@ fn startup_and_app_runtime_do_not_require_tmux() {
 fn acp_completion_does_not_use_shell_status_files() {
     for path in [
         "src/data/runner.rs",
-        "src/app/finalization.rs",
+        "src/app/finalization",
         "src/app/yolo_exit.rs",
     ] {
-        let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
-        assert!(
-            !text.contains("run-status"),
-            "{path} should not use shell-era run-status files"
-        );
-        assert!(
-            !text.contains("status_path"),
-            "{path} should not pass status files through ACP runtime boundaries"
-        );
+        for (file, text) in collect_rust_sources(path) {
+            assert!(
+                !text.contains("run-status"),
+                "{} should not use shell-era run-status files",
+                file.display()
+            );
+            assert!(
+                !text.contains("status_path"),
+                "{} should not pass status files through ACP runtime boundaries",
+                file.display()
+            );
+        }
     }
+}
+
+// Walks `path` when it points at a single .rs file, or every .rs under it
+// when it's a directory — handles both `src/app/foo.rs` and the submodule
+// layout `src/app/foo/{mod,...}.rs` produced by the orchestrator slice.
+fn collect_rust_sources(path: &str) -> Vec<(std::path::PathBuf, String)> {
+    let p = Path::new(path);
+    let mut out = Vec::new();
+    if p.is_file() {
+        let text = fs::read_to_string(p).unwrap_or_else(|err| panic!("{path}: {err}"));
+        out.push((p.to_path_buf(), text));
+        return out;
+    }
+    if p.is_dir() {
+        let mut stack = vec![p.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
+            {
+                let entry = entry.expect("dir entry");
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    stack.push(entry_path);
+                } else if entry_path.extension().map(|e| e == "rs").unwrap_or(false) {
+                    let text = fs::read_to_string(&entry_path)
+                        .unwrap_or_else(|err| panic!("{}: {err}", entry_path.display()));
+                    out.push((entry_path, text));
+                }
+            }
+        }
+        return out;
+    }
+    panic!("{path}: not a file or directory");
 }

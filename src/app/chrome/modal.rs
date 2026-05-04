@@ -15,6 +15,14 @@ pub fn render_modal_backdrop(frame: &mut Frame, area: Rect) {
     frame.render_widget(dim, area);
 }
 
+/// Shared modal width calculation so callers that pre-wrap body text can stay
+/// in lockstep with [`render_modal_overlay`].
+pub fn modal_inner_width(terminal_area: Rect) -> u16 {
+    let max_w = terminal_area.width.saturating_sub(4).max(1);
+    let dialog_w = max_w.min(80).max(max_w.min(40));
+    dialog_w.saturating_sub(2)
+}
+
 /// Render the centered modal panel: dark surface, bold accent border, accent
 /// bold title, body text in readable light gray, one blank separator row,
 /// and a keymap row that is layout-reserved (body yields rows when height is
@@ -32,8 +40,7 @@ pub fn render_modal_overlay(
 ) {
     let terminal_width = terminal_area.width;
     let terminal_height = terminal_area.height;
-    let max_w = terminal_width.saturating_sub(4).max(1);
-    let dialog_w = max_w.min(80).max(max_w.min(40));
+    let dialog_w = modal_inner_width(terminal_area).saturating_add(2);
     let content_h = content.len();
     let dialog_h = ((content_h + 5) as u16).min(terminal_height.saturating_sub(4));
     let dialog = Rect::new(

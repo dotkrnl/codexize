@@ -2055,6 +2055,80 @@ fn modal_dialog_uses_black_background_and_light_text() {
 }
 
 #[test]
+fn modal_border_and_title_use_accent_color_with_bold_modifier() {
+    let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+    app.state.current_phase = Phase::SpecReviewPaused;
+
+    let width = 100;
+    let height = 30;
+    let buf = render_full_frame_buf(&mut app, width, height);
+    let dialog = expected_dialog_rect(width, height, 1);
+
+    // Top-left corner cell carries the bold-cyan border style.
+    let corner = &buf[(dialog.x, dialog.y)];
+    assert_eq!(corner.symbol(), "┌");
+    assert_eq!(corner.fg, Color::Cyan);
+    assert!(corner.modifier.contains(Modifier::BOLD));
+
+    // The title spans, drawn into the top border row, share the accent.
+    let title_text = raw_line_text(&buf, dialog.y, width);
+    let title_start = title_text
+        .find("Spec review complete")
+        .expect("title rendered");
+    for offset in 0.."Spec review complete".len() {
+        let cell = &buf[((title_start + offset) as u16, dialog.y)];
+        assert_eq!(
+            cell.fg,
+            Color::Cyan,
+            "title char {:?} not cyan",
+            cell.symbol()
+        );
+        assert!(
+            cell.modifier.contains(Modifier::BOLD),
+            "title char {:?} not bold",
+            cell.symbol()
+        );
+    }
+}
+
+#[test]
+fn modal_drops_offset_shadow_in_favour_of_dim_backdrop() {
+    let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+    app.state.current_phase = Phase::SpecReviewPaused;
+
+    let width = 100;
+    let height = 30;
+    let buf = render_full_frame_buf(&mut app, width, height);
+    let dialog = expected_dialog_rect(width, height, 1);
+
+    // Cells just below and to the right of the dialog used to host a black
+    // offset shadow. With the redesign they should carry the dim backdrop
+    // background instead — never solid black.
+    let shadow_y = dialog.y + dialog.height;
+    if shadow_y < height {
+        for x in (dialog.x + 1)..(dialog.x + dialog.width).min(width) {
+            let cell = &buf[(x, shadow_y)];
+            assert_ne!(
+                cell.bg,
+                Color::Black,
+                "cell ({x},{shadow_y}) just below dialog should not be the old shadow"
+            );
+        }
+    }
+    let shadow_x = dialog.x + dialog.width;
+    if shadow_x < width {
+        for y in (dialog.y + 1)..(dialog.y + dialog.height).min(height) {
+            let cell = &buf[(shadow_x, y)];
+            assert_ne!(
+                cell.bg,
+                Color::Black,
+                "cell ({shadow_x},{y}) just right of dialog should not be the old shadow"
+            );
+        }
+    }
+}
+
+#[test]
 fn stage_error_modal_wraps_long_text_inside_centered_dialog() {
     let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
     app.state.current_phase = Phase::SpecReviewRunning;

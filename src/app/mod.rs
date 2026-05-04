@@ -62,8 +62,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-type RetryKey = (String, Option<u32>, u32);
-type FailedModelSet = HashSet<(VendorKind, String)>;
+pub(crate) type RetryKey = (String, Option<u32>, u32);
+pub(crate) type FailedModelSet = HashSet<(VendorKind, String)>;
 const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
 const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 const DEFAULT_EVENT_POLL_MS: u64 = 250;

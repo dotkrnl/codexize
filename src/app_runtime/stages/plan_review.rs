@@ -1,3 +1,5 @@
+use crossterm::event::{KeyCode, KeyEvent};
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::prompts::plan_review_prompt;
@@ -139,6 +141,30 @@ impl App {
                 self.record_agent_error(format!("failed to launch plan review: {err}"));
                 false
             }
+        }
+    }
+}
+
+impl App {
+    /// Modal handler for the "plan review paused — accept verdict?" prompt.
+    /// Co-located with the plan-review launch so the stage's launch and
+    /// pause-modal behavior live in one file.
+    pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                self.clear_agent_error();
+                self.queue_view_of_current_artifact("plan.md");
+                let _ = self.transition_to_phase(Phase::ShardingRunning);
+                false
+            }
+            KeyCode::Char('n') => {
+                let _ = self.transition_to_phase(Phase::PlanReviewRunning);
+                self.launch_plan_review();
+                false
+            }
+            // Consume all other keys so the UI is genuinely modal.
+            _ => false,
         }
     }
 }

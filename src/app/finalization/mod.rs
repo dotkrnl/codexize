@@ -12,7 +12,7 @@ use crate::{
         selection::SelectionWarning,
     },
     state::{
-        self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus, SessionState,
+        self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus,
     },
     tasks,
 };

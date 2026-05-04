@@ -13,6 +13,7 @@
 
 mod brainstorm;
 mod coder;
+mod dispatch;
 mod final_validation;
 mod plan_review;
 mod planning;
@@ -33,8 +34,7 @@ use crate::{
         selection::{pick_for_phase_with_effort, select_for_review_with_effort},
     },
     state::{
-        self as session_state, LaunchModes, Message, MessageKind, MessageSender, Phase,
-        SessionState,
+        self as session_state, LaunchModes, Message, MessageKind, MessageSender, SessionState,
     },
 };
 
@@ -254,40 +254,6 @@ impl App {
                 .find(|item| item.stage == "recovery" && item.round == Some(round))
                 .and_then(|item| item.interactive)
                 .unwrap_or(false),
-            _ => false,
-        }
-    }
-
-    pub(crate) fn launch_retry_for_stage(
-        &mut self,
-        failed_run: &crate::state::RunRecord,
-        chosen: CachedModel,
-    ) -> bool {
-        match failed_run.stage.as_str() {
-            "brainstorm" => {
-                let Some(idea) = self.state.idea_text.clone() else {
-                    return false;
-                };
-                self.launch_brainstorm_with_model(idea, Some(chosen))
-            }
-            "spec-review" => self.launch_spec_review_with_model(Some(chosen)),
-            "planning" => self.launch_planning_with_model(Some(chosen), true),
-            "plan-review" => match self.state.current_phase {
-                Phase::BuilderRecoveryPlanReview(_) => {
-                    self.launch_recovery_plan_review_with_model(Some(chosen))
-                }
-                _ => self.launch_plan_review_with_model(Some(chosen)),
-            },
-            "sharding" => match self.state.current_phase {
-                Phase::BuilderRecoverySharding(_) => {
-                    self.launch_recovery_sharding_with_model(Some(chosen))
-                }
-                _ => self.launch_sharding_with_model(Some(chosen)),
-            },
-            "recovery" => self.launch_recovery_with_model(Some(chosen)),
-            "coder" => self.launch_coder_with_model(Some(chosen)),
-            "reviewer" => self.launch_reviewer_with_model(Some(chosen)),
-            "simplifier" => self.launch_simplifier_with_model(Some(chosen)),
             _ => false,
         }
     }

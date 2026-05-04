@@ -348,18 +348,10 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Enter => {
-                match stage_id {
-                    StageId::Brainstorm => {
-                        let idea = self.state.idea_text.clone().unwrap_or_default();
-                        self.launch_brainstorm(idea);
-                    }
-                    StageId::SpecReview => self.launch_spec_review(),
-                    StageId::Planning => self.launch_planning(),
-                    StageId::PlanReview => self.launch_plan_review(),
-                    StageId::Sharding => self.launch_sharding(),
-                    StageId::Implementation => self.launch_coder(),
-                    StageId::Review => self.launch_reviewer(),
-                }
+                // Dispatch routes through `app_runtime::stages` so the modal
+                // handler only carries the keybinding contract; per-stage
+                // launch wiring stays co-located with each stage module.
+                self.launch_retry_for_stage_id(stage_id);
                 false
             }
             KeyCode::Char('e') if stage_id == StageId::Brainstorm => {

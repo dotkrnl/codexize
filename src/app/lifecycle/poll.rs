@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use crate::app::{App, AppStartupOrigin, ObservedPathState, RetryLaunch, split::SplitTarget};
-use crate::state::{MessageKind, Phase, SessionState};
+use crate::app::{App, ObservedPathState, split::SplitTarget};
+use crate::state::{MessageKind, SessionState};
 
 impl App {
     pub(crate) fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
@@ -54,38 +54,6 @@ impl App {
         let _stalled = self
             .agent_last_change
             .map(|last| now.duration_since(last) >= Duration::from_secs(30));
-    }
-
-    /// Auto-launch the agent for the current phase if it's a non-interactive
-    /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
-    /// run is already launched, if models aren't loaded, or if the last run
-    /// errored (user needs to intervene).
-    pub(crate) fn maybe_auto_launch(&mut self) {
-        if self.startup_origin == AppStartupOrigin::PickerCreated {
-            return;
-        }
-        if self.run_launched || self.state.agent_error.is_some() || self.models.is_empty() {
-            return;
-        }
-        match self.state.current_phase {
-            Phase::BrainstormRunning => {
-                if let Some(idea) = self.state.idea_text.clone() {
-                    self.launch_brainstorm(idea);
-                }
-            }
-            Phase::SpecReviewRunning => self.launch_spec_review(),
-            Phase::PlanningRunning => self.launch_planning(),
-            Phase::PlanReviewRunning => self.launch_plan_review(),
-            Phase::ShardingRunning => self.launch_sharding(),
-            Phase::ImplementationRound(_) => self.launch_coder(),
-            Phase::ReviewRound(_) => self.launch_reviewer(),
-            Phase::BuilderRecovery(_) => self.launch_recovery(),
-            Phase::BuilderRecoveryPlanReview(_) => self.launch_recovery_plan_review(),
-            Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
-            Phase::Simplification(_) => self.launch_simplifier(),
-            Phase::FinalValidation(_) => self.launch_final_validation(),
-            _ => {}
-        }
     }
 
     pub(crate) fn poll_agent_run(&mut self) {
@@ -153,21 +121,4 @@ impl App {
         self.rebuild_tree_view(None);
     }
 
-    pub(crate) fn launch_retry_from_descriptor(&mut self, retry: RetryLaunch) {
-        match retry {
-            RetryLaunch::Brainstorm => {
-                let idea = self.state.idea_text.clone().unwrap_or_default();
-                self.launch_brainstorm(idea);
-            }
-            RetryLaunch::SpecReview => self.launch_spec_review(),
-            RetryLaunch::Planning => self.launch_planning(),
-            RetryLaunch::PlanReview => self.launch_plan_review(),
-            RetryLaunch::Sharding => self.launch_sharding(),
-            RetryLaunch::Recovery => self.launch_recovery(),
-            RetryLaunch::RecoveryPlanReview => self.launch_recovery_plan_review(),
-            RetryLaunch::RecoverySharding => self.launch_recovery_sharding(),
-            RetryLaunch::Coder => self.launch_coder(),
-            RetryLaunch::Reviewer => self.launch_reviewer(),
-        }
-    }
 }

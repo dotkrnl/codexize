@@ -63,8 +63,8 @@ workspace issues unrelated to the goal. Items in `## Out of scope` are
 never gaps.
 
 Outputs (the ONLY two paths you may Write):
-  - fixture/session/rounds/003/final_validation_3.toml — the verdict TOML.
-  - fixture/session/artifacts/live_summary.txt — the live progress summary (rules below).
+  - /tmp/codexize-prompt-fixture/session/rounds/003/final_validation_3.toml — the verdict TOML.
+  - /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt — the live progress summary (rules below).
 
 Verdict TOML schema (validated programmatically; parse failure or schema
 violation = run failure):
@@ -107,4 +107,4 @@ Hard rules (override any default skill behavior):
     — when the verdict is written, STOP and exit.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

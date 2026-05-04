@@ -8,11 +8,11 @@ than you — a fresh pair of eyes that notices different things. Take the
 extra moment on edge cases and clarity so the review goes smoothly.
 
 Inputs:
-  Task:  fixture/session/rounds/003/task.toml   (what to do, test steps, line refs into spec/plan)
-  Spec:  fixture/session/artifacts/spec.md
-  Plan:  fixture/session/artifacts/plan.md
+  Task:  /tmp/codexize-prompt-fixture/session/rounds/003/task.toml   (what to do, test steps, line refs into spec/plan)
+  Spec:  /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  Plan:  /tmp/codexize-prompt-fixture/session/artifacts/plan.md
 
-Previous reviewer feedback (round 2): fixture/session/rounds/002/review.toml
+Previous reviewer feedback (round 2): /tmp/codexize-prompt-fixture/session/rounds/002/review.toml
 Reviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.
 
 Refine carryover from prior task's reviewer (apply opportunistically — these are nice-to-haves, not blockers):
@@ -68,7 +68,7 @@ Hard rules:
     tree dirty is a hard failure regardless of test/lint state.
   - No force-push, no history rewrite, no branch deletes.
 
-Before exiting, write `fixture/session/rounds/003/coder_summary.toml` in this exact TOML shape (REQUIRED):
+Before exiting, write `/tmp/codexize-prompt-fixture/session/rounds/003/coder_summary.toml` in this exact TOML shape (REQUIRED):
     status       = "done" | "partial"      # "partial" makes the run retry
     summary      = "One short paragraph of what you completed."
     rebuttal     = ["[Round N, Item M] Response to prior reviewer feedback."]
@@ -80,4 +80,4 @@ with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

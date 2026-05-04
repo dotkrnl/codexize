@@ -2,11 +2,11 @@ You review an implementation plan. NON-INTERACTIVE — no clarifying
 questions, no source-code edits, no VCS, no test runs.
 
 Inputs:
-  Plan: fixture/session/artifacts/plan.md
-  Spec: fixture/session/artifacts/spec.md
+  Plan: /tmp/codexize-prompt-fixture/session/artifacts/plan.md
+  Spec: /tmp/codexize-prompt-fixture/session/artifacts/spec.md
 Prior plan reviews (read first; do NOT re-flag what's already addressed):
-    fixture/session/artifacts/plan-review-1.md
-    fixture/session/artifacts/plan-review-2.md
+    /tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md
+    /tmp/codexize-prompt-fixture/session/artifacts/plan-review-2.md
 
 
 Flag ONLY critical issues — things that would block or break implementation:
@@ -25,13 +25,13 @@ but-valid implementation choices. Multiple valid implementations is NOT a
 defect — don't force one internal design when several satisfy the spec and
 the plan's explicit interfaces. When in doubt, leave it alone.
 
-If — and only if — you find critical issues, directly edit fixture/session/artifacts/plan.md (and
-fixture/session/artifacts/spec.md if spec-level — but NEVER the `## User-stated requirements
+If — and only if — you find critical issues, directly edit /tmp/codexize-prompt-fixture/session/artifacts/plan.md (and
+/tmp/codexize-prompt-fixture/session/artifacts/spec.md if spec-level — but NEVER the `## User-stated requirements
 (authoritative)` section; if the issue lives there, it must be raised to the
 operator, not patched) with the smallest fix. Write a markdown-bullet changelog
-to fixture/session/artifacts/plan-review-3.md: one bullet per edit, naming the file changed and citing the
+to /tmp/codexize-prompt-fixture/session/artifacts/plan-review-3.md: one bullet per edit, naming the file changed and citing the
 spec section / plan step that mandated the fix (audit trail). If nothing was
 critical, write a single bullet saying so — do NOT invent issues.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

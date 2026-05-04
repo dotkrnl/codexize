@@ -7,10 +7,10 @@ trail.
 
 Your job is to repair builder artifacts so orchestration can reconcile and
 resume. You may edit ONLY:
-  - fixture/session/artifacts/spec.md
-  - fixture/session/artifacts/plan.md
-  - fixture/session/artifacts/tasks.toml
-  - fixture/session/rounds/001/recovery.toml
+  - /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  - /tmp/codexize-prompt-fixture/session/artifacts/plan.md
+  - /tmp/codexize-prompt-fixture/session/artifacts/tasks.toml
+  - /tmp/codexize-prompt-fixture/session/rounds/001/recovery.toml
 
 Context from orchestrator:
   - Triggering task id: 7
@@ -33,7 +33,7 @@ Hard requirements:
         ## Recovery Notes
         - Task 7 superseded: original approach (X) violated spec §3 after
           reviewer flagged Y. Replaced by tasks 9-10.
-  - Write `fixture/session/rounds/001/recovery.toml` as TOML in this exact shape:
+  - Write `/tmp/codexize-prompt-fixture/session/rounds/001/recovery.toml` as TOML in this exact shape:
         status        = "approved" | "revise"           # what the recovery did
         trigger       = "human_blocked" | "agent_pivot" # next recovery trigger;
                                                         # use human_blocked when
@@ -45,4 +45,4 @@ Hard requirements:
                                                         # paths you actually edited (audit trail)
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

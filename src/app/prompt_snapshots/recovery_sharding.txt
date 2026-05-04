@@ -6,8 +6,8 @@ Heads up: your tasks.toml feeds coders and reviewers from DIFFERENT model
 vendors than you — bring care to the descriptions and refs.
 
 Inputs:
-  - Spec: fixture/session/artifacts/spec.md
-  - Plan: fixture/session/artifacts/plan.md
+  - Spec: /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  - Plan: /tmp/codexize-prompt-fixture/session/artifacts/plan.md
 
 Read any `## Recovery Notes` sections in spec/plan FIRST — they list
 superseded task ids and the reasons; don't re-create work that was
@@ -40,7 +40,7 @@ Difficulty:
     leave it false — the system routes extra compute to tough tasks, so
     over-marking wastes budget.
 
-Output: write fixture/session/artifacts/tasks.toml as TOML in this shape. No prose around it.
+Output: write /tmp/codexize-prompt-fixture/session/artifacts/tasks.toml as TOML in this shape. No prose around it.
 Validated programmatically; missing/empty fields or ids ≤ 5
 cause rejection.
 
@@ -59,4 +59,4 @@ cause rejection.
     plan_refs = [{ path = "artifacts/plan.md", lines = "22-60" }]
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

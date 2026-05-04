@@ -5,15 +5,15 @@ Heads up: the coder you're reviewing is from a DIFFERENT model vendor — bring
 fresh eyes, that's the whole point of pairing.
 
 Inputs:
-  Task:         fixture/session/rounds/003/task.toml
-  Spec:         fixture/session/artifacts/spec.md
-  Plan:         fixture/session/artifacts/plan.md
-  Review scope: fixture/session/rounds/003/review_scope.toml (TOML with base_sha = HEAD at round start)
+  Task:         /tmp/codexize-prompt-fixture/session/rounds/003/task.toml
+  Spec:         /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  Plan:         /tmp/codexize-prompt-fixture/session/artifacts/plan.md
+  Review scope: /tmp/codexize-prompt-fixture/session/rounds/003/review_scope.toml (TOML with base_sha = HEAD at round start)
   Prior reviews for this task (read first; do not repeat their feedback):
-    fixture/session/rounds/001/review.toml
-    fixture/session/rounds/002/review.toml
+    /tmp/codexize-prompt-fixture/session/rounds/001/review.toml
+    /tmp/codexize-prompt-fixture/session/rounds/002/review.toml
 
-  Coder summary: fixture/session/rounds/003/coder_summary.toml
+  Coder summary: /tmp/codexize-prompt-fixture/session/rounds/003/coder_summary.toml
   Coder rebuttal (round 3):
     Read it before your verdict.
     If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.
@@ -21,7 +21,7 @@ Inputs:
 
 
 Review:
-  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' fixture/session/rounds/003/review_scope.toml)
+  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' /tmp/codexize-prompt-fixture/session/rounds/003/review_scope.toml)
      `git log --oneline $BASE..HEAD` — every commit in this round.
      `git diff $BASE..HEAD`           — aggregate change.
      `git show <sha>`                 — drill into any commit.
@@ -42,7 +42,7 @@ Review:
      review only `base..HEAD`.
 
 
-# IMPORTANT: emit ONLY the TOML below to fixture/session/rounds/003/review.toml — no prose around it.
+# IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/rounds/003/review.toml — no prose around it.
 # Parse failure = run failure. Use double-quoted strings; triple-quoted for
 # multi-line; arrays of inline tables for any new_task refs.
 
@@ -86,4 +86,4 @@ Rules:
     without good reason — in which case call that out explicitly.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

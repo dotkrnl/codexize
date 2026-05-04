@@ -30,7 +30,7 @@ Operator IS available for design questions — interrogate them on ambiguities,
 scope, and trade-offs BEFORE drafting. The "stop and exit" rule below covers
 stage-transition asks only, not design clarifications.
 
-Authoritative user input — at the top of fixture/session/artifacts/spec.md, write a section titled
+Authoritative user input — at the top of /tmp/codexize-prompt-fixture/session/artifacts/spec.md, write a section titled
 exactly:
 
     ## User-stated requirements (authoritative)
@@ -49,9 +49,9 @@ Spec structure reminder — include this stub exactly, even if it stays empty:
          You must not silently invent exclusions. If you are uncertain whether something is in or out of scope, ask instead of deciding silently. -->
 
 Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
-  1. fixture/session/artifacts/spec.md — the design doc. Start with a TL;DR (3–6 bullets a lazy
+  1. /tmp/codexize-prompt-fixture/session/artifacts/spec.md — the design doc. Start with a TL;DR (3–6 bullets a lazy
      reader can skim in 30 sec), then the full spec.
-  2. fixture/session/artifacts/session_summary.toml — TOML with `title = "<≤80 chars naming the actual
+  2. /tmp/codexize-prompt-fixture/session/artifacts/session_summary.toml — TOML with `title = "<≤80 chars naming the actual
      change, e.g. 'Add Kimi adapter min-quota fallback'>"`. Avoid generic
      labels ("Refactor", "New feature", "Update files in src/"). Required,
      even when proposing one of the escape hatches below.
@@ -59,7 +59,7 @@ Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
 Optional escape hatches (RARE — when in doubt, omit and let the normal
 spec-review → planning → sharding pipeline run):
 
-  • Skip-to-impl: write artifacts/skip_proposal.toml as TOML:
+  • Skip-to-impl: write /tmp/codexize-prompt-fixture/session/artifacts/skip_proposal.toml as TOML:
         proposed  = true
         status    = "skip_to_impl"
         rationale = "<≤500 chars why>"
@@ -72,8 +72,8 @@ spec-review → planning → sharding pipeline run):
 
   • Nothing-to-do: when there is genuinely nothing to implement (already in
     place, invalid premise, pure question). Still required:
-      - fixture/session/artifacts/spec.md — one short paragraph explaining why nothing is needed.
-      - artifacts/skip_proposal.toml as TOML:
+      - /tmp/codexize-prompt-fixture/session/artifacts/spec.md — one short paragraph explaining why nothing is needed.
+      - /tmp/codexize-prompt-fixture/session/artifacts/skip_proposal.toml as TOML:
             proposed  = true
             status    = "nothing_to_do"
             rationale = "<≤500 chars why>"
@@ -92,4 +92,5 @@ operator to enter `/exit` if they have no further comments. While you are
 still waiting for the operator's input, never include this cue.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. Keep this file current until you exit.
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. Keep this file current until you exit.
+

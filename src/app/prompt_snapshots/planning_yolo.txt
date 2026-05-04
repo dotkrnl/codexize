@@ -26,10 +26,10 @@ invoke a skill. The instructions in this prompt are complete and
 authoritative for this run.
 
 Inputs:
-  Spec:    fixture/session/artifacts/spec.md
+  Spec:    /tmp/codexize-prompt-fixture/session/artifacts/spec.md
   Reviews:
-  - review 1: artifacts/spec-review-1.md
-  - review 2: artifacts/spec-review-2.md
+  - review 1: /tmp/codexize-prompt-fixture/session/artifacts/spec-review-1.md
+  - review 2: /tmp/codexize-prompt-fixture/session/artifacts/spec-review-2.md
 
 Triage reviews first. They may contradict each other AND are written by AI
 agents — be skeptical, accept only what genuinely improves the spec or plan,
@@ -38,10 +38,10 @@ confidence, resolve it yourself per the trust preamble above and choose the
 approach that best satisfies the spec.
 
 Once trade-offs are resolved, do TWO things IN THIS ORDER:
-  1. UPDATE fixture/session/artifacts/spec.md in place to reflect every accepted decision. If you change
+  1. UPDATE /tmp/codexize-prompt-fixture/session/artifacts/spec.md in place to reflect every accepted decision. If you change
      the body, also update its TL;DR so the two stay consistent — an agent
      reading ONLY the spec must not be surprised by anything in the plan.
-  2. Write fixture/session/artifacts/plan.md starting with a TL;DR (3–6 bullets summarising key
+  2. Write /tmp/codexize-prompt-fixture/session/artifacts/plan.md starting with a TL;DR (3–6 bullets summarising key
      sequencing/interface decisions, skimmable in 30 sec), then the body.
 
 Plan shape: an execution map for coordination — sequencing & dependencies
@@ -66,4 +66,4 @@ Hard rules:
     transitions.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

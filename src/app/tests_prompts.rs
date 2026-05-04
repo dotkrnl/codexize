@@ -306,10 +306,12 @@ fn review_prompts_protect_authoritative_user_requirements() {
 
 #[test]
 fn live_summary_instruction_requires_immediate_creation_and_current_updates() {
-    let path = std::path::Path::new("artifacts/live_summary.test.txt");
+    let path =
+        std::path::Path::new("/tmp/codexize-live-summary-test/artifacts/live_summary.test.txt");
     let prompt = live_summary_instruction(path);
+    let expected = path.display().to_string();
 
-    assert!(prompt.contains("Immediately create artifacts/live_summary.test.txt"));
+    assert!(prompt.contains(&format!("Immediately create {expected}")));
     assert!(prompt.contains("every 2–3 min and on each sub-goal change"));
     assert!(prompt.contains("Keep this file current until you exit."));
 }
@@ -396,12 +398,162 @@ fn final_validation_prompt_embeds_idea_spec_and_precedence_rules() {
 
 #[test]
 fn interactive_live_summary_instruction_requires_immediate_creation() {
-    let path = std::path::Path::new("artifacts/live_summary.interactive.txt");
+    let path = std::path::Path::new(
+        "/tmp/codexize-live-summary-test/artifacts/live_summary.interactive.txt",
+    );
     let prompt = live_summary_instruction_interactive(path);
+    let expected = path.display().to_string();
 
-    assert!(prompt.contains("Immediately create artifacts/live_summary.interactive.txt"));
+    assert!(prompt.contains(&format!("Immediately create {expected}")));
     assert!(prompt.contains("every 2–3 min"));
     assert!(prompt.contains("Keep this file current until you exit."));
+}
+
+#[test]
+fn agent_prompt_paths_are_rendered_as_absolute_paths() {
+    use std::path::{Path, PathBuf};
+
+    with_temp_root_and_cwd(|_root| {
+        let cwd = std::env::current_dir().unwrap();
+        let session_dir = PathBuf::from("fixture/session");
+        let artifacts = session_dir.join("artifacts");
+        let round1 = session_dir.join("rounds/001");
+        let round2 = session_dir.join("rounds/002");
+        let round3 = session_dir.join("rounds/003");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::create_dir_all(&round1).unwrap();
+        std::fs::create_dir_all(&round2).unwrap();
+        std::fs::create_dir_all(&round3).unwrap();
+        std::fs::write(round2.join("review.toml"), "status = \"refine\"\n").unwrap();
+
+        let spec = artifacts.join("spec.md");
+        let plan = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let summary = artifacts.join("session_summary.toml");
+        let live = artifacts.join("live_summary.txt");
+        let recovery = round1.join("recovery.toml");
+        let task_file = round3.join("task.toml");
+        let review_scope = round3.join("review_scope.toml");
+        let review = round3.join("review.toml");
+        let simplification = round3.join("simplification.toml");
+        let spec_review = artifacts.join("spec-review-1.md");
+        let plan_review = artifacts.join("plan-review-3.md");
+        let final_verdict = round3.join("final_validation_3.toml");
+
+        let prompts = vec![
+            live_summary_instruction(Path::new("artifacts/live_summary.txt")),
+            live_summary_instruction_interactive(Path::new(
+                "artifacts/live_summary.interactive.txt",
+            )),
+            spec_review_prompt(
+                &spec.display().to_string(),
+                &spec_review.display().to_string(),
+                &live.display().to_string(),
+            ),
+            plan_review_prompt(
+                &spec.display().to_string(),
+                &plan.display().to_string(),
+                &plan_review.display().to_string(),
+                3,
+                &live.display().to_string(),
+            ),
+            brainstorm_prompt(
+                "path rendering check",
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                None,
+                false,
+            ),
+            brainstorm_prompt(
+                "path rendering check",
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                None,
+                true,
+            ),
+            planning_prompt(
+                &spec,
+                &[PathBuf::from("artifacts/spec-review-1.md")],
+                &plan,
+                &live,
+                false,
+            ),
+            planning_prompt(
+                &spec,
+                &[PathBuf::from("artifacts/spec-review-1.md")],
+                &plan,
+                &live,
+                true,
+            ),
+            sharding_prompt(&spec, &plan, &tasks_path, &live),
+            final_validation_prompt(
+                "idea",
+                "# Spec\n",
+                &final_verdict,
+                &live,
+                Some(&simplification),
+            ),
+            recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2],
+                &[1, 2, 3],
+                &live,
+                &recovery,
+                true,
+            ),
+            recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2],
+                &[1, 2, 3],
+                &live,
+                &recovery,
+                false,
+            ),
+            recovery_plan_review_prompt(&spec, &plan, &review, &recovery, &live, &plan_review),
+            recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
+            coder_prompt(&session_dir, 7, 3, &task_file, &live, true, &[]),
+            reviewer_prompt(ReviewerPromptInputs {
+                session_dir: &session_dir,
+                task_id: 7,
+                round: 3,
+                task_file: &task_file,
+                review_scope_file: &review_scope,
+                coder_summary_file: Some(&round3.join("coder_summary.toml")),
+                review_file: &review,
+                live_summary_path: &live,
+            }),
+            simplifier_prompt(&session_dir, &review_scope, &simplification, &live),
+        ];
+
+        let cwd_str = cwd.to_string_lossy();
+        for prompt in prompts {
+            assert!(
+                prompt.contains(cwd_str.as_ref()),
+                "prompt should contain resolved absolute artifact paths:\n{prompt}"
+            );
+            assert!(
+                !prompt.contains(" fixture/session/")
+                    && !prompt.contains(": fixture/session/")
+                    && !prompt.contains("Immediately create artifacts/")
+                    && !prompt.contains("Immediately create fixture/"),
+                "prompt should not expose relative agent path inputs:\n{prompt}"
+            );
+            assert!(
+                !prompt.contains("write artifacts/skip_proposal.toml"),
+                "brainstorm skip-proposal output path should be absolute:\n{prompt}"
+            );
+        }
+    });
 }
 
 #[test]
@@ -731,11 +883,10 @@ fn assert_prompt_snapshot(name: &str, actual: &str) {
 fn prompt_snapshots_match_fixtures() {
     use std::path::{Path, PathBuf};
     with_temp_root_and_cwd(|_root| {
-        // Use stable, *relative* path strings so every snapshot is
-        // byte-deterministic across runs. The test cwd is a tempdir, so
-        // these resolve to a per-run sandbox; the rendered prompt only
-        // embeds the relative-path text, which is identical across runs.
-        let session_dir = PathBuf::from("fixture/session");
+        // Use stable absolute path strings so every snapshot is
+        // byte-deterministic across runs while matching production prompt
+        // behavior: agents always receive full resolved artifact paths.
+        let session_dir = PathBuf::from("/tmp/codexize-prompt-fixture/session");
         let artifacts = session_dir.join("artifacts");
         let round1 = session_dir.join("rounds/001");
         let round3 = session_dir.join("rounds/003");
@@ -764,12 +915,12 @@ fn prompt_snapshots_match_fixtures() {
         // Live summary instructions (the smallest templates).
         assert_prompt_snapshot(
             "live_summary",
-            &live_summary_instruction(Path::new("artifacts/live_summary.txt")),
+            &live_summary_instruction(&session_dir.join("artifacts/live_summary.txt")),
         );
         assert_prompt_snapshot(
             "live_summary_interactive",
             &live_summary_instruction_interactive(Path::new(
-                "artifacts/live_summary.interactive.txt",
+                "/tmp/codexize-prompt-fixture/session/artifacts/live_summary.interactive.txt",
             )),
         );
 
@@ -835,8 +986,8 @@ fn prompt_snapshots_match_fixtures() {
         // Planning: yolo and interactive, both with two prior spec reviews
         // to exercise the reviews block.
         let spec_reviews = vec![
-            PathBuf::from("artifacts/spec-review-1.md"),
-            PathBuf::from("artifacts/spec-review-2.md"),
+            artifacts.join("spec-review-1.md"),
+            artifacts.join("spec-review-2.md"),
         ];
         assert_prompt_snapshot(
             "planning_interactive",

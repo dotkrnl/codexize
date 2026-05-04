@@ -294,15 +294,13 @@ pub(super) fn plan_review_prompt(
     )
 }
 
-/// Builds the brainstorm-stage prompt. The `package_path` parameter is kept
-/// in the signature for caller stability but is no longer consulted — the
-/// prompt embeds the workflow inline and explicitly refuses to invoke skills.
+/// Builds the brainstorm-stage prompt. The prompt embeds the workflow inline
+/// and explicitly refuses to invoke skills.
 pub(super) fn brainstorm_prompt(
     idea: &str,
     spec_path: &str,
     summary_path: &str,
     live_summary_path: &str,
-    _package_path: Option<&std::path::Path>,
     yolo: bool,
 ) -> String {
     let project_doc_instr = project_doc_instr();

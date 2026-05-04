@@ -462,7 +462,6 @@ fn agent_prompt_paths_are_rendered_as_absolute_paths() {
                 &spec.display().to_string(),
                 &summary.display().to_string(),
                 &live.display().to_string(),
-                None,
                 false,
             ),
             brainstorm_prompt(
@@ -470,7 +469,6 @@ fn agent_prompt_paths_are_rendered_as_absolute_paths() {
                 &spec.display().to_string(),
                 &summary.display().to_string(),
                 &live.display().to_string(),
-                None,
                 true,
             ),
             planning_prompt(
@@ -572,24 +570,15 @@ fn brainstorm_prompts_drop_skill_invocation_and_carry_no_skill_clause() {
                 &spec_path.display().to_string(),
                 &summary_path.display().to_string(),
                 &live_summary.display().to_string(),
-                None,
                 yolo,
-            );
-            assert!(
-                !prompt.contains("Invoke your brainstorming skill"),
-                "old skill-invocation line must be gone"
-            );
-            assert!(
-                !prompt.contains("Use that installed package for brainstorming."),
-                "old package-path plumbing must be gone"
             );
             assert!(
                 prompt.contains("Do not invoke any skill"),
                 "embedded prompt must explicitly forbid harness skills"
             );
             assert!(
-                prompt.contains("brainstorming\nskill, writing-plans skill, or any other"),
-                "no-skill clause must enumerate the affected skills"
+                prompt.contains("Skill tool, `superpowers:*` skill, or any\nother"),
+                "no-skill clause must remain generic and self-contained"
             );
             assert!(
                 prompt.contains("verify the brainstorm prompt removed the legacy skill plumbing"),
@@ -620,8 +609,8 @@ fn planning_prompts_drop_skill_invocation_and_carry_no_skill_clause() {
             "planner prompt must carry the no-skill clause"
         );
         assert!(
-            prompt.contains("writing-plans skill, or any other"),
-            "no-skill clause must enumerate writing-plans"
+            prompt.contains("Skill tool, `superpowers:*` skill, or any\nother"),
+            "no-skill clause must remain generic and self-contained"
         );
         assert!(prompt.contains("artifacts/spec-review-1.md"));
         assert!(prompt.contains("artifacts/spec-review-2.md"));
@@ -751,7 +740,6 @@ fn every_prompt_builder_renders_without_unbound_placeholders() {
                 &spec.display().to_string(),
                 &summary.display().to_string(),
                 &live.display().to_string(),
-                None,
                 yolo,
             );
             let _ = planning_prompt(
@@ -967,7 +955,6 @@ fn prompt_snapshots_match_fixtures() {
                 &spec.display().to_string(),
                 &summary.display().to_string(),
                 &live.display().to_string(),
-                None,
                 false,
             ),
         );
@@ -978,7 +965,6 @@ fn prompt_snapshots_match_fixtures() {
                 &spec.display().to_string(),
                 &summary.display().to_string(),
                 &live.display().to_string(),
-                None,
                 true,
             ),
         );

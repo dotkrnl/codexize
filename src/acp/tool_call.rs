@@ -132,12 +132,16 @@ impl ToolCallDisplayState {
 pub(super) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,
     insertion_order: VecDeque<String>,
+    // Watchdog Start/Finish dedup is monotonic for the lifetime of the session
+    // (a session corresponds to one managed-ACP run). Once a Start has been
+    // emitted for an id, no later payload — including a repeated `tool_call`
+    // that re-creates the display entry under the same id — may emit another
+    // Start. Same one-shot rule applies to Finish. This intentionally diverges
+    // from the display-side `entries` map, which is allowed to overwrite on
+    // id reuse: the activity stream feeds a per-run state machine that must
+    // never double-count pause windows or pause-resume transitions.
     terminal_emitted: BTreeMap<String, ()>,
     terminal_order: VecDeque<String>,
-    // Tracks `ToolCallActivity::Start` emission so a `tool_call` followed by
-    // any number of non-terminal `tool_call_update`s yields exactly one
-    // Start. Bounded with the same FIFO/cap discipline as `terminal_emitted`
-    // so a pathological agent cannot grow this set unbounded.
     start_emitted: BTreeMap<String, ()>,
     start_order: VecDeque<String>,
 }
@@ -157,16 +161,17 @@ impl ToolCallMap {
         self.entries.get(id)
     }
 
-    /// Insert or replace state for `id`. A reused id is treated as a fresh
-    /// invocation: the previous entry is dropped and the new one takes the
-    /// most-recent FIFO slot. When the map is at the 256-entry cap, the
-    /// oldest entry is dropped first.
+    /// Insert or replace display state for `id`. A reused id is treated as a
+    /// fresh invocation for display purposes: the previous entry is dropped
+    /// and the new one takes the most-recent FIFO slot. When the map is at
+    /// the 256-entry cap, the oldest entry is dropped first.
+    ///
+    /// Watchdog `start_emitted` / `terminal_emitted` markers are intentionally
+    /// **not** cleared here; see the field comment above for why.
     pub(super) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() {
             self.insertion_order.retain(|existing| existing != &id);
         }
-        self.clear_terminal_emitted(&id);
-        self.clear_start_emitted(&id);
         while self.insertion_order.len() >= TOOL_CALL_MAP_CAP {
             let Some(oldest) = self.insertion_order.pop_front() else {
                 break;
@@ -213,12 +218,6 @@ impl ToolCallMap {
         self.start_emitted.contains_key(id)
     }
 
-    fn clear_start_emitted(&mut self, id: &str) {
-        if self.start_emitted.remove(id).is_some() {
-            self.start_order.retain(|existing| existing != id);
-        }
-    }
-
     pub(super) fn mark_terminal_emitted(&mut self, id: &str) {
         if self.terminal_emitted.remove(id).is_some() {
             self.terminal_order.retain(|existing| existing != id);
@@ -235,12 +234,6 @@ impl ToolCallMap {
 
     pub(super) fn terminal_emitted(&self, id: &str) -> bool {
         self.terminal_emitted.contains_key(id)
-    }
-
-    fn clear_terminal_emitted(&mut self, id: &str) {
-        if self.terminal_emitted.remove(id).is_some() {
-            self.terminal_order.retain(|existing| existing != id);
-        }
     }
 
     #[cfg(test)]
@@ -954,12 +947,23 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_map_insert_clears_terminal_marker_for_id_reuse() {
+    fn tool_call_map_insert_preserves_watchdog_dedup_markers() {
+        // Display-side `entries` may overwrite on id reuse, but the watchdog
+        // Start/Finish markers must remain monotonic for the lifetime of the
+        // session so a second `tool_call` payload for an already-tracked id
+        // cannot resurrect either transition.
         let mut map = ToolCallMap::new();
+        map.mark_start_emitted("id-x");
         map.mark_terminal_emitted("id-x");
+        assert!(map.start_emitted("id-x"));
         assert!(map.terminal_emitted("id-x"));
+
         map.insert("id-x".to_string(), ToolCallDisplayState::default());
-        assert!(!map.terminal_emitted("id-x"));
+        assert!(map.start_emitted("id-x"), "start dedup must survive insert");
+        assert!(
+            map.terminal_emitted("id-x"),
+            "finish dedup must survive insert"
+        );
     }
 
     #[test]

@@ -1581,7 +1581,13 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_id_reuse_after_terminal_allows_new_result() {
+    fn dispatch_id_reuse_after_terminal_renders_text_without_repeating_activity() {
+        // Id reuse is permitted for the *display* contract (a fresh
+        // invocation block + a fresh result block render under the reused
+        // id), but the watchdog activity stream is one-shot per id within a
+        // session: a previously-completed tool_call_id must not be allowed
+        // to resurrect Start or Finish — doing so would let the App's idle
+        // clock pause/resume on a phantom call.
         let mut map = ToolCallMap::new();
         let _ = drain(
             json!({
@@ -1614,14 +1620,10 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        // Re-inserting the id clears prior Start/Finish dedup so a fresh
-        // lifecycle reports both transitions.
         assert_eq!(
             reused_invocation,
-            vec![
-                tool_call_block("tool: exec(echo second)"),
-                activity("call_1", ToolCallActivityKind::Start),
-            ]
+            vec![tool_call_block("tool: exec(echo second)")],
+            "reused id must not re-emit Start"
         );
         let reused_result = drain(
             json!({
@@ -1635,10 +1637,8 @@ mod tests {
         );
         assert_eq!(
             reused_result,
-            vec![
-                tool_call_block("result: completed, output: second"),
-                activity("call_1", ToolCallActivityKind::Finish),
-            ]
+            vec![tool_call_block("result: completed, output: second")],
+            "reused id must not re-emit Finish"
         );
     }
 
@@ -1789,6 +1789,182 @@ mod tests {
         assert!(
             third_terminal.is_empty(),
             "later terminal statuses must remain suppressed"
+        );
+    }
+
+    #[test]
+    fn activity_dedup_repeated_tool_call_payload_emits_single_start() {
+        // Some agents resend a `tool_call` (not `tool_call_update`) for the
+        // same id — e.g. as part of a status refresh. The display map is
+        // allowed to overwrite on id reuse, but the watchdog Start contract
+        // is one-shot per id for the lifetime of the session.
+        let mut map = ToolCallMap::new();
+        let initial = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_repeat",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert_eq!(
+            initial,
+            vec![activity("call_repeat", ToolCallActivityKind::Start)]
+        );
+
+        let resent = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_repeat",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            resent.is_empty(),
+            "repeated tool_call payload must not re-emit Start"
+        );
+
+        // Even if the resent payload bears `pending` (a different non-
+        // terminal status), the contract still suppresses re-emission.
+        let resent_pending = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_repeat",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            resent_pending.is_empty(),
+            "second non-terminal tool_call payload must not re-emit Start"
+        );
+    }
+
+    #[test]
+    fn activity_dedup_repeated_terminal_tool_call_payload_emits_single_finish() {
+        // After a tool call has completed, an agent may resend a `tool_call`
+        // for the same id with terminal status — e.g. duplicated transport
+        // or a retry layer above the runner. The Finish contract is also
+        // one-shot per id for the lifetime of the session.
+        let mut map = ToolCallMap::new();
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_dt",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["echo", "x"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let first_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_dt",
+                "kind": "execute",
+                "status": "completed",
+                "rawInput": { "command": ["echo", "x"] },
+                "rawOutput": { "exit_code": 0, "stdout": "x" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert_eq!(
+            first_terminal,
+            vec![activity("call_dt", ToolCallActivityKind::Finish)]
+        );
+
+        let second_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_dt",
+                "kind": "execute",
+                "status": "completed",
+                "rawInput": { "command": ["echo", "x"] },
+                "rawOutput": { "exit_code": 0, "stdout": "x" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            second_terminal.is_empty(),
+            "repeated terminal tool_call payload must not re-emit Finish"
+        );
+
+        // A final mixed-flavor cross-check: if a `tool_call_update` arrives
+        // with another terminal status after the duplicate-terminal stream,
+        // it must also remain suppressed.
+        let third_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_dt",
+                "status": "errored"
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            third_terminal.is_empty(),
+            "tool_call_update terminal after duplicate-terminal tool_call must remain suppressed"
+        );
+    }
+
+    #[test]
+    fn activity_dedup_terminal_tool_call_after_completion_does_not_resurrect_finish() {
+        // Specifically exercises the bug fix: a terminal `tool_call_update`
+        // completes the lifecycle and evicts the display entry, then a fresh
+        // `tool_call` payload arrives with terminal status for the same id
+        // (a re-acknowledgement or transport echo). Display is best-effort,
+        // but Finish must not re-emit.
+        let mut map = ToolCallMap::new();
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_echo",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["echo", "y"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_echo",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "y" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        // Display-side entry is now evicted; markers must remain.
+        let resurrected = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_echo",
+                "kind": "execute",
+                "status": "completed",
+                "rawInput": { "command": ["echo", "y"] },
+                "rawOutput": { "exit_code": 0, "stdout": "y" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            resurrected.is_empty(),
+            "terminal tool_call payload for an already-finished id must not re-emit Finish"
         );
     }
 

@@ -429,7 +429,7 @@ struct RenderedLine {
 fn push_blank_line_if_needed(lines: &mut Vec<RenderedLine>) {
     if lines
         .last()
-        .is_none_or(|line| !line.spans.iter().all(|span| span.content.is_empty()))
+        .is_some_and(|line| !line.spans.iter().all(|span| span.content.is_empty()))
     {
         lines.push(RenderedLine { spans: Vec::new() });
     }
@@ -583,6 +583,7 @@ fn render_messages(
                     ],
                 });
             }
+            push_blank_line_if_needed(&mut lines);
             continue;
         }
 
@@ -594,8 +595,7 @@ fn render_messages(
         };
         let renders_markdown =
             matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
-        let is_interactive_acp_output = run.modes.interactive && renders_markdown;
-        if is_interactive_acp_output {
+        if renders_markdown {
             push_blank_line_if_needed(&mut lines);
         }
         let markdown_lines = if renders_markdown {
@@ -651,7 +651,7 @@ fn render_messages(
                 spans: first_line.spans,
             });
         }
-        if is_interactive_acp_output {
+        if renders_markdown {
             push_blank_line_if_needed(&mut lines);
         }
     }
@@ -1092,6 +1092,41 @@ mod tests {
         assert_eq!(texts[3], "");
         assert!(texts[4].contains("▸ answer"), "{texts:?}");
         assert_eq!(texts[5], "");
+        assert!(
+            texts
+                .windows(2)
+                .all(|pair| !(pair[0].is_empty() && pair[1].is_empty())),
+            "ACP padding should never create consecutive blank lines: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn user_input_echo_gets_trailing_blank_line() {
+        let msgs = vec![make_msg(MessageKind::UserInput, "please continue")];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert!(texts[0].contains("› please continue"));
+        assert_eq!(texts[1], "", "user echo should be followed by spacing");
+    }
+
+    #[test]
+    fn noninteractive_acp_agent_outputs_get_padding() {
+        let msgs = vec![
+            make_msg(MessageKind::AgentThought, "thinking"),
+            make_msg(MessageKind::AgentText, "answer"),
+        ];
+        let run = make_run(RunStatus::Running);
+        let offset = FixedOffset::east_opt(0).unwrap();
+        let lines = message_lines(&msgs, &run, &offset, None, 80, 0, false);
+        let texts = lines.iter().map(line_text).collect::<Vec<_>>();
+
+        assert!(texts[0].contains("· Thinking"), "{texts:?}");
+        assert_eq!(texts[1], "");
+        assert!(texts[2].contains("▸ answer"), "{texts:?}");
+        assert_eq!(texts[3], "");
         assert!(
             texts
                 .windows(2)

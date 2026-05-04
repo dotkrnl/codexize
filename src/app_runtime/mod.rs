@@ -31,7 +31,9 @@ pub use harness::{
     run_harness_until_exit,
 };
 pub use terminal::run_terminal_app;
-pub use view::{AgentRunSummary, AppView, ModalKind, StageId, StatusMessage, StatusSeverity};
+pub use view::{
+    AgentRunSummary, AppView, ModalKind, ModeFlags, StageId, StatusMessage, StatusSeverity,
+};
 
 pub use crate::app::App;
 pub use crate::app::AppStartupOrigin;

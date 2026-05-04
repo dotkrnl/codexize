@@ -89,6 +89,15 @@ impl AgentRunSummary {
     }
 }
 
+/// UI-neutral mirror of the operator-toggleable mode flags. Mirrors
+/// [`crate::logic::pipeline::Modes`] without dragging the persistence-shaped
+/// type across the seam.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ModeFlags {
+    pub yolo: bool,
+    pub cheap: bool,
+}
+
 /// Immutable, UI-neutral derived snapshot for any UI to render.
 ///
 /// The view is built from the runtime's authoritative state and shipped
@@ -115,6 +124,9 @@ pub struct AppView {
     /// True when an agent run is currently in flight; the UI uses this
     /// to gate inputs (e.g. quit confirmation, palette commands).
     pub agent_running: bool,
+    /// Operator mode flags (YOLO / Cheap). Drives the top-rule mode badges
+    /// and any UI surface that conditions on launch policy.
+    pub modes: ModeFlags,
 }
 
 impl AppView {
@@ -129,6 +141,7 @@ impl AppView {
             agent_runs: Arc::from(Vec::<AgentRunSummary>::new()),
             follow_tail: true,
             agent_running: false,
+            modes: ModeFlags::default(),
         }
     }
 }
@@ -171,6 +184,7 @@ mod tests {
         assert!(view.follow_tail);
         assert!(!view.agent_running);
         assert_eq!(view.phase, Phase::IdeaInput);
+        assert_eq!(view.modes, ModeFlags::default());
     }
 
     #[test]

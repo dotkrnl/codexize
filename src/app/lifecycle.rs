@@ -75,7 +75,8 @@ fn retry_target_for_run(run: &crate::state::RunRecord) -> Option<RetryTarget> {
 impl App {
     pub(crate) fn current_app_view(&self) -> crate::app_runtime::AppView {
         use crate::app_runtime::{
-            AgentRunSummary, AppView, ModalKind as RuntimeModalKind, StageId as RuntimeStageId,
+            AgentRunSummary, AppView, ModalKind as RuntimeModalKind, ModeFlags,
+            StageId as RuntimeStageId,
         };
         use std::sync::Arc;
 
@@ -117,6 +118,10 @@ impl App {
             ),
             follow_tail: self.split_follow_tail,
             agent_running: self.has_running_agent(),
+            modes: ModeFlags {
+                yolo: self.state.modes.yolo,
+                cheap: self.state.modes.cheap,
+            },
         }
     }
 

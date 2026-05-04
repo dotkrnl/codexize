@@ -61,6 +61,13 @@ pub struct TestClock {
 }
 
 #[cfg(test)]
+impl Default for TestClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl TestClock {
     pub fn new() -> Self {
         Self {

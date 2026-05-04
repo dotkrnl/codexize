@@ -1,11 +1,11 @@
 pub mod chat_widget;
 mod chat_widget_view_model;
 pub use crate::ui::chrome;
-mod clock;
+pub use crate::ui::clock;
 mod events;
 mod expansion;
 mod finalization;
-mod focus_caps;
+pub use crate::ui::focus_caps;
 mod footer;
 mod guard;
 mod launch;

@@ -4,6 +4,8 @@
 //! explicit UI layer.
 
 pub mod chrome;
+pub mod clock;
+pub mod focus_caps;
 pub mod input_editor;
 pub mod preflight;
 pub mod tui;

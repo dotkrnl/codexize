@@ -367,14 +367,19 @@ fn builder_stage_orders_done_recovery_current_pending() {
         .collect::<Vec<_>>();
     assert_eq!(
         labels,
-        vec![
-            "Task 3",
-            "Task 1",
-            "Builder Recovery",
-            "Task 9",
-            "Task 8",
-            "Task 7",
-        ]
+        vec!["Task 3", "Task 1", "Task 9", "Task 8", "Task 7"]
+    );
+    let task9 = builder
+        .children
+        .iter()
+        .find(|child| child.label == "Task 9")
+        .expect("current task");
+    assert!(
+        task9
+            .children
+            .iter()
+            .any(|child| child.label == "Builder Recovery"),
+        "Builder Recovery should be nested inside the blocked/current task"
     );
     assert_eq!(builder.summary, "builder recovery in progress");
     assert_eq!(builder.status, NodeStatus::Running);
@@ -387,6 +392,7 @@ fn builder_recovery_uses_trigger_task_for_position() {
     state.builder.done = vec![1];
     state.builder.current_task = Some(2);
     state.builder.pending = vec![3];
+    state.builder.iteration = 4;
     state.builder.recovery_trigger_task_id = Some(2);
     let mut recovery = run(99, "recovery", RunStatus::Running);
     recovery.round = 4;
@@ -400,10 +406,61 @@ fn builder_recovery_uses_trigger_task_for_position() {
         .map(|child| child.label.as_str())
         .collect::<Vec<_>>();
 
+    assert_eq!(labels, vec!["Task 1", "Task 2", "Task 3"]);
+    let task2 = builder
+        .children
+        .iter()
+        .find(|child| child.label == "Task 2")
+        .expect("trigger task");
+    let task2_labels = task2
+        .children
+        .iter()
+        .map(|child| child.label.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(
-        labels,
-        vec!["Task 1", "Task 2", "Builder Recovery", "Task 3"]
+        task2_labels,
+        vec!["Round 4", "Builder Recovery"],
+        "Builder Recovery should be inside the trigger task after the blocked round"
     );
+}
+
+#[test]
+fn builder_recovery_sits_between_blocked_round_and_new_round_inside_task() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::ImplementationRound(5);
+    state.builder.current_task = Some(2);
+    state.builder.recovery_trigger_task_id = Some(2);
+
+    let mut coder_round4 = run(10, "coder", RunStatus::Done);
+    coder_round4.task_id = Some(2);
+    coder_round4.round = 4;
+    state.agent_runs.push(coder_round4);
+    let mut reviewer_round4 = run(11, "reviewer", RunStatus::Failed);
+    reviewer_round4.task_id = Some(2);
+    reviewer_round4.round = 4;
+    state.agent_runs.push(reviewer_round4);
+    let mut recovery = run(12, "recovery", RunStatus::Done);
+    recovery.round = 4;
+    state.agent_runs.push(recovery);
+    let mut coder_round5 = run(13, "coder", RunStatus::Running);
+    coder_round5.task_id = Some(2);
+    coder_round5.round = 5;
+    state.agent_runs.push(coder_round5);
+
+    let nodes = build_tree(&state);
+    let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
+    let task2 = builder
+        .children
+        .iter()
+        .find(|child| child.label == "Task 2")
+        .expect("task 2");
+    let task2_labels = task2
+        .children
+        .iter()
+        .map(|child| child.label.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(task2_labels, vec!["Round 4", "Builder Recovery", "Round 5"]);
 }
 
 #[test]

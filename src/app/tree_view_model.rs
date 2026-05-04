@@ -664,6 +664,7 @@ fn build_builder_stage(state: &SessionState) -> Node {
         for run in &recovery_sharding_runs {
             rounds.entry(run.round).or_default().2.push(*run);
         }
+        let recovery_anchor_round = rounds.keys().next().copied();
         let mut round_nodes = Vec::new();
         for (round_num, (rec_runs, pr_runs, sh_runs)) in rounds {
             let mut mode_nodes = Vec::new();
@@ -724,19 +725,30 @@ fn build_builder_stage(state: &SessionState) -> Node {
             run_id: None,
             leaf_run_id: None,
         };
-        let fallback_pos = state.builder.done_task_ids().len().min(children.len());
-        let insert_pos = state
+        let target_task_id = state
             .builder
             .recovery_trigger_task_id
-            .and_then(|trigger_task_id| {
-                ordered_task_ids
-                    .iter()
-                    .position(|task_id| *task_id == trigger_task_id)
-                    .map(|index| index + 1)
-            })
-            .unwrap_or(fallback_pos)
-            .min(children.len());
-        children.insert(insert_pos, recovery_node);
+            .or_else(|| state.builder.current_task_id());
+        if let Some(task_index) = target_task_id.and_then(|trigger_task_id| {
+            ordered_task_ids
+                .iter()
+                .position(|task_id| *task_id == trigger_task_id)
+        }) {
+            if let Some(task_node) = children.get_mut(task_index) {
+                let insert_pos = recovery_anchor_round
+                    .and_then(|anchor| {
+                        task_node
+                            .children
+                            .iter()
+                            .position(|node| parse_round(node).is_some_and(|round| round > anchor))
+                    })
+                    .unwrap_or(task_node.children.len());
+                task_node.children.insert(insert_pos, recovery_node);
+            }
+        } else {
+            let fallback_pos = state.builder.done_task_ids().len().min(children.len());
+            children.insert(fallback_pos, recovery_node);
+        }
     }
     Node {
         label: "Loop".to_string(),

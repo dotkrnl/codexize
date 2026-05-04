@@ -189,6 +189,45 @@ impl App {
         self.maybe_refocus_to_progress();
     }
 
+    /// Drain runner-emitted tool-call lifecycle transitions and apply them
+    /// to the matching `WatchdogState` entries. Called from the main poll
+    /// loop alongside `process_live_summary_changes`.
+    ///
+    /// Task 1 only sets up the plumbing — `WatchdogRegistry` is empty
+    /// because lifecycle insert/remove wiring lands with task 2 (spec §3.8).
+    /// In the meantime this loop is observationally a no-op for runs that
+    /// have not been registered, but it still drains the runner-side
+    /// channels so events do not pile up across the process lifetime.
+    pub(super) fn apply_pending_tool_call_transitions(&mut self) {
+        let transitions = crate::runner::drain_tool_call_transitions();
+        if transitions.is_empty() {
+            return;
+        }
+        for (window_name, transition) in transitions {
+            let Some(run_id) = self
+                .state
+                .agent_runs
+                .iter()
+                .rev()
+                .find(|run| run.window_name == window_name)
+                .map(|run| run.id)
+            else {
+                continue;
+            };
+            let Some(state) = self.watchdog.get_mut(run_id) else {
+                continue;
+            };
+            match transition.kind {
+                crate::acp::ToolCallActivityKind::Start => {
+                    state.on_tool_call_started(transition.observed_at);
+                }
+                crate::acp::ToolCallActivityKind::Finish => {
+                    state.on_tool_call_finished(transition.observed_at);
+                }
+            }
+        }
+    }
+
     /// Final read + cleanup of the live-summary file when a run finishes.
     /// Emits any last summary as a Brief message, then deletes the file so
     /// the next run starts with a clean slate.

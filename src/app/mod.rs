@@ -6,7 +6,7 @@ mod events;
 mod expansion;
 mod finalization;
 pub use crate::ui::focus_caps;
-mod footer;
+pub use crate::ui::footer;
 mod guard;
 mod launch;
 mod lifecycle;

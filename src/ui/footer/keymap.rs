@@ -1,8 +1,8 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use super::super::focus_caps::FocusCaps;
-use super::super::{ModalKind, StageId};
+use crate::app::{ModalKind, StageId};
+use crate::ui::focus_caps::FocusCaps;
 use super::keymap_view_model::{
     WidthTier, binding_enabled, render_binding, select_modal_tier, select_simple_tier,
     select_width_tier,

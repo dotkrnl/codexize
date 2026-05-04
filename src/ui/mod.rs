@@ -6,6 +6,7 @@
 pub mod chrome;
 pub mod clock;
 pub mod focus_caps;
+pub mod footer;
 pub mod input_editor;
 pub mod preflight;
 pub mod tui;

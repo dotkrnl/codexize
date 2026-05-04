@@ -1,7 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use super::super::clock::Clock;
+use crate::ui::clock::Clock;
 use super::live_agent_message_view_model::{capitalize_first, gradient_spans};
 
 pub use super::live_agent_message_view_model::extract_short_title;

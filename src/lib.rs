@@ -18,7 +18,7 @@ pub mod picker_view_model;
 pub mod preflight;
 pub use crate::data::providers;
 pub mod review;
-pub mod runner;
+pub use crate::data::runner;
 pub mod selection;
 pub mod simplification;
 pub mod smoke;

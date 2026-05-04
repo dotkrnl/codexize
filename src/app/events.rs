@@ -541,6 +541,13 @@ impl App {
                 self.input_cursor = self.input_buffer.chars().count();
                 self.handle_input_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
             }
+            AppCommand::CancelModal => {
+                // Currently emitted only for the quit-confirmation modal; other
+                // modals' Esc semantics still flow through `handle_modal_key`
+                // via the legacy `KeyPress` bridge.
+                self.pending_quit_confirmation_run_id = None;
+                false
+            }
             // The remaining command variants are exercised by the stubbed
             // runtime seam; legacy production handlers will claim them as the
             // surrounding modal/palette split moves out of `App`.

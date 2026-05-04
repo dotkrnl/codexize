@@ -44,7 +44,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
 
-        if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration())?
+        if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)?
             && app.handle_app_command(command)
         {
             crate::runner::shutdown_all_runs();

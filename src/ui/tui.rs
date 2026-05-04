@@ -11,7 +11,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::time::Duration;
 
-use crate::app_runtime::{AppCommand, AppView, UiKey, UiKeyCode};
+use crate::app_runtime::{AppCommand, AppView, ModalKind, UiKey, UiKeyCode};
 
 pub type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -90,24 +90,35 @@ where
     Ok(())
 }
 
-pub fn poll_command(timeout: Duration) -> Result<Option<AppCommand>> {
+pub fn poll_command(timeout: Duration, view: &AppView) -> Result<Option<AppCommand>> {
     if !event::poll(timeout)? {
         return Ok(None);
     }
-    Ok(command_from_event(event::read()?))
+    Ok(command_from_event(event::read()?, view))
 }
 
-pub fn command_from_event(event: Event) -> Option<AppCommand> {
+pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {
     match event {
-        Event::Key(key) => command_from_key_event(key),
+        Event::Key(key) => command_from_key_event(key, view),
         Event::Paste(text) => Some(AppCommand::PasteInput { text }),
         _ => None,
     }
 }
 
-fn command_from_key_event(key: KeyEvent) -> Option<AppCommand> {
+fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     if key.kind != KeyEventKind::Press {
         return None;
+    }
+    // Esc on the quit-confirmation modal is unambiguously "cancel the
+    // confirmation": the modal handler clears `pending_quit_confirmation_run_id`
+    // and stays on screen. Translating it at the seam exercises an
+    // operator-intent variant in production rather than routing through the
+    // generic `KeyPress` bridge.
+    if matches!(view.modal, Some(ModalKind::QuitRunningAgent))
+        && key.code == KeyCode::Esc
+        && key.modifiers.is_empty()
+    {
+        return Some(AppCommand::CancelModal);
     }
     let code = match key.code {
         KeyCode::Esc => UiKeyCode::Esc,

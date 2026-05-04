@@ -2687,6 +2687,28 @@ fn quit_confirmation_cancel_leaves_run_active() {
 }
 
 #[test]
+fn cancel_modal_command_clears_quit_confirmation_run_active() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("quit-modal-cancel-cmd".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        state.agent_runs.push(make_brainstorm_run(11));
+        let mut app = mk_app(state);
+        app.current_run_id = Some(11);
+        app.pending_quit_confirmation_run_id = Some(11);
+
+        let should_quit = app.handle_app_command(crate::app_runtime::AppCommand::CancelModal);
+
+        assert!(!should_quit);
+        assert!(
+            app.pending_quit_confirmation_run_id.is_none(),
+            "CancelModal must clear the pending quit confirmation"
+        );
+        assert_eq!(app.active_modal(), None);
+        assert!(app.has_running_agent());
+    });
+}
+
+#[test]
 fn pending_guard_resume_fail_closed_when_decision_missing() {
     with_temp_root(|| {
         let session_id = "pending-guard-resume-fail";

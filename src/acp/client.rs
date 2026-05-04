@@ -1,5 +1,6 @@
 use super::{
     AcpError, AcpResolvedLaunch, AcpResult, AcpTextBoundary, ClientUpdate, PromptPayload,
+    ToolCallActivityKind,
     tool_call::{
         ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line,
         format_result_line, is_terminal_status,
@@ -946,15 +947,34 @@ fn handle_tool_call(
     if let Some(id) = payload.tool_call_id.clone() {
         map.insert(id.clone(), state.clone());
         out.push_back(tool_call_text(invocation));
+        // Watchdog activity transitions: a `tool_call` payload represents a
+        // freshly-observed tool-call id. If it is non-terminal (or missing
+        // status, which we conservatively treat as in-flight), emit a Start
+        // so the App can pause its idle clock from this moment. If it is
+        // already terminal, skip Start — there was no observable in-flight
+        // window for this id at the runner — and emit a single Finish.
         if terminal {
+            out.push_back(tool_call_text(format_result_line(&state)));
+            if !map.terminal_emitted(&id) {
+                out.push_back(ClientUpdate::ToolCallActivity {
+                    tool_call_id: id.clone(),
+                    kind: ToolCallActivityKind::Finish,
+                });
+                map.mark_terminal_emitted(&id);
+            }
+            map.evict(&id);
             // Spec §Behavior rule 1: when the same payload carries terminal
             // status, emit the result block immediately afterward and evict.
-            out.push_back(tool_call_text(format_result_line(&state)));
-            map.evict(&id);
-            map.mark_terminal_emitted(&id);
+        } else if !map.start_emitted(&id) {
+            out.push_back(ClientUpdate::ToolCallActivity {
+                tool_call_id: id.clone(),
+                kind: ToolCallActivityKind::Start,
+            });
+            map.mark_start_emitted(&id);
         }
     } else {
         // Missing toolCallId: best-effort output only, never stored.
+        // No watchdog activity emitted: dedup requires a stable id.
         out.push_back(tool_call_text(invocation));
         if terminal {
             out.push_back(tool_call_text(format_result_line(&state)));
@@ -972,9 +992,18 @@ fn handle_tool_call_update(
         .as_deref()
         .map(is_terminal_status)
         .unwrap_or(false);
+    // For watchdog activity tracking, only an explicit `pending` /
+    // `in_progress` status on an update counts as a Start transition. An
+    // update without an explicit status is just a property merge, not a
+    // lifecycle signal, so we do not synthesize a Start from it.
+    let active = payload
+        .status
+        .as_deref()
+        .is_some_and(|status| matches!(status, "pending" | "in_progress"));
 
     let Some(id) = payload.tool_call_id.clone() else {
         // Missing toolCallId: best-effort result if terminal, otherwise drop.
+        // No watchdog activity emitted: dedup requires a stable id.
         if terminal {
             let state = ToolCallDisplayState::from_payload(&payload);
             out.push_back(tool_call_text(format_result_line(&state)));
@@ -986,21 +1015,41 @@ fn handle_tool_call_update(
         if terminal {
             let result = format_result_line(state);
             out.push_back(tool_call_text(result));
+            if !map.terminal_emitted(&id) {
+                out.push_back(ClientUpdate::ToolCallActivity {
+                    tool_call_id: id.clone(),
+                    kind: ToolCallActivityKind::Finish,
+                });
+                map.mark_terminal_emitted(&id);
+            }
             map.evict(&id);
-            map.mark_terminal_emitted(&id);
+        } else if active && !map.start_emitted(&id) {
+            // Server reported in_progress / pending without a prior
+            // `tool_call`; treat this as the first observation of a
+            // non-terminal status and emit a single Start.
+            out.push_back(ClientUpdate::ToolCallActivity {
+                tool_call_id: id.clone(),
+                kind: ToolCallActivityKind::Start,
+            });
+            map.mark_start_emitted(&id);
         }
         // Non-terminal merges into prior state and produces no transcript
         // output (spec §Behavior rule 5).
     } else if terminal {
         if map.terminal_emitted(&id) {
             // Duplicate terminal update for an already-completed id: suppress
-            // re-emission to keep the two-block contract append-only.
+            // re-emission to keep the two-block contract append-only and to
+            // satisfy the one-shot Finish contract for the watchdog.
             return;
         }
         // No prior state (never created or already evicted): emit a
         // best-effort result block from the payload only; never insert.
         let state = ToolCallDisplayState::from_payload(&payload);
         out.push_back(tool_call_text(format_result_line(&state)));
+        out.push_back(ClientUpdate::ToolCallActivity {
+            tool_call_id: id.clone(),
+            kind: ToolCallActivityKind::Finish,
+        });
         map.mark_terminal_emitted(&id);
     }
     // Non-terminal update with no prior state is silently dropped.
@@ -1294,6 +1343,13 @@ mod tests {
         }
     }
 
+    fn activity(id: &str, kind: ToolCallActivityKind) -> ClientUpdate {
+        ClientUpdate::ToolCallActivity {
+            tool_call_id: id.to_string(),
+            kind,
+        }
+    }
+
     #[test]
     fn dispatch_renders_invocation_from_observed_codex_read_payload() {
         let mut map = ToolCallMap::new();
@@ -1313,7 +1369,13 @@ mod tests {
             &mut map,
         );
 
-        assert_eq!(updates, vec![tool_call_block("tool: read(Cargo.toml)")]);
+        assert_eq!(
+            updates,
+            vec![
+                tool_call_block("tool: read(Cargo.toml)"),
+                activity("call_1", ToolCallActivityKind::Start),
+            ]
+        );
         assert_eq!(map.len(), 1);
     }
 
@@ -1334,7 +1396,13 @@ mod tests {
             Path::new("/work/project"),
             &mut map,
         );
-        assert_eq!(invocation, vec![tool_call_block("tool: read(Cargo.toml)")]);
+        assert_eq!(
+            invocation,
+            vec![
+                tool_call_block("tool: read(Cargo.toml)"),
+                activity("call_1", ToolCallActivityKind::Start),
+            ]
+        );
         assert!(map.contains("call_1"));
 
         let result = drain(
@@ -1349,9 +1417,10 @@ mod tests {
         );
         assert_eq!(
             result,
-            vec![tool_call_block(
-                "result: completed, exit 0, output: [package] name = \"codexize\""
-            )]
+            vec![
+                tool_call_block("result: completed, exit 0, output: [package] name = \"codexize\""),
+                activity("call_1", ToolCallActivityKind::Finish),
+            ]
         );
         // After eviction the entry must be gone.
         assert!(!map.contains("call_1"));
@@ -1379,6 +1448,7 @@ mod tests {
             vec![
                 tool_call_block("tool: exec(echo ok)"),
                 tool_call_block("result: completed, exit 0, output: ok"),
+                activity("call_q", ToolCallActivityKind::Finish),
             ]
         );
         assert!(!map.contains("call_q"));
@@ -1436,7 +1506,10 @@ mod tests {
         );
         assert_eq!(
             updates,
-            vec![tool_call_block("result: completed, exit 0, output: ok")]
+            vec![
+                tool_call_block("result: completed, exit 0, output: ok"),
+                activity("stale_id", ToolCallActivityKind::Finish),
+            ]
         );
         assert!(
             !map.contains("stale_id"),
@@ -1470,7 +1543,14 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        assert_eq!(first_result.len(), 1);
+        // Result block + watchdog Finish transition.
+        assert_eq!(
+            first_result,
+            vec![
+                tool_call_block("result: completed, exit 0, output: hi"),
+                activity("call_1", ToolCallActivityKind::Finish),
+            ]
+        );
         assert!(!map.contains("call_1"));
 
         // Duplicate terminal update for the now-evicted id must be ignored.
@@ -1534,9 +1614,14 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
+        // Re-inserting the id clears prior Start/Finish dedup so a fresh
+        // lifecycle reports both transitions.
         assert_eq!(
             reused_invocation,
-            vec![tool_call_block("tool: exec(echo second)")]
+            vec![
+                tool_call_block("tool: exec(echo second)"),
+                activity("call_1", ToolCallActivityKind::Start),
+            ]
         );
         let reused_result = drain(
             json!({
@@ -1548,7 +1633,13 @@ mod tests {
             Path::new("/tmp"),
             &mut map,
         );
-        assert_eq!(reused_result.len(), 1);
+        assert_eq!(
+            reused_result,
+            vec![
+                tool_call_block("result: completed, output: second"),
+                activity("call_1", ToolCallActivityKind::Finish),
+            ]
+        );
     }
 
     #[test]
@@ -1579,6 +1670,248 @@ mod tests {
             &mut map,
         );
         assert_eq!(updates, vec![tool_call_block("tool: tool")]);
+    }
+
+    fn activity_only(updates: Vec<ClientUpdate>) -> Vec<ClientUpdate> {
+        updates
+            .into_iter()
+            .filter(|update| matches!(update, ClientUpdate::ToolCallActivity { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn activity_dedup_repeated_pending_in_progress_emits_single_start() {
+        // The same id may surface across `tool_call` (pending) and one or
+        // more non-terminal `tool_call_update`s (in_progress) before any
+        // terminal status arrives. Exactly one Start must be emitted.
+        let mut map = ToolCallMap::new();
+        let initial = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_dup",
+                "kind": "execute",
+                "status": "pending",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert_eq!(
+            initial,
+            vec![activity("call_dup", ToolCallActivityKind::Start)]
+        );
+
+        let progress = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_dup",
+                "status": "in_progress"
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            progress.is_empty(),
+            "second non-terminal status must not re-emit Start"
+        );
+
+        let still_progress = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_dup",
+                "status": "in_progress",
+                "rawOutput": { "stdout": "tick" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            still_progress.is_empty(),
+            "third non-terminal status must not re-emit Start"
+        );
+    }
+
+    #[test]
+    fn activity_dedup_terminal_then_terminal_emits_single_finish() {
+        // A runner can plausibly observe `failed` followed by a `cancelled`
+        // (or any second terminal) for the same id. The second terminal
+        // must be suppressed: the Finish contract is one-shot per id.
+        let mut map = ToolCallMap::new();
+        let _ = drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_t",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["sleep", "1"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        );
+        let first_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_t",
+                "status": "failed",
+                "rawOutput": { "exit_code": 1, "stderr": "boom" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert_eq!(
+            first_terminal,
+            vec![activity("call_t", ToolCallActivityKind::Finish)]
+        );
+
+        let second_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_t",
+                "status": "cancelled"
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            second_terminal.is_empty(),
+            "second terminal status for the same id must not re-emit Finish"
+        );
+
+        let third_terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_t",
+                "status": "errored"
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            third_terminal.is_empty(),
+            "later terminal statuses must remain suppressed"
+        );
+    }
+
+    #[test]
+    fn activity_distinct_ids_are_tracked_independently_with_correct_ordering() {
+        // Two overlapping tool calls must each yield their own Start and
+        // their own Finish, in arrival order. The order of dispatch through
+        // `dispatch_update` is the order the App sees the activity stream.
+        let mut map = ToolCallMap::new();
+
+        let start_a = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_a",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["echo", "a"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        let start_b = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_b",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["echo", "b"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        let finish_a = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_a",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "a" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        let finish_b = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_b",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "b" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+
+        assert_eq!(
+            start_a,
+            vec![activity("call_a", ToolCallActivityKind::Start)]
+        );
+        assert_eq!(
+            start_b,
+            vec![activity("call_b", ToolCallActivityKind::Start)]
+        );
+        assert_eq!(
+            finish_a,
+            vec![activity("call_a", ToolCallActivityKind::Finish)]
+        );
+        assert_eq!(
+            finish_b,
+            vec![activity("call_b", ToolCallActivityKind::Finish)]
+        );
+    }
+
+    #[test]
+    fn activity_terminal_directly_emits_only_finish_no_start() {
+        // A `tool_call` payload that arrives already terminal had no
+        // observable in-flight window from the runner's perspective. Spec
+        // §3.6: Start fires only on first observation of a non-terminal
+        // status. Finish still fires once.
+        let mut map = ToolCallMap::new();
+        let updates = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "fast_call",
+                "kind": "execute",
+                "status": "completed",
+                "rawInput": { "command": ["true"] },
+                "rawOutput": { "exit_code": 0 }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert_eq!(
+            updates,
+            vec![activity("fast_call", ToolCallActivityKind::Finish)]
+        );
+    }
+
+    #[test]
+    fn activity_missing_tool_call_id_emits_no_transitions() {
+        // Dedup requires a stable id. Best-effort visible blocks may still
+        // be produced, but no activity transitions are emitted because there
+        // is nothing to attribute pause/resume to.
+        let mut map = ToolCallMap::new();
+        let initial = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "kind": "execute",
+                "rawInput": { "command": ["echo", "ghost"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(initial.is_empty());
+
+        let terminal = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "ghost" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(terminal.is_empty());
     }
 
     #[test]
@@ -1945,14 +2278,23 @@ mod tests {
             &mut map,
             &mut state,
         );
+        // Only the visible (text) updates are constrained to StartNewMessage;
+        // ToolCallActivity carries no boundary metadata and is intentionally
+        // excluded from the assertion below.
         assert!(updates.iter().all(|update| matches!(
             update,
             ClientUpdate::ToolCallText {
                 boundary: AcpTextBoundary::StartNewMessage,
                 identity: None,
                 ..
-            }
+            } | ClientUpdate::ToolCallActivity { .. }
         )));
+        assert!(
+            updates
+                .iter()
+                .any(|update| matches!(update, ClientUpdate::ToolCallText { .. })),
+            "tool call should have produced at least one text block"
+        );
     }
 
     #[test]

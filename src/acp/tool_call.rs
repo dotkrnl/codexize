@@ -134,6 +134,12 @@ pub(super) struct ToolCallMap {
     insertion_order: VecDeque<String>,
     terminal_emitted: BTreeMap<String, ()>,
     terminal_order: VecDeque<String>,
+    // Tracks `ToolCallActivity::Start` emission so a `tool_call` followed by
+    // any number of non-terminal `tool_call_update`s yields exactly one
+    // Start. Bounded with the same FIFO/cap discipline as `terminal_emitted`
+    // so a pathological agent cannot grow this set unbounded.
+    start_emitted: BTreeMap<String, ()>,
+    start_order: VecDeque<String>,
 }
 
 impl ToolCallMap {
@@ -160,6 +166,7 @@ impl ToolCallMap {
             self.insertion_order.retain(|existing| existing != &id);
         }
         self.clear_terminal_emitted(&id);
+        self.clear_start_emitted(&id);
         while self.insertion_order.len() >= TOOL_CALL_MAP_CAP {
             let Some(oldest) = self.insertion_order.pop_front() else {
                 break;
@@ -185,6 +192,30 @@ impl ToolCallMap {
     pub(super) fn evict(&mut self, id: &str) {
         if self.entries.remove(id).is_some() {
             self.insertion_order.retain(|existing| existing != id);
+        }
+    }
+
+    pub(super) fn mark_start_emitted(&mut self, id: &str) {
+        if self.start_emitted.remove(id).is_some() {
+            self.start_order.retain(|existing| existing != id);
+        }
+        while self.start_order.len() >= TOOL_CALL_MAP_CAP {
+            let Some(oldest) = self.start_order.pop_front() else {
+                break;
+            };
+            self.start_emitted.remove(&oldest);
+        }
+        self.start_order.push_back(id.to_string());
+        self.start_emitted.insert(id.to_string(), ());
+    }
+
+    pub(super) fn start_emitted(&self, id: &str) -> bool {
+        self.start_emitted.contains_key(id)
+    }
+
+    fn clear_start_emitted(&mut self, id: &str) {
+        if self.start_emitted.remove(id).is_some() {
+            self.start_order.retain(|existing| existing != id);
         }
     }
 

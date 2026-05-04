@@ -127,8 +127,7 @@ pub struct RunRecord {
     pub attempt: u32,
     pub model: String,
     pub vendor: String,
-    /// Persisted key retained for schema compatibility; ACP treats it as a
-    /// run label, not a tmux window identifier.
+    /// Persisted key retained for schema compatibility with existing runs.
     pub window_name: String,
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,

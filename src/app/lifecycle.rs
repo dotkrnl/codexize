@@ -428,13 +428,6 @@ impl App {
         }
     }
 
-    /// Returns a clone of the shared `StatusLine` handle so non-render call
-    /// sites can push messages.
-    #[allow(dead_code)]
-    pub(super) fn status_line_handle(&self) -> Rc<RefCell<status_line::StatusLine>> {
-        self.status_line.clone()
-    }
-
     pub(super) fn current_node(&self) -> usize {
         current_node_index(&self.nodes)
     }

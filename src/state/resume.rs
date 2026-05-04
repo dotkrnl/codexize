@@ -3,23 +3,14 @@ use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 
 /// Errors that can occur when attempting to resume a session.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum ResumeError {
     InvalidState(String),
-    CorruptedArtifacts(Vec<String>),
-    ActiveSessionConflict(String),
 }
 
 impl std::fmt::Display for ResumeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ResumeError::InvalidState(msg) => write!(f, "Cannot resume: {msg}"),
-            ResumeError::CorruptedArtifacts(paths) => {
-                write!(f, "Corrupted artifacts: {}", paths.join(", "))
-            }
-            ResumeError::ActiveSessionConflict(msg) => {
-                write!(f, "Active session conflict: {msg}")
-            }
         }
     }
 }

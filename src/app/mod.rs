@@ -17,6 +17,7 @@ pub(crate) use crate::ui::palette;
 mod prompt_render;
 mod prompts;
 mod render;
+mod review_banner;
 pub(crate) use crate::ui::render_view_model;
 pub use crate::ui::sheet;
 pub use crate::ui::split;

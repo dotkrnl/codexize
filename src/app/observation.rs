@@ -1,6 +1,8 @@
 // observation.rs
 use super::*;
-use crate::data::observation::{LiveSummaryWatcher, build_live_summary_watcher};
+use crate::data::observation::{
+    LiveSummaryWatcher, build_live_summary_watcher, ensure_live_summary_watch_dir,
+};
 use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
@@ -13,6 +15,15 @@ impl App {
             self.live_summary_change_rx = None;
             return Ok(());
         };
+
+        // Probe parent-directory creation before any test short-circuit so
+        // failures still surface as boundary errors with the watcher disabled.
+        if let Err(reason) = ensure_live_summary_watch_dir(&path) {
+            self.surface_boundary_error(reason, false);
+            self.live_summary_watcher = None;
+            self.live_summary_change_rx = None;
+            return Ok(());
+        }
 
         #[cfg(test)]
         if !Self::test_uses_real_live_summary_watcher() {

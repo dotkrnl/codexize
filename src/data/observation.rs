@@ -25,23 +25,34 @@ pub enum LiveSummaryWatcher {
     Disabled,
 }
 
-/// Build a `notify` watcher that fires on writes to `live_summary_path`.
+/// Resolve and create the directory `notify` will watch for
+/// `live_summary_path`.
 ///
-/// Creates the parent directory (or `.` when there is no parent) before
-/// installing the watcher, since `notify` requires the watch root to exist.
-/// Returns `PollOnly { reason }` for any recoverable error so callers can
-/// fall back to mtime polling without aborting the run.
-pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatcher {
+/// Returns the watch root on success, or a human-readable reason matching
+/// the prior boundary-error wording when the parent could not be created.
+/// Callers fall back to mtime polling on `Err`.
+pub fn ensure_live_summary_watch_dir(live_summary_path: &Path) -> Result<PathBuf, String> {
     let watch_path: PathBuf = live_summary_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     if let Err(e) = std::fs::create_dir_all(&watch_path) {
-        return LiveSummaryWatcher::PollOnly {
-            reason: format!("watcher setup failed: {e}, falling back to poll"),
-        };
+        return Err(format!("watcher setup failed: {e}, falling back to poll"));
     }
+    Ok(watch_path)
+}
+
+/// Build a `notify` watcher that fires on writes to `live_summary_path`.
+///
+/// Calls [`ensure_live_summary_watch_dir`] first, then installs the watcher.
+/// Returns `PollOnly { reason }` for any recoverable error so callers can
+/// fall back to mtime polling without aborting the run.
+pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatcher {
+    let watch_path = match ensure_live_summary_watch_dir(live_summary_path) {
+        Ok(path) => path,
+        Err(reason) => return LiveSummaryWatcher::PollOnly { reason },
+    };
 
     let (tx, rx) = mpsc::channel();
     let watched_file = live_summary_path.to_path_buf();

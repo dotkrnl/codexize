@@ -14,7 +14,7 @@ use super::{
 };
 
 impl App {
-    pub(in crate::app) fn selected_retry_target(&self) -> Option<RetryTarget> {
+    pub(crate) fn selected_retry_target(&self) -> Option<RetryTarget> {
         let row = self.visible_rows.get(self.selected)?;
         for depth in (1..=row.path.len()).rev() {
             let node = node_at_path(&self.nodes, &row.path[..depth])?;
@@ -47,7 +47,7 @@ impl App {
             .or_else(|| self.state.builder.current_task_id().map(RetryTarget::Task))
     }
 
-    pub(in crate::app) fn retry_selected_target(&mut self) {
+    pub(crate) fn retry_selected_target(&mut self) {
         let Some(target) = self.selected_retry_target() else {
             self.push_status(
                 "retry: select a stage or task first".to_string(),
@@ -236,7 +236,7 @@ impl App {
         removed_ids
     }
 
-    pub(in crate::app) fn go_back(&mut self) {
+    pub(crate) fn go_back(&mut self) {
         use std::fs;
 
         let session_dir = session_state::session_dir(&self.state.session_id);

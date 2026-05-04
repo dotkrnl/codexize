@@ -35,7 +35,7 @@ fn parse_task_label_id(label: &str) -> Option<u32> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum RetryTarget {
+pub(crate) enum RetryTarget {
     Task(u32),
     Stage(&'static str),
 }
@@ -120,7 +120,7 @@ impl App {
         }
     }
 
-    pub(super) fn active_modal(&self) -> Option<ModalKind> {
+    pub(crate) fn active_modal(&self) -> Option<ModalKind> {
         if self.pending_quit_confirmation_run_id.is_some() {
             return Some(ModalKind::QuitRunningAgent);
         }
@@ -157,7 +157,7 @@ impl App {
         }
     }
 
-    pub(super) fn interactive_exit_prompt_key(&self) -> Option<(u64, usize)> {
+    pub(crate) fn interactive_exit_prompt_key(&self) -> Option<(u64, usize)> {
         let run_id = self.current_run_id?;
         let run = self.state.agent_runs.iter().find(|run| {
             run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
@@ -458,7 +458,7 @@ impl App {
     }
 
 
-    pub(super) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
+    pub(crate) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
         session_state::transitions::execute_transition(&mut self.state, next_phase)?;
         // Pin the round's review scope at round entry — including the
         // skip-to-impl path that has no reviewer stage and goal-gap re-runs
@@ -492,7 +492,7 @@ impl App {
     /// `BlockedNeedsUser`. The single throat for entering a block from app
     /// code so the persisted provenance is always populated and the
     /// force-ship guard has a value to read.
-    pub(super) fn transition_to_blocked(
+    pub(crate) fn transition_to_blocked(
         &mut self,
         origin: crate::state::BlockOrigin,
     ) -> Result<()> {
@@ -500,15 +500,15 @@ impl App {
         self.transition_to_phase(Phase::BlockedNeedsUser)
     }
 
-    pub(super) fn record_agent_error(&mut self, message: impl Into<String>) {
+    pub(crate) fn record_agent_error(&mut self, message: impl Into<String>) {
         session_state::transitions::record_agent_error(&mut self.state, message);
     }
 
-    pub(super) fn clear_agent_error(&mut self) {
+    pub(crate) fn clear_agent_error(&mut self) {
         session_state::transitions::clear_agent_error(&mut self.state);
     }
 
-    pub(super) fn clear_builder_recovery_context(&mut self) {
+    pub(crate) fn clear_builder_recovery_context(&mut self) {
         session_state::transitions::clear_builder_recovery_context(&mut self.state);
     }
 
@@ -634,7 +634,7 @@ impl App {
         self.complete_run_finalization(&run, None)
     }
 
-    pub(super) fn editable_artifact(&self) -> Option<std::path::PathBuf> {
+    pub(crate) fn editable_artifact(&self) -> Option<std::path::PathBuf> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
         let path = match self.state.current_phase {
@@ -666,14 +666,14 @@ impl App {
         if path.exists() { Some(path) } else { None }
     }
 
-    pub(super) fn open_editable_artifact(&mut self) {
+    pub(crate) fn open_editable_artifact(&mut self) {
         let Some(path) = self.editable_artifact() else {
             return;
         };
         self.pending_view_path = Some(path);
     }
 
-    pub(super) fn queue_view_of_current_artifact(&mut self, filename: &str) {
+    pub(crate) fn queue_view_of_current_artifact(&mut self, filename: &str) {
         let path = session_state::session_dir(&self.state.session_id)
             .join("artifacts")
             .join(filename);
@@ -682,7 +682,7 @@ impl App {
         }
     }
 
-    pub(super) fn can_go_back(&self) -> bool {
+    pub(crate) fn can_go_back(&self) -> bool {
         !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
     }
 

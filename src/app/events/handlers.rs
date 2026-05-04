@@ -11,7 +11,7 @@ use super::super::{
 };
 
 impl App {
-    pub(in crate::app) fn palette_commands(&self) -> Vec<PaletteCommand> {
+    pub(crate) fn palette_commands(&self) -> Vec<PaletteCommand> {
         // Direct keys in the running app (see `handle_key`): `Esc` quits the
         // TUI when no agent is running, while Ctrl-C stops a running agent.
         // `:` opens the palette. Everything else
@@ -94,7 +94,7 @@ impl App {
         commands
     }
 
-    pub(in crate::app) fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc => {
                 self.close_palette(true);
@@ -154,7 +154,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn execute_palette_input(&mut self, input: &str) -> bool {
+    pub(crate) fn execute_palette_input(&mut self, input: &str) -> bool {
         if input.trim() == "/exit" && self.interactive_run_active() {
             self.exit_interactive_run_locally();
             return false;
@@ -194,7 +194,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
+    pub(crate) fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
         match name {
             "quit" => {
                 if self.has_running_agent() {
@@ -268,7 +268,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn interactive_run_active(&self) -> bool {
+    pub(crate) fn interactive_run_active(&self) -> bool {
         let Some(run_id) = self.current_run_id else {
             return false;
         };
@@ -277,7 +277,7 @@ impl App {
         })
     }
 
-    pub(in crate::app) fn interactive_run_waiting_for_input(&self) -> bool {
+    pub(crate) fn interactive_run_waiting_for_input(&self) -> bool {
         let Some(run_id) = self.current_run_id else {
             return false;
         };
@@ -289,7 +289,7 @@ impl App {
         })
     }
 
-    pub(in crate::app) fn exit_interactive_run_locally(&mut self) {
+    pub(crate) fn exit_interactive_run_locally(&mut self) {
         let Some(run_id) = self.current_run_id else {
             return;
         };
@@ -300,7 +300,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn send_interactive_input(&mut self, input: String) {
+    pub(crate) fn send_interactive_input(&mut self, input: String) {
         let Some(run_id) = self.current_run_id else {
             return;
         };
@@ -338,7 +338,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn append_user_input_message(&mut self, run_id: u64, input: String) {
+    pub(crate) fn append_user_input_message(&mut self, run_id: u64, input: String) {
         let message = Message {
             ts: chrono::Utc::now(),
             run_id,
@@ -356,7 +356,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn interrupt_interactive_input(&mut self, input: String) {
+    pub(crate) fn interrupt_interactive_input(&mut self, input: String) {
         let trimmed = input.trim().to_string();
         if trimmed.is_empty() {
             self.push_status(
@@ -389,7 +389,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn toggle_noninteractive_texts(&mut self) {
+    pub(crate) fn toggle_noninteractive_texts(&mut self) {
         self.state.show_noninteractive_texts = !self.state.show_noninteractive_texts;
         let label = if self.state.show_noninteractive_texts {
             "showing non-interactive agent text"
@@ -411,7 +411,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn toggle_thinking_texts(&mut self) {
+    pub(crate) fn toggle_thinking_texts(&mut self) {
         self.state.show_thinking_texts = !self.state.show_thinking_texts;
         let label = if self.state.show_thinking_texts {
             "showing thinking text"
@@ -433,7 +433,7 @@ impl App {
         self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
     }
 
-    pub(in crate::app) fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
+    pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
         match modal {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
             ModalKind::GitGuard => self.handle_guard_modal_key(key),
@@ -445,13 +445,13 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn dismiss_interactive_exit_prompt(&mut self) {
+    pub(crate) fn dismiss_interactive_exit_prompt(&mut self) {
         if let Some(key) = self.interactive_exit_prompt_key() {
             self.interactive_exit_prompt_dismissed_at = Some(key);
         }
     }
 
-    pub(in crate::app) fn handle_interactive_exit_prompt_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_interactive_exit_prompt_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Enter => {
                 self.interactive_exit_prompt_dismissed_at = None;
@@ -476,7 +476,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Enter | KeyCode::Char('y') => {
                 let Some(run_id) = self.pending_quit_confirmation_run_id.take() else {
@@ -510,7 +510,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_spec_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
@@ -528,7 +528,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_plan_review_paused_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Enter => {
@@ -547,7 +547,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
+    pub(crate) fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Enter => {
@@ -574,7 +574,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_input_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_input_key(&mut self, key: KeyEvent) -> bool {
         if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
             self.input_mode = false;
             return false;
@@ -645,7 +645,7 @@ impl App {
         false
     }
 
-    pub(in crate::app) fn toggle_expand_focused(&mut self) {
+    pub(crate) fn toggle_expand_focused(&mut self) {
         let Some(row) = self.visible_rows.get(self.selected).cloned() else {
             return;
         };
@@ -671,7 +671,7 @@ impl App {
         self.restore_selection(Some(row.key), self.selected);
     }
 
-    pub(in crate::app) fn scroll_or_move_focus(&mut self, delta: isize) {
+    pub(crate) fn scroll_or_move_focus(&mut self, delta: isize) {
         let idx = self.selected;
         let area_h = self.effective_body_inner_height();
         let (ys, total) = self.header_y_offsets();
@@ -695,7 +695,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn move_focus(&mut self, delta: isize) {
+    pub(crate) fn move_focus(&mut self, delta: isize) {
         self.explicit_viewport_scroll = false;
         let before = self.selected;
         if delta < 0 {
@@ -719,7 +719,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
@@ -742,7 +742,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {

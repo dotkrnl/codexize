@@ -9,7 +9,7 @@ use crate::state::{
 use crate::{review, tasks};
 
 impl App {
-    pub(in crate::app) fn enter_builder_recovery(
+    pub(crate) fn enter_builder_recovery(
         &mut self,
         triggering_round: u32,
         trigger_task_id: Option<u32>,
@@ -91,7 +91,7 @@ impl App {
         true
     }
 
-    pub(in crate::app) fn started_builder_task_ids(&self) -> BTreeSet<u32> {
+    pub(crate) fn started_builder_task_ids(&self) -> BTreeSet<u32> {
         self.state
             .agent_runs
             .iter()
@@ -100,7 +100,7 @@ impl App {
             .collect()
     }
 
-    pub(in crate::app) fn recovery_notes_document_started_supersession(
+    pub(crate) fn recovery_notes_document_started_supersession(
         text: &str,
         superseded_ids: &BTreeSet<u32>,
     ) -> Result<()> {
@@ -136,7 +136,7 @@ impl App {
         Ok(())
     }
 
-    pub(in crate::app) fn reconcile_builder_recovery(&mut self, recovery_run_id: u64) -> Result<()> {
+    pub(crate) fn reconcile_builder_recovery(&mut self, recovery_run_id: u64) -> Result<()> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
         let spec_path = artifacts.join("spec.md");
@@ -276,7 +276,7 @@ impl App {
     /// Reads `artifacts/plan_review.toml`, applies the verdict, and either
     /// advances to recovery sharding (approved) or re-runs recovery
     /// (revise/human_blocked/agent_pivot with circuit-breaker).
-    pub(in crate::app) fn handle_recovery_plan_review_completed(
+    pub(crate) fn handle_recovery_plan_review_completed(
         &mut self,
         run: &crate::state::RunRecord,
         round: u32,
@@ -359,7 +359,7 @@ impl App {
     ///
     /// Validates the regenerated `tasks.toml` against the completed task history,
     /// rebuilds the pipeline queue, and advances to the next implementation round.
-    pub(in crate::app) fn handle_recovery_sharding_completed(
+    pub(crate) fn handle_recovery_sharding_completed(
         &mut self,
         run: &crate::state::RunRecord,
         round: u32,

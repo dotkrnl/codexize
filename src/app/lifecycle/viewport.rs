@@ -8,12 +8,12 @@ use crate::app::tree::{
 use crate::state::{Node, NodeStatus, Phase, RunStatus};
 
 impl App {
-    pub(in crate::app) fn current_node(&self) -> usize {
+    pub(crate) fn current_node(&self) -> usize {
         current_node_index(&self.nodes)
     }
 
     #[cfg(test)]
-    pub(in crate::app) fn current_row(&self) -> usize {
+    pub(crate) fn current_row(&self) -> usize {
         let current = self.current_node();
         self.visible_rows
             .iter()
@@ -21,21 +21,21 @@ impl App {
             .unwrap_or(0)
     }
 
-    pub(in crate::app) fn node_for_row(&self, index: usize) -> Option<&Node> {
+    pub(crate) fn node_for_row(&self, index: usize) -> Option<&Node> {
         let row = self.visible_rows.get(index)?;
         node_at_path(&self.nodes, &row.path)
     }
 
-    pub(in crate::app) fn default_selected_key(&self) -> Option<NodeKey> {
+    pub(crate) fn default_selected_key(&self) -> Option<NodeKey> {
         let current = self.current_node();
         node_key_at_path(&self.nodes, &[current])
     }
 
-    pub(in crate::app) fn active_path_keys(&self) -> BTreeSet<NodeKey> {
+    pub(crate) fn active_path_keys(&self) -> BTreeSet<NodeKey> {
         active_path_keys(&self.nodes, &self.state.agent_runs)
     }
 
-    pub(in crate::app) fn rebuild_visible_rows(&mut self) {
+    pub(crate) fn rebuild_visible_rows(&mut self) {
         let active_keys = self.active_path_keys();
         let current = self.current_node();
         let overrides = self.collapsed_overrides.clone();
@@ -44,7 +44,7 @@ impl App {
         });
     }
 
-    pub(in crate::app) fn restore_selection(
+    pub(crate) fn restore_selection(
         &mut self,
         preferred_key: Option<NodeKey>,
         previous_selected: usize,
@@ -74,7 +74,7 @@ impl App {
             .map(|row| row.key.clone());
     }
 
-    pub(in crate::app) fn rebuild_tree_view(&mut self, preferred_key: Option<NodeKey>) {
+    pub(crate) fn rebuild_tree_view(&mut self, preferred_key: Option<NodeKey>) {
         let previous_selected = self.selected;
         let preferred_key = preferred_key.or_else(|| self.selected_key.clone());
 
@@ -94,7 +94,7 @@ impl App {
     /// so non-interactive runs never trigger auto-open, auto-switch, or forced
     /// input focus from this path — only the stale-target cleanup below applies
     /// to them.
-    pub(in crate::app) fn synchronize_split_target(&mut self) {
+    pub(crate) fn synchronize_split_target(&mut self) {
         if self.interactive_run_waiting_for_input()
             && let Some(run_id) = self.current_run_id
         {
@@ -141,7 +141,7 @@ impl App {
     /// Clamp the split scroll offset to a maximum value. Called after
     /// terminal resize and after content changes.
     #[allow(dead_code)]
-    pub(in crate::app) fn clamp_split_scroll(&mut self, content_height: usize) {
+    pub(crate) fn clamp_split_scroll(&mut self, content_height: usize) {
         let viewport_height = self.split_viewport_height();
         if viewport_height == 0 {
             self.split_scroll_offset = 0;
@@ -176,7 +176,7 @@ impl App {
     /// row instead of the new active stage. Returns `None` only when the
     /// pipeline has no live stage (everything `Done`/`Skipped`), which lets
     /// callers leave `selected_key` alone on terminal phases.
-    pub(in crate::app) fn progress_focus_key(&self) -> Option<NodeKey> {
+    pub(crate) fn progress_focus_key(&self) -> Option<NodeKey> {
         if let Some(run_id) = self.current_run_id
             && self
                 .state
@@ -202,7 +202,7 @@ impl App {
     /// Move focus to the row returned by `progress_focus_key` when progress
     /// follow is active. Reuses `restore_selection` so the collapsed-ancestor
     /// fallback matches normal selection recovery.
-    pub(in crate::app) fn maybe_refocus_to_progress(&mut self) {
+    pub(crate) fn maybe_refocus_to_progress(&mut self) {
         if !self.progress_follow_active {
             return;
         }
@@ -216,12 +216,12 @@ impl App {
     /// Re-enable progress-follow focus and immediately refocus. Called from
     /// the phase-transition and run-launch boundaries the spec treats as
     /// natural reset points after manual navigation.
-    pub(in crate::app) fn enable_progress_follow_and_refocus(&mut self) {
+    pub(crate) fn enable_progress_follow_and_refocus(&mut self) {
         self.progress_follow_active = true;
         self.maybe_refocus_to_progress();
     }
 
-    pub(in crate::app) fn can_focus_input(&self) -> bool {
+    pub(crate) fn can_focus_input(&self) -> bool {
         self.is_expanded(self.selected)
             && self.state.current_phase == Phase::IdeaInput
             && self
@@ -229,14 +229,14 @@ impl App {
                 .is_some_and(|node| node.label == "Idea")
     }
 
-    pub(in crate::app) fn split_owns_input(&self) -> bool {
+    pub(crate) fn split_owns_input(&self) -> bool {
         self.is_split_open()
             && (matches!(self.split_target, Some(SplitTarget::Idea))
                 && self.state.current_phase == Phase::IdeaInput
                 || self.interactive_run_waiting_for_input())
     }
 
-    pub(in crate::app) fn split_viewport_height(&self) -> usize {
+    pub(crate) fn split_viewport_height(&self) -> usize {
         if !self.is_split_open() || self.body_inner_height == 0 {
             return 0;
         }
@@ -248,7 +248,7 @@ impl App {
         content_height.saturating_sub(tree_height)
     }
 
-    pub(in crate::app) fn current_split_content_height(&self) -> usize {
+    pub(crate) fn current_split_content_height(&self) -> usize {
         let Some(target) = self.split_target else {
             return 0;
         };
@@ -289,7 +289,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
+    pub(crate) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
         let mut ys = Vec::with_capacity(self.visible_rows.len());
         let mut y = 0usize;
         for i in 0..self.visible_rows.len() {
@@ -302,7 +302,7 @@ impl App {
         (ys, y)
     }
 
-    pub(in crate::app) fn running_depth_0_header(&self) -> Option<(usize, usize)> {
+    pub(crate) fn running_depth_0_header(&self) -> Option<(usize, usize)> {
         let (ys, _) = self.header_y_offsets();
         let mut candidates = self
             .visible_rows
@@ -320,12 +320,12 @@ impl App {
         Some(candidate)
     }
 
-    pub(in crate::app) fn pinned_running_header(&self, viewport_top: usize) -> Option<(usize, usize)> {
+    pub(crate) fn pinned_running_header(&self, viewport_top: usize) -> Option<(usize, usize)> {
         self.running_depth_0_header()
             .filter(|(_, header_y)| *header_y < viewport_top)
     }
 
-    pub(in crate::app) fn effective_body_height_for_top(
+    pub(crate) fn effective_body_height_for_top(
         &self,
         viewport_top: usize,
         body_height: usize,
@@ -337,11 +337,11 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn effective_body_inner_height(&self) -> usize {
+    pub(crate) fn effective_body_inner_height(&self) -> usize {
         self.effective_body_height_for_top(self.viewport_top, self.body_inner_height)
     }
 
-    pub(in crate::app) fn max_viewport_top_for_height(&self, body_height: usize) -> usize {
+    pub(crate) fn max_viewport_top_for_height(&self, body_height: usize) -> usize {
         if body_height == 0 {
             return 0;
         }
@@ -357,7 +357,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn clamp_viewport(&mut self) {
+    pub(crate) fn clamp_viewport(&mut self) {
         let area_h = self.body_inner_height;
         if area_h == 0 {
             self.viewport_top = 0;
@@ -397,11 +397,11 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn max_viewport_top(&self) -> usize {
+    pub(crate) fn max_viewport_top(&self) -> usize {
         self.max_viewport_top_for_height(self.body_inner_height)
     }
 
-    pub(in crate::app) fn scroll_viewport(&mut self, delta: isize, explicit: bool) {
+    pub(crate) fn scroll_viewport(&mut self, delta: isize, explicit: bool) {
         self.explicit_viewport_scroll = explicit;
         let max_top = self.max_viewport_top() as isize;
         let next = (self.viewport_top as isize + delta).clamp(0, max_top.max(0));
@@ -417,7 +417,7 @@ impl App {
 
     /// Single writer for `follow_tail`. Tracks the message-count baseline so
     /// the unread-counter badge can compute "messages since detach".
-    pub(in crate::app) fn set_follow_tail(&mut self, follow: bool) {
+    pub(crate) fn set_follow_tail(&mut self, follow: bool) {
         if follow == self.follow_tail {
             return;
         }
@@ -437,7 +437,7 @@ impl App {
     /// is currently looking at stays expanded across later state changes
     /// (e.g., the active stage rolling over to Done before a phase advance,
     /// which would otherwise drop it off the auto-expand active path).
-    pub(in crate::app) fn latch_visible_expansions(&mut self) {
+    pub(crate) fn latch_visible_expansions(&mut self) {
         let to_pin: Vec<NodeKey> = (0..self.visible_rows.len())
             .filter(|&i| self.is_expanded(i))
             .filter_map(|i| self.visible_rows.get(i).map(|row| row.key.clone()))
@@ -449,14 +449,14 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn unread_below_count(&self) -> usize {
+    pub(crate) fn unread_below_count(&self) -> usize {
         match self.tail_detach_baseline {
             Some(baseline) => self.messages.len().saturating_sub(baseline),
             None => 0,
         }
     }
 
-    pub(in crate::app) fn first_unread_rendered_line(&self) -> Option<usize> {
+    pub(crate) fn first_unread_rendered_line(&self) -> Option<usize> {
         let baseline = self.tail_detach_baseline?;
         if baseline >= self.messages.len() {
             return None;

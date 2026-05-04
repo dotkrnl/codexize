@@ -6,11 +6,11 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, RunStatus};
 
 impl App {
-    pub(in crate::app) fn launch_spec_review(&mut self) {
+    pub(crate) fn launch_spec_review(&mut self) {
         let _ = self.launch_spec_review_with_model(None);
     }
 
-    pub(in crate::app) fn launch_spec_review_with_model(
+    pub(crate) fn launch_spec_review_with_model(
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {

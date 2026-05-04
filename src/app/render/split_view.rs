@@ -5,7 +5,7 @@ use crate::state::Phase;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-pub(super) struct SplitWidget<'a> {
+pub(crate) struct SplitWidget<'a> {
     pub(super) app: &'a App,
 }
 

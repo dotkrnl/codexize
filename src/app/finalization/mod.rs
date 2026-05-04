@@ -25,13 +25,13 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum OperatorTerminationMarker {
+pub(crate) enum OperatorTerminationMarker {
     Stopped,
     RetryRequested,
 }
 
 impl App {
-    pub(super) fn rebuild_failed_models(state: &SessionState) -> HashMap<RetryKey, FailedModelSet> {
+    pub(crate) fn rebuild_failed_models(state: &SessionState) -> HashMap<RetryKey, FailedModelSet> {
         let mut failed_models = HashMap::new();
         let cutoff = state.builder.retry_reset_run_id_cutoff;
         for run in state
@@ -58,7 +58,7 @@ impl App {
         failed_models
     }
 
-    pub(super) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
+    pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
             .agent_runs
             .iter()
@@ -69,7 +69,7 @@ impl App {
             + 1
     }
 
-    pub(super) fn completed_rounds(&self, stage: &str) -> u32 {
+    pub(crate) fn completed_rounds(&self, stage: &str) -> u32 {
         self.state
             .agent_runs
             .iter()
@@ -79,7 +79,7 @@ impl App {
             .unwrap_or(0)
     }
 
-    pub(super) fn running_run(&self) -> Option<&crate::state::RunRecord> {
+    pub(crate) fn running_run(&self) -> Option<&crate::state::RunRecord> {
         self.current_run_id.and_then(|run_id| {
             self.state
                 .agent_runs
@@ -88,14 +88,14 @@ impl App {
         })
     }
 
-    pub(super) fn has_running_agent(&self) -> bool {
+    pub(crate) fn has_running_agent(&self) -> bool {
         self.state
             .agent_runs
             .iter()
             .any(|run| run.status == RunStatus::Running)
     }
 
-    pub(super) fn active_run_exists(&self, window_name: &str) -> bool {
+    pub(crate) fn active_run_exists(&self, window_name: &str) -> bool {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return false;
@@ -103,14 +103,14 @@ impl App {
         crate::runner::run_label_is_active(window_name)
     }
 
-    pub(super) fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {
+    pub(crate) fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {
         (run.stage.clone(), run.task_id, run.round)
     }
 
     /// Project a list of completed runs into the (vendors, (vendor,model)) shape
     /// expected by `select_for_review` and `select_excluding`. Runs with an
     /// unrecognised vendor string are dropped.
-    pub(super) fn used_review_pairs(
+    pub(crate) fn used_review_pairs(
         runs: &[crate::state::RunRecord],
     ) -> (Vec<VendorKind>, Vec<(VendorKind, String)>) {
         let mut vendors = Vec::new();
@@ -130,7 +130,7 @@ impl App {
         (vendors, models)
     }
 
-    pub(super) fn phase_for_stage(stage: &str) -> SelectionPhase {
+    pub(crate) fn phase_for_stage(stage: &str) -> SelectionPhase {
         match stage {
             "brainstorm" => SelectionPhase::Idea,
             "spec-review" => SelectionPhase::Review,
@@ -145,7 +145,7 @@ impl App {
         }
     }
 
-    pub(super) fn run_key_for(
+    pub(crate) fn run_key_for(
         stage: &str,
         task_id: Option<u32>,
         round: u32,
@@ -157,7 +157,7 @@ impl App {
         format!("{stage}-{task}-r{round}-a{attempt}")
     }
 
-    pub(super) fn live_summary_path_for_run(
+    pub(crate) fn live_summary_path_for_run(
         &self,
         stage: &str,
         task_id: Option<u32>,
@@ -170,14 +170,14 @@ impl App {
             .join(format!("live_summary.{run_key}.txt"))
     }
 
-    pub(super) fn live_summary_path_for(
+    pub(crate) fn live_summary_path_for(
         &self,
         run: &crate::state::RunRecord,
     ) -> std::path::PathBuf {
         self.live_summary_path_for_run(&run.stage, run.task_id, run.round, run.attempt)
     }
 
-    pub(super) fn finish_stamp_path_for_run(
+    pub(crate) fn finish_stamp_path_for_run(
         &self,
         stage: &str,
         task_id: Option<u32>,
@@ -191,14 +191,14 @@ impl App {
             .join(format!("{run_key}.toml"))
     }
 
-    pub(super) fn finish_stamp_path_for(
+    pub(crate) fn finish_stamp_path_for(
         &self,
         run: &crate::state::RunRecord,
     ) -> std::path::PathBuf {
         self.finish_stamp_path_for_run(&run.stage, run.task_id, run.round, run.attempt)
     }
 
-    pub(super) fn stamp_timeout_duration() -> Duration {
+    pub(crate) fn stamp_timeout_duration() -> Duration {
         std::env::var(ENV_STAMP_TIMEOUT_MS)
             .ok()
             .and_then(|raw| raw.parse::<u64>().ok())
@@ -207,7 +207,7 @@ impl App {
             .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_TIMEOUT_MS))
     }
 
-    pub(super) fn guard_dir_for(
+    pub(crate) fn guard_dir_for(
         &self,
         stage: &str,
         task_id: Option<u32>,
@@ -227,7 +227,7 @@ impl App {
     /// No-op under the test harness (no real git available).
     /// Returns `true` if the working tree was dirty at capture time (non-coder
     /// only; always `false` for coder). `mode` is ignored for the coder stage.
-    pub(super) fn capture_run_guard(
+    pub(crate) fn capture_run_guard(
         &self,
         stage: &str,
         task_id: Option<u32>,
@@ -265,7 +265,7 @@ impl App {
         }
     }
 
-    pub(super) fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> guard::VerifyResult {
+    pub(crate) fn enforce_run_guard(&self, run: &crate::state::RunRecord) -> guard::VerifyResult {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return guard::VerifyResult::Ok { warnings: vec![] };
@@ -274,13 +274,13 @@ impl App {
         guard::verify(&dir, &run.stage)
     }
 
-    pub(super) fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
+    pub(crate) fn read_exit_status_code(&self, run: &crate::state::RunRecord) -> Option<i32> {
         crate::runner::read_finish_stamp(&self.finish_stamp_path_for(run))
             .ok()
             .map(|stamp| stamp.exit_code)
     }
 
-    pub(super) fn artifact_present(path: &std::path::Path) -> bool {
+    pub(crate) fn artifact_present(path: &std::path::Path) -> bool {
         std::fs::metadata(path)
             .map(|meta| meta.is_file() && meta.len() > 0)
             .unwrap_or(false)
@@ -289,7 +289,7 @@ impl App {
     /// Capture HEAD at round start so the reviewer (and the simplifier) can
     /// inspect `base_sha..HEAD`. Idempotent on resume: the original base is
     /// preserved.
-    pub(super) fn capture_round_base(&self, round_dir: &std::path::Path) {
+    pub(crate) fn capture_round_base(&self, round_dir: &std::path::Path) {
         let scope_file = round_dir.join("review_scope.toml");
         if scope_file.exists() {
             return;
@@ -308,7 +308,7 @@ impl App {
         }
     }
 
-    pub(super) fn append_system_message(&mut self, run_id: u64, kind: MessageKind, text: String) {
+    pub(crate) fn append_system_message(&mut self, run_id: u64, kind: MessageKind, text: String) {
         let message = Message {
             ts: chrono::Utc::now(),
             run_id,
@@ -325,7 +325,7 @@ impl App {
         }
     }
 
-    pub(super) fn emit_dirty_tree_warning(&mut self) {
+    pub(crate) fn emit_dirty_tree_warning(&mut self) {
         if let Some(run_id) = self.current_run_id {
             self.append_system_message(
                 run_id,
@@ -336,7 +336,7 @@ impl App {
         }
     }
 
-    pub(super) fn emit_selection_warning(&mut self, warning: Option<SelectionWarning>) {
+    pub(crate) fn emit_selection_warning(&mut self, warning: Option<SelectionWarning>) {
         let Some(SelectionWarning::CheapFallback { phase, reason }) = warning else {
             return;
         };
@@ -345,11 +345,11 @@ impl App {
         self.push_status(message, status_line::Severity::Warn, Duration::from_secs(8));
     }
 
-    pub(super) fn toggle_cheap_mode(&mut self, source: &str) {
+    pub(crate) fn toggle_cheap_mode(&mut self, source: &str) {
         self.set_cheap_mode(!self.state.modes.cheap, source);
     }
 
-    pub(super) fn set_cheap_mode(&mut self, value: bool, source: &str) {
+    pub(crate) fn set_cheap_mode(&mut self, value: bool, source: &str) {
         session_state::transitions::set_cheap_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
             self.record_agent_error(format!("failed to save cheap mode: {err:#}"));
@@ -370,7 +370,7 @@ impl App {
         );
     }
 
-    pub(super) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
+    pub(crate) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
         let task_id =
             session_state::transitions::ensure_builder_task_for_round(&mut self.state, round)?;
         let round_dir = session_state::session_dir(&self.state.session_id)
@@ -381,7 +381,7 @@ impl App {
     }
 
     /// Launch the non-interactive recovery-mode plan review agent.
-    pub(super) fn finalize_run_record(
+    pub(crate) fn finalize_run_record(
         &mut self,
         run_id: u64,
         success: bool,
@@ -443,7 +443,7 @@ impl App {
         }
     }
 
-    pub(super) fn retry_exhausted_summary(&self, failed_run: &crate::state::RunRecord) -> String {
+    pub(crate) fn retry_exhausted_summary(&self, failed_run: &crate::state::RunRecord) -> String {
         let mut attempts = self
             .state
             .agent_runs
@@ -471,7 +471,7 @@ impl App {
         lines.join("\n")
     }
 
-    pub(super) fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
+    pub(crate) fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
         if failed_run.status == RunStatus::FailedUnverified {
             let _ = self.state.log_event(format!(
                 "auto-retry suppressed for {} round {} attempt {} due to failed_unverified",
@@ -577,7 +577,7 @@ impl App {
         true
     }
 
-    pub(super) fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
+    pub(crate) fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
         self.drain_live_summary(run);
 
         let failure_reason = self.normalized_failure_reason(run)?;

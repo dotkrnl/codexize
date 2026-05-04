@@ -14,7 +14,7 @@ use anyhow::Result;
 #[cfg(test)]
 use std::sync::mpsc;
 impl App {
-    pub(super) fn setup_watcher(&mut self) -> Result<()> {
+    pub(crate) fn setup_watcher(&mut self) -> Result<()> {
         let Some(path) = self.live_summary_path.clone() else {
             self.live_summary_watcher = None;
             self.live_summary_change_events = None;
@@ -61,7 +61,7 @@ impl App {
         std::env::var_os("CODEXIZE_TEST_REAL_WATCHER").is_some()
     }
 
-    pub(super) fn process_live_summary_changes(&mut self) {
+    pub(crate) fn process_live_summary_changes(&mut self) {
         // Drain typed `DataEvent::LiveSummaryChanged` notifications from the
         // data-owned watcher seam. Multiple coalesced events still trigger a
         // single re-read because the pipeline is idempotent on repeated
@@ -78,7 +78,7 @@ impl App {
         self.poll_live_summary_fallback();
     }
 
-    pub(super) fn poll_live_summary_fallback(&mut self) {
+    pub(crate) fn poll_live_summary_fallback(&mut self) {
         if !self.run_launched {
             self.live_summary_cached_text.clear();
             self.live_summary_cached_mtime = None;
@@ -108,7 +108,7 @@ impl App {
         }
     }
 
-    pub(super) fn read_live_summary_pipeline(&mut self) {
+    pub(crate) fn read_live_summary_pipeline(&mut self) {
         let Some(run_id) = self.current_run_id else {
             return;
         };
@@ -225,7 +225,7 @@ impl App {
     /// the App holds a borrow on the registry only while computing
     /// decisions; the side-effect pass releases that borrow before
     /// reaching back into the same registry to read prompt paths.
-    pub(super) fn tick_watchdog(&mut self) {
+    pub(crate) fn tick_watchdog(&mut self) {
         if self.watchdog.is_empty() {
             return;
         }
@@ -312,7 +312,7 @@ impl App {
     /// Final read + cleanup of the live-summary file when a run finishes.
     /// Emits any last summary as a Brief message, then deletes the file so
     /// the next run starts with a clean slate.
-    pub(super) fn drain_live_summary(&mut self, run: &crate::state::RunRecord) {
+    pub(crate) fn drain_live_summary(&mut self, run: &crate::state::RunRecord) {
         let path = self.live_summary_path_for(run);
         // The drain primitive removes the file even when the read fails,
         // so the next run always starts clean.

@@ -13,7 +13,7 @@ use crate::state::{
 use crate::tasks;
 
 impl App {
-    pub(in crate::app) fn complete_run_finalization(
+    pub(crate) fn complete_run_finalization(
         &mut self,
         run: &crate::state::RunRecord,
         failure_reason: Option<String>,

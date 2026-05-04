@@ -8,11 +8,11 @@ use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
 
 impl App {
-    pub(in crate::app) fn launch_final_validation(&mut self) {
+    pub(crate) fn launch_final_validation(&mut self) {
         let _ = self.launch_final_validation_with_model(None);
     }
 
-    pub(in crate::app) fn launch_final_validation_with_model(
+    pub(crate) fn launch_final_validation_with_model(
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {

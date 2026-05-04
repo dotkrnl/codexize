@@ -58,11 +58,11 @@ impl App {
     /// Single entry point so renderer toasts and side-effect producers
     /// (refresh worker, guard logic, key handlers) share the same
     /// severity-priority + TTL contract enforced by `StatusLine`.
-    pub(super) fn push_status(&self, message: String, severity: Severity, ttl: Duration) {
+    pub(crate) fn push_status(&self, message: String, severity: Severity, ttl: Duration) {
         self.status_line.borrow_mut().push(message, severity, ttl);
     }
 
-    pub(super) fn surface_boundary_error(&mut self, message: String, persist_agent_error: bool) {
+    pub(crate) fn surface_boundary_error(&mut self, message: String, persist_agent_error: bool) {
         let _ = self.state.log_event(message.clone());
         self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
         if persist_agent_error {
@@ -72,7 +72,7 @@ impl App {
         }
     }
 
-    pub(super) fn stop_running_agent(&mut self) {
+    pub(crate) fn stop_running_agent(&mut self) {
         let Some(run) = self
             .running_run()
             .or_else(|| {
@@ -144,7 +144,7 @@ impl App {
     /// Run rows (including collapsed parents that absorbed a leaf run id)
     /// map to `Run(id)`. The Idea node maps to `Idea`. Everything else
     /// returns `None`.
-    pub(super) fn resolve_split_target_for_selected_row(&self) -> Option<SplitTarget> {
+    pub(crate) fn resolve_split_target_for_selected_row(&self) -> Option<SplitTarget> {
         let node = self.node_for_row(self.selected)?;
         if let Some(run_id) = node.run_id.or(node.leaf_run_id) {
             return Some(SplitTarget::Run(run_id));
@@ -158,7 +158,7 @@ impl App {
     /// Open the split for `target`. If the split is already showing the
     /// same target, this is a no-op (Enter must not toggle-close).
     /// Opening a different target resets scroll to the default tail position.
-    pub(super) fn open_split_target(&mut self, target: SplitTarget) {
+    pub(crate) fn open_split_target(&mut self, target: SplitTarget) {
         let same_target = self.split_target == Some(target);
         if same_target {
             return;
@@ -169,14 +169,14 @@ impl App {
     }
 
     /// Close the split pane and return focus to the tree.
-    pub(super) fn close_split(&mut self) {
+    pub(crate) fn close_split(&mut self) {
         self.split_target = None;
         self.split_scroll_offset = 0;
         self.split_follow_tail = true;
     }
 
     /// Returns `true` when the split is currently open.
-    pub(super) fn is_split_open(&self) -> bool {
+    pub(crate) fn is_split_open(&self) -> bool {
         self.split_target.is_some()
     }
 
@@ -351,7 +351,7 @@ impl App {
         }
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;
         }
@@ -555,7 +555,7 @@ impl App {
         }
     }
 
-    pub(super) fn handle_paste(&mut self, text: &str) {
+    pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.palette.open {
             crate::input_editor::insert_str(
                 &mut self.palette.buffer,

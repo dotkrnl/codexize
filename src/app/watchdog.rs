@@ -19,23 +19,23 @@ pub(super) type RunId = u64;
 
 /// Production thresholds (spec §3.1). The `_TOUGH` variants apply when
 /// `EffortLevel == Tough` (1.5×).
-pub(super) const WARN_AFTER_NORMAL: Duration = Duration::from_secs(10 * 60);
-pub(super) const KILL_AFTER_NORMAL: Duration = Duration::from_secs(20 * 60);
-pub(super) const WARN_AFTER_TOUGH: Duration = Duration::from_secs(15 * 60);
-pub(super) const KILL_AFTER_TOUGH: Duration = Duration::from_secs(30 * 60);
+pub(crate) const WARN_AFTER_NORMAL: Duration = Duration::from_secs(10 * 60);
+pub(crate) const KILL_AFTER_NORMAL: Duration = Duration::from_secs(20 * 60);
+pub(crate) const WARN_AFTER_TOUGH: Duration = Duration::from_secs(15 * 60);
+pub(crate) const KILL_AFTER_TOUGH: Duration = Duration::from_secs(30 * 60);
 
 /// Test-only env var that compresses the watchdog clock (spec §3.1, §6).
 /// Production is implicit `1_000_000_000` ns per simulated second (real
 /// time). Smaller values shrink real-time thresholds proportionally so the
 /// integration tests can drive AC1–AC6 in sub-second wall clock without
 /// changing the unscaled spec constants.
-pub(super) const SCALE_ENV_VAR: &str = "CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC";
+pub(crate) const SCALE_ENV_VAR: &str = "CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC";
 
 const PRODUCTION_NS_PER_SEC: u64 = 1_000_000_000;
 
 /// Idle-adjusted warn threshold for a run with the given effort level
 /// (unscaled — production wall-clock duration).
-pub(super) fn warn_after(effort: EffortLevel) -> Duration {
+pub(crate) fn warn_after(effort: EffortLevel) -> Duration {
     match effort {
         EffortLevel::Tough => WARN_AFTER_TOUGH,
         EffortLevel::Low | EffortLevel::Normal => WARN_AFTER_NORMAL,
@@ -44,7 +44,7 @@ pub(super) fn warn_after(effort: EffortLevel) -> Duration {
 
 /// Idle-adjusted kill threshold for a run with the given effort level
 /// (unscaled — production wall-clock duration).
-pub(super) fn kill_after(effort: EffortLevel) -> Duration {
+pub(crate) fn kill_after(effort: EffortLevel) -> Duration {
     match effort {
         EffortLevel::Tough => KILL_AFTER_TOUGH,
         EffortLevel::Low | EffortLevel::Normal => KILL_AFTER_NORMAL,
@@ -54,7 +54,7 @@ pub(super) fn kill_after(effort: EffortLevel) -> Duration {
 /// Decision returned by `WatchdogState::evaluate` once the App has computed a
 /// `now`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum WatchdogDecision {
+pub(crate) enum WatchdogDecision {
     Idle,
     EmitWarning,
     EmitKill,
@@ -62,7 +62,7 @@ pub(super) enum WatchdogDecision {
 
 /// Per-run idle-adjusted timing state. Spec §3.2.
 #[derive(Debug, Clone)]
-pub(super) struct WatchdogState {
+pub(crate) struct WatchdogState {
     #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
     pub(super) run_id: RunId,
     pub(super) window_name: String,
@@ -93,7 +93,7 @@ impl WatchdogState {
     /// Construct a state with custom (post-scaled) thresholds. Used by the
     /// registry so it owns the scaling policy in one place. Tests may also
     /// call this to supply hand-picked thresholds.
-    pub(super) fn new_with_thresholds(
+    pub(crate) fn new_with_thresholds(
         run_id: RunId,
         effort: EffortLevel,
         now: Instant,
@@ -125,7 +125,7 @@ impl WatchdogState {
     /// Construct an unscaled state at run-launch time (production
     /// thresholds). Convenience for tests that don't exercise scaling.
     #[cfg(test)]
-    pub(super) fn new(run_id: RunId, effort: EffortLevel, now: Instant) -> Self {
+    pub(crate) fn new(run_id: RunId, effort: EffortLevel, now: Instant) -> Self {
         Self::new_with_thresholds(
             run_id,
             effort,
@@ -139,7 +139,7 @@ impl WatchdogState {
 
     /// Idle-adjusted duration since the last observed `live_summary.txt`
     /// mtime advance. Spec §3.2.
-    pub(super) fn idle_elapsed(&self, now: Instant) -> Duration {
+    pub(crate) fn idle_elapsed(&self, now: Instant) -> Duration {
         let raw = now.saturating_duration_since(self.last_live_summary_event);
         let active_pause = self
             .pause_began_at
@@ -151,7 +151,7 @@ impl WatchdogState {
 
     /// One ACP tool call entered a non-terminal status. The first such call
     /// opens the pause window; concurrent ones only bump the counter.
-    pub(super) fn on_tool_call_started(&mut self, now: Instant) {
+    pub(crate) fn on_tool_call_started(&mut self, now: Instant) {
         self.in_flight_tool_calls = self.in_flight_tool_calls.saturating_add(1);
         if self.in_flight_tool_calls == 1 {
             self.pause_began_at = Some(now);
@@ -161,7 +161,7 @@ impl WatchdogState {
     /// One ACP tool call entered a terminal status. The pause window closes
     /// only when the last in-flight call finishes. Defensive against
     /// unbalanced finishes.
-    pub(super) fn on_tool_call_finished(&mut self, now: Instant) {
+    pub(crate) fn on_tool_call_finished(&mut self, now: Instant) {
         if self.in_flight_tool_calls == 0 {
             return;
         }
@@ -178,7 +178,7 @@ impl WatchdogState {
     /// `live_summary.txt` mtime advance observed at `now`. Resets the idle
     /// clock and pause budget; if a call is in flight, restart the pause
     /// window from `now` so pre-reset pause is not double-credited.
-    pub(super) fn on_live_summary_event(&mut self, now: Instant) {
+    pub(crate) fn on_live_summary_event(&mut self, now: Instant) {
         self.last_live_summary_event = now;
         self.paused_total = Duration::ZERO;
         if self.pause_began_at.is_some() {
@@ -189,7 +189,7 @@ impl WatchdogState {
     /// Decide whether the idle-adjusted clock has crossed a threshold at
     /// `now`. Kill fires even when `warned == false` so a starved App tick
     /// can skip the courtesy warning (spec §3.3 last paragraph).
-    pub(super) fn evaluate(&mut self, now: Instant) -> WatchdogDecision {
+    pub(crate) fn evaluate(&mut self, now: Instant) -> WatchdogDecision {
         let elapsed = self.idle_elapsed(now);
         if elapsed >= self.kill_threshold {
             return WatchdogDecision::EmitKill;
@@ -205,7 +205,7 @@ impl WatchdogState {
     /// back onto the unscaled (simulated) minute axis. Used in the
     /// `SummaryWarn` text and warning preamble so the agent-visible numbers
     /// match the spec wording independent of clock compression.
-    pub(super) fn idle_minutes_for_message(&self, now: Instant) -> u64 {
+    pub(crate) fn idle_minutes_for_message(&self, now: Instant) -> u64 {
         let elapsed_ns = self.idle_elapsed(now).as_nanos();
         let warn_unscaled = warn_after(self.effort).as_nanos();
         let warn_scaled = self.warn_threshold.as_nanos().max(1);
@@ -218,7 +218,7 @@ impl WatchdogState {
 /// Per-run keyed registry of `WatchdogState`. Owns the clock-compression
 /// scale once per App so all registered runs share a single policy.
 #[derive(Debug)]
-pub(super) struct WatchdogRegistry {
+pub(crate) struct WatchdogRegistry {
     states: HashMap<RunId, WatchdogState>,
     /// Number of real-time nanoseconds that represent one simulated second.
     /// Production = 1e9; tests may override via `SCALE_ENV_VAR`.
@@ -239,7 +239,7 @@ impl WatchdogRegistry {
     /// not exercise clock compression; production callers go through
     /// `from_env` so the env var is honored.
     #[cfg(test)]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -247,7 +247,7 @@ impl WatchdogRegistry {
     /// `CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC` if present and `> 0`.
     /// Production callers should use this so unset env always means
     /// unscaled (1e9 ns / s) — matches spec §3.1, §6.
-    pub(super) fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let scale_ns_per_sec = std::env::var(SCALE_ENV_VAR)
             .ok()
             .and_then(|raw| raw.parse::<u64>().ok())
@@ -260,7 +260,7 @@ impl WatchdogRegistry {
     }
 
     #[cfg(test)]
-    pub(super) fn with_scale_ns_per_sec(scale_ns_per_sec: u64) -> Self {
+    pub(crate) fn with_scale_ns_per_sec(scale_ns_per_sec: u64) -> Self {
         Self {
             states: HashMap::new(),
             scale_ns_per_sec: scale_ns_per_sec.max(1),
@@ -283,11 +283,11 @@ impl WatchdogRegistry {
         Duration::from_nanos(scaled_ns.min(u128::from(u64::MAX)) as u64)
     }
 
-    pub(super) fn warn_threshold(&self, effort: EffortLevel) -> Duration {
+    pub(crate) fn warn_threshold(&self, effort: EffortLevel) -> Duration {
         self.scale(warn_after(effort))
     }
 
-    pub(super) fn kill_threshold(&self, effort: EffortLevel) -> Duration {
+    pub(crate) fn kill_threshold(&self, effort: EffortLevel) -> Duration {
         self.scale(kill_after(effort))
     }
 
@@ -295,7 +295,7 @@ impl WatchdogRegistry {
     /// — callers that re-register without a finalize in between will
     /// overwrite the prior state, which is correct for the resume path
     /// (§4 "State survives across codexize restart? No.").
-    pub(super) fn register(
+    pub(crate) fn register(
         &mut self,
         run_id: RunId,
         effort: EffortLevel,
@@ -317,28 +317,28 @@ impl WatchdogRegistry {
         self.states.insert(run_id, state);
     }
 
-    pub(super) fn remove(&mut self, run_id: RunId) -> Option<WatchdogState> {
+    pub(crate) fn remove(&mut self, run_id: RunId) -> Option<WatchdogState> {
         self.states.remove(&run_id)
     }
 
-    pub(super) fn get_mut(&mut self, run_id: RunId) -> Option<&mut WatchdogState> {
+    pub(crate) fn get_mut(&mut self, run_id: RunId) -> Option<&mut WatchdogState> {
         self.states.get_mut(&run_id)
     }
 
     #[cfg(test)]
-    pub(super) fn get(&self, run_id: RunId) -> Option<&WatchdogState> {
+    pub(crate) fn get(&self, run_id: RunId) -> Option<&WatchdogState> {
         self.states.get(&run_id)
     }
 
     #[cfg(test)]
-    pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = &mut WatchdogState> {
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut WatchdogState> {
         self.states.values_mut()
     }
 
     /// Snapshot of (run_id, idle-adjusted decision) pairs at `now`. The
     /// poll-loop calls this and applies side effects per decision while
     /// holding `&mut self`.
-    pub(super) fn evaluate_all(&mut self, now: Instant) -> Vec<(RunId, WatchdogDecision)> {
+    pub(crate) fn evaluate_all(&mut self, now: Instant) -> Vec<(RunId, WatchdogDecision)> {
         self.states
             .iter_mut()
             .map(|(id, state)| (*id, state.evaluate(now)))
@@ -346,11 +346,11 @@ impl WatchdogRegistry {
     }
 
     #[cfg(test)]
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.states.len()
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 }
@@ -360,7 +360,7 @@ impl WatchdogRegistry {
 /// identical between production and clock-compressed tests. `idle_minutes`
 /// is the (unscaled) idle-adjusted minutes value already mapped onto the
 /// spec axis by `WatchdogState::idle_minutes_for_message`.
-pub(super) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
+pub(crate) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
     format!(
         "\u{26a0} Liveness warning from codexize watchdog \u{26a0}\n\n\
 You have not updated `live_summary.txt` in {idle} minutes (excluding time spent waiting on tool calls). \
@@ -379,7 +379,7 @@ do not acknowledge this warning beyond updating the live summary file.\n\n\
 
 /// Documented degraded fallback when `run.prompt_path` cannot be read —
 /// still send a warning rather than silently skipping (spec §3.4).
-pub(super) const PROMPT_UNAVAILABLE_BODY: &str =
+pub(crate) const PROMPT_UNAVAILABLE_BODY: &str =
     "the original prompt is unavailable on disk; resume the task as best you can.";
 
 #[cfg(test)]

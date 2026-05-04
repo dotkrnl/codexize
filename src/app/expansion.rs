@@ -4,11 +4,11 @@ use super::*;
 use super::tree::VisibleNodeRow;
 
 impl App {
-    pub(super) fn default_expanded(&self, row: &VisibleNodeRow) -> bool {
+    pub(crate) fn default_expanded(&self, row: &VisibleNodeRow) -> bool {
         default_expansion(row, self.current_node(), &self.active_path_keys())
     }
 
-    pub(super) fn is_expanded(&self, index: usize) -> bool {
+    pub(crate) fn is_expanded(&self, index: usize) -> bool {
         let Some(row) = self.visible_rows.get(index) else {
             return false;
         };
@@ -20,7 +20,7 @@ impl App {
         )
     }
 
-    pub(super) fn is_expanded_body(&self, index: usize) -> bool {
+    pub(crate) fn is_expanded_body(&self, index: usize) -> bool {
         self.is_expanded(index)
             && self
                 .visible_rows

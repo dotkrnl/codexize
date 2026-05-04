@@ -7,15 +7,14 @@ mod expansion;
 mod finalization;
 pub use crate::ui::focus_caps;
 pub use crate::ui::footer;
-mod guard;
-mod launch;
+pub(crate) mod guard;
 mod lifecycle;
 pub(crate) mod models;
 pub use crate::ui::models_area;
 mod observation;
 pub(crate) use crate::ui::palette;
 mod prompt_render;
-mod prompts;
+pub(crate) mod prompts;
 mod render;
 mod review_banner;
 pub(crate) use crate::ui::render_view_model;
@@ -71,33 +70,33 @@ const DEFAULT_EVENT_POLL_MS: u64 = 250;
 const LIVE_SUMMARY_EVENT_POLL_MS: u64 = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ObservedPathState {
+pub(crate) struct ObservedPathState {
     exists: bool,
     modified_at: Option<SystemTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct YoloExitSnapshot {
+pub(crate) struct YoloExitSnapshot {
     live_summary: ObservedPathState,
     finish_stamp: ObservedPathState,
     stage_artifacts: Vec<ObservedPathState>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct YoloExitObservation {
+pub(crate) struct YoloExitObservation {
     snapshot: YoloExitSnapshot,
     saw_new_update: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExpansionOverride {
+pub(crate) enum ExpansionOverride {
     Expanded,
     Collapsed,
 }
 
 /// Identifies a running stage for Family B error modals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StageId {
+pub(crate) enum StageId {
     Brainstorm,
     SpecReview,
     Planning,
@@ -108,7 +107,7 @@ pub(super) enum StageId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ModalKind {
+pub(crate) enum ModalKind {
     SkipToImpl,
     GitGuard,
     QuitRunningAgent,
@@ -119,7 +118,7 @@ pub(super) enum ModalKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum RetryLaunch {
+pub(crate) enum RetryLaunch {
     Brainstorm,
     SpecReview,
     Planning,
@@ -158,7 +157,7 @@ impl RetryLaunch {
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TerminationIntent {
+pub(crate) enum TerminationIntent {
     StopOnly,
     StopAndRetry(RetryLaunch),
     StopAndQuit,
@@ -183,7 +182,7 @@ impl TerminationIntent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PendingTermination {
+pub(crate) struct PendingTermination {
     run_id: u64,
     intent: TerminationIntent,
 }
@@ -206,7 +205,7 @@ impl PendingTermination {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CommandReturnTarget {
+pub(crate) enum CommandReturnTarget {
     Idea,
     FooterInteractive,
     SplitInteractive,
@@ -214,16 +213,16 @@ pub(super) enum CommandReturnTarget {
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
-struct TestLaunchOutcome {
-    exit_code: i32,
-    artifact_contents: Option<String>,
-    launch_error: Option<String>,
+pub(crate) struct TestLaunchOutcome {
+    pub(crate) exit_code: i32,
+    pub(crate) artifact_contents: Option<String>,
+    pub(crate) launch_error: Option<String>,
 }
 
 #[cfg(test)]
 #[derive(Debug, Default)]
-struct TestLaunchHarness {
-    outcomes: std::collections::VecDeque<TestLaunchOutcome>,
+pub(crate) struct TestLaunchHarness {
+    pub(crate) outcomes: std::collections::VecDeque<TestLaunchOutcome>,
 }
 
 pub const RESPONSIVE_HEIGHT_THRESHOLD: u16 = 60;
@@ -236,80 +235,80 @@ pub enum AppStartupOrigin {
 }
 
 pub struct App {
-    state: SessionState,
-    nodes: Vec<Node>,
-    visible_rows: Vec<VisibleNodeRow>,
-    models: Vec<CachedModel>,
-    versions: VersionIndex,
-    model_refresh: ModelRefreshState,
-    selected: usize,
-    selected_key: Option<NodeKey>,
-    collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
-    viewport_top: usize,
-    follow_tail: bool,
+    pub(crate) state: SessionState,
+    pub(crate) nodes: Vec<Node>,
+    pub(crate) visible_rows: Vec<VisibleNodeRow>,
+    pub(crate) models: Vec<CachedModel>,
+    pub(crate) versions: VersionIndex,
+    pub(crate) model_refresh: ModelRefreshState,
+    pub(crate) selected: usize,
+    pub(crate) selected_key: Option<NodeKey>,
+    pub(crate) collapsed_overrides: BTreeMap<NodeKey, ExpansionOverride>,
+    pub(crate) viewport_top: usize,
+    pub(crate) follow_tail: bool,
     /// When true, the viewport was intentionally paged away from the focused
     /// row and clamp_viewport should not pull it back toward focus.
-    explicit_viewport_scroll: bool,
+    pub(crate) explicit_viewport_scroll: bool,
     /// While true, automatic progress events (startup, phase changes, run
     /// launches/retries, live-summary updates) move the focus arrow to the
     /// newest active run row. Manual focus moves and explicit viewport paging
     /// flip this off; the next phase transition or run launch flips it back on.
-    progress_follow_active: bool,
+    pub(crate) progress_follow_active: bool,
     /// Snapshot of `messages.len()` taken when tail-follow was last
     /// disengaged. None while following. Used to count missed messages
     /// for the "v N new" badge.
-    tail_detach_baseline: Option<usize>,
-    body_inner_height: usize,
-    body_inner_width: usize,
-    split_target: Option<split::SplitTarget>,
+    pub(crate) tail_detach_baseline: Option<usize>,
+    pub(crate) body_inner_height: usize,
+    pub(crate) body_inner_width: usize,
+    pub(crate) split_target: Option<split::SplitTarget>,
     /// When true, the split transcript snaps to the latest visible tail on
     /// content/viewport changes. Manual split scrolling flips this off until
     /// the operator returns to the bottom of the transcript.
-    split_follow_tail: bool,
-    split_scroll_offset: usize,
+    pub(crate) split_follow_tail: bool,
+    pub(crate) split_scroll_offset: usize,
     /// Cached from the last draw pass so lifecycle clamping can honor the
     /// full-body split mode used at small terminal heights.
-    split_fullscreen: bool,
-    input_mode: bool,
-    input_buffer: String,
-    input_cursor: usize,
-    pending_view_path: Option<std::path::PathBuf>,
-    confirm_back: bool,
-    startup_origin: AppStartupOrigin,
-    run_launched: bool,
-    quota_errors: Vec<QuotaError>,
-    quota_retry_delay: Duration,
-    agent_line_count: usize,
-    agent_content_hash: u64,
-    agent_last_change: Option<Instant>,
-    spinner_tick: usize,
-    live_summary_spinner_visible: bool,
-    live_summary_watcher: Option<notify::RecommendedWatcher>,
-    live_summary_change_events: Option<crate::data::events::LiveSummaryEvents>,
-    live_summary_path: Option<std::path::PathBuf>,
-    live_summary_cached_text: String,
-    live_summary_cached_mtime: Option<std::time::SystemTime>,
-    pending_drain_deadline: Option<Instant>,
-    pending_termination: Option<PendingTermination>,
-    pending_quit_confirmation_run_id: Option<u64>,
-    interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,
-    pending_app_exit: bool,
-    current_run_id: Option<u64>,
-    failed_models: HashMap<RetryKey, FailedModelSet>,
-    pending_yolo_toggle_gate: Option<&'static str>,
-    yolo_exit_issued: HashSet<u64>,
-    yolo_exit_observations: HashMap<u64, YoloExitObservation>,
+    pub(crate) split_fullscreen: bool,
+    pub(crate) input_mode: bool,
+    pub(crate) input_buffer: String,
+    pub(crate) input_cursor: usize,
+    pub(crate) pending_view_path: Option<std::path::PathBuf>,
+    pub(crate) confirm_back: bool,
+    pub(crate) startup_origin: AppStartupOrigin,
+    pub(crate) run_launched: bool,
+    pub(crate) quota_errors: Vec<QuotaError>,
+    pub(crate) quota_retry_delay: Duration,
+    pub(crate) agent_line_count: usize,
+    pub(crate) agent_content_hash: u64,
+    pub(crate) agent_last_change: Option<Instant>,
+    pub(crate) spinner_tick: usize,
+    pub(crate) live_summary_spinner_visible: bool,
+    pub(crate) live_summary_watcher: Option<notify::RecommendedWatcher>,
+    pub(crate) live_summary_change_events: Option<crate::data::events::LiveSummaryEvents>,
+    pub(crate) live_summary_path: Option<std::path::PathBuf>,
+    pub(crate) live_summary_cached_text: String,
+    pub(crate) live_summary_cached_mtime: Option<std::time::SystemTime>,
+    pub(crate) pending_drain_deadline: Option<Instant>,
+    pub(crate) pending_termination: Option<PendingTermination>,
+    pub(crate) pending_quit_confirmation_run_id: Option<u64>,
+    pub(crate) interactive_exit_prompt_dismissed_at: Option<(u64, usize)>,
+    pub(crate) pending_app_exit: bool,
+    pub(crate) current_run_id: Option<u64>,
+    pub(crate) failed_models: HashMap<RetryKey, FailedModelSet>,
+    pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
+    pub(crate) yolo_exit_issued: HashSet<u64>,
+    pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
     /// Per-run liveness watchdog state. Allocated as part of task 1
     /// scaffolding; the App-side lifecycle hookup that inserts/removes
     /// entries (and ticks `evaluate`) lands with task 2.
-    watchdog: watchdog::WatchdogRegistry,
+    pub(crate) watchdog: watchdog::WatchdogRegistry,
     #[cfg(test)]
-    test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
-    messages: Vec<Message>,
-    status_line: Rc<RefCell<status_line::StatusLine>>,
-    prev_models_mode: models_area::ModelsAreaMode,
-    palette: palette::PaletteState,
-    command_return_target: Option<CommandReturnTarget>,
+    pub(crate) test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
+    pub(crate) messages: Vec<Message>,
+    pub(crate) status_line: Rc<RefCell<status_line::StatusLine>>,
+    pub(crate) prev_models_mode: models_area::ModelsAreaMode,
+    pub(crate) palette: palette::PaletteState,
+    pub(crate) command_return_target: Option<CommandReturnTarget>,
 }
 
 fn default_expansion(

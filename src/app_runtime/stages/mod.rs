@@ -1,10 +1,15 @@
-// Per-stage launch handlers.
+// Per-stage runtime modules.
 //
-// Shared bookkeeping (model picking, run tracking, retry routing) lives in
-// this file; the actual per-stage launch bodies live in sibling submodules so
-// each pipeline stage's wiring is reviewable in isolation. The orchestrator
-// (App) reaches the per-stage helpers as plain methods because the impl
-// blocks all extend `crate::app::App`.
+// Each pipeline stage owns one file under `src/app_runtime/stages/<name>.rs`
+// holding that stage's launch wiring (and, where the prior god files made
+// the cross-stage cut natural, finalize/event hooks). The orchestrator
+// (`crate::app::App`) reaches the per-stage helpers as plain methods because
+// the impl blocks all extend `App` — physical location moved out of
+// `src/app/launch/` so a future server-mode binary can drive `app_runtime`
+// directly without pulling the legacy `app::launch` namespace.
+//
+// Shared bookkeeping (model picking, run tracking, retry routing) stays in
+// this `mod.rs` so per-stage files remain reviewable in isolation.
 
 mod brainstorm;
 mod coder;
@@ -16,12 +21,12 @@ mod recovery_plan_review;
 mod recovery_sharding;
 mod reviewer;
 mod sharding;
-mod simplifier;
+mod simplification;
 mod spec_review;
 
-use super::*;
 use crate::{
     adapters::EffortLevel,
+    app::App,
     selection::{
         CachedModel, VendorKind,
         config::SelectionPhase,
@@ -33,10 +38,10 @@ use crate::{
     },
 };
 
-use super::models::vendor_tag;
+use crate::app::models::vendor_tag;
 
 impl App {
-    pub(super) fn try_test_launch(
+    pub(crate) fn try_test_launch(
         &mut self,
         artifact_path: Option<&std::path::Path>,
         run_key: &str,
@@ -86,7 +91,7 @@ impl App {
         }
     }
 
-    pub(super) fn choose_primary_model(
+    pub(crate) fn choose_primary_model(
         &mut self,
         override_model: Option<&CachedModel>,
         phase: SelectionPhase,
@@ -112,7 +117,7 @@ impl App {
         Some(picked)
     }
 
-    pub(super) fn choose_review_model(
+    pub(crate) fn choose_review_model(
         &mut self,
         override_model: Option<&CachedModel>,
         used_vendors: &[VendorKind],
@@ -148,7 +153,7 @@ impl App {
     // This launch bookkeeping intentionally keeps the selected model metadata
     // explicit at the call site so run records cannot silently omit a field.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn start_run_tracking(
+    pub(crate) fn start_run_tracking(
         &mut self,
         stage: &str,
         task_id: Option<u32>,
@@ -253,7 +258,7 @@ impl App {
         }
     }
 
-    pub(super) fn launch_retry_for_stage(
+    pub(crate) fn launch_retry_for_stage(
         &mut self,
         failed_run: &crate::state::RunRecord,
         chosen: CachedModel,

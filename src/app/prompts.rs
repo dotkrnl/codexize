@@ -31,11 +31,11 @@ const RECOVERY_INTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_inter
 const RECOVERY_NONINTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_noninteractive.md");
 const RECOVERY_PLAN_REVIEW_TEMPLATE: &str = include_str!("prompts/recovery_plan_review.md");
 const RECOVERY_SHARDING_TEMPLATE: &str = include_str!("prompts/recovery_sharding.md");
-pub(super) fn cancel_run_label(base: &str) {
+pub(crate) fn cancel_run_label(base: &str) {
     crate::runner::cancel_run_labels_matching(base);
 }
 
-pub(super) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
+pub(crate) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
     for (backup, target) in pairs {
         if backup.exists() {
             let _ = std::fs::copy(backup, target);
@@ -43,7 +43,7 @@ pub(super) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) 
     }
 }
 
-pub(super) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
+pub(crate) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
     use anyhow::Context;
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;
@@ -55,7 +55,7 @@ pub(super) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyh
     toml::to_string_pretty(task).context("serialize task.toml")
 }
 
-pub(super) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> EffortLevel {
+pub(crate) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> EffortLevel {
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let Ok(parsed) = tasks::validate(&tasks_path) else {
         // Preserve the existing launch fallback when task metadata is unavailable.
@@ -69,7 +69,7 @@ pub(super) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> Ef
         .unwrap_or_default()
 }
 
-pub(super) fn assigned_revise_task_ids(
+pub(crate) fn assigned_revise_task_ids(
     builder: &session_state::BuilderState,
     count: usize,
 ) -> Vec<u32> {
@@ -80,7 +80,7 @@ pub(super) fn assigned_revise_task_ids(
     ids
 }
 
-pub(super) fn rewrite_tasks_for_revise(
+pub(crate) fn rewrite_tasks_for_revise(
     session_dir: &std::path::Path,
     current_task_id: u32,
     new_tasks: &[tasks::Task],
@@ -129,7 +129,7 @@ pub(super) fn rewrite_tasks_for_revise(
     Ok(())
 }
 
-pub(super) fn validate_stage_toml_writes(
+pub(crate) fn validate_stage_toml_writes(
     session_dir: &std::path::Path,
     stage: &str,
     round: u32,
@@ -148,7 +148,7 @@ pub(super) fn validate_stage_toml_writes(
     crate::runner::validate_toml_artifacts(&refs)
 }
 
-pub(super) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<ReviewScopeArtifact> {
+pub(crate) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<ReviewScopeArtifact> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     let scope: ReviewScopeArtifact =
@@ -159,11 +159,11 @@ pub(super) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<Review
     Ok(scope)
 }
 
-pub(super) fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> {
+pub(crate) fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(read_review_scope(path)?.base_sha.trim().to_string())
 }
 
-pub(super) fn write_review_scope_artifact(
+pub(crate) fn write_review_scope_artifact(
     round_dir: &std::path::Path,
     base_sha: &str,
 ) -> std::io::Result<()> {
@@ -206,7 +206,7 @@ fn agent_path(path: &Path) -> String {
 /// (CLAUDE.md / AGENTS.md) before the agent acts. Returns an empty string
 /// if neither file is present in the cwd, to avoid wasting prompt context
 /// directing the agent to read files that don't exist.
-pub(super) fn project_doc_instr() -> String {
+pub(crate) fn project_doc_instr() -> String {
     let claude_path = Path::new("CLAUDE.md");
     let agents_path = Path::new("AGENTS.md");
     let claude = claude_path.exists();
@@ -224,17 +224,17 @@ pub(super) fn project_doc_instr() -> String {
     format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
 }
 
-pub(super) fn live_summary_instruction(path: &std::path::Path) -> String {
+pub(crate) fn live_summary_instruction(path: &std::path::Path) -> String {
     let path_str = agent_path(path);
     render(LIVE_SUMMARY_TEMPLATE, &[("path", &path_str)])
 }
 
-pub(super) fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
+pub(crate) fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
     let path_str = agent_path(path);
     render(LIVE_SUMMARY_INTERACTIVE_TEMPLATE, &[("path", &path_str)])
 }
 
-pub(super) fn spec_review_prompt(
+pub(crate) fn spec_review_prompt(
     spec_path: &str,
     review_path: &str,
     live_summary_path: &str,
@@ -254,7 +254,7 @@ pub(super) fn spec_review_prompt(
     )
 }
 
-pub(super) fn plan_review_prompt(
+pub(crate) fn plan_review_prompt(
     spec_path: &str,
     plan_path: &str,
     review_path: &str,
@@ -296,7 +296,7 @@ pub(super) fn plan_review_prompt(
 
 /// Builds the brainstorm-stage prompt. The prompt embeds the workflow inline
 /// and explicitly refuses to invoke skills.
-pub(super) fn brainstorm_prompt(
+pub(crate) fn brainstorm_prompt(
     idea: &str,
     spec_path: &str,
     summary_path: &str,
@@ -335,7 +335,7 @@ pub(super) fn brainstorm_prompt(
     )
 }
 
-pub(super) fn planning_prompt(
+pub(crate) fn planning_prompt(
     spec_path: &std::path::Path,
     review_paths: &[std::path::PathBuf],
     plan_path: &std::path::Path,
@@ -378,7 +378,7 @@ pub(super) fn planning_prompt(
     )
 }
 
-pub(super) fn final_validation_prompt(
+pub(crate) fn final_validation_prompt(
     idea_text: &str,
     spec_text: &str,
     verdict_path: &std::path::Path,
@@ -413,7 +413,7 @@ pub(super) fn final_validation_prompt(
     )
 }
 
-pub(super) fn sharding_prompt(
+pub(crate) fn sharding_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
     tasks_path: &std::path::Path,
@@ -437,7 +437,7 @@ pub(super) fn sharding_prompt(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn recovery_prompt(
+pub(crate) fn recovery_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
     tasks_path: &std::path::Path,
@@ -503,7 +503,7 @@ pub(super) fn recovery_prompt(
     )
 }
 
-pub(super) fn recovery_plan_review_prompt(
+pub(crate) fn recovery_plan_review_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
     triggering_review_path: &std::path::Path,
@@ -532,7 +532,7 @@ pub(super) fn recovery_plan_review_prompt(
     )
 }
 
-pub(super) fn recovery_sharding_prompt(
+pub(crate) fn recovery_sharding_prompt(
     spec_path: &std::path::Path,
     plan_path: &std::path::Path,
     live_summary_path: &std::path::Path,
@@ -576,7 +576,7 @@ pub(super) use super::review_banner::{REVIEW_BANNER, prepend_review_banner, stri
 // builds so transitions never shell out to git from the test process; this
 // helper is only reachable on the production path.
 #[cfg_attr(test, allow(dead_code))]
-pub(super) fn git_rev_parse_head() -> Option<String> {
+pub(crate) fn git_rev_parse_head() -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .output()
@@ -588,7 +588,7 @@ pub(super) fn git_rev_parse_head() -> Option<String> {
     (!sha.is_empty()).then_some(sha)
 }
 
-pub(super) fn coder_prompt(
+pub(crate) fn coder_prompt(
     session_dir: &std::path::Path,
     task_id: u32,
     round: u32,
@@ -663,18 +663,18 @@ pub(super) fn coder_prompt(
     )
 }
 
-pub(super) struct ReviewerPromptInputs<'a> {
-    pub(super) session_dir: &'a std::path::Path,
-    pub(super) task_id: u32,
-    pub(super) round: u32,
-    pub(super) task_file: &'a std::path::Path,
-    pub(super) review_scope_file: &'a std::path::Path,
-    pub(super) coder_summary_file: Option<&'a std::path::Path>,
-    pub(super) review_file: &'a std::path::Path,
-    pub(super) live_summary_path: &'a std::path::Path,
+pub(crate) struct ReviewerPromptInputs<'a> {
+    pub(crate) session_dir: &'a std::path::Path,
+    pub(crate) task_id: u32,
+    pub(crate) round: u32,
+    pub(crate) task_file: &'a std::path::Path,
+    pub(crate) review_scope_file: &'a std::path::Path,
+    pub(crate) coder_summary_file: Option<&'a std::path::Path>,
+    pub(crate) review_file: &'a std::path::Path,
+    pub(crate) live_summary_path: &'a std::path::Path,
 }
 
-pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
+pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let ReviewerPromptInputs {
         session_dir,
         task_id,
@@ -744,7 +744,7 @@ pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
 /// pass over the round's `base_sha..HEAD` diff. The simplifier writes
 /// `simplification_path` and a live summary, and produces `refactor:` /
 /// `style:` commits when it has work to do.
-pub(super) fn simplifier_prompt(
+pub(crate) fn simplifier_prompt(
     session_dir: &std::path::Path,
     review_scope_file: &std::path::Path,
     simplification_path: &std::path::Path,

@@ -3,7 +3,7 @@ use crate::app::chat_widget;
 use crate::app::clock::WallClock;
 use crate::app::split::{SplitTarget, run_main_panel_message_visible};
 
-pub(super) struct PipelineWidget<'a> {
+pub(crate) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
 }
 
@@ -19,7 +19,7 @@ struct PipelineLine {
     kind: PipelineLineKind,
 }
 
-pub(super) struct RunningTailLine {
+pub(crate) struct RunningTailLine {
     pub(super) line: Line<'static>,
     kind: PipelineLineKind,
 }
@@ -102,7 +102,7 @@ impl App {
             })
     }
 
-    pub(super) fn live_agent_spinner_active(&self) -> bool {
+    pub(crate) fn live_agent_spinner_active(&self) -> bool {
         self.state
             .agent_runs
             .iter()
@@ -144,7 +144,7 @@ impl App {
         lines
     }
 
-    pub(super) fn visible_live_summary_tail_runs(
+    pub(crate) fn visible_live_summary_tail_runs(
         &self,
         area_h: usize,
         viewport_top: usize,
@@ -168,7 +168,7 @@ impl App {
             .collect()
     }
 
-    pub(super) fn live_summary_spinner_visible_for_height(&self, area_h: usize) -> bool {
+    pub(crate) fn live_summary_spinner_visible_for_height(&self, area_h: usize) -> bool {
         if !self.live_agent_spinner_active() {
             return false;
         }
@@ -240,7 +240,7 @@ impl App {
         Some(line)
     }
 
-    pub(super) fn node_header(
+    pub(crate) fn node_header(
         &self,
         index: usize,
         expanded: bool,
@@ -305,7 +305,7 @@ impl App {
         Line::from(spans).style(style)
     }
 
-    pub(in crate::app) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
+    pub(crate) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
         let width = self.body_inner_width.max(1);
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
         self.node_body_lines_with_offset(index, width, &local_offset, &BTreeSet::new())
@@ -408,7 +408,7 @@ impl App {
     /// message" (`HH:MM:SS ⠋ live-summary-title`). Container rows use the
     /// tree-shape placeholder only when a visible child transcript tail for the
     /// same run is not already representing progress.
-    pub(super) fn running_tail_for_row<C: Clock>(
+    pub(crate) fn running_tail_for_row<C: Clock>(
         &self,
         index: usize,
         run: &RunRecord,
@@ -491,7 +491,7 @@ impl App {
     /// artifact is missing or fails to parse — invalid verdicts are routed
     /// through the runtime fail-closed path elsewhere; here we just stay
     /// quiet rather than render half-truths.
-    pub(super) fn final_validation_report_lines_for_run(
+    pub(crate) fn final_validation_report_lines_for_run(
         &self,
         run: &RunRecord,
         indent: &str,

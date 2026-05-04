@@ -10,7 +10,7 @@ use crate::{
     state::{PendingGuardDecision, Phase, RunRecord, RunStatus, SessionState},
 };
 
-pub(super) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
@@ -37,7 +37,7 @@ pub(super) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 /// from the current directory, so prompt snapshots must run under a clean
 /// cwd to stay deterministic regardless of what's checked into the repo
 /// root. Serialized via `test_fs_lock`; chdir is process-global.
-pub(super) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
+pub(crate) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
@@ -64,7 +64,7 @@ pub(super) fn with_temp_root_and_cwd<T>(f: impl FnOnce(&std::path::Path) -> T) -
     result.expect("test panicked")
 }
 
-pub(super) fn mk_state_with_runs() -> SessionState {
+pub(crate) fn mk_state_with_runs() -> SessionState {
     let mut state = SessionState::new("t".to_string());
     state.current_phase = Phase::SpecReviewRunning;
     state.agent_runs.push(RunRecord {
@@ -106,14 +106,14 @@ pub(super) fn mk_state_with_runs() -> SessionState {
     state
 }
 
-pub(super) fn coder_round_state(session_id: &str) -> SessionState {
+pub(crate) fn coder_round_state(session_id: &str) -> SessionState {
     let mut state = SessionState::new(session_id.to_string());
     state.current_phase = Phase::ImplementationRound(1);
     state.builder.current_task = Some(1);
     state
 }
 
-pub(super) fn mk_app(state: SessionState) -> App {
+pub(crate) fn mk_app(state: SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
@@ -180,7 +180,7 @@ pub(super) fn mk_app(state: SessionState) -> App {
     app
 }
 
-pub(super) fn make_coder_run(id: u64, round: u32, attempt: u32) -> RunRecord {
+pub(crate) fn make_coder_run(id: u64, round: u32, attempt: u32) -> RunRecord {
     RunRecord {
         id,
         stage: "coder".to_string(),
@@ -201,7 +201,7 @@ pub(super) fn make_coder_run(id: u64, round: u32, attempt: u32) -> RunRecord {
     }
 }
 
-pub(super) fn make_planning_run(id: u64, attempt: u32) -> RunRecord {
+pub(crate) fn make_planning_run(id: u64, attempt: u32) -> RunRecord {
     RunRecord {
         id,
         stage: "planning".to_string(),
@@ -222,7 +222,7 @@ pub(super) fn make_planning_run(id: u64, attempt: u32) -> RunRecord {
     }
 }
 
-pub(super) fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> RunRecord {
+pub(crate) fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> RunRecord {
     RunRecord {
         id,
         stage: stage.to_string(),
@@ -243,11 +243,11 @@ pub(super) fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> 
     }
 }
 
-pub(super) fn write_review_scope(round_dir: &std::path::Path, base_sha: &str) {
+pub(crate) fn write_review_scope(round_dir: &std::path::Path, base_sha: &str) {
     write_review_scope_artifact(round_dir, base_sha).expect("write review scope");
 }
 
-pub(super) fn write_finish_stamp(
+pub(crate) fn write_finish_stamp(
     session_dir: &std::path::Path,
     run_key: &str,
     head_after: &str,
@@ -269,7 +269,7 @@ pub(super) fn write_finish_stamp(
     crate::runner::write_finish_stamp(&stamp_path, &stamp).expect("write finish stamp");
 }
 
-pub(super) fn write_finish_stamp_for_run(
+pub(crate) fn write_finish_stamp_for_run(
     app: &App,
     run: &RunRecord,
     exit_code: i32,
@@ -288,7 +288,7 @@ pub(super) fn write_finish_stamp_for_run(
         .expect("write finish stamp");
 }
 
-pub(super) fn build_progress_follow_app(state: SessionState, current_run_id: u64) -> App {
+pub(crate) fn build_progress_follow_app(state: SessionState, current_run_id: u64) -> App {
     let mut app = mk_app(state);
     app.current_run_id = Some(current_run_id);
     app.rebuild_tree_view(None);
@@ -296,17 +296,17 @@ pub(super) fn build_progress_follow_app(state: SessionState, current_run_id: u64
     app
 }
 
-pub(super) fn row_index(app: &App, label: &str) -> usize {
+pub(crate) fn row_index(app: &App, label: &str) -> usize {
     row_index_opt(app, label).expect("row")
 }
 
-pub(super) fn row_index_opt(app: &App, label: &str) -> Option<usize> {
+pub(crate) fn row_index_opt(app: &App, label: &str) -> Option<usize> {
     app.visible_rows
         .iter()
         .position(|row| node_at_path(&app.nodes, &row.path).is_some_and(|node| node.label == label))
 }
 
-pub(super) fn row_label(app: &App, index: usize) -> String {
+pub(crate) fn row_label(app: &App, index: usize) -> String {
     app.node_for_row(index)
         .map(|node| node.label.clone())
         .unwrap_or_default()
@@ -318,7 +318,7 @@ pub(super) fn row_label(app: &App, index: usize) -> String {
 ///   1.0³ = 1.0     → kept
 ///   0.6³ = 0.216   → 0.216 < 1/3, excluded
 ///   0.4³ = 0.064   → excluded
-pub(super) fn rank_to_axis_score_inner(rank: u8) -> f64 {
+pub(crate) fn rank_to_axis_score_inner(rank: u8) -> f64 {
     match rank {
         1 => 1.0,
         2 => 0.6,
@@ -335,7 +335,7 @@ fn rank_to_ipbr_score(rank: u8) -> f64 {
     100.0 - (f64::from(rank.saturating_sub(1)) * 100.0)
 }
 
-pub(super) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::CachedModel {
+pub(crate) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selection::CachedModel {
     let idea = rank_to_axis_score_inner(idea_rank);
     let build = rank_to_axis_score_inner(build_rank);
     selection::CachedModel {
@@ -372,7 +372,7 @@ pub(super) fn sample_model(name: &str, idea_rank: u8, build_rank: u8) -> selecti
     }
 }
 
-pub(super) fn ranked_model(
+pub(crate) fn ranked_model(
     vendor: selection::VendorKind,
     name: &str,
     planning_rank: u8,
@@ -420,7 +420,7 @@ pub(super) fn ranked_model(
     }
 }
 
-pub(super) fn idle_app(state: SessionState) -> App {
+pub(crate) fn idle_app(state: SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
     let selected_key = node_key_at_path(&nodes, &[current]);
@@ -487,7 +487,7 @@ pub(super) fn idle_app(state: SessionState) -> App {
     app
 }
 
-pub(super) fn make_brainstorm_run(id: u64) -> RunRecord {
+pub(crate) fn make_brainstorm_run(id: u64) -> RunRecord {
     RunRecord {
         id,
         stage: "brainstorm".to_string(),
@@ -508,7 +508,7 @@ pub(super) fn make_brainstorm_run(id: u64) -> RunRecord {
     }
 }
 
-pub(super) fn write_ask_operator_snapshot(session_dir: &std::path::Path) {
+pub(crate) fn write_ask_operator_snapshot(session_dir: &std::path::Path) {
     let guard_dir = session_dir.join(".guards").join("brainstorm-stage-r1-a1");
     std::fs::create_dir_all(&guard_dir).expect("guard dir");
     std::fs::write(
@@ -518,7 +518,7 @@ pub(super) fn write_ask_operator_snapshot(session_dir: &std::path::Path) {
         .expect("write snapshot");
 }
 
-pub(super) fn make_pending_guard_state(session_id: &str, run_id: u64) -> SessionState {
+pub(crate) fn make_pending_guard_state(session_id: &str, run_id: u64) -> SessionState {
     let mut state = SessionState::new(session_id.to_string());
     state.current_phase = Phase::GitGuardPending;
     state.agent_runs.push(make_brainstorm_run(run_id));
@@ -535,6 +535,6 @@ pub(super) fn make_pending_guard_state(session_id: &str, run_id: u64) -> Session
     state
 }
 
-pub(super) fn key(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
+pub(crate) fn key(code: crossterm::event::KeyCode) -> crossterm::event::KeyEvent {
     crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
 }

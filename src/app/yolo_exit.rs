@@ -7,11 +7,11 @@ use crate::{
 };
 use std::time::Duration;
 impl App {
-    pub(super) fn toggle_yolo_mode(&mut self, source: &str) {
+    pub(crate) fn toggle_yolo_mode(&mut self, source: &str) {
         self.set_yolo_mode(!self.state.modes.yolo, source);
     }
 
-    pub(super) fn set_yolo_mode(&mut self, value: bool, source: &str) {
+    pub(crate) fn set_yolo_mode(&mut self, value: bool, source: &str) {
         session_state::transitions::set_yolo_mode(&mut self.state, value);
         if let Err(err) = self.state.save() {
             self.record_agent_error(format!("failed to save yolo mode: {err:#}"));
@@ -37,7 +37,7 @@ impl App {
         );
     }
 
-    pub(super) fn live_yolo_paused_gate(&self) -> Option<&'static str> {
+    pub(crate) fn live_yolo_paused_gate(&self) -> Option<&'static str> {
         match self.state.current_phase {
             Phase::SpecReviewPaused => Some("spec_approval"),
             Phase::PlanReviewPaused => Some("plan_approval"),
@@ -45,17 +45,17 @@ impl App {
         }
     }
 
-    pub(super) fn log_yolo_auto_approved(&mut self, gate: &'static str) {
+    pub(crate) fn log_yolo_auto_approved(&mut self, gate: &'static str) {
         let _ = self
             .state
             .log_event(format!("yolo_auto_approved: gate={gate}"));
     }
 
-    pub(super) fn queue_recovery_sharding_pipeline_item(&mut self, round: u32) {
+    pub(crate) fn queue_recovery_sharding_pipeline_item(&mut self, round: u32) {
         session_state::transitions::queue_recovery_sharding(&mut self.state, round);
     }
 
-    pub(super) fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
+    pub(crate) fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
         let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
@@ -79,7 +79,7 @@ impl App {
         }
     }
 
-    pub(super) fn yolo_exit_snapshot(&self, run: &RunRecord) -> YoloExitSnapshot {
+    pub(crate) fn yolo_exit_snapshot(&self, run: &RunRecord) -> YoloExitSnapshot {
         YoloExitSnapshot {
             live_summary: Self::observed_path_state(&self.live_summary_path_for(run)),
             finish_stamp: Self::observed_path_state(&self.finish_stamp_path_for(run)),
@@ -91,7 +91,7 @@ impl App {
         }
     }
 
-    pub(super) fn prime_yolo_exit_tracking(&mut self, run: &RunRecord) {
+    pub(crate) fn prime_yolo_exit_tracking(&mut self, run: &RunRecord) {
         self.yolo_exit_issued.remove(&run.id);
         self.yolo_exit_observations.insert(
             run.id,
@@ -102,7 +102,7 @@ impl App {
         );
     }
 
-    pub(super) fn yolo_exit_has_new_observable_update(&mut self, run: &RunRecord) -> bool {
+    pub(crate) fn yolo_exit_has_new_observable_update(&mut self, run: &RunRecord) -> bool {
         let snapshot = self.yolo_exit_snapshot(run);
         let observation = self
             .yolo_exit_observations
@@ -118,13 +118,13 @@ impl App {
         observation.saw_new_update
     }
 
-    pub(super) fn yolo_exit_gate_name(stage: &str) -> String {
+    pub(crate) fn yolo_exit_gate_name(stage: &str) -> String {
         // The spec leaves per-stage `/exit` event names open; keep them aligned
         // with the existing underscore-delimited yolo audit gates.
         format!("{}_exit", stage.replace('-', "_"))
     }
 
-    pub(super) fn maybe_yolo_auto_resolve(&mut self) {
+    pub(crate) fn maybe_yolo_auto_resolve(&mut self) {
         if !self.state.modes.yolo {
             return;
         }
@@ -139,7 +139,7 @@ impl App {
         }
     }
 
-    pub(super) fn auto_approve_spec_review_pause(&mut self, gate: &'static str) {
+    pub(crate) fn auto_approve_spec_review_pause(&mut self, gate: &'static str) {
         self.log_yolo_auto_approved(gate);
         if self.pending_yolo_toggle_gate == Some(gate) {
             let _ = self
@@ -151,7 +151,7 @@ impl App {
         let _ = self.transition_to_phase(Phase::PlanningRunning);
     }
 
-    pub(super) fn auto_approve_plan_review_pause(&mut self, gate: &'static str) {
+    pub(crate) fn auto_approve_plan_review_pause(&mut self, gate: &'static str) {
         self.log_yolo_auto_approved(gate);
         if self.pending_yolo_toggle_gate == Some(gate) {
             let _ = self
@@ -164,13 +164,13 @@ impl App {
         let _ = self.transition_to_phase(Phase::ShardingRunning);
     }
 
-    pub(super) fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
+    pub(crate) fn record_dirty_worktree_yolo_gate(&mut self, dirty: bool, modes: LaunchModes) {
         if dirty && modes.yolo {
             self.log_yolo_auto_approved("dirty_worktree");
         }
     }
 
-    pub(super) fn maybe_issue_yolo_exit(&mut self, run: &RunRecord) {
+    pub(crate) fn maybe_issue_yolo_exit(&mut self, run: &RunRecord) {
         if !run.modes.yolo || self.yolo_exit_issued.contains(&run.id) {
             return;
         }
@@ -188,7 +188,7 @@ impl App {
         crate::runner::request_run_label_exit(&run.window_name);
     }
 
-    pub(super) fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
+    pub(crate) fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {
         let paths = self.yolo_exit_stage_artifacts(run);
         if paths.is_empty() || !paths.iter().all(|path| Self::artifact_present(path)) {
             return false;

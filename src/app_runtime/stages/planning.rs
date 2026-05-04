@@ -6,11 +6,11 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, RunStatus};
 
 impl App {
-    pub(in crate::app) fn launch_planning(&mut self) {
+    pub(crate) fn launch_planning(&mut self) {
         let _ = self.launch_planning_with_model(None, true);
     }
 
-    pub(in crate::app) fn launch_planning_with_model(
+    pub(crate) fn launch_planning_with_model(
         &mut self,
         override_model: Option<CachedModel>,
         interactive: bool,

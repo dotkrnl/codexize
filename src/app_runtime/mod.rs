@@ -22,6 +22,7 @@
 
 pub mod command;
 pub mod harness;
+pub(crate) mod stages;
 pub mod terminal;
 pub mod view;
 

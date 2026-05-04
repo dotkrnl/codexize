@@ -4,7 +4,7 @@ use crate::app::{App, AppStartupOrigin, ObservedPathState, RetryLaunch, split::S
 use crate::state::{MessageKind, Phase, SessionState};
 
 impl App {
-    pub(in crate::app) fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
+    pub(crate) fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
         match std::fs::metadata(path) {
             Ok(meta) => ObservedPathState {
                 exists: true,
@@ -17,7 +17,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn update_agent_progress(&mut self) {
+    pub(crate) fn update_agent_progress(&mut self) {
         if let Ok(messages) = SessionState::load_messages(&self.state.session_id)
             && messages != self.messages
         {
@@ -60,7 +60,7 @@ impl App {
     /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
     /// run is already launched, if models aren't loaded, or if the last run
     /// errored (user needs to intervene).
-    pub(in crate::app) fn maybe_auto_launch(&mut self) {
+    pub(crate) fn maybe_auto_launch(&mut self) {
         if self.startup_origin == AppStartupOrigin::PickerCreated {
             return;
         }
@@ -88,7 +88,7 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn poll_agent_run(&mut self) {
+    pub(crate) fn poll_agent_run(&mut self) {
         let Some(run_id) = self.current_run_id else {
             self.pending_drain_deadline = None;
             return;
@@ -153,7 +153,7 @@ impl App {
         self.rebuild_tree_view(None);
     }
 
-    pub(in crate::app) fn launch_retry_from_descriptor(&mut self, retry: RetryLaunch) {
+    pub(crate) fn launch_retry_from_descriptor(&mut self, retry: RetryLaunch) {
         match retry {
             RetryLaunch::Brainstorm => {
                 let idea = self.state.idea_text.clone().unwrap_or_default();

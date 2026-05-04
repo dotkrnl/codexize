@@ -13,7 +13,7 @@
 //     error (panic) so a typo in a template surfaces in tests rather than at
 //     runtime.
 
-pub(super) fn render(template: &str, vars: &[(&str, &str)]) -> String {
+pub(crate) fn render(template: &str, vars: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
     let mut i = 0;

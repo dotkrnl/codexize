@@ -10,7 +10,7 @@ use crate::state::{
 use crate::{coder_summary, final_validation, review, tasks};
 
 impl App {
-    pub(in crate::app) fn failed_unverified_reason(
+    pub(crate) fn failed_unverified_reason(
         stamp_path: &std::path::Path,
         detail: impl AsRef<str>,
     ) -> String {
@@ -21,7 +21,7 @@ impl App {
         )
     }
 
-    pub(in crate::app) fn coder_gate_reason(
+    pub(crate) fn coder_gate_reason(
         &self,
         run: &crate::state::RunRecord,
         round_dir: &std::path::Path,
@@ -102,7 +102,7 @@ impl App {
     /// therefore never appear in `git status`, so a dirty tree at exit is
     /// the sign of source edits the simplifier should have committed or
     /// reverted. No-op under the test harness.
-    pub(in crate::app) fn simplifier_dirty_tree_reason(
+    pub(crate) fn simplifier_dirty_tree_reason(
         &self,
         run: &crate::state::RunRecord,
     ) -> Option<String> {
@@ -123,7 +123,7 @@ impl App {
         ))
     }
 
-    pub(in crate::app) fn normalized_failure_reason(
+    pub(crate) fn normalized_failure_reason(
         &mut self,
         run: &crate::state::RunRecord,
     ) -> Result<Option<String>> {

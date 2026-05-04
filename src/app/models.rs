@@ -14,7 +14,7 @@ use super::{App, state::ModelRefreshState, status_line::Severity};
 const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub(super) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
+pub(crate) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(selection::assemble::assemble_models());
@@ -22,7 +22,7 @@ pub(super) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaErro
     rx
 }
 
-pub(super) fn vendor_tag(vendor: VendorKind) -> &'static str {
+pub(crate) fn vendor_tag(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::Claude => "claude",
         VendorKind::Codex => "codex",
@@ -59,12 +59,12 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
 }
 
 impl App {
-    pub(super) fn set_models(&mut self, models: Vec<CachedModel>) {
+    pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.versions = build_version_index(&models);
         self.models = models;
     }
 
-    pub(super) fn refresh_models_if_due(&mut self) {
+    pub(crate) fn refresh_models_if_due(&mut self) {
         match &self.model_refresh {
             ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
                 Ok((models, errors)) => {
@@ -118,7 +118,7 @@ impl App {
         }
     }
 
-    pub(super) fn force_refresh_models(&mut self) {
+    pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
             rx: spawn_refresh(),
             started_at: Instant::now(),

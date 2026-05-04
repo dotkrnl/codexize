@@ -8,11 +8,11 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 
 impl App {
-    pub(in crate::app) fn launch_recovery_plan_review(&mut self) {
+    pub(crate) fn launch_recovery_plan_review(&mut self) {
         let _ = self.launch_recovery_plan_review_with_model(None);
     }
 
-    pub(in crate::app) fn launch_recovery_plan_review_with_model(
+    pub(crate) fn launch_recovery_plan_review_with_model(
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {

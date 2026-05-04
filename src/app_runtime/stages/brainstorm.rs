@@ -7,11 +7,11 @@ use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 
 impl App {
-    pub(in crate::app) fn launch_brainstorm(&mut self, idea: String) {
+    pub(crate) fn launch_brainstorm(&mut self, idea: String) {
         let _ = self.launch_brainstorm_with_model(idea, None);
     }
 
-    pub(in crate::app) fn launch_brainstorm_with_model(
+    pub(crate) fn launch_brainstorm_with_model(
         &mut self,
         idea: String,
         override_model: Option<CachedModel>,
@@ -152,7 +152,7 @@ impl App {
     }
 
     #[cfg(test)]
-    pub(in crate::app) fn select_brainstorm_model<'a>(
+    pub(crate) fn select_brainstorm_model<'a>(
         models: &'a [CachedModel],
         versions: &crate::selection::ranking::VersionIndex,
     ) -> Option<&'a CachedModel> {

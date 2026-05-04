@@ -1,6 +1,6 @@
 pub mod chat_widget;
 mod chat_widget_view_model;
-pub mod chrome;
+pub use crate::ui::chrome;
 mod clock;
 mod events;
 mod expansion;

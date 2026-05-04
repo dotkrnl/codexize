@@ -3,6 +3,7 @@
 //! These re-exports preserve existing paths while callers migrate to the
 //! explicit UI layer.
 
+pub mod chrome;
 pub mod input_editor;
 pub mod preflight;
 pub mod tui;

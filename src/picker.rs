@@ -1,4 +1,4 @@
-use crate::app::chrome::{
+use crate::ui::chrome::{
     bottom_rule,
     modal::{render_modal_backdrop, render_modal_overlay},
     top_rule_with_left_spans,

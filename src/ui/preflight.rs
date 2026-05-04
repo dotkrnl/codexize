@@ -5,7 +5,7 @@
 //! module turns those typed results into ratatui frames and dispatches the
 //! chosen action back through the data layer.
 
-use crate::app::chrome::modal::{modal_inner_width, render_modal_overlay};
+use crate::ui::chrome::modal::{modal_inner_width, render_modal_overlay};
 use crate::data::preflight as backend;
 use crate::data::preflight::Scenario;
 pub use crate::data::preflight::PreflightOutcome;

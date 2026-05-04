@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 #[test]
 fn adapter_and_provider_child_spawns_stay_in_runner() {
-    for dir in ["src/adapters", "src/providers"] {
+    for dir in ["src/data/adapters", "src/data/providers"] {
         for entry in fs::read_dir(dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
@@ -13,7 +13,7 @@ fn adapter_and_provider_child_spawns_stay_in_runner() {
             let source = fs::read_to_string(&path).unwrap();
             assert!(
                 !source.contains(".spawn("),
-                "{} directly spawns a child process; route launch parameters through src/runner.rs",
+                "{} directly spawns a child process; route launch parameters through src/data/runner.rs",
                 display_path(&path)
             );
         }

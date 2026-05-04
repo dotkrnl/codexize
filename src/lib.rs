@@ -10,7 +10,7 @@ pub mod dashboard;
 mod dashboard_view_model;
 pub mod data;
 pub mod final_validation;
-pub mod input_editor;
+pub use crate::ui::input_editor;
 pub mod logic;
 pub mod model_names;
 pub mod picker;

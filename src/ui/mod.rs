@@ -3,11 +3,11 @@
 //! These re-exports preserve existing paths while callers migrate to the
 //! explicit UI layer.
 
+pub mod input_editor;
 pub mod preflight;
 pub mod tui;
 
 pub use crate::app as runtime;
 pub use crate::dashboard;
-pub use crate::input_editor;
 pub use crate::picker;
 pub use crate::smoke;

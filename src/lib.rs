@@ -25,6 +25,6 @@ pub mod smoke;
 pub mod state;
 pub use crate::data::synthetic_artifacts;
 pub mod tasks;
-pub mod tui;
+pub use crate::ui::tui;
 pub mod ui;
 pub use crate::data::warmup;

@@ -66,6 +66,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_drain_deadline: None,
         pending_termination: None,
         pending_quit_confirmation_run_id: None,
+        interactive_exit_prompt_dismissed_at: None,
         pending_app_exit: false,
         current_run_id: None,
         failed_models: HashMap::new(),

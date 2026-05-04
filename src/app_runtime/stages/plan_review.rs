@@ -1,3 +1,4 @@
+use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
@@ -5,7 +6,7 @@ use crate::app::{App, guard};
 use crate::app::prompts::plan_review_prompt;
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase, RunStatus};
+use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
 
 impl App {
     pub(crate) fn launch_plan_review(&mut self) {
@@ -166,5 +167,24 @@ impl App {
             // Consume all other keys so the UI is genuinely modal.
             _ => false,
         }
+    }
+
+    /// Co-located success-finalization for `Phase::PlanReviewRunning`.
+    pub(crate) fn finalize_plan_review_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+    ) -> Result<()> {
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        self.transition_to_phase(Phase::PlanReviewPaused)?;
+        self.append_system_message(
+            run.id,
+            MessageKind::Summary,
+            "Plan review complete.".to_string(),
+        );
+        if run.modes.yolo {
+            self.auto_approve_plan_review_pause("plan_approval");
+        }
+        Ok(())
     }
 }

@@ -1,7 +1,9 @@
+use anyhow::Result;
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::prompts::brainstorm_prompt;
-use crate::artifacts::ArtifactKind;
+use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::runner::{launch_interactive, launch_noninteractive};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
@@ -149,6 +151,73 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::BrainstormRunning`.
+    ///
+    /// Reads the optional `skip_proposal.toml` and `session_summary.toml`
+    /// artifacts, marks the run done, and routes the pipeline to either
+    /// `SkipToImplPending` (proposed) or `SpecReviewRunning` (default).
+    pub(crate) fn finalize_brainstorm_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let skip_artifact_path = session_dir
+            .join("artifacts")
+            .join(ArtifactKind::SkipToImpl.filename());
+        let proposal = match SkipToImplProposal::read_from_path(&skip_artifact_path) {
+            Ok((p, warnings)) => {
+                for w in warnings {
+                    let _ = self
+                        .state
+                        .log_event(format!("warning: skip_proposal.toml: {w}"));
+                }
+                p
+            }
+            Err(err) => {
+                let _ = self.state.log_event(format!(
+                    "warning: skip_proposal.toml malformed or invalid, falling through to spec review: {err:#}"
+                ));
+                None
+            }
+        };
+
+        let summary_path = session_dir
+            .join("artifacts")
+            .join(ArtifactKind::SessionSummary.filename());
+        match crate::artifacts::SessionSummaryArtifact::read_from_path(&summary_path) {
+            Ok(Some(summary)) => {
+                session_state::transitions::record_session_title(
+                    &mut self.state,
+                    summary.title.trim().to_string(),
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                let _ = self.state.log_event(format!(
+                    "warning: session_summary.toml malformed or invalid, leaving title unset: {err:#}"
+                ));
+            }
+        }
+
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+
+        match proposal {
+            Some(p) if p.proposed => {
+                session_state::transitions::record_skip_to_impl_proposal(
+                    &mut self.state,
+                    p.rationale,
+                    p.status,
+                );
+                self.transition_to_phase(Phase::SkipToImplPending)?;
+            }
+            _ => {
+                self.transition_to_phase(Phase::SpecReviewRunning)?;
+            }
+        }
+        Ok(())
     }
 
     #[cfg(test)]

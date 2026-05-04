@@ -1,9 +1,11 @@
+use anyhow::Result;
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::prompts::planning_prompt;
 use crate::runner::{launch_interactive, launch_noninteractive};
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, RunStatus};
+use crate::state::{self as session_state, Phase, RunStatus};
 
 impl App {
     pub(crate) fn launch_planning(&mut self) {
@@ -141,5 +143,29 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::PlanningRunning`.
+    ///
+    /// Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md`
+    /// existing. The successful-finalization context already implies the
+    /// artifact, but the explicit guard protects against a planning agent
+    /// that reports success without writing the file.
+    pub(crate) fn finalize_planning_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+    ) -> Result<()> {
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        let plan_path = session_state::session_dir(&self.state.session_id)
+            .join("artifacts")
+            .join("plan.md");
+        if run.modes.yolo && Self::artifact_present(&plan_path) {
+            self.log_yolo_auto_approved("plan_review_skipped");
+            self.transition_to_phase(Phase::ShardingRunning)?;
+        } else {
+            self.transition_to_phase(Phase::PlanReviewRunning)?;
+        }
+        Ok(())
     }
 }

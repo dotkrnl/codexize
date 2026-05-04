@@ -1,9 +1,12 @@
+use anyhow::{Context, Result};
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::prompts::sharding_prompt;
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
-use crate::state::{self as session_state};
+use crate::state::{self as session_state, Phase};
+use crate::tasks;
 
 impl App {
     pub(crate) fn launch_sharding(&mut self) {
@@ -106,5 +109,27 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::ShardingRunning`.
+    pub(crate) fn finalize_sharding_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+        let parsed = tasks::validate(&tasks_path)
+            .with_context(|| format!("invalid {}", tasks_path.display()))?;
+        session_state::transitions::initialize_task_pipeline(
+            &mut self.state,
+            parsed
+                .tasks
+                .iter()
+                .map(|task| (task.id, task.title.clone())),
+        );
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        self.transition_to_phase(Phase::ImplementationRound(1))?;
+        Ok(())
     }
 }

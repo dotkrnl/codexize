@@ -441,7 +441,7 @@ impl App {
     /// `block_origin = Simplification`, which intentionally does *not*
     /// unlock force-ship — that escape hatch remains tied to
     /// `BlockOrigin::FinalValidation`.
-    fn enter_simplification_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
+    pub(crate) fn enter_simplification_or_done(&mut self, round: u32, yolo: bool) -> Result<()> {
         if yolo {
             self.transition_to_phase(Phase::Done)?;
             return Ok(());
@@ -451,7 +451,7 @@ impl App {
         Ok(())
     }
 
-    fn append_goal_gap_tasks(
+    pub(crate) fn append_goal_gap_tasks(
         &mut self,
         session_dir: &std::path::Path,
         new_tasks: &[tasks::Task],

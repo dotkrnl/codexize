@@ -1,9 +1,17 @@
+use anyhow::Result;
+
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::{App, guard};
-use crate::app::prompts::{ReviewerPromptInputs, read_review_scope, reviewer_prompt, task_effort_for};
+use crate::app::prompts::{
+    ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope, reviewer_prompt,
+    rewrite_tasks_for_revise, task_effort_for,
+};
+use crate::review;
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
-use crate::state::{self as session_state, Phase};
+use crate::state::{
+    self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
+};
 
 impl App {
     pub(crate) fn launch_reviewer(&mut self) {
@@ -159,5 +167,192 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::ReviewRound(round)`.
+    pub(crate) fn finalize_reviewer_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let review_path = session_dir
+            .join("rounds")
+            .join(format!("{round:03}"))
+            .join("review.toml");
+        let verdict = review::validate(&review_path)?;
+        let summary_text = verdict.summary.trim();
+        if !summary_text.is_empty() {
+            let kind = match verdict.status {
+                review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
+                    MessageKind::Summary
+                }
+                review::ReviewStatus::Revise
+                | review::ReviewStatus::HumanBlocked
+                | review::ReviewStatus::AgentPivot => MessageKind::SummaryWarn,
+            };
+            let msg = Message {
+                ts: chrono::Utc::now(),
+                run_id: run.id,
+                kind,
+                sender: MessageSender::Agent {
+                    model: run.model.clone(),
+                    vendor: run.vendor.clone(),
+                },
+                text: summary_text.to_string(),
+            };
+            if let Err(err) = self.state.append_message(&msg) {
+                let _ = self.state.log_event(format!(
+                    "failed to append review summary message for run {}: {err}",
+                    run.id
+                ));
+            } else {
+                self.messages.push(msg);
+            }
+        }
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        session_state::transitions::record_builder_verdict(
+            &mut self.state,
+            format!("{:?}", verdict.status).to_lowercase(),
+        );
+        match verdict.status {
+            review::ReviewStatus::Approved => {
+                // Advisory feedback on an approved verdict is non-blocking;
+                // surface it to the UI but continue the pipeline.
+                if !verdict.feedback.is_empty() {
+                    let advisory = format!(
+                        "advisory ({}): {}",
+                        verdict.feedback.len(),
+                        verdict.feedback[0].trim()
+                    );
+                    let advisory_msg = Message {
+                        ts: chrono::Utc::now(),
+                        run_id: run.id,
+                        kind: MessageKind::SummaryWarn,
+                        sender: MessageSender::Agent {
+                            model: run.model.clone(),
+                            vendor: run.vendor.clone(),
+                        },
+                        text: advisory,
+                    };
+                    if let Err(err) = self.state.append_message(&advisory_msg) {
+                        let _ = self.state.log_event(format!(
+                            "failed to append advisory feedback message: {err}"
+                        ));
+                    } else {
+                        self.messages.push(advisory_msg);
+                    }
+                }
+                if let Some(task_id) = self.state.builder.current_task_id() {
+                    let _ = session_state::transitions::mark_task_status(
+                        &mut self.state,
+                        task_id,
+                        PipelineItemStatus::Approved,
+                        Some(round),
+                    );
+                }
+                if !self.state.builder.has_unfinished_tasks() {
+                    self.enter_simplification_or_done(round, run.modes.yolo)?;
+                } else {
+                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                }
+            }
+            review::ReviewStatus::Refine => {
+                // Approve the current task and stash feedback for
+                // the next coder. No re-review of this round.
+                session_state::transitions::append_refine_feedback(
+                    &mut self.state,
+                    verdict.feedback.iter().cloned(),
+                );
+                if let Some(task_id) = self.state.builder.current_task_id() {
+                    let _ = session_state::transitions::mark_task_status(
+                        &mut self.state,
+                        task_id,
+                        PipelineItemStatus::Approved,
+                        Some(round),
+                    );
+                }
+                if !self.state.builder.has_unfinished_tasks() {
+                    self.enter_simplification_or_done(round, run.modes.yolo)?;
+                } else {
+                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+                }
+            }
+            review::ReviewStatus::Revise => {
+                if let Some(task_id) = self.state.builder.current_task_id() {
+                    if verdict.new_tasks.is_empty() {
+                        let _ = session_state::transitions::mark_task_status(
+                            &mut self.state,
+                            task_id,
+                            PipelineItemStatus::Revise,
+                            Some(round),
+                        );
+                    } else {
+                        let new_tasks = verdict
+                            .new_tasks
+                            .iter()
+                            .map(|task| {
+                                (
+                                    task.title.clone(),
+                                    task.description.clone(),
+                                    task.test.clone(),
+                                    task.estimated_tokens,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        let assigned_ids =
+                            assigned_revise_task_ids(&self.state.builder, new_tasks.len());
+                        rewrite_tasks_for_revise(
+                            &session_dir,
+                            task_id,
+                            &verdict.new_tasks,
+                            &assigned_ids,
+                        )?;
+                        session_state::transitions::apply_revise_with_new_tasks(
+                            &mut self.state,
+                            task_id,
+                            new_tasks,
+                        );
+                    }
+                }
+                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+            }
+            review::ReviewStatus::HumanBlocked | review::ReviewStatus::AgentPivot => {
+                let (verdict_status, trigger_str) = match verdict.status {
+                    review::ReviewStatus::HumanBlocked => {
+                        (PipelineItemStatus::HumanBlocked, "human_blocked")
+                    }
+                    review::ReviewStatus::AgentPivot => {
+                        (PipelineItemStatus::AgentPivot, "agent_pivot")
+                    }
+                    review::ReviewStatus::Approved
+                    | review::ReviewStatus::Refine
+                    | review::ReviewStatus::Revise => {
+                        // SAFETY: the enclosing outer match arm only matches
+                        // `HumanBlocked | AgentPivot`, so the other ReviewStatus
+                        // variants cannot reach this inner match.
+                        unreachable!("already handled")
+                    }
+                };
+                if let Some(task_id) = self.state.builder.current_task_id() {
+                    let _ = session_state::transitions::mark_task_status(
+                        &mut self.state,
+                        task_id,
+                        verdict_status,
+                        Some(round),
+                    );
+                }
+                let summary = verdict.feedback.join("\n");
+                let trigger_summary = (!summary.trim().is_empty()).then_some(summary);
+                self.enter_builder_recovery(
+                    round,
+                    self.state.builder.current_task_id(),
+                    trigger_summary,
+                    trigger_str,
+                );
+            }
+        }
+        Ok(())
     }
 }

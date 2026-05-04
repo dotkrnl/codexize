@@ -1,7 +1,10 @@
+use anyhow::{Context, Result};
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::final_validation_prompt;
+use crate::final_validation::{self, ValidationStatus};
 use crate::runner::launch_noninteractive_with_policy;
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
@@ -152,5 +155,40 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::FinalValidation(round)`.
+    pub(crate) fn finalize_final_validation_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let verdict_path = session_dir
+            .join("artifacts")
+            .join(format!("final_validation_{round}.toml"));
+        let verdict = final_validation::validate(&verdict_path)
+            .with_context(|| format!("invalid {}", verdict_path.display()))?;
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        match verdict.status {
+            ValidationStatus::GoalMet => {
+                self.transition_to_phase(Phase::Done)?;
+            }
+            ValidationStatus::GoalGap => {
+                let verdict_artifact = format!("artifacts/final_validation_{round}.toml");
+                let new_tasks = final_validation::normalize_gap_tasks(
+                    verdict.new_tasks,
+                    self.state.builder.max_task_id(),
+                    &verdict_artifact,
+                );
+                self.append_goal_gap_tasks(&session_dir, &new_tasks)?;
+                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+            }
+            ValidationStatus::NeedsHuman => {
+                self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
+            }
+        }
+        Ok(())
     }
 }

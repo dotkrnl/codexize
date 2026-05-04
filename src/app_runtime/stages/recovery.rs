@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
@@ -155,5 +155,53 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::BuilderRecovery(round)`.
+    ///
+    /// Runs `reconcile_builder_recovery` and then either advances to recovery
+    /// plan-review (or sharding under yolo) or surfaces the failure and lets
+    /// the auto-retry policy take over.
+    pub(crate) fn finalize_recovery_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        match self.reconcile_builder_recovery(run.id) {
+            Ok(()) => {
+                self.finalize_run_record(run.id, true, None);
+                self.clear_agent_error();
+                if run.modes.yolo {
+                    // Recovery has already validated `recovery.toml`/`tasks.toml`; yolo
+                    // delegates the review gate, not the artifact validation step.
+                    self.log_yolo_auto_approved("recovery_plan_review_skipped");
+                    self.queue_recovery_sharding_pipeline_item(round);
+                    self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+                } else {
+                    // Insert the recovery-mode plan review pipeline item before
+                    // transitioning so the UI shows it as the next pending stage.
+                    session_state::transitions::queue_recovery_plan_review(
+                        &mut self.state,
+                        round,
+                    );
+                    self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
+                }
+            }
+            Err(err) => {
+                let reason = format!("recovery_reconcile_failed: {err:#}");
+                self.finalize_run_record(run.id, false, Some(reason.clone()));
+                let failed_run = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|candidate| candidate.id == run.id)
+                    .cloned()
+                    .unwrap_or_else(|| run.clone());
+                if !self.maybe_auto_retry(&failed_run) {
+                    self.record_agent_error(reason);
+                }
+            }
+        }
+        Ok(())
     }
 }

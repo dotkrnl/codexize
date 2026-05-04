@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::{App, guard};
 use crate::app::models::vendor_tag;
@@ -154,5 +156,23 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::Simplification(round)`.
+    ///
+    /// The artifact-validation gate above has already accepted the
+    /// simplification TOML; on success we hand control to FinalValidation.
+    /// The simplifier's verdict is advisory only — final validation makes
+    /// its own call against idea + spec, so we don't branch on the parsed
+    /// status here.
+    pub(crate) fn finalize_simplification_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        let _ = session_state::transitions::enter_final_validation(&mut self.state, round)?;
+        Ok(())
     }
 }

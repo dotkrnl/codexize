@@ -1,6 +1,10 @@
+use anyhow::Result;
+
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::{App, guard};
-use crate::app::prompts::{coder_prompt, task_effort_for, task_toml_for};
+use crate::app::prompts::{
+    coder_prompt, read_review_scope, task_effort_for, task_toml_for, write_review_scope_artifact,
+};
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
@@ -149,5 +153,25 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Co-located success-finalization for `Phase::ImplementationRound(round)`.
+    pub(crate) fn finalize_coder_success(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
+        let scope = read_review_scope(&round_dir.join("review_scope.toml"))?;
+        let _ = write_review_scope_artifact(&round_dir, &scope.base_sha);
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        if round == 1 && self.state.skip_to_impl_rationale.is_some() {
+            self.enter_simplification_or_done(1, run.modes.yolo)?;
+        } else {
+            self.transition_to_phase(Phase::ReviewRound(round))?;
+        }
+        Ok(())
     }
 }

@@ -40,6 +40,7 @@ fn interactive_launch_opens_matching_run_split_immediately() {
             "[Brainstorm]".to_string(),
             EffortLevel::Normal,
             crate::state::LaunchModes::default(),
+            std::path::PathBuf::from("prompts/brainstorm.md"),
         );
 
         let run_id = app.current_run_id.expect("run id");

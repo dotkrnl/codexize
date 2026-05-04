@@ -234,7 +234,7 @@ impl App {
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),
-            watchdog: super::watchdog::WatchdogRegistry::new(),
+            watchdog: super::watchdog::WatchdogRegistry::from_env(),
             #[cfg(test)]
             test_launch_harness: None,
             messages,
@@ -391,6 +391,7 @@ impl App {
             self.update_agent_progress();
             self.process_live_summary_changes();
             self.apply_pending_tool_call_transitions();
+            self.tick_watchdog();
             self.synchronize_split_target();
             terminal.draw(|frame| self.draw(frame))?;
             self.on_frame_drawn();

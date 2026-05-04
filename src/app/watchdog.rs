@@ -1,22 +1,15 @@
-//! Pure timing/state machine for the per-run liveness watchdog.
+//! Per-run liveness watchdog: pure timing/state machine plus the App-side
+//! registry that owns lifecycle wiring.
 //!
-//! This module owns the idle-adjusted clock and the warn/kill state machine
-//! described in spec §3.1–§3.3. It is intentionally inert at this layer: it
-//! does not send interrupts, terminate runs, write dashboard messages, or
-//! observe `live_summary.txt` itself. Higher-level App wiring (task 2) is
-//! responsible for those side effects.
-
-// Several methods/items here are intentionally consumed only by tests in
-// task 1; the policy module that drives warn/kill (task 2) is the rest of
-// the consumer surface and lands in a follow-up. The helpers are kept
-// pub(super) so task 2 can wire them up without further refactoring.
-// Suppress dead-code warnings while the non-test build still has only
-// partial consumers.
-#![allow(dead_code)]
+//! The state machine itself is inert — it does not send interrupts, terminate
+//! runs, or write dashboard messages. Higher layers in `lifecycle.rs` /
+//! `observation.rs` apply the side effects when `evaluate(now)` returns
+//! `EmitWarning` or `EmitKill`.
 
 use crate::adapters::EffortLevel;
 use std::{
     collections::HashMap,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -24,16 +17,24 @@ use std::{
 /// existing `u64` run id (see `state::RunRecord::id`).
 pub(super) type RunId = u64;
 
+/// Production thresholds (spec §3.1). The `_TOUGH` variants apply when
+/// `EffortLevel == Tough` (1.5×).
 pub(super) const WARN_AFTER_NORMAL: Duration = Duration::from_secs(10 * 60);
 pub(super) const KILL_AFTER_NORMAL: Duration = Duration::from_secs(20 * 60);
 pub(super) const WARN_AFTER_TOUGH: Duration = Duration::from_secs(15 * 60);
 pub(super) const KILL_AFTER_TOUGH: Duration = Duration::from_secs(30 * 60);
 
-/// Idle-adjusted warn threshold for a run with the given effort level.
-///
-/// Goes through this helper (and never the raw constants) so a future
-/// test-only clock-compression env var can compose without further
-/// refactoring (spec §3.1, §6).
+/// Test-only env var that compresses the watchdog clock (spec §3.1, §6).
+/// Production is implicit `1_000_000_000` ns per simulated second (real
+/// time). Smaller values shrink real-time thresholds proportionally so the
+/// integration tests can drive AC1–AC6 in sub-second wall clock without
+/// changing the unscaled spec constants.
+pub(super) const SCALE_ENV_VAR: &str = "CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC";
+
+const PRODUCTION_NS_PER_SEC: u64 = 1_000_000_000;
+
+/// Idle-adjusted warn threshold for a run with the given effort level
+/// (unscaled — production wall-clock duration).
 pub(super) fn warn_after(effort: EffortLevel) -> Duration {
     match effort {
         EffortLevel::Tough => WARN_AFTER_TOUGH,
@@ -41,7 +42,8 @@ pub(super) fn warn_after(effort: EffortLevel) -> Duration {
     }
 }
 
-/// Idle-adjusted kill threshold for a run with the given effort level.
+/// Idle-adjusted kill threshold for a run with the given effort level
+/// (unscaled — production wall-clock duration).
 pub(super) fn kill_after(effort: EffortLevel) -> Duration {
     match effort {
         EffortLevel::Tough => KILL_AFTER_TOUGH,
@@ -50,8 +52,7 @@ pub(super) fn kill_after(effort: EffortLevel) -> Duration {
 }
 
 /// Decision returned by `WatchdogState::evaluate` once the App has computed a
-/// `now`. Higher-level App wiring (task 2) maps these onto the actual
-/// interrupt/terminate side effects.
+/// `now`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WatchdogDecision {
     Idle,
@@ -62,7 +63,11 @@ pub(super) enum WatchdogDecision {
 /// Per-run idle-adjusted timing state. Spec §3.2.
 #[derive(Debug, Clone)]
 pub(super) struct WatchdogState {
+    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
     pub(super) run_id: RunId,
+    pub(super) window_name: String,
+    pub(super) prompt_path: PathBuf,
+    #[allow(dead_code)] // retained for Debug logs and future operator-visible diagnostics
     pub(super) started_at: Instant,
     pub(super) last_live_summary_event: Instant,
     /// Counter (not bool) so concurrent tool calls pause the clock for the
@@ -70,23 +75,40 @@ pub(super) struct WatchdogState {
     /// in-flight calls finishes.
     pub(super) in_flight_tool_calls: usize,
     pub(super) pause_began_at: Option<Instant>,
-    /// Pause time accumulated since `last_live_summary_event`. Reset on
-    /// every observed live-summary event so future accounting is anchored
-    /// to the most recent reset and pre-reset pause windows are not
-    /// double-credited.
+    /// Pause time accumulated since `last_live_summary_event`.
     pub(super) paused_total: Duration,
     pub(super) warned: bool,
     pub(super) effort: EffortLevel,
+    /// Scaled threshold (real wall-clock duration). Equal to `warn_after`
+    /// in production; smaller under clock compression.
+    pub(super) warn_threshold: Duration,
+    pub(super) kill_threshold: Duration,
+    /// Unscaled remaining-minutes value used in the warning preamble. Always
+    /// derived from spec constants regardless of clock compression so the
+    /// agent-visible text is identical between production and tests.
+    pub(super) warning_remaining_minutes: u64,
 }
 
 impl WatchdogState {
-    /// Construct a new state at run-launch time. `started_at` and
-    /// `last_live_summary_event` are both anchored to `now` so a run that
-    /// never produces a first summary still falls under the same warn/kill
-    /// timeline measured from launch (spec §4 — first bullet).
-    pub(super) fn new(run_id: RunId, effort: EffortLevel, now: Instant) -> Self {
+    /// Construct a state with custom (post-scaled) thresholds. Used by the
+    /// registry so it owns the scaling policy in one place. Tests may also
+    /// call this to supply hand-picked thresholds.
+    pub(super) fn new_with_thresholds(
+        run_id: RunId,
+        effort: EffortLevel,
+        now: Instant,
+        window_name: String,
+        prompt_path: PathBuf,
+        warn_threshold: Duration,
+        kill_threshold: Duration,
+    ) -> Self {
+        let warn_unscaled = warn_after(effort).as_secs() / 60;
+        let kill_unscaled = kill_after(effort).as_secs() / 60;
+        let warning_remaining_minutes = kill_unscaled.saturating_sub(warn_unscaled);
         Self {
             run_id,
+            window_name,
+            prompt_path,
             started_at: now,
             last_live_summary_event: now,
             in_flight_tool_calls: 0,
@@ -94,13 +116,29 @@ impl WatchdogState {
             paused_total: Duration::ZERO,
             warned: false,
             effort,
+            warn_threshold,
+            kill_threshold,
+            warning_remaining_minutes,
         }
     }
 
+    /// Construct an unscaled state at run-launch time (production
+    /// thresholds). Convenience for tests that don't exercise scaling.
+    #[cfg(test)]
+    pub(super) fn new(run_id: RunId, effort: EffortLevel, now: Instant) -> Self {
+        Self::new_with_thresholds(
+            run_id,
+            effort,
+            now,
+            String::new(),
+            PathBuf::new(),
+            warn_after(effort),
+            kill_after(effort),
+        )
+    }
+
     /// Idle-adjusted duration since the last observed `live_summary.txt`
-    /// mtime advance. Subtracts both completed pause windows
-    /// (`paused_total`) and any pause window that is still open at `now`.
-    /// Spec §3.2.
+    /// mtime advance. Spec §3.2.
     pub(super) fn idle_elapsed(&self, now: Instant) -> Duration {
         let raw = now.saturating_duration_since(self.last_live_summary_event);
         let active_pause = self
@@ -111,9 +149,8 @@ impl WatchdogState {
             .saturating_sub(active_pause)
     }
 
-    /// One ACP tool call entered a non-terminal status (`pending` or
-    /// `in_progress`). The first such call opens the pause window;
-    /// subsequent overlapping calls only bump the counter.
+    /// One ACP tool call entered a non-terminal status. The first such call
+    /// opens the pause window; concurrent ones only bump the counter.
     pub(super) fn on_tool_call_started(&mut self, now: Instant) {
         self.in_flight_tool_calls = self.in_flight_tool_calls.saturating_add(1);
         if self.in_flight_tool_calls == 1 {
@@ -121,14 +158,9 @@ impl WatchdogState {
         }
     }
 
-    /// One ACP tool call entered a terminal status. The pause window
-    /// closes only when the last in-flight call finishes; the elapsed
-    /// pause time is rolled into `paused_total` so future
-    /// `idle_elapsed(now)` calls see it.
-    ///
-    /// Defensive against unbalanced finishes (e.g. a runner that misses
-    /// its own Start dedup): if the counter is already zero, this is a
-    /// no-op rather than panicking.
+    /// One ACP tool call entered a terminal status. The pause window closes
+    /// only when the last in-flight call finishes. Defensive against
+    /// unbalanced finishes.
     pub(super) fn on_tool_call_finished(&mut self, now: Instant) {
         if self.in_flight_tool_calls == 0 {
             return;
@@ -143,11 +175,9 @@ impl WatchdogState {
         }
     }
 
-    /// `live_summary.txt` mtime advance observed at `now`. Resets the
-    /// idle clock and the accumulated pause budget. If a tool call is
-    /// currently in flight, its pause window is restarted from `now` so
-    /// the pre-reset portion of the pause is not double-credited toward
-    /// future idle accounting (spec §3.2 corner case).
+    /// `live_summary.txt` mtime advance observed at `now`. Resets the idle
+    /// clock and pause budget; if a call is in flight, restart the pause
+    /// window from `now` so pre-reset pause is not double-credited.
     pub(super) fn on_live_summary_event(&mut self, now: Instant) {
         self.last_live_summary_event = now;
         self.paused_total = Duration::ZERO;
@@ -157,47 +187,134 @@ impl WatchdogState {
     }
 
     /// Decide whether the idle-adjusted clock has crossed a threshold at
-    /// `now`. The kill check intentionally fires even when `warned ==
-    /// false` so a starved App tick can skip the courtesy warning and go
-    /// straight to kill (spec §3.3 last paragraph).
+    /// `now`. Kill fires even when `warned == false` so a starved App tick
+    /// can skip the courtesy warning (spec §3.3 last paragraph).
     pub(super) fn evaluate(&mut self, now: Instant) -> WatchdogDecision {
         let elapsed = self.idle_elapsed(now);
-        if elapsed >= kill_after(self.effort) {
+        if elapsed >= self.kill_threshold {
             return WatchdogDecision::EmitKill;
         }
-        if !self.warned && elapsed >= warn_after(self.effort) {
+        if !self.warned && elapsed >= self.warn_threshold {
             self.warned = true;
             return WatchdogDecision::EmitWarning;
         }
         WatchdogDecision::Idle
     }
+
+    /// Idle minutes since the last live-summary mtime advance, projected
+    /// back onto the unscaled (simulated) minute axis. Used in the
+    /// `SummaryWarn` text and warning preamble so the agent-visible numbers
+    /// match the spec wording independent of clock compression.
+    pub(super) fn idle_minutes_for_message(&self, now: Instant) -> u64 {
+        let elapsed_ns = self.idle_elapsed(now).as_nanos();
+        let warn_unscaled = warn_after(self.effort).as_nanos();
+        let warn_scaled = self.warn_threshold.as_nanos().max(1);
+        let simulated_ns = elapsed_ns.saturating_mul(warn_unscaled) / warn_scaled;
+        let simulated_secs = (simulated_ns / 1_000_000_000u128) as u64;
+        simulated_secs / 60
+    }
 }
 
-/// Runner→App tool-call activity transition. The runner timestamps the
-/// transition at the moment it observes the ACP `session/update`; the App
-/// applies transitions in arrival (timestamp) order so short calls that
-/// start and finish between App polls still count as paused time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ToolCallTransitionKind {
-    Start,
-    Finish,
-}
-
-/// Per-run keyed registry of `WatchdogState`. Insert-on-launch and
-/// remove-on-finalize wiring lives in task 2 (spec §3.8); this struct
-/// supplies the storage and the small access helpers task 2 needs.
-#[derive(Debug, Default)]
+/// Per-run keyed registry of `WatchdogState`. Owns the clock-compression
+/// scale once per App so all registered runs share a single policy.
+#[derive(Debug)]
 pub(super) struct WatchdogRegistry {
     states: HashMap<RunId, WatchdogState>,
+    /// Number of real-time nanoseconds that represent one simulated second.
+    /// Production = 1e9; tests may override via `SCALE_ENV_VAR`.
+    scale_ns_per_sec: u64,
+}
+
+impl Default for WatchdogRegistry {
+    fn default() -> Self {
+        Self {
+            states: HashMap::new(),
+            scale_ns_per_sec: PRODUCTION_NS_PER_SEC,
+        }
+    }
 }
 
 impl WatchdogRegistry {
+    /// Construct an unscaled registry. Used by test scaffolding that does
+    /// not exercise clock compression; production callers go through
+    /// `from_env` so the env var is honored.
+    #[cfg(test)]
     pub(super) fn new() -> Self {
         Self::default()
     }
 
-    pub(super) fn insert(&mut self, state: WatchdogState) {
-        self.states.insert(state.run_id, state);
+    /// Build a registry whose threshold scale is read from
+    /// `CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC` if present and `> 0`.
+    /// Production callers should use this so unset env always means
+    /// unscaled (1e9 ns / s) — matches spec §3.1, §6.
+    pub(super) fn from_env() -> Self {
+        let scale_ns_per_sec = std::env::var(SCALE_ENV_VAR)
+            .ok()
+            .and_then(|raw| raw.parse::<u64>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(PRODUCTION_NS_PER_SEC);
+        Self {
+            states: HashMap::new(),
+            scale_ns_per_sec,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_scale_ns_per_sec(scale_ns_per_sec: u64) -> Self {
+        Self {
+            states: HashMap::new(),
+            scale_ns_per_sec: scale_ns_per_sec.max(1),
+        }
+    }
+
+    /// Apply the active clock scale to an unscaled `base` duration.
+    fn scale(&self, base: Duration) -> Duration {
+        if self.scale_ns_per_sec == PRODUCTION_NS_PER_SEC {
+            return base;
+        }
+        // Convert simulated seconds (`base`) into real wall-clock
+        // nanoseconds. `u128` keeps the multiplication safe for any
+        // realistic spec threshold.
+        let secs = u128::from(base.as_secs());
+        let sub_nanos = u128::from(base.subsec_nanos());
+        let ns_per_sec = u128::from(self.scale_ns_per_sec);
+        let scaled_ns = secs.saturating_mul(ns_per_sec)
+            + sub_nanos.saturating_mul(ns_per_sec) / 1_000_000_000u128;
+        Duration::from_nanos(scaled_ns.min(u128::from(u64::MAX)) as u64)
+    }
+
+    pub(super) fn warn_threshold(&self, effort: EffortLevel) -> Duration {
+        self.scale(warn_after(effort))
+    }
+
+    pub(super) fn kill_threshold(&self, effort: EffortLevel) -> Duration {
+        self.scale(kill_after(effort))
+    }
+
+    /// Insert a fresh watchdog state for a run. Idempotent at the App layer
+    /// — callers that re-register without a finalize in between will
+    /// overwrite the prior state, which is correct for the resume path
+    /// (§4 "State survives across codexize restart? No.").
+    pub(super) fn register(
+        &mut self,
+        run_id: RunId,
+        effort: EffortLevel,
+        window_name: String,
+        prompt_path: PathBuf,
+        now: Instant,
+    ) {
+        let warn = self.warn_threshold(effort);
+        let kill = self.kill_threshold(effort);
+        let state = WatchdogState::new_with_thresholds(
+            run_id,
+            effort,
+            now,
+            window_name,
+            prompt_path,
+            warn,
+            kill,
+        );
+        self.states.insert(run_id, state);
     }
 
     pub(super) fn remove(&mut self, run_id: RunId) -> Option<WatchdogState> {
@@ -213,8 +330,19 @@ impl WatchdogRegistry {
         self.states.get(&run_id)
     }
 
+    #[cfg(test)]
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = &mut WatchdogState> {
         self.states.values_mut()
+    }
+
+    /// Snapshot of (run_id, idle-adjusted decision) pairs at `now`. The
+    /// poll-loop calls this and applies side effects per decision while
+    /// holding `&mut self`.
+    pub(super) fn evaluate_all(&mut self, now: Instant) -> Vec<(RunId, WatchdogDecision)> {
+        self.states
+            .iter_mut()
+            .map(|(id, state)| (*id, state.evaluate(now)))
+            .collect()
     }
 
     #[cfg(test)]
@@ -226,6 +354,33 @@ impl WatchdogRegistry {
         self.states.is_empty()
     }
 }
+
+/// Build the warning interrupt payload (spec §3.4). The remaining-minutes
+/// value comes from the unscaled spec constants so the agent-facing text is
+/// identical between production and clock-compressed tests. `idle_minutes`
+/// is the (unscaled) idle-adjusted minutes value already mapped onto the
+/// spec axis by `WatchdogState::idle_minutes_for_message`.
+pub(super) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
+    format!(
+        "\u{26a0} Liveness warning from codexize watchdog \u{26a0}\n\n\
+You have not updated `live_summary.txt` in {idle} minutes (excluding time spent waiting on tool calls). \
+You will be killed and the run will be retried automatically if you go another {remaining} minutes without writing a summary. \
+This is your only warning.\n\n\
+The original prompt is repeated below verbatim so you can resume from it. Continue the task; \
+do not acknowledge this warning beyond updating the live summary file.\n\n\
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} ORIGINAL PROMPT \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n\
+{body}\n\
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500} END ORIGINAL PROMPT \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+        idle = idle_minutes,
+        remaining = remaining_minutes,
+        body = prompt_body,
+    )
+}
+
+/// Documented degraded fallback when `run.prompt_path` cannot be read —
+/// still send a warning rather than silently skipping (spec §3.4).
+pub(super) const PROMPT_UNAVAILABLE_BODY: &str =
+    "the original prompt is unavailable on disk; resume the task as best you can.";
 
 #[cfg(test)]
 mod tests {
@@ -252,10 +407,8 @@ mod tests {
     #[test]
     fn single_tool_call_spans_the_whole_window_no_idle_accumulates() {
         let (start, mut state) = fresh(EffortLevel::Normal);
-        // Tool call live for the entire 12-minute window.
-        state.on_tool_call_started(start + Duration::from_secs(0));
+        state.on_tool_call_started(start);
         let now = start + Duration::from_secs(12 * 60);
-        // The pause window is still open; idle_elapsed must subtract it.
         assert_eq!(state.idle_elapsed(now), Duration::ZERO);
     }
 
@@ -264,16 +417,14 @@ mod tests {
         let (start, mut state) = fresh(EffortLevel::Normal);
         state.on_tool_call_started(start + Duration::from_secs(60));
         state.on_tool_call_started(start + Duration::from_secs(120));
-        // First finish must not unpause while the second is still in flight.
         state.on_tool_call_finished(start + Duration::from_secs(180));
         assert!(state.pause_began_at.is_some());
         assert_eq!(state.in_flight_tool_calls, 1);
 
-        // Now finish the second; pause window closes at this instant.
         state.on_tool_call_finished(start + Duration::from_secs(240));
         assert!(state.pause_began_at.is_none());
-        // Pause spanned 60..240 (180 s); idle elapsed at t=300 is 300 - 180 = 120.
         let now = start + Duration::from_secs(300);
+        // Pause spanned 60..240 = 180s; idle 300 - 180 = 120s.
         assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
     }
 
@@ -282,36 +433,27 @@ mod tests {
         let (start, mut state) = fresh(EffortLevel::Normal);
         state.on_tool_call_started(start + Duration::from_secs(60));
         state.on_tool_call_finished(start + Duration::from_secs(120));
-        // 60 s of paused_total before the reset.
         assert_eq!(state.paused_total, Duration::from_secs(60));
 
         state.on_live_summary_event(start + Duration::from_secs(180));
         assert_eq!(state.paused_total, Duration::ZERO);
 
         let now = start + Duration::from_secs(300);
-        // 120 s since the reset, no pauses since the reset.
         assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
     }
 
     #[test]
     fn live_summary_event_during_pause_does_not_double_credit_pre_reset_pause() {
         let (start, mut state) = fresh(EffortLevel::Normal);
-        // Tool call starts at t=60 and is still in flight when summary lands.
         state.on_tool_call_started(start + Duration::from_secs(60));
         state.on_live_summary_event(start + Duration::from_secs(120));
-        // The pause window must restart from the reset moment, not stay
-        // anchored at t=60 (which would over-count pause time by 60 s
-        // toward future idle accounting).
         assert_eq!(state.pause_began_at, Some(start + Duration::from_secs(120)));
         assert_eq!(state.paused_total, Duration::ZERO);
 
-        // Tool call finishes at t=300. Pause since reset is 300 - 120 = 180.
         state.on_tool_call_finished(start + Duration::from_secs(300));
         assert_eq!(state.paused_total, Duration::from_secs(180));
 
         let now = start + Duration::from_secs(420);
-        // Idle since reset = 420 - 120 = 300; pause since reset = 180.
-        // Idle-adjusted = 300 - 180 = 120.
         assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
     }
 
@@ -334,18 +476,15 @@ mod tests {
     #[test]
     fn warn_threshold_emits_once_then_idle_until_kill() {
         let (start, mut state) = fresh(EffortLevel::Normal);
-        // 9 minutes — under warn threshold.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(9 * 60)),
             WatchdogDecision::Idle
         );
-        // 11 minutes — first crossing of warn threshold.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(11 * 60)),
             WatchdogDecision::EmitWarning
         );
         assert!(state.warned);
-        // 15 minutes — past warn but below kill; one-shot flag suppresses.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(15 * 60)),
             WatchdogDecision::Idle
@@ -355,11 +494,8 @@ mod tests {
     #[test]
     fn direct_kill_without_prior_warning_when_starved() {
         let (start, mut state) = fresh(EffortLevel::Normal);
-        // App was starved for cycles between warn and kill thresholds; the
-        // first evaluation it gets sees idle past the kill threshold.
         let decision = state.evaluate(start + Duration::from_secs(21 * 60));
         assert_eq!(decision, WatchdogDecision::EmitKill);
-        // `warned` stays false — the warning was never emitted.
         assert!(!state.warned);
     }
 
@@ -395,18 +531,14 @@ mod tests {
     #[test]
     fn tough_run_does_not_warn_at_normal_threshold() {
         let (start, mut state) = fresh(EffortLevel::Tough);
-        // 11 minutes is past the normal 10-minute warn but below the
-        // tough 15-minute warn.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(11 * 60)),
             WatchdogDecision::Idle
         );
-        // 16 minutes crosses the tough warn threshold.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(16 * 60)),
             WatchdogDecision::EmitWarning
         );
-        // 31 minutes crosses the tough kill threshold.
         assert_eq!(
             state.evaluate(start + Duration::from_secs(31 * 60)),
             WatchdogDecision::EmitKill
@@ -414,14 +546,25 @@ mod tests {
     }
 
     #[test]
-    fn registry_insert_get_remove_roundtrip() {
+    fn registry_register_get_remove_roundtrip() {
         let mut registry = WatchdogRegistry::new();
         assert!(registry.is_empty());
 
         let now = Instant::now();
-        registry.insert(WatchdogState::new(42, EffortLevel::Tough, now));
+        registry.register(
+            42,
+            EffortLevel::Tough,
+            "[Builder t1 r1]".to_string(),
+            PathBuf::from("/tmp/prompts/coder.md"),
+            now,
+        );
         assert_eq!(registry.len(), 1);
-        assert!(registry.get(42).is_some());
+        let stored = registry.get(42).expect("registered");
+        assert_eq!(stored.window_name, "[Builder t1 r1]");
+        assert_eq!(stored.prompt_path.to_str(), Some("/tmp/prompts/coder.md"));
+        assert_eq!(stored.warn_threshold, Duration::from_secs(15 * 60));
+        assert_eq!(stored.kill_threshold, Duration::from_secs(30 * 60));
+        assert_eq!(stored.warning_remaining_minutes, 15);
 
         if let Some(state) = registry.get_mut(42) {
             state.on_tool_call_started(now);
@@ -438,25 +581,111 @@ mod tests {
     fn registry_iter_mut_visits_all_states() {
         let mut registry = WatchdogRegistry::new();
         let now = Instant::now();
-        registry.insert(WatchdogState::new(1, EffortLevel::Normal, now));
-        registry.insert(WatchdogState::new(2, EffortLevel::Tough, now));
+        registry.register(
+            1,
+            EffortLevel::Normal,
+            "[a]".to_string(),
+            PathBuf::from("/a"),
+            now,
+        );
+        registry.register(
+            2,
+            EffortLevel::Tough,
+            "[b]".to_string(),
+            PathBuf::from("/b"),
+            now,
+        );
 
         for state in registry.iter_mut() {
             state.on_live_summary_event(now + Duration::from_secs(60));
         }
-        assert_eq!(
-            registry
-                .get(1)
-                .map(|s| s.last_live_summary_event - now)
-                .unwrap_or_default(),
-            Duration::from_secs(60)
+        for id in [1, 2] {
+            assert_eq!(
+                registry
+                    .get(id)
+                    .map(|s| s.last_live_summary_event - now)
+                    .unwrap_or_default(),
+                Duration::from_secs(60)
+            );
+        }
+    }
+
+    #[test]
+    fn registry_compresses_thresholds_under_test_scale() {
+        let mut registry = WatchdogRegistry::with_scale_ns_per_sec(1_000_000);
+        let now = Instant::now();
+        registry.register(
+            1,
+            EffortLevel::Normal,
+            "[w]".to_string(),
+            PathBuf::from("/p"),
+            now,
         );
-        assert_eq!(
-            registry
-                .get(2)
-                .map(|s| s.last_live_summary_event - now)
-                .unwrap_or_default(),
-            Duration::from_secs(60)
+        let state = registry.get(1).expect("registered");
+        // 600s simulated × 1_000_000 ns/s = 600_000_000 ns = 600 ms real.
+        assert_eq!(state.warn_threshold, Duration::from_millis(600));
+        assert_eq!(state.kill_threshold, Duration::from_millis(1200));
+        // Warning preamble must still report unscaled minutes.
+        assert_eq!(state.warning_remaining_minutes, 10);
+    }
+
+    #[test]
+    fn registry_evaluate_all_reports_per_run_decisions() {
+        let mut registry = WatchdogRegistry::new();
+        let now = Instant::now();
+        registry.register(
+            1,
+            EffortLevel::Normal,
+            "[a]".to_string(),
+            PathBuf::from("/a"),
+            now,
         );
+        registry.register(
+            2,
+            EffortLevel::Tough,
+            "[b]".to_string(),
+            PathBuf::from("/b"),
+            now,
+        );
+
+        let later = now + Duration::from_secs(11 * 60);
+        let mut decisions = registry.evaluate_all(later);
+        decisions.sort_by_key(|(id, _)| *id);
+        // Run 1 (Normal) crosses warn at 10 min; run 2 (Tough) does not.
+        assert_eq!(decisions[0].1, WatchdogDecision::EmitWarning);
+        assert_eq!(decisions[1].1, WatchdogDecision::Idle);
+    }
+
+    #[test]
+    fn warning_text_contains_prompt_verbatim_and_minute_counts() {
+        let body = "Original instructions for the agent.";
+        let text = warning_text(11, 9, body);
+        assert!(text.contains("11 minutes"));
+        assert!(text.contains("9 minutes"));
+        assert!(text.contains(body));
+        assert!(text.contains("ORIGINAL PROMPT"));
+        assert!(text.contains("END ORIGINAL PROMPT"));
+        // The exact prompt body — including any later lines — is sandwiched
+        // between the markers (AC7).
+        let start = text.find("ORIGINAL PROMPT").unwrap();
+        let end = text.find("END ORIGINAL PROMPT").unwrap();
+        assert!(text[start..end].contains(body));
+    }
+
+    #[test]
+    fn idle_minutes_for_message_reports_unscaled_minutes_under_compression() {
+        let mut registry = WatchdogRegistry::with_scale_ns_per_sec(1_000_000);
+        let now = Instant::now();
+        registry.register(
+            1,
+            EffortLevel::Normal,
+            "[w]".to_string(),
+            PathBuf::from("/p"),
+            now,
+        );
+        let state = registry.get_mut(1).expect("registered");
+        // 660 ms real wall clock should map back to ~11 simulated minutes.
+        let advanced = now + Duration::from_millis(660);
+        assert!(state.idle_minutes_for_message(advanced) >= 11);
     }
 }

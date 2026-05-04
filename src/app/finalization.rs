@@ -1346,6 +1346,9 @@ impl App {
         success: bool,
         error: Option<String>,
     ) {
+        // Drop the watchdog entry on every finalization (success, organic
+        // failure, or watchdog-induced kill). Spec §3.8.
+        self.watchdog.remove(run_id);
         let Some(finished) =
             session_state::transitions::finish_run_record(&mut self.state, run_id, success, error)
         else {

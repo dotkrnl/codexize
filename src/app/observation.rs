@@ -129,10 +129,16 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some(run) = self.running_run() else {
+        let Some((run_window_name, run_model, run_vendor)) = self.running_run().map(|run| {
+            (
+                run.window_name.clone(),
+                run.model.clone(),
+                run.vendor.clone(),
+            )
+        }) else {
             return;
         };
-        if !self.active_run_exists(&run.window_name) {
+        if !self.active_run_exists(&run_window_name) {
             return;
         }
         let Some(path) = self.live_summary_path.clone() else {
@@ -146,6 +152,13 @@ impl App {
             && mtime <= cached_mtime
         {
             return;
+        }
+        // Reset the watchdog idle clock as soon as we observe a real mtime
+        // advance, before any later content-staleness or duplicate-content
+        // gates (spec §3.7). Empty/duplicate writes still count — the
+        // operator-stated heartbeat is the file write itself.
+        if let Some(state) = self.watchdog.get_mut(run_id) {
+            state.on_live_summary_event(std::time::Instant::now());
         }
         let stale = mtime
             .elapsed()
@@ -169,8 +182,8 @@ impl App {
             run_id,
             kind: MessageKind::Brief,
             sender: MessageSender::Agent {
-                model: run.model.clone(),
-                vendor: run.vendor.clone(),
+                model: run_model,
+                vendor: run_vendor,
             },
             text: sanitized.clone(),
         };
@@ -192,12 +205,6 @@ impl App {
     /// Drain runner-emitted tool-call lifecycle transitions and apply them
     /// to the matching `WatchdogState` entries. Called from the main poll
     /// loop alongside `process_live_summary_changes`.
-    ///
-    /// Task 1 only sets up the plumbing — `WatchdogRegistry` is empty
-    /// because lifecycle insert/remove wiring lands with task 2 (spec §3.8).
-    /// In the meantime this loop is observationally a no-op for runs that
-    /// have not been registered, but it still drains the runner-side
-    /// channels so events do not pile up across the process lifetime.
     pub(super) fn apply_pending_tool_call_transitions(&mut self) {
         let transitions = crate::runner::drain_tool_call_transitions();
         if transitions.is_empty() {
@@ -226,6 +233,100 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Per-tick watchdog evaluation. Walks every registered run's state at
+    /// `now`, then performs the spec §3.4/§3.5 side effects (warning
+    /// interrupt + `SummaryWarn`, or kill `Terminate` + `SummaryWarn`)
+    /// with the App's `&mut self` access to dashboard messages and the
+    /// runner registry.
+    ///
+    /// Decision evaluation and side effects are split into two passes so
+    /// the App holds a borrow on the registry only while computing
+    /// decisions; the side-effect pass releases that borrow before
+    /// reaching back into the same registry to read prompt paths.
+    pub(super) fn tick_watchdog(&mut self) {
+        if self.watchdog.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let decisions = self.watchdog.evaluate_all(now);
+        for (run_id, decision) in decisions {
+            match decision {
+                super::watchdog::WatchdogDecision::Idle => {}
+                super::watchdog::WatchdogDecision::EmitWarning => {
+                    self.dispatch_watchdog_warning(run_id, now);
+                }
+                super::watchdog::WatchdogDecision::EmitKill => {
+                    self.dispatch_watchdog_kill(run_id, now);
+                }
+            }
+        }
+    }
+
+    fn dispatch_watchdog_warning(&mut self, run_id: u64, now: std::time::Instant) {
+        // Snapshot exactly the values we need before touching dashboard
+        // helpers. Holding a borrow on `self.watchdog` across calls to
+        // `append_system_message` would deadlock the borrow checker.
+        let Some((window_name, prompt_path, idle_minutes, remaining_minutes)) =
+            self.watchdog.get_mut(run_id).map(|state| {
+                (
+                    state.window_name.clone(),
+                    state.prompt_path.clone(),
+                    state.idle_minutes_for_message(now),
+                    state.warning_remaining_minutes,
+                )
+            })
+        else {
+            return;
+        };
+        let prompt_body = std::fs::read_to_string(&prompt_path)
+            .unwrap_or_else(|_| super::watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
+        let warning_text =
+            super::watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
+        let interrupt_sent = crate::runner::force_interrupt_run_label(&window_name, warning_text);
+        let _ = self.state.log_event(format!(
+            "watchdog_warning: run={run_id} window={window_name} idle_min={idle_minutes} \
+             interrupt_sent={interrupt_sent}"
+        ));
+        self.append_system_message(
+            run_id,
+            MessageKind::SummaryWarn,
+            format!(
+                "watchdog warning: live summary stale for {idle_minutes} min \
+                 (tool-call time excluded); sent interrupt with original prompt"
+            ),
+        );
+    }
+
+    fn dispatch_watchdog_kill(&mut self, run_id: u64, now: std::time::Instant) {
+        let Some((window_name, idle_minutes)) = self.watchdog.get_mut(run_id).map(|state| {
+            (
+                state.window_name.clone(),
+                state.idle_minutes_for_message(now),
+            )
+        }) else {
+            return;
+        };
+        // Drop the watchdog state immediately. The runner thread
+        // observes the Terminate, exits with code 143, and the existing
+        // `poll_agent_run` finalize path drives the standard failed-run
+        // vendor failover (spec §3.5). `finalize_run_record` will also
+        // call remove() but the duplicate is a no-op.
+        self.watchdog.remove(run_id);
+        let terminate_sent = crate::runner::terminate_run_label(&window_name);
+        let _ = self.state.log_event(format!(
+            "watchdog_kill: run={run_id} window={window_name} idle_min={idle_minutes} \
+             terminate_sent={terminate_sent}"
+        ));
+        self.append_system_message(
+            run_id,
+            MessageKind::SummaryWarn,
+            format!(
+                "watchdog kill: live summary stale for {idle_minutes} min; \
+                 terminating run, vendor failover will follow"
+            ),
+        );
     }
 
     /// Final read + cleanup of the live-summary file when a run finishes.

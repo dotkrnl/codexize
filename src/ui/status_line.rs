@@ -126,8 +126,8 @@ mod tests {
     use super::*;
 
     fn line_at(
-        clock: super::super::clock::TestClock,
-    ) -> StatusLine<super::super::clock::TestClock> {
+        clock: crate::ui::clock::TestClock,
+    ) -> StatusLine<crate::ui::clock::TestClock> {
         StatusLine::with_clock(clock)
     }
 
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn lower_severity_can_take_line_after_ttl_expiry() {
-        let clock = super::super::clock::TestClock::new();
+        let clock = crate::ui::clock::TestClock::new();
         let now = clock.now();
         let mut line = line_at(clock.clone());
         line.push(
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn ttl_expiry_hides_message() {
-        let clock = super::super::clock::TestClock::new();
+        let clock = crate::ui::clock::TestClock::new();
         let mut line = line_at(clock.clone());
         line.push(
             "transient".to_string(),

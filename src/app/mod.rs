@@ -14,15 +14,15 @@ mod models;
 mod models_area;
 mod models_area_view_model;
 mod observation;
-pub(crate) mod palette;
+pub(crate) use crate::ui::palette;
 mod prompt_render;
 mod prompts;
 mod render;
 mod render_view_model;
-mod sheet;
+pub use crate::ui::sheet;
 mod split;
 mod state;
-mod status_line;
+pub use crate::ui::status_line;
 #[cfg(test)]
 mod test_harness;
 #[cfg(test)]

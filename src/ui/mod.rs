@@ -8,7 +8,10 @@ pub mod clock;
 pub mod focus_caps;
 pub mod footer;
 pub mod input_editor;
+pub(crate) mod palette;
 pub mod preflight;
+pub mod sheet;
+pub mod status_line;
 pub mod tui;
 
 pub use crate::app as runtime;

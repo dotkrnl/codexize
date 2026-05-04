@@ -7,9 +7,12 @@
 //! enum. The runtime routes the command into [`crate::logic`] and any
 //! resulting [`crate::data::events::DataRequest`].
 //!
-//! Today the production TUI still mutates state directly via the legacy
-//! [`crate::app::App`] event pump; this enum exists so the seam is
-//! reified for the runtime harness and the upcoming UI extraction.
+//! The production TUI now translates a subset of `KeyEvent`s into
+//! `AppCommand`s before they reach the legacy [`crate::app::App`] event
+//! pump (e.g. Esc on the quit-running-agent modal becomes
+//! [`AppCommand::CancelModal`]). Remaining focus-local key handling still
+//! lives in `app/` and migrates out as each surface is split into a
+//! narrower domain variant.
 
 use super::view::StageId;
 

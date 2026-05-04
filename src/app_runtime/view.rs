@@ -6,11 +6,12 @@
 //! state and a UI layer only reads via this view, then converts the values
 //! into its own (ratatui, web, headless, …) presentation shape.
 //!
-//! Today the production TUI still owns the state directly via
-//! [`crate::app::App`]; the view types exist so the seam is explicit and
-//! exercised by [`crate::app_runtime::harness`]. The next slice of the
-//! refactor will switch the TUI to consume `AppView` and emit
-//! [`crate::app_runtime::AppCommand`] over channels.
+//! The production TUI now consumes `AppView` for the seams that have been
+//! migrated (top-rule mode badges read [`AppView::modes`], the terminal
+//! loop publishes the view each tick) while a few legacy surfaces still
+//! read state directly from [`crate::app::App`]. The view types remain
+//! authoritative for the runtime/UI seam and are exercised by
+//! [`crate::app_runtime::harness`].
 
 use std::sync::Arc;
 

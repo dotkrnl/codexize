@@ -3,6 +3,7 @@
 //! The current crate keeps existing module paths live while later slices move
 //! files under this layer. Re-exports here are intentionally compatibility-only.
 
+pub mod artifacts;
 pub mod cache;
 pub mod cache_lock;
 pub mod persistence;

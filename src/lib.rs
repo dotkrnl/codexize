@@ -2,7 +2,7 @@ pub mod acp;
 pub mod adapters;
 pub mod app;
 pub mod app_runtime;
-pub mod artifacts;
+pub use crate::data::artifacts;
 pub use crate::data::cache;
 pub use crate::data::cache_lock;
 pub mod coder_summary;

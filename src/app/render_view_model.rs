@@ -270,9 +270,10 @@ pub(super) fn stage_error_title(stage_id: StageId) -> &'static str {
 pub(super) fn modal_border_style(kind: ModalKind) -> Style {
     match kind {
         ModalKind::StageError(_) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ModalKind::SkipToImpl | ModalKind::GitGuard | ModalKind::QuitRunningAgent => {
-            Style::default().fg(Color::Yellow)
-        }
+        ModalKind::SkipToImpl
+        | ModalKind::GitGuard
+        | ModalKind::QuitRunningAgent
+        | ModalKind::InteractiveExitPrompt => Style::default().fg(Color::Yellow),
         ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
             Style::default().fg(Color::Cyan)
         }
@@ -284,6 +285,7 @@ pub(super) fn modal_title(kind: ModalKind) -> Option<&'static str> {
         ModalKind::SkipToImpl => Some("Skip to implementation?"),
         ModalKind::GitGuard => Some("Git guard"),
         ModalKind::QuitRunningAgent => Some("Stop running agent and quit?"),
+        ModalKind::InteractiveExitPrompt => Some("Any requests?"),
         ModalKind::SpecReviewPaused => Some("Spec review complete"),
         ModalKind::PlanReviewPaused => Some("Plan review complete"),
         ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),

@@ -895,9 +895,41 @@ impl App {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
             ModalKind::GitGuard => self.handle_guard_modal_key(key),
             ModalKind::QuitRunningAgent => self.handle_quit_running_agent_modal_key(key),
+            ModalKind::InteractiveExitPrompt => self.handle_interactive_exit_prompt_modal_key(key),
             ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
             ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
             ModalKind::StageError(stage_id) => self.handle_stage_error_modal_key(stage_id, key),
+        }
+    }
+
+    fn dismiss_interactive_exit_prompt(&mut self) {
+        if let Some(key) = self.interactive_exit_prompt_key() {
+            self.interactive_exit_prompt_dismissed_at = Some(key);
+        }
+    }
+
+    fn handle_interactive_exit_prompt_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Enter => {
+                self.interactive_exit_prompt_dismissed_at = None;
+                self.exit_interactive_run_locally();
+                false
+            }
+            KeyCode::Esc => {
+                self.dismiss_interactive_exit_prompt();
+                self.input_mode = true;
+                false
+            }
+            KeyCode::Char(_)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.dismiss_interactive_exit_prompt();
+                self.input_mode = true;
+                self.handle_input_key(key)
+            }
+            _ => false,
         }
     }
 

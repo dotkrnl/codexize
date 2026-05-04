@@ -98,6 +98,9 @@ impl App {
         if self.pending_quit_confirmation_run_id.is_some() {
             return Some(ModalKind::QuitRunningAgent);
         }
+        if self.interactive_exit_prompt_key().is_some() {
+            return Some(ModalKind::InteractiveExitPrompt);
+        }
         match self.state.current_phase {
             Phase::SkipToImplPending => Some(ModalKind::SkipToImpl),
             Phase::GitGuardPending => Some(ModalKind::GitGuard),
@@ -126,6 +129,32 @@ impl App {
             }
             _ => None,
         }
+    }
+
+    pub(super) fn interactive_exit_prompt_key(&self) -> Option<(u64, usize)> {
+        let run_id = self.current_run_id?;
+        let run = self.state.agent_runs.iter().find(|run| {
+            run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
+        })?;
+        if !crate::runner::run_label_is_waiting_for_input(&run.window_name) {
+            return None;
+        }
+        let (message_index, message) =
+            self.messages
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, message)| {
+                    message.run_id == run_id && message.kind == MessageKind::AgentText
+                })?;
+        if !message.text.contains("/exit") {
+            return None;
+        }
+        let key = (run_id, message_index);
+        if self.interactive_exit_prompt_dismissed_at == Some(key) {
+            return None;
+        }
+        Some(key)
     }
 
     pub fn new(state: SessionState) -> Self {
@@ -198,6 +227,7 @@ impl App {
             pending_drain_deadline: None,
             pending_termination: None,
             pending_quit_confirmation_run_id: None,
+            interactive_exit_prompt_dismissed_at: None,
             pending_app_exit: false,
             current_run_id: None,
             failed_models,

@@ -1731,6 +1731,43 @@ fn interactive_exit_is_handled_locally_without_quitting_tui() {
 }
 
 #[test]
+fn agent_exit_suggestion_opens_requests_modal() {
+    with_temp_root(|| {
+        let (app, _window_name) = app_waiting_on_agent_exit("agent-exit-modal");
+
+        assert_eq!(app.active_modal(), Some(ModalKind::InteractiveExitPrompt));
+    });
+}
+
+#[test]
+fn agent_exit_suggestion_enter_exits_interactive_run() {
+    with_temp_root(|| {
+        let (mut app, window_name) = app_waiting_on_agent_exit("agent-exit-enter");
+
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert!(!crate::runner::run_label_is_waiting_for_input(&window_name));
+        assert_eq!(app.active_modal(), None);
+    });
+}
+
+#[test]
+fn agent_exit_suggestion_typing_starts_request_input() {
+    with_temp_root(|| {
+        let (mut app, window_name) = app_waiting_on_agent_exit("agent-exit-type");
+
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Char('f')));
+
+        assert!(!should_quit);
+        assert!(app.input_mode);
+        assert_eq!(app.input_buffer, "f");
+        assert!(crate::runner::run_label_is_waiting_for_input(&window_name));
+        assert_eq!(app.active_modal(), None);
+    });
+}
+
+#[test]
 fn idea_input_leading_colon_enters_command_mode() {
     with_temp_root(|| {
         let mut state = SessionState::new("idea-leading-colon".to_string());
@@ -3435,6 +3472,29 @@ fn make_non_interactive_run(id: u64, window_name: &str) -> RunRecord {
         hostname: None,
         mount_device_id: None,
     }
+}
+
+fn app_waiting_on_agent_exit(session_id: &str) -> (App, String) {
+    let mut state = SessionState::new(session_id.to_string());
+    state.current_phase = Phase::BrainstormRunning;
+    let mut run = make_brainstorm_run(7);
+    run.window_name = format!("[Brainstorm {session_id}]");
+    run.modes.interactive = true;
+    let window_name = run.window_name.clone();
+    let model = run.model.clone();
+    let vendor = run.vendor.clone();
+    state.agent_runs.push(run);
+    crate::runner::request_run_label_interactive_input_for_test(&window_name);
+    let mut app = idle_app(state);
+    app.current_run_id = Some(7);
+    app.messages.push(Message {
+        ts: chrono::Utc::now(),
+        run_id: 7,
+        kind: MessageKind::AgentText,
+        sender: MessageSender::Agent { model, vendor },
+        text: "Done. Enter /exit if there are no further requests.".to_string(),
+    });
+    (app, window_name)
 }
 
 #[test]

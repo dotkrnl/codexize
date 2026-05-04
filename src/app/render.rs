@@ -486,6 +486,22 @@ impl App {
                     )),
                 ]
             }
+            ModalKind::InteractiveExitPrompt => vec![
+                Line::from(Span::styled(
+                    "The agent offered to finish this interactive turn.".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Any requests before it exits?".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Enter: no requests · type a request · Esc: write request".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+            ],
             ModalKind::SpecReviewPaused => vec![Line::from(Span::styled(
                 "Spec review complete".to_string(),
                 Style::default().fg(Color::White),

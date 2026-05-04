@@ -34,6 +34,9 @@ Escalation rules — ask the operator when:
 • The feedback affects end-user-facing design (UI/UX, CLI behavior, config
   schema, output formats, user-facing prompts, file layout). MUST ask.
   Present a concise accept/reject choice; never decide alone.
+  Ask escalation questions one at a time: ask exactly one operator question per
+  message. Wait for the operator's answer before asking the next escalation question.
+  Do not bundle multiple accept/reject choices into one message.
 • The feedback is an internal design decision (code structure, module
   boundaries, function signatures, invisible implementation patterns) and
   you are very unsure. If confident, decide and briefly explain why.

@@ -24,14 +24,17 @@ pub enum ClientUpdate {
     AgentMessageText {
         text: String,
         boundary: AcpTextBoundary,
+        identity: Option<String>,
     },
     AgentThoughtText {
         text: String,
         boundary: AcpTextBoundary,
+        identity: Option<String>,
     },
     ToolCallText {
         text: String,
         boundary: AcpTextBoundary,
+        identity: Option<String>,
     },
     SessionInfoUpdate {
         title: Option<String>,
@@ -69,6 +72,7 @@ pub struct AcpTextEvent {
     pub interactive: bool,
     pub thought: bool,
     pub boundary: AcpTextBoundary,
+    pub identity: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,30 +156,39 @@ impl Default for AcpTextAccumulator {
 
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
     match update {
-        ClientUpdate::AgentMessageText { text, boundary } => {
-            Some(AcpRuntimeEvent::Text(AcpTextEvent {
-                text,
-                interactive,
-                thought: false,
-                boundary,
-            }))
-        }
-        ClientUpdate::AgentThoughtText { text, boundary } => {
-            Some(AcpRuntimeEvent::Text(AcpTextEvent {
-                text,
-                interactive,
-                thought: true,
-                boundary,
-            }))
-        }
-        ClientUpdate::ToolCallText { text, boundary } => {
-            Some(AcpRuntimeEvent::Text(AcpTextEvent {
-                text: format!("{text}\n\n"),
-                interactive,
-                thought: true,
-                boundary,
-            }))
-        }
+        ClientUpdate::AgentMessageText {
+            text,
+            boundary,
+            identity,
+        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text,
+            interactive,
+            thought: false,
+            boundary,
+            identity,
+        })),
+        ClientUpdate::AgentThoughtText {
+            text,
+            boundary,
+            identity,
+        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text,
+            interactive,
+            thought: true,
+            boundary,
+            identity,
+        })),
+        ClientUpdate::ToolCallText {
+            text,
+            boundary,
+            identity,
+        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
+            text: format!("{text}\n\n"),
+            interactive,
+            thought: true,
+            boundary,
+            identity,
+        })),
         ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
             AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
         }),
@@ -199,6 +212,7 @@ mod tests {
             ClientUpdate::AgentMessageText {
                 text: "hello".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             },
             true,
         )
@@ -211,6 +225,7 @@ mod tests {
                 interactive: true,
                 thought: false,
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             })
         );
     }
@@ -221,6 +236,7 @@ mod tests {
             ClientUpdate::AgentMessageText {
                 text: " more".to_string(),
                 boundary: AcpTextBoundary::Continue,
+                identity: None,
             },
             true,
         )
@@ -233,6 +249,7 @@ mod tests {
                 interactive: true,
                 thought: false,
                 boundary: AcpTextBoundary::Continue,
+                identity: None,
             })
         );
     }
@@ -243,6 +260,7 @@ mod tests {
             ClientUpdate::AgentThoughtText {
                 text: "internal".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             },
             true,
         );
@@ -254,6 +272,7 @@ mod tests {
                 interactive: true,
                 thought: true,
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }))
         );
     }
@@ -264,6 +283,7 @@ mod tests {
             ClientUpdate::ToolCallText {
                 text: "tool: read(Cargo.toml)".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             },
             false,
         );
@@ -275,6 +295,7 @@ mod tests {
                 interactive: false,
                 thought: true,
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }))
         );
     }
@@ -285,6 +306,7 @@ mod tests {
             ClientUpdate::ToolCallText {
                 text: "result: completed, exit 0, output: ok".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             },
             true,
         );
@@ -296,6 +318,7 @@ mod tests {
                 interactive: true,
                 thought: true,
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }))
         );
     }

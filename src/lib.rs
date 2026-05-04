@@ -1,4 +1,4 @@
-pub mod acp;
+pub use crate::data::acp;
 pub use crate::data::adapters;
 pub mod app;
 pub mod app_runtime;

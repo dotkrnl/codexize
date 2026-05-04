@@ -142,16 +142,22 @@ pub fn read_live_summary(path: &Path) -> Option<LiveSummarySnapshot> {
 /// removal is attempted regardless of read success so the next run starts
 /// with a clean slate. Errors on either step are intentionally swallowed —
 /// the watchdog/cleanup path must not fail end-of-run finalization.
+///
+/// Content presence governs whether a snapshot is emitted; mtime is a
+/// best-effort fallback. If `read_to_string` succeeded but the metadata
+/// probe lost a race with concurrent writers (or the file vanished between
+/// the two syscalls), the snapshot still carries the readable content with
+/// `mtime` filled in from `SystemTime::now()` so the final Brief is not
+/// silently dropped. Mirrors the pre-move app behavior, which appended the
+/// final summary purely on a successful read.
 pub fn drain_live_summary_file(path: &Path) -> Option<LiveSummarySnapshot> {
-    let snapshot = match (
-        std::fs::read_to_string(path),
-        std::fs::metadata(path).and_then(|m| m.modified()),
-    ) {
-        (Ok(content), Ok(mtime)) => Some(LiveSummarySnapshot { mtime, content }),
-        _ => None,
-    };
+    let content = std::fs::read_to_string(path).ok();
+    let mtime = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .unwrap_or_else(SystemTime::now);
     let _ = std::fs::remove_file(path);
-    snapshot
+    content.map(|content| LiveSummarySnapshot { mtime, content })
 }
 
 /// Read a prompt-body file from disk. Returns `None` when the file is

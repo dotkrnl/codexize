@@ -7,10 +7,11 @@ pub mod artifacts;
 pub mod cache;
 pub mod cache_lock;
 pub mod persistence;
+pub mod synthetic_artifacts;
+pub mod warmup;
 
 pub use crate::acp;
 pub use crate::adapters;
 pub use crate::providers;
 pub use crate::runner;
-pub use crate::synthetic_artifacts as synthetic;
-pub use crate::warmup;
+pub use crate::data::synthetic_artifacts as synthetic;

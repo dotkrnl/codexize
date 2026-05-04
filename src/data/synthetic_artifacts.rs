@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::artifacts::{ArtifactKind, Spec};
+use crate::data::artifacts::{ArtifactKind, Spec};
 use crate::tasks::{Ref, Task, TasksFile};
 
 /// Write synthetic plan/tasks artifacts into `<session_dir>/artifacts/`

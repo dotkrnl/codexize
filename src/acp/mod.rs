@@ -402,6 +402,7 @@ mod tests {
             ClientUpdate::AgentMessageText {
                 text: "hello".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             },
             ClientUpdate::PromptTurnFinished,
         ]);
@@ -429,6 +430,7 @@ mod tests {
                 interactive: false,
                 thought: false,
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             })) if text == "hello"
         ));
 

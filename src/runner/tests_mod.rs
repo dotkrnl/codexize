@@ -473,6 +473,28 @@ fn acp_text_stream_continue_appends_within_stable_identity() {
 }
 
 #[test]
+fn acp_text_trace_records_boundary_identity_and_text() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let launch = make_acp_test_launch("trace-session", "[Trace]", temp.path());
+    let event = crate::acp::AcpTextEvent {
+        text: "Proposed correction".to_string(),
+        interactive: true,
+        thought: false,
+        boundary: crate::acp::AcpTextBoundary::Continue,
+        identity: None,
+    };
+
+    append_acp_text_trace(&launch, &event);
+
+    let trace = fs::read_to_string(acp_text_trace_path(&launch)).expect("trace file");
+    assert!(trace.contains(r#""type":"text_event""#));
+    assert!(trace.contains(r#""text":"Proposed correction""#));
+    assert!(trace.contains(r#""boundary":"Continue""#));
+    assert!(trace.contains(r#""identity":null"#));
+    assert!(trace.contains(r#""stream":"agent""#));
+}
+
+#[test]
 fn acp_text_stream_start_new_message_preserves_blank_line_splitting() {
     let _guard = crate::state::test_fs_lock()
         .lock()
@@ -583,6 +605,7 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
         crate::acp::ClientUpdate::ToolCallText {
             text: "tool: exec(echo ok)".to_string(),
             boundary: crate::acp::AcpTextBoundary::StartNewMessage,
+            identity: None,
         },
         true,
     )

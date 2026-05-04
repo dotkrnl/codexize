@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
     sync::{
@@ -209,10 +210,19 @@ fn build_managed_acp_launch(
             .collect(),
         policy,
     };
-    let resolved = AcpConfig::default()
+    let mut resolved = AcpConfig::default()
         .resolve(&request)
         .map_err(|err| anyhow!("{err}"))?;
     ensure_program_exists(&resolved.spawn.program)?;
+    let cause_path = artifacts_dir
+        .join("run-finish")
+        .join(format!("{run_key}.cause.txt"));
+    resolved.session.metadata.insert(
+        "codexize.acp_trace_path".to_string(),
+        acp_trace_path_from_cause_path(&cause_path)
+            .display()
+            .to_string(),
+    );
 
     Ok(ManagedAcpLaunch {
         resolved,
@@ -223,9 +233,7 @@ fn build_managed_acp_launch(
             .join(format!("{run_key}.toml")),
         // Keep transport-boundary diagnostics adjacent to finish stamps so
         // postmortems can inspect one per-run directory.
-        cause_path: artifacts_dir
-            .join("run-finish")
-            .join(format!("{run_key}.cause.txt")),
+        cause_path,
         required_artifact: required_artifact.map(Path::to_path_buf),
     })
 }
@@ -265,6 +273,43 @@ fn append_launch_cause(path: &Path, cause: &str) {
         format!("{existing}\n{cause}")
     };
     let _ = fs::write(path, text);
+}
+
+fn acp_trace_path_from_cause_path(cause_path: &Path) -> PathBuf {
+    let Some(file_name) = cause_path.file_name().and_then(|name| name.to_str()) else {
+        return cause_path.with_extension("acp.jsonl");
+    };
+    let trace_name = file_name
+        .strip_suffix(".cause.txt")
+        .map(|stem| format!("{stem}.acp.jsonl"))
+        .unwrap_or_else(|| format!("{file_name}.acp.jsonl"));
+    cause_path.with_file_name(trace_name)
+}
+
+fn acp_text_trace_path(launch: &ManagedAcpLaunch) -> PathBuf {
+    acp_trace_path_from_cause_path(&launch.cause_path)
+}
+
+fn append_acp_text_trace(launch: &ManagedAcpLaunch, event: &crate::acp::AcpTextEvent) {
+    let path = acp_text_trace_path(launch);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let record = serde_json::json!({
+        "type": "text_event",
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "stream": if event.thought { "thought" } else { "agent" },
+        "interactive": event.interactive,
+        "boundary": format!("{:?}", event.boundary),
+        "identity": event.identity,
+        "text": event.text,
+    });
+    let Ok(line) = serde_json::to_string(&record) else {
+        return;
+    };
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 fn git_rev_parse_head() -> Option<String> {
@@ -661,6 +706,7 @@ fn run_managed_acp_launch(
                 };
             }
             Some(AcpRuntimeEvent::Text(text_event)) => {
+                append_acp_text_trace(&launch, &text_event);
                 let text = text_event.text;
                 if text_event.thought {
                     thought_text.push_text_boundary(

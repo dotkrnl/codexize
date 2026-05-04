@@ -129,17 +129,12 @@ impl AcpConnector for SubprocessConnector {
         ) {
             return cleanup_failed_connect(child, rpc, err);
         }
-        let prompt = match prompt_blocks(&launch.session.prompt) {
-            Ok(prompt) => prompt,
+        let prompt_params = match prompt_request_params(&session.session_id, &launch.session.prompt)
+        {
+            Ok(params) => params,
             Err(err) => return cleanup_failed_connect(child, rpc, err),
         };
-        let prompt_response = match rpc.start_request(
-            "session/prompt",
-            json!({
-                "sessionId": session.session_id,
-                "prompt": prompt
-            }),
-        ) {
+        let prompt_response = match rpc.start_request("session/prompt", prompt_params) {
             Ok(response) => response,
             Err(err) => return cleanup_failed_connect(child, rpc, err),
         };
@@ -156,6 +151,11 @@ impl AcpConnector for SubprocessConnector {
             tool_calls: ToolCallMap::new(),
             boundary_state: AcpBoundaryState::new(),
             pending_updates: VecDeque::new(),
+            acp_trace_path: launch
+                .session
+                .metadata
+                .get("codexize.acp_trace_path")
+                .map(PathBuf::from),
         }))
     }
 }
@@ -183,6 +183,7 @@ struct SubprocessSession {
     tool_calls: ToolCallMap,
     boundary_state: AcpBoundaryState,
     pending_updates: VecDeque<ClientUpdate>,
+    acp_trace_path: Option<PathBuf>,
 }
 
 /// Per-stream identity + restart-flag tracking used to classify text chunks
@@ -276,6 +277,7 @@ impl AcpSession for SubprocessSession {
         loop {
             match self.rpc.try_next_update() {
                 Ok(Some(value)) => {
+                    append_raw_acp_update_trace(self.acp_trace_path.as_deref(), &value);
                     dispatch_update(
                         &value,
                         &self.cwd,
@@ -345,14 +347,9 @@ impl AcpSession for SubprocessSession {
         // before the server can reuse a prior turn's messageId on its first
         // chunk. The conservative reset avoids cross-turn gluing.
         self.boundary_state.reset_for_prompt_turn();
-        let prompt = prompt_blocks(&PromptPayload::Text(text.to_string()))?;
-        let prompt_response = self.rpc.start_request(
-            "session/prompt",
-            json!({
-                "sessionId": self.session_id,
-                "prompt": prompt
-            }),
-        )?;
+        let prompt_params =
+            prompt_request_params(&self.session_id, &PromptPayload::Text(text.to_string()))?;
+        let prompt_response = self.rpc.start_request("session/prompt", prompt_params)?;
         self.prompt_response = Some(prompt_response);
         self.prompt_finished = false;
         Ok(())
@@ -787,7 +784,11 @@ fn dispatch_update(
             let identity = extract_message_identity(value);
             let boundary =
                 boundary_for_text_chunk(&mut boundary_state.agent_message, identity.as_deref());
-            out.push_back(ClientUpdate::AgentMessageText { text, boundary });
+            out.push_back(ClientUpdate::AgentMessageText {
+                text,
+                boundary,
+                identity,
+            });
         }
         "agent_thought_chunk" => {
             let text = value
@@ -798,7 +799,11 @@ fn dispatch_update(
             let identity = extract_message_identity(value);
             let boundary =
                 boundary_for_text_chunk(&mut boundary_state.agent_thought, identity.as_deref());
-            out.push_back(ClientUpdate::AgentThoughtText { text, boundary });
+            out.push_back(ClientUpdate::AgentThoughtText {
+                text,
+                boundary,
+                identity,
+            });
         }
         "session_info_update" => {
             out.push_back(ClientUpdate::SessionInfoUpdate {
@@ -989,6 +994,7 @@ fn tool_call_text(text: String) -> ClientUpdate {
     ClientUpdate::ToolCallText {
         text,
         boundary: AcpTextBoundary::StartNewMessage,
+        identity: None,
     }
 }
 
@@ -1006,6 +1012,38 @@ fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
         "type": "text",
         "text": text
     })])
+}
+
+fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
+    Ok(json!({
+        "sessionId": session_id,
+        "messageId": uuid::Uuid::new_v4().to_string(),
+        "prompt": prompt_blocks(prompt)?,
+    }))
+}
+
+fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
+    let Some(path) = path else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let record = json!({
+        "type": "raw_update",
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "update": update,
+    });
+    let Ok(line) = serde_json::to_string(&record) else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 fn debug_protocol(message: impl AsRef<str>) {
@@ -1171,6 +1209,44 @@ mod tests {
         assert_eq!(result, PromptTurnOutcome::Finished);
     }
 
+    #[test]
+    fn prompt_request_params_include_uuid_message_id() {
+        let params = prompt_request_params("sess-1", &PromptPayload::Text("hello".to_string()))
+            .expect("prompt params");
+        let message_id = params
+            .get("messageId")
+            .and_then(Value::as_str)
+            .expect("messageId");
+
+        assert_eq!(message_id.len(), 36);
+        assert_eq!(message_id.chars().filter(|ch| *ch == '-').count(), 4);
+        assert_eq!(
+            params.get("sessionId").and_then(Value::as_str),
+            Some("sess-1")
+        );
+        assert_eq!(
+            params.pointer("/prompt/0/text").and_then(Value::as_str),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn raw_acp_update_trace_records_payload() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let trace_path = temp.path().join("run.acp.jsonl");
+        let update = json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "text": "Proposed correction" }
+        });
+
+        append_raw_acp_update_trace(Some(&trace_path), &update);
+
+        let trace = std::fs::read_to_string(trace_path).expect("trace file");
+        assert!(trace.contains(r#""type":"raw_update""#));
+        assert!(trace.contains(r#""sessionUpdate":"agent_message_chunk""#));
+        assert!(trace.contains(r#""text":"Proposed correction""#));
+    }
+
     fn drain(value: Value, cwd: &Path, map: &mut ToolCallMap) -> Vec<ClientUpdate> {
         let mut state = AcpBoundaryState::new();
         let mut out = VecDeque::new();
@@ -1193,6 +1269,7 @@ mod tests {
         ClientUpdate::ToolCallText {
             text: text.to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
+            identity: None,
         }
     }
 
@@ -1532,6 +1609,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "hello".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }]
         );
 
@@ -1548,6 +1626,7 @@ mod tests {
             vec![ClientUpdate::AgentThoughtText {
                 text: "thinking".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }]
         );
     }
@@ -1587,6 +1666,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "first ".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }]
         );
         assert_eq!(
@@ -1594,6 +1674,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "second".to_string(),
                 boundary: AcpTextBoundary::Continue,
+                identity: None,
             }]
         );
     }
@@ -1641,6 +1722,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "after".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }]
         );
     }
@@ -1677,6 +1759,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "turn two".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
             }]
         );
     }
@@ -1715,6 +1798,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "hel".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: Some("msg-7".to_string()),
             }]
         );
         assert_eq!(
@@ -1722,6 +1806,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "lo".to_string(),
                 boundary: AcpTextBoundary::Continue,
+                identity: Some("msg-7".to_string()),
             }]
         );
     }
@@ -1773,6 +1858,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "after".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: Some("msg-7".to_string()),
             }]
         );
     }
@@ -1811,6 +1897,7 @@ mod tests {
             vec![ClientUpdate::AgentMessageText {
                 text: "turn two".to_string(),
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: Some("msg-7".to_string()),
             }]
         );
     }
@@ -1841,6 +1928,7 @@ mod tests {
             update,
             ClientUpdate::ToolCallText {
                 boundary: AcpTextBoundary::StartNewMessage,
+                identity: None,
                 ..
             }
         )));

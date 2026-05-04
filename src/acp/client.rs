@@ -27,6 +27,7 @@ pub trait AcpSession: Send {
     fn session_id(&self) -> &str;
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>>;
     fn submit_prompt(&mut self, text: &str) -> AcpResult<()>;
+    fn cancel_prompt(&mut self) -> AcpResult<()>;
     fn close(&mut self) -> AcpResult<()>;
 }
 
@@ -355,6 +356,15 @@ impl AcpSession for SubprocessSession {
         Ok(())
     }
 
+    fn cancel_prompt(&mut self) -> AcpResult<()> {
+        self.rpc.notify(
+            "session/cancel",
+            json!({
+                "sessionId": self.session_id,
+            }),
+        )
+    }
+
     fn close(&mut self) -> AcpResult<()> {
         if self.closed {
             return Ok(());
@@ -452,6 +462,17 @@ impl RpcPeer {
             )));
         }
         Ok(rx)
+    }
+
+    fn notify(&mut self, method: &str, params: Value) -> AcpResult<()> {
+        let message = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        });
+        write_json_rpc_line(&self.writer, &message).map_err(|err| {
+            AcpError::io(format!("failed to write ACP notification {method}: {err}"))
+        })
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<Value>> {

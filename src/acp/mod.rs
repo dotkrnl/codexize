@@ -344,6 +344,10 @@ mod tests {
             Ok(())
         }
 
+        fn cancel_prompt(&mut self) -> AcpResult<()> {
+            Ok(())
+        }
+
         fn close(&mut self) -> AcpResult<()> {
             *self
                 .closed

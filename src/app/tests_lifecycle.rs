@@ -1956,6 +1956,36 @@ fn unknown_command_in_waiting_interactive_mode_is_sent_as_user_input() {
 }
 
 #[test]
+fn interrupt_command_interrupts_active_interactive_turn_and_echoes_user_input() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("interrupt-command-active".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let mut run = make_brainstorm_run(7);
+        run.modes.interactive = true;
+        run.window_name = "[Interrupt Active]".to_string();
+        let window_name = run.window_name.clone();
+        state.agent_runs.push(run);
+        crate::runner::request_run_label_active_for_test(&window_name);
+        let mut app = idle_app(state);
+        app.current_run_id = Some(7);
+
+        app.handle_key(key(crossterm::event::KeyCode::Char(':')));
+        for c in "interrupt please stop and do this instead".chars() {
+            app.handle_key(key(crossterm::event::KeyCode::Char(c)));
+        }
+        let should_quit = app.handle_key(key(crossterm::event::KeyCode::Enter));
+
+        assert!(!should_quit);
+        assert!(app.messages.iter().any(|message| {
+            message.kind == MessageKind::UserInput
+                && message.text == "please stop and do this instead"
+        }));
+        assert!(!crate::runner::run_label_is_waiting_for_input(&window_name));
+        crate::runner::shutdown_all_runs();
+    });
+}
+
+#[test]
 fn unknown_command_outside_waiting_mode_sets_status_and_is_not_persisted() {
     with_temp_root(|| {
         let mut state = SessionState::new("unknown-command-not-waiting".to_string());

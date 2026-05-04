@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -140,10 +140,16 @@ pub(super) struct ToolCallMap {
     // from the display-side `entries` map, which is allowed to overwrite on
     // id reuse: the activity stream feeds a per-run state machine that must
     // never double-count pause windows or pause-resume transitions.
-    terminal_emitted: BTreeMap<String, ()>,
-    terminal_order: VecDeque<String>,
-    start_emitted: BTreeMap<String, ()>,
-    start_order: VecDeque<String>,
+    //
+    // Storage is an unbounded `BTreeSet<String>` rather than the FIFO+cap
+    // discipline used for `entries`. The cap on `entries` exists to bound
+    // display-state memory for pathological agents; for activity dedup an
+    // FIFO eviction policy would silently re-arm Start/Finish once an old id
+    // ages out, breaking the one-shot watchdog contract. We pay the (small)
+    // unbounded-id-string cost — bounded by the count of distinct tool-call
+    // ids the agent emits during one run — to preserve correctness.
+    start_emitted: BTreeSet<String>,
+    terminal_emitted: BTreeSet<String>,
 }
 
 impl ToolCallMap {
@@ -201,39 +207,19 @@ impl ToolCallMap {
     }
 
     pub(super) fn mark_start_emitted(&mut self, id: &str) {
-        if self.start_emitted.remove(id).is_some() {
-            self.start_order.retain(|existing| existing != id);
-        }
-        while self.start_order.len() >= TOOL_CALL_MAP_CAP {
-            let Some(oldest) = self.start_order.pop_front() else {
-                break;
-            };
-            self.start_emitted.remove(&oldest);
-        }
-        self.start_order.push_back(id.to_string());
-        self.start_emitted.insert(id.to_string(), ());
+        self.start_emitted.insert(id.to_string());
     }
 
     pub(super) fn start_emitted(&self, id: &str) -> bool {
-        self.start_emitted.contains_key(id)
+        self.start_emitted.contains(id)
     }
 
     pub(super) fn mark_terminal_emitted(&mut self, id: &str) {
-        if self.terminal_emitted.remove(id).is_some() {
-            self.terminal_order.retain(|existing| existing != id);
-        }
-        while self.terminal_order.len() >= TOOL_CALL_MAP_CAP {
-            let Some(oldest) = self.terminal_order.pop_front() else {
-                break;
-            };
-            self.terminal_emitted.remove(&oldest);
-        }
-        self.terminal_order.push_back(id.to_string());
-        self.terminal_emitted.insert(id.to_string(), ());
+        self.terminal_emitted.insert(id.to_string());
     }
 
     pub(super) fn terminal_emitted(&self, id: &str) -> bool {
-        self.terminal_emitted.contains_key(id)
+        self.terminal_emitted.contains(id)
     }
 
     #[cfg(test)]
@@ -935,15 +921,24 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_map_terminal_markers_are_bounded_fifo() {
+    fn tool_call_map_activity_dedup_markers_are_unbounded_per_session() {
+        // Activity dedup must remain monotonic for the entire managed-ACP
+        // session, regardless of how many distinct ids the agent emits. A
+        // bounded FIFO would let an early id's marker age out and re-arm
+        // Start/Finish for that id later in the run, breaking the watchdog
+        // contract that each id emits at most one Start and one Finish.
         let mut map = ToolCallMap::new();
-        for i in 0..TOOL_CALL_MAP_CAP {
-            map.mark_terminal_emitted(&format!("id-{i}"));
+        let overflow_count = TOOL_CALL_MAP_CAP * 4;
+        for i in 0..overflow_count {
+            let id = format!("id-{i}");
+            map.mark_start_emitted(&id);
+            map.mark_terminal_emitted(&id);
         }
-        assert!(map.terminal_emitted("id-0"));
-        map.mark_terminal_emitted("id-overflow");
-        assert!(!map.terminal_emitted("id-0"));
-        assert!(map.terminal_emitted("id-overflow"));
+        for i in 0..overflow_count {
+            let id = format!("id-{i}");
+            assert!(map.start_emitted(&id), "start marker missing for {id}");
+            assert!(map.terminal_emitted(&id), "finish marker missing for {id}");
+        }
     }
 
     #[test]

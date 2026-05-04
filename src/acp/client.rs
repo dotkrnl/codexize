@@ -1204,6 +1204,7 @@ fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::tool_call::TOOL_CALL_MAP_CAP;
     use super::*;
     use crate::{adapters::EffortLevel, state::LaunchModes};
     use std::{collections::BTreeMap, path::PathBuf};
@@ -1965,6 +1966,80 @@ mod tests {
         assert!(
             resurrected.is_empty(),
             "terminal tool_call payload for an already-finished id must not re-emit Finish"
+        );
+    }
+
+    #[test]
+    fn activity_dedup_survives_more_than_cap_distinct_ids_for_full_session() {
+        // Regression: activity dedup must hold for the full session, not just
+        // the most recent `TOOL_CALL_MAP_CAP` ids. The display-side `entries`
+        // map evicts old display state under FIFO pressure, but the
+        // Start/Finish markers must be unbounded so an early id whose display
+        // state has aged out can never re-emit either transition.
+        let mut map = ToolCallMap::new();
+
+        for i in 0..(TOOL_CALL_MAP_CAP + 5) {
+            let id = format!("call_{i}");
+            let _ = drain(
+                json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": id,
+                    "kind": "execute",
+                    "status": "in_progress",
+                    "rawInput": { "command": ["echo", id] }
+                }),
+                Path::new("/tmp"),
+                &mut map,
+            );
+            let _ = drain(
+                json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": id,
+                    "status": "completed",
+                    "rawOutput": { "exit_code": 0, "stdout": id }
+                }),
+                Path::new("/tmp"),
+                &mut map,
+            );
+        }
+
+        // Display-state entries for early ids are gone — confirming we have
+        // exceeded what the FIFO would track for activity dedup if it shared
+        // that cap.
+        assert!(!map.contains("call_0"));
+
+        // Re-send Start and Finish for the very first id. Both must be
+        // suppressed despite call_0's display entry having long since been
+        // evicted, because activity dedup is monotonic per-session.
+        let resent_start = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_0",
+                "kind": "execute",
+                "status": "in_progress",
+                "rawInput": { "command": ["echo", "call_0"] }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            resent_start.is_empty(),
+            "Start must not re-emit for id whose marker was set before the FIFO cap was exceeded"
+        );
+
+        let resent_finish = activity_only(drain(
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_0",
+                "status": "completed",
+                "rawOutput": { "exit_code": 0, "stdout": "call_0" }
+            }),
+            Path::new("/tmp"),
+            &mut map,
+        ));
+        assert!(
+            resent_finish.is_empty(),
+            "Finish must not re-emit for id whose marker was set before the FIFO cap was exceeded"
         );
     }
 

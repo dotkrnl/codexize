@@ -1,4 +1,8 @@
-use crate::app::chrome::{bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans};
+use crate::app::chrome::{
+    bottom_rule,
+    modal::{render_modal_backdrop, render_modal_overlay},
+    top_rule_with_left_spans,
+};
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
 use crate::picker_view_model;

@@ -267,16 +267,18 @@ pub(super) fn stage_error_title(stage_id: StageId) -> &'static str {
     }
 }
 
-pub(super) fn modal_border_style(kind: ModalKind) -> Style {
+/// Semantic accent for a modal dialog: Red = error/failure, Yellow =
+/// warning/guard/skip/quit/confirmation, Cyan = paused/informational.
+/// The renderer applies the bold modifier itself; callers pass the bare
+/// accent color.
+pub(super) fn modal_accent_color(kind: ModalKind) -> Color {
     match kind {
-        ModalKind::StageError(_) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ModalKind::StageError(_) => Color::Red,
         ModalKind::SkipToImpl
         | ModalKind::GitGuard
         | ModalKind::QuitRunningAgent
-        | ModalKind::InteractiveExitPrompt => Style::default().fg(Color::Yellow),
-        ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => {
-            Style::default().fg(Color::Cyan)
-        }
+        | ModalKind::InteractiveExitPrompt => Color::Yellow,
+        ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => Color::Cyan,
     }
 }
 
@@ -418,10 +420,10 @@ mod tests {
     }
 
     #[test]
-    fn modal_border_style_colors_stage_errors_red() {
+    fn modal_accent_color_colors_stage_errors_red() {
         assert_eq!(
-            modal_border_style(ModalKind::StageError(StageId::Review)).fg,
-            Some(Color::Red)
+            modal_accent_color(ModalKind::StageError(StageId::Review)),
+            Color::Red
         );
     }
 

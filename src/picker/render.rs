@@ -467,7 +467,7 @@ impl SessionPicker {
         content.push(Line::from(""));
         content.push(Line::from(Span::styled(
             format!("\"{}\"", entry),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )));
         content.push(Line::from(""));
 
@@ -492,11 +492,14 @@ impl SessionPicker {
             area.width.clamp(40, 80).saturating_sub(4),
         );
 
+        // Picker has underlying chrome behind the confirmation modal, so we
+        // draw the dim backdrop before the panel.
+        render_modal_backdrop(frame, area);
         render_modal_overlay(
             frame,
             area,
+            ratatui::style::Color::Yellow,
             Some(title),
-            ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
             content,
             modal_keymap,
         );

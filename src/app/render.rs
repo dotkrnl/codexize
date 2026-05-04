@@ -22,7 +22,11 @@ use self::split_view::SplitWidget;
 
 use super::{
     App, ModalKind,
-    chrome::{UnreadBadge, bottom_rule, modal::render_modal_overlay, top_rule_with_left_spans},
+    chrome::{
+        UnreadBadge, bottom_rule,
+        modal::{render_modal_backdrop, render_modal_overlay},
+        top_rule_with_left_spans,
+    },
     clock::Clock,
     focus_caps::FocusCaps,
     footer::{
@@ -31,7 +35,7 @@ use super::{
     },
     models_area,
     render_view_model::{
-        guard_content, is_last_sibling, modal_border_style, modal_title, skip_to_impl_content,
+        guard_content, is_last_sibling, modal_accent_color, modal_title, skip_to_impl_content,
         spinner_frame, stage_error_content, status_highlight_bg,
     },
     sheet::bottom_sheet_without_rule,
@@ -214,11 +218,15 @@ impl App {
                 false,
                 inner_w,
             );
+            // Backdrop is drawn here (the dashboard owns the underlying TUI
+            // that needs to recede); the helper itself does not paint it so
+            // surfaces without underlying UI can opt out.
+            render_modal_backdrop(frame, area);
             render_modal_overlay(
                 frame,
                 area,
+                modal_accent_color(m),
                 modal_title(m),
-                modal_border_style(m),
                 content,
                 modal_keymap,
             );

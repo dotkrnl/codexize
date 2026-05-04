@@ -5,10 +5,10 @@ Heads up: the recovery agent who produced these artifacts is from a
 DIFFERENT model vendor — bring fresh eyes, that's the point of pairing.
 
 Inputs:
-  - Spec: fixture/session/artifacts/spec.md
-  - Plan: fixture/session/artifacts/plan.md
-  - Triggering review (what caused recovery): fixture/session/rounds/001/review.toml
-  - Recovery artifact (what the recovery agent reported): fixture/session/rounds/001/recovery.toml
+  - Spec: /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  - Plan: /tmp/codexize-prompt-fixture/session/artifacts/plan.md
+  - Triggering review (what caused recovery): /tmp/codexize-prompt-fixture/session/rounds/001/review.toml
+  - Recovery artifact (what the recovery agent reported): /tmp/codexize-prompt-fixture/session/rounds/001/recovery.toml
     Schema: status / trigger / interactive / summary / feedback /
     changed_files. Cross-check that `changed_files` lines up with the
     actual edits visible in spec/plan.
@@ -17,11 +17,11 @@ Your job:
   1. Verify the recovered spec/plan directly addresses the triggering review.
   2. Verify the plan is coherent enough for sharding.
   3. Do NOT reopen broad product/design debate.
-  4. Make minimal fixes to fixture/session/artifacts/spec.md or fixture/session/artifacts/plan.md only for critical issues. For
+  4. Make minimal fixes to /tmp/codexize-prompt-fixture/session/artifacts/spec.md or /tmp/codexize-prompt-fixture/session/artifacts/plan.md only for critical issues. For
      each edit, add a bullet to `feedback` naming the file changed and the
      specific issue it resolves (audit trail).
 
-# IMPORTANT: emit ONLY the TOML below to fixture/session/artifacts/plan-review-1.md — no prose around it.
+# IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md — no prose around it.
 # Parse failure = run failure.
 
     status   = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
@@ -37,4 +37,4 @@ Routing downstream:
     the retry is interactive so the operator can decide.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

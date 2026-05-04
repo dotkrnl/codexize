@@ -1,3 +1,3 @@
 
 
-Immediately create artifacts/live_summary.interactive.txt, then every 2–3 min overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. Keep this file current until you exit.
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.interactive.txt, then every 2–3 min overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. Keep this file current until you exit.

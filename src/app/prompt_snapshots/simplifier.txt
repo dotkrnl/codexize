@@ -11,9 +11,9 @@ Read what's there, honor the conventions just written, and bring fresh
 eyes to readability — that's the whole point of pairing.
 
 Inputs:
-  Spec:         fixture/session/artifacts/spec.md
-  Plan:         fixture/session/artifacts/plan.md    (advisory only — design context, not a contract)
-  Diff scope:   `base_sha..HEAD` from fixture/session/rounds/001/review_scope.toml
+  Spec:         /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  Plan:         /tmp/codexize-prompt-fixture/session/artifacts/plan.md    (advisory only — design context, not a contract)
+  Diff scope:   `base_sha..HEAD` from /tmp/codexize-prompt-fixture/session/rounds/001/review_scope.toml
                 (TOML with `base_sha = HEAD at round start`)
 
 Do not invoke any skill (Skill tool, `superpowers:*` skill, simplifier
@@ -43,7 +43,7 @@ What you may NOT do:
     separate from refactor commits.
 
 Workflow:
-  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' fixture/session/rounds/001/review_scope.toml)
+  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' /tmp/codexize-prompt-fixture/session/rounds/001/review_scope.toml)
      `git log --oneline $BASE..HEAD` and `git diff $BASE..HEAD` — read the
      round's aggregate work end-to-end before editing anything.
   2. Identify a small set of behavior-preserving simplifications. If the
@@ -65,7 +65,7 @@ Workspace hygiene (same as the coder follows):
     vocabulary ("task N", "round N", "plan", "shard", "phase", "simplifier")
     or references to this prompt.
 
-Before exiting, write `fixture/session/rounds/001/simplification.toml` in this exact TOML shape
+Before exiting, write `/tmp/codexize-prompt-fixture/session/rounds/001/simplification.toml` in this exact TOML shape
 (REQUIRED; parse failure or schema violation = run failure):
 
     status        = "simplified" | "no_changes" | "skipped"
@@ -87,4 +87,4 @@ Hard rules:
   - Final validation runs after you. Don't try to do its job.
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

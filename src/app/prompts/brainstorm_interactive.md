@@ -59,7 +59,7 @@ Outputs (all under artifacts/, SPEC-ONLY phase — no code, no VCS):
 Optional escape hatches (RARE — when in doubt, omit and let the normal
 spec-review → planning → sharding pipeline run):
 
-  • Skip-to-impl: write artifacts/skip_proposal.toml as TOML:
+  • Skip-to-impl: write {skip_proposal_path} as TOML:
         proposed  = true
         status    = "skip_to_impl"
         rationale = "<≤500 chars why>"
@@ -73,7 +73,7 @@ spec-review → planning → sharding pipeline run):
   • Nothing-to-do: when there is genuinely nothing to implement (already in
     place, invalid premise, pure question). Still required:
       - {spec_path} — one short paragraph explaining why nothing is needed.
-      - artifacts/skip_proposal.toml as TOML:
+      - {skip_proposal_path} as TOML:
             proposed  = true
             status    = "nothing_to_do"
             rationale = "<≤500 chars why>"

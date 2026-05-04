@@ -3,8 +3,8 @@ tasks. NON-INTERACTIVE — no code edits, no VCS, no questions; your ONLY
 output is the tasks TOML.
 
 Inputs:
-  Spec: fixture/session/artifacts/spec.md
-  Plan: fixture/session/artifacts/plan.md
+  Spec: /tmp/codexize-prompt-fixture/session/artifacts/spec.md
+  Plan: /tmp/codexize-prompt-fixture/session/artifacts/plan.md
 
 Sizing:
   - Target ~100_000 tokens of implementation effort per task — fits one
@@ -50,7 +50,7 @@ Difficulty:
     leave it false — the system routes extra compute to tough tasks, so
     over-marking wastes budget.
 
-Output: write fixture/session/artifacts/tasks.toml as TOML. No prose around it. Validated programmatically;
+Output: write /tmp/codexize-prompt-fixture/session/artifacts/tasks.toml as TOML. No prose around it. Validated programmatically;
 missing/empty fields cause rejection.
 
     [[tasks]]
@@ -71,4 +71,4 @@ missing/empty fields cause rejection.
     ]
 
 
-Immediately create fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).

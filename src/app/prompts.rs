@@ -12,6 +12,7 @@ use crate::{
     tasks,
 };
 use anyhow::Context;
+use std::path::{Component, Path, PathBuf};
 
 const LIVE_SUMMARY_TEMPLATE: &str = include_str!("prompts/live_summary.md");
 const LIVE_SUMMARY_INTERACTIVE_TEMPLATE: &str = include_str!("prompts/live_summary_interactive.md");
@@ -173,29 +174,63 @@ pub(super) fn write_review_scope_artifact(
     )
 }
 
+fn resolved_agent_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
+            Component::RootDir => resolved.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = resolved.pop();
+            }
+            Component::Normal(part) => resolved.push(part),
+        }
+    }
+    resolved
+}
+
+fn agent_path(path: &Path) -> String {
+    resolved_agent_path(path).display().to_string()
+}
+
 /// Prepended to every agent prompt. Surfaces project-specific guidance
 /// (CLAUDE.md / AGENTS.md) before the agent acts. Returns an empty string
 /// if neither file is present in the cwd, to avoid wasting prompt context
 /// directing the agent to read files that don't exist.
 pub(super) fn project_doc_instr() -> String {
-    let claude = std::path::Path::new("CLAUDE.md").exists();
-    let agents = std::path::Path::new("AGENTS.md").exists();
+    let claude_path = Path::new("CLAUDE.md");
+    let agents_path = Path::new("AGENTS.md");
+    let claude = claude_path.exists();
+    let agents = agents_path.exists();
     let docs = match (claude, agents) {
-        (true, true) => "CLAUDE.md and AGENTS.md",
-        (true, false) => "CLAUDE.md",
-        (false, true) => "AGENTS.md",
+        (true, true) => format!(
+            "{} and {}",
+            agent_path(claude_path),
+            agent_path(agents_path)
+        ),
+        (true, false) => agent_path(claude_path),
+        (false, true) => agent_path(agents_path),
         (false, false) => return String::new(),
     };
     format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
 }
 
 pub(super) fn live_summary_instruction(path: &std::path::Path) -> String {
-    let path_str = path.display().to_string();
+    let path_str = agent_path(path);
     render(LIVE_SUMMARY_TEMPLATE, &[("path", &path_str)])
 }
 
 pub(super) fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
-    let path_str = path.display().to_string();
+    let path_str = agent_path(path);
     render(LIVE_SUMMARY_INTERACTIVE_TEMPLATE, &[("path", &path_str)])
 }
 
@@ -206,12 +241,14 @@ pub(super) fn spec_review_prompt(
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
+    let spec_path = agent_path(Path::new(spec_path));
+    let review_path = agent_path(Path::new(review_path));
     render(
         SPEC_REVIEW_TEMPLATE,
         &[
             ("project_doc_instr", &project_doc_instr),
-            ("spec_path", spec_path),
-            ("review_path", review_path),
+            ("spec_path", &spec_path),
+            ("review_path", &review_path),
             ("instr", &instr),
         ],
     )
@@ -226,7 +263,10 @@ pub(super) fn plan_review_prompt(
 ) -> String {
     let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
     let project_doc_instr = project_doc_instr();
-    let review_dir = std::path::Path::new(review_path)
+    let spec_path = agent_path(Path::new(spec_path));
+    let plan_path = agent_path(Path::new(plan_path));
+    let review_path = agent_path(Path::new(review_path));
+    let review_dir = Path::new(&review_path)
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
@@ -245,9 +285,9 @@ pub(super) fn plan_review_prompt(
         PLAN_REVIEW_TEMPLATE,
         &[
             ("project_doc_instr", &project_doc_instr),
-            ("spec_path", spec_path),
-            ("plan_path", plan_path),
-            ("review_path", review_path),
+            ("spec_path", &spec_path),
+            ("plan_path", &plan_path),
+            ("review_path", &review_path),
             ("prior_block", &prior_block),
             ("instr", &instr),
         ],
@@ -266,6 +306,13 @@ pub(super) fn brainstorm_prompt(
     yolo: bool,
 ) -> String {
     let project_doc_instr = project_doc_instr();
+    let spec_path = agent_path(Path::new(spec_path));
+    let summary_path = agent_path(Path::new(summary_path));
+    let skip_proposal_path = Path::new(&summary_path)
+        .parent()
+        .map(|dir| dir.join("skip_proposal.toml"))
+        .unwrap_or_else(|| resolved_agent_path(Path::new("skip_proposal.toml")));
+    let skip_proposal_path = agent_path(&skip_proposal_path);
     let (template, instr) = if yolo {
         (
             BRAINSTORM_YOLO_TEMPLATE,
@@ -282,8 +329,9 @@ pub(super) fn brainstorm_prompt(
         &[
             ("project_doc_instr", &project_doc_instr),
             ("idea", idea),
-            ("spec_path", spec_path),
-            ("summary_path", summary_path),
+            ("spec_path", &spec_path),
+            ("summary_path", &summary_path),
+            ("skip_proposal_path", &skip_proposal_path),
             ("instr", &instr),
         ],
     )
@@ -302,7 +350,7 @@ pub(super) fn planning_prompt(
         review_paths
             .iter()
             .enumerate()
-            .map(|(i, p)| format!("  - review {}: {}", i + 1, p.display()))
+            .map(|(i, p)| format!("  - review {}: {}", i + 1, agent_path(p)))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -318,8 +366,8 @@ pub(super) fn planning_prompt(
             live_summary_instruction_interactive(live_summary_path),
         )
     };
-    let spec_str = spec_path.display().to_string();
-    let plan_str = plan_path.display().to_string();
+    let spec_str = agent_path(spec_path);
+    let plan_str = agent_path(plan_path);
     render(
         template,
         &[
@@ -341,15 +389,15 @@ pub(super) fn final_validation_prompt(
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     let project_doc_instr = project_doc_instr();
-    let verdict_str = verdict_path.display().to_string();
-    let live_summary_str = live_summary_path.display().to_string();
+    let verdict_str = agent_path(verdict_path);
+    let live_summary_str = agent_path(live_summary_path);
     // Pass the simplifier's self-report only when a TOML exists for this
     // round. The validator may inspect it for context but its own verdict
     // remains independent — the simplifier's claim is never authoritative.
     let simplification_block = match simplification_path {
         Some(path) if path.exists() => format!(
             "\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n",
-            path.display()
+            agent_path(path)
         ),
         _ => String::new(),
     };
@@ -375,9 +423,9 @@ pub(super) fn sharding_prompt(
 ) -> String {
     let instr = live_summary_instruction(live_summary_path);
     let project_doc_instr = project_doc_instr();
-    let spec_str = spec_path.display().to_string();
-    let plan_str = plan_path.display().to_string();
-    let tasks_str = tasks_path.display().to_string();
+    let spec_str = agent_path(spec_path);
+    let plan_str = agent_path(plan_path);
+    let tasks_str = agent_path(tasks_path);
     render(
         SHARDING_TEMPLATE,
         &[
@@ -436,10 +484,10 @@ pub(super) fn recovery_prompt(
     } else {
         RECOVERY_NONINTERACTIVE_TEMPLATE
     };
-    let spec_str = spec_path.display().to_string();
-    let plan_str = plan_path.display().to_string();
-    let tasks_str = tasks_path.display().to_string();
-    let recovery_str = recovery_path.display().to_string();
+    let spec_str = agent_path(spec_path);
+    let plan_str = agent_path(plan_path);
+    let tasks_str = agent_path(tasks_path);
+    let recovery_str = agent_path(recovery_path);
     render(
         template,
         &[
@@ -467,11 +515,11 @@ pub(super) fn recovery_plan_review_prompt(
 ) -> String {
     let project_doc_instr = project_doc_instr();
     let instr = live_summary_instruction(live_summary_path);
-    let spec_str = spec_path.display().to_string();
-    let plan_str = plan_path.display().to_string();
-    let review_str = triggering_review_path.display().to_string();
-    let recovery_str = recovery_path.display().to_string();
-    let output_str = plan_review_output_path.display().to_string();
+    let spec_str = agent_path(spec_path);
+    let plan_str = agent_path(plan_path);
+    let review_str = agent_path(triggering_review_path);
+    let recovery_str = agent_path(recovery_path);
+    let output_str = agent_path(plan_review_output_path);
     render(
         RECOVERY_PLAN_REVIEW_TEMPLATE,
         &[
@@ -505,9 +553,9 @@ pub(super) fn recovery_sharding_prompt(
     };
     let project_doc_instr = project_doc_instr();
     let instr = live_summary_instruction(live_summary_path);
-    let spec_str = spec_path.display().to_string();
-    let plan_str = plan_path.display().to_string();
-    let output_str = tasks_output_path.display().to_string();
+    let spec_str = agent_path(spec_path);
+    let plan_str = agent_path(plan_path);
+    let output_str = agent_path(tasks_output_path);
     let id_floor_str = id_floor.to_string();
     render(
         RECOVERY_SHARDING_TEMPLATE,
@@ -603,7 +651,7 @@ pub(super) fn coder_prompt(
             format!(
                 "\nPrevious reviewer feedback (round {}): {}\nReviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.\n",
                 round - 1,
-                p.display()
+                agent_path(&p)
             )
         } else {
             String::new()
@@ -632,10 +680,10 @@ pub(super) fn coder_prompt(
     let project_doc_instr = project_doc_instr();
     let task_id_str = task_id.to_string();
     let round_str = round.to_string();
-    let task_str = task_file.display().to_string();
-    let spec_str = spec.display().to_string();
-    let plan_str = plan.display().to_string();
-    let coder_summary_str = coder_summary.display().to_string();
+    let task_str = agent_path(task_file);
+    let spec_str = agent_path(&spec);
+    let plan_str = agent_path(&plan);
+    let coder_summary_str = agent_path(&coder_summary);
     render(
         CODER_TEMPLATE,
         &[
@@ -686,7 +734,7 @@ pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
                     .join("rounds")
                     .join(format!("{r:03}"))
                     .join("review.toml");
-                format!("    {}", p.display())
+                format!("    {}", agent_path(&p))
             })
             .collect();
         format!(
@@ -699,7 +747,7 @@ pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let coder_summary_section = coder_summary_file.map_or(String::new(), |path| {
         format!(
             "  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n",
-            path.display(),
+            agent_path(path),
             round
         )
     });
@@ -707,11 +755,11 @@ pub(super) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let project_doc_instr = project_doc_instr();
     let task_id_str = task_id.to_string();
     let round_str = round.to_string();
-    let task_str = task_file.display().to_string();
-    let spec_str = spec.display().to_string();
-    let plan_str = plan.display().to_string();
-    let review_scope_str = review_scope_file.display().to_string();
-    let review_str = review_file.display().to_string();
+    let task_str = agent_path(task_file);
+    let spec_str = agent_path(&spec);
+    let plan_str = agent_path(&plan);
+    let review_scope_str = agent_path(review_scope_file);
+    let review_str = agent_path(review_file);
     render(
         REVIEWER_TEMPLATE,
         &[
@@ -745,10 +793,10 @@ pub(super) fn simplifier_prompt(
     let plan = session_dir.join("artifacts/plan.md");
     let project_doc_instr = project_doc_instr();
     let instr = live_summary_instruction(live_summary_path);
-    let spec_str = spec.display().to_string();
-    let plan_str = plan.display().to_string();
-    let review_scope_str = review_scope_file.display().to_string();
-    let simplification_str = simplification_path.display().to_string();
+    let spec_str = agent_path(&spec);
+    let plan_str = agent_path(&plan);
+    let review_scope_str = agent_path(review_scope_file);
+    let simplification_str = agent_path(simplification_path);
     render(
         SIMPLIFIER_TEMPLATE,
         &[

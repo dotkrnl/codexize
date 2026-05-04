@@ -39,6 +39,7 @@ mod tests_split_sync;
 mod tests_yolo;
 mod tree;
 mod tree_view_model;
+mod watchdog;
 mod yolo_exit;
 
 pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
@@ -300,6 +301,10 @@ pub struct App {
     pending_yolo_toggle_gate: Option<&'static str>,
     yolo_exit_issued: HashSet<u64>,
     yolo_exit_observations: HashMap<u64, YoloExitObservation>,
+    /// Per-run liveness watchdog state. Allocated as part of task 1
+    /// scaffolding; the App-side lifecycle hookup that inserts/removes
+    /// entries (and ticks `evaluate`) lands with task 2.
+    watchdog: watchdog::WatchdogRegistry,
     #[cfg(test)]
     test_launch_harness: Option<std::sync::Arc<std::sync::Mutex<TestLaunchHarness>>>,
     messages: Vec<Message>,

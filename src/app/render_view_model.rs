@@ -295,11 +295,10 @@ pub(super) fn modal_title(kind: ModalKind) -> Option<&'static str> {
 }
 
 pub(super) fn stage_error_content(
-    stage_id: StageId,
+    _stage_id: StageId,
     error: Option<&str>,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let title = stage_error_title(stage_id);
     let error_text = error
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -307,13 +306,10 @@ pub(super) fn stage_error_content(
     let truncated: String = error_text.chars().take(300).collect();
     let wrapped = wrap_input(&truncated, width.max(1) as usize);
 
-    let mut lines = vec![
-        Line::from(Span::styled(
-            title.to_string(),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
+    // The modal title already carries the semantic red accent. Keep the body
+    // content light so stage errors follow the shared modal body-color
+    // contract instead of repeating an accent-colored heading inside the body.
+    let mut lines = vec![Line::from("")];
     for line in wrapped {
         lines.push(Line::from(Span::styled(
             line,

@@ -125,9 +125,7 @@ impl StatusMessage {
 mod tests {
     use super::*;
 
-    fn line_at(
-        clock: crate::ui::clock::TestClock,
-    ) -> StatusLine<crate::ui::clock::TestClock> {
+    fn line_at(clock: crate::ui::clock::TestClock) -> StatusLine<crate::ui::clock::TestClock> {
         StatusLine::with_clock(clock)
     }
 

@@ -5,12 +5,12 @@
 //! module turns those typed results into ratatui frames and dispatches the
 //! chosen action back through the data layer.
 
-use crate::ui::chrome::modal::{modal_inner_width, render_modal_overlay};
 use crate::data::preflight as backend;
-use crate::data::preflight::Scenario;
 pub use crate::data::preflight::PreflightOutcome;
+use crate::data::preflight::Scenario;
 use crate::state::codexize_root;
 use crate::tui::{AppTerminal, wrap_input};
+use crate::ui::chrome::modal::{modal_inner_width, render_modal_overlay};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
@@ -307,7 +307,11 @@ fn run_gitignore_modal(
 
 fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
     if crate::acp::should_offer_codex_acp_install() {
-        run_acp_install_modal(terminal, Scenario::CodexAcpMissing, backend::install_codex_acp)?;
+        run_acp_install_modal(
+            terminal,
+            Scenario::CodexAcpMissing,
+            backend::install_codex_acp,
+        )?;
     }
     if crate::acp::should_offer_claude_acp_install() {
         run_acp_install_modal(

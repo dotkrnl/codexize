@@ -22,12 +22,12 @@ use crate::selection::{
     ranking::{VersionIndex, candidate_pool_weights, phase_rank_score},
 };
 
-use crate::app::models::{vendor_color, vendor_prefix};
 use super::models_area_view_model::{
     ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, ResetColumn, VERY_WIDE_THRESHOLD, choose_mode,
     format_name_with_freshness, name_budget_for, name_width_min, probability_color,
     probability_percent,
 };
+use crate::app::models::{vendor_color, vendor_prefix};
 
 pub use super::models_area_view_model::ModelsAreaMode;
 

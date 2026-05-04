@@ -1,8 +1,8 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::ui::clock::Clock;
 use super::live_agent_message_view_model::{capitalize_first, gradient_spans};
+use crate::ui::clock::Clock;
 
 pub use super::live_agent_message_view_model::extract_short_title;
 

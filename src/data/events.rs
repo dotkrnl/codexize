@@ -127,20 +127,18 @@ pub fn dispatch(request: DataRequest) -> DataOutcome {
         DataRequest::ReadLiveSummary { path } => {
             DataOutcome::LiveSummaryRead(crate::data::observation::read_live_summary(&path))
         }
-        DataRequest::DrainLiveSummary { path } => {
-            DataOutcome::LiveSummaryDrained(crate::data::observation::drain_live_summary_file(
-                &path,
-            ))
-        }
+        DataRequest::DrainLiveSummary { path } => DataOutcome::LiveSummaryDrained(
+            crate::data::observation::drain_live_summary_file(&path),
+        ),
         DataRequest::ReadPromptBody { path } => {
             DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(&path))
         }
         DataRequest::InterruptRun { window_name, text } => DataOutcome::Interrupted(
             crate::data::runner::force_interrupt_run_label(&window_name, text),
         ),
-        DataRequest::TerminateRun { window_name } => DataOutcome::Terminated(
-            crate::data::runner::terminate_run_label(&window_name),
-        ),
+        DataRequest::TerminateRun { window_name } => {
+            DataOutcome::Terminated(crate::data::runner::terminate_run_label(&window_name))
+        }
     }
 }
 
@@ -156,7 +154,10 @@ mod tests {
         let outcome = dispatch(DataRequest::ProbeLiveSummary {
             path: dir.path().join("nope.txt"),
         });
-        assert_eq!(outcome, DataOutcome::LiveSummaryProbed(LiveSummaryProbe::Missing));
+        assert_eq!(
+            outcome,
+            DataOutcome::LiveSummaryProbed(LiveSummaryProbe::Missing)
+        );
     }
 
     #[test]

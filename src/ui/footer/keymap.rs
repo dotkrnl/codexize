@@ -1,13 +1,13 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
-use crate::app::{ModalKind, StageId};
-use crate::ui::focus_caps::FocusCaps;
 use super::keymap_view_model::{
     WidthTier, binding_enabled, render_binding, select_modal_tier, select_simple_tier,
     select_width_tier,
 };
+use crate::app::{ModalKind, StageId};
 use crate::state::Phase;
+use crate::ui::focus_caps::FocusCaps;
 
 /// Key binding with optional capability requirement.
 #[derive(Clone, Copy)]

@@ -97,6 +97,29 @@ fn cancel_run_labels_matching_still_terminates_run() {
 }
 
 #[test]
+fn interrupt_run_label_input_queues_interrupt_when_turn_is_active() {
+    let _guard = active_run_test_lock();
+    shutdown_all_runs();
+    request_run_label_active_for_test("[Interrupt]");
+
+    assert!(interrupt_run_label_input(
+        "[Interrupt]",
+        "new instructions".to_string()
+    ));
+
+    let receiver = test_input_receivers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove("[Interrupt]")
+        .expect("input receiver");
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        AcpInput::Interrupt("new instructions".to_string())
+    );
+    shutdown_all_runs();
+}
+
+#[test]
 fn finish_stamp_round_trip() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = dir.path().join("stamp.toml");

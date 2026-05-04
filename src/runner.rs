@@ -127,9 +127,10 @@ enum AcpCancelReason {
     Complete,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum AcpInput {
     Prompt(String),
+    Interrupt(String),
 }
 
 #[derive(Debug)]
@@ -623,6 +624,7 @@ fn run_managed_acp_launch(
     let mut thought_text = AcpTextStream::new();
     let mut pending_input = VecDeque::new();
     let mut waiting_for_interactive_prompt = false;
+    let mut interrupting_turn = false;
 
     let outcome = loop {
         if let Ok(reason) = cancel_rx.try_recv() {
@@ -652,6 +654,14 @@ fn run_managed_acp_launch(
         while let Ok(input) = input_rx.try_recv() {
             match input {
                 AcpInput::Prompt(text) => pending_input.push_back(text),
+                AcpInput::Interrupt(text) => {
+                    pending_input.push_back(text);
+                    if !waiting_for_interactive_prompt && !interrupting_turn {
+                        session.cancel_prompt().map_err(|err| anyhow!("{err}"))?;
+                        interrupting_turn = true;
+                        waiting_for_input.store(false, Ordering::SeqCst);
+                    }
+                }
             }
         }
 
@@ -661,6 +671,7 @@ fn run_managed_acp_launch(
                 .submit_prompt(&text)
                 .map_err(|err| anyhow!("{err}"))?;
             waiting_for_interactive_prompt = false;
+            interrupting_turn = false;
         }
 
         let event = session
@@ -673,14 +684,17 @@ fn run_managed_acp_launch(
                 thought_text.finish_turn(&launch, MessageKind::AgentThought);
                 agent_text.finish_turn(&launch, MessageKind::AgentText);
                 if launch.resolved.interactive {
-                    waiting_for_interactive_prompt = true;
-                    waiting_for_input.store(true, Ordering::SeqCst);
                     if let Some(text) = pending_input.pop_front() {
                         waiting_for_input.store(false, Ordering::SeqCst);
                         session
                             .submit_prompt(&text)
                             .map_err(|err| anyhow!("{err}"))?;
                         waiting_for_interactive_prompt = false;
+                        interrupting_turn = false;
+                    } else {
+                        waiting_for_interactive_prompt = true;
+                        interrupting_turn = false;
+                        waiting_for_input.store(true, Ordering::SeqCst);
                     }
                     thread::sleep(ACP_POLL_INTERVAL);
                     continue;
@@ -698,6 +712,22 @@ fn run_managed_acp_launch(
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
                 thought_text.finish_turn(&launch, MessageKind::AgentThought);
                 agent_text.finish_turn(&launch, MessageKind::AgentText);
+                if launch.resolved.interactive && interrupting_turn {
+                    if let Some(text) = pending_input.pop_front() {
+                        waiting_for_input.store(false, Ordering::SeqCst);
+                        session
+                            .submit_prompt(&text)
+                            .map_err(|err| anyhow!("{err}"))?;
+                        waiting_for_interactive_prompt = false;
+                        interrupting_turn = false;
+                    } else {
+                        waiting_for_interactive_prompt = true;
+                        interrupting_turn = false;
+                        waiting_for_input.store(true, Ordering::SeqCst);
+                    }
+                    thread::sleep(ACP_POLL_INTERVAL);
+                    continue;
+                }
                 waiting_for_input.store(false, Ordering::SeqCst);
                 session.close().map_err(|err| anyhow!("{err}"))?;
                 break ManagedAcpOutcome {
@@ -859,13 +889,23 @@ pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
 
 #[cfg(test)]
 pub fn request_run_label_interactive_input_for_test(window_name: &str) {
+    request_run_label_for_test(window_name, true);
+}
+
+#[cfg(test)]
+pub fn request_run_label_active_for_test(window_name: &str) {
+    request_run_label_for_test(window_name, false);
+}
+
+#[cfg(test)]
+fn request_run_label_for_test(window_name: &str, waiting: bool) {
     let mut guard = active_acp_runs()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (cancel_tx, cancel_rx) = mpsc::channel();
     let (input_tx, input_rx) = mpsc::channel();
     let finished = std::sync::Arc::new(AtomicBool::new(false));
-    let waiting_for_input = std::sync::Arc::new(AtomicBool::new(true));
+    let waiting_for_input = std::sync::Arc::new(AtomicBool::new(waiting));
     test_input_receivers()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -932,6 +972,27 @@ pub fn send_run_label_input(window_name: &str, text: String) -> bool {
             !run.finished.load(Ordering::SeqCst) && run.waiting_for_input.load(Ordering::SeqCst)
         })
         .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
+}
+
+pub fn interrupt_run_label_input(window_name: &str, text: String) -> bool {
+    if text.trim().is_empty() {
+        return false;
+    }
+    cleanup_finished_acp_runs();
+    let guard = active_acp_runs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.get(window_name).is_some_and(|run| {
+        if run.finished.load(Ordering::SeqCst) {
+            return false;
+        }
+        let input = if run.waiting_for_input.load(Ordering::SeqCst) {
+            AcpInput::Prompt(text)
+        } else {
+            AcpInput::Interrupt(text)
+        };
+        run.input_tx.send(input).is_ok()
+    })
 }
 
 pub fn shutdown_all_runs() {

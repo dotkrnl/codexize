@@ -595,6 +595,14 @@ impl App {
                 key_hint: None,
             });
         }
+        if self.interactive_run_active() {
+            commands.push(PaletteCommand {
+                name: "interrupt",
+                aliases: &[],
+                help: "Interrupt ACP turn and send a new prompt",
+                key_hint: None,
+            });
+        }
         if self.editable_artifact().is_some() {
             commands.push(PaletteCommand {
                 name: "edit",
@@ -772,6 +780,10 @@ impl App {
                 }
                 false
             }
+            "interrupt" => {
+                self.interrupt_interactive_input(args.trim().to_string());
+                false
+            }
             _ => false,
         }
     }
@@ -840,6 +852,57 @@ impl App {
         } else {
             self.push_status(
                 "interactive agent is not ready for input".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+        }
+    }
+
+    fn append_user_input_message(&mut self, run_id: u64, input: String) {
+        let message = Message {
+            ts: chrono::Utc::now(),
+            run_id,
+            kind: MessageKind::UserInput,
+            sender: MessageSender::System,
+            text: input,
+        };
+        if let Err(err) = self.state.append_message(&message) {
+            let _ = self.state.log_event(format!(
+                "failed to append user input for run {run_id}: {err}"
+            ));
+        } else {
+            self.messages.push(message);
+            self.agent_last_change = Some(std::time::Instant::now());
+        }
+    }
+
+    fn interrupt_interactive_input(&mut self, input: String) {
+        let trimmed = input.trim().to_string();
+        if trimmed.is_empty() {
+            self.push_status(
+                "interrupt requires a message".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        }
+        let Some(run_id) = self.current_run_id else {
+            return;
+        };
+        let Some(run) = self
+            .state
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .cloned()
+        else {
+            return;
+        };
+        if crate::runner::interrupt_run_label_input(&run.window_name, trimmed.clone()) {
+            self.append_user_input_message(run_id, trimmed);
+        } else {
+            self.push_status(
+                "interactive agent is not running".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );

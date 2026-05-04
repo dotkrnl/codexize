@@ -230,19 +230,6 @@ impl NodeStatus {
             Self::FailedUnverified => "failed-unverified",
         }
     }
-
-    pub fn style(self) -> ratatui::style::Style {
-        use ratatui::style::{Color, Style};
-        match self {
-            Self::Pending => Style::default().fg(Color::DarkGray),
-            Self::Running => Style::default().fg(Color::Cyan),
-            Self::WaitingUser => Style::default().fg(Color::Yellow),
-            Self::Done => Style::default().fg(Color::Green),
-            Self::Skipped => Style::default().fg(Color::Yellow),
-            Self::Failed => Style::default().fg(Color::Red),
-            Self::FailedUnverified => Style::default().fg(Color::LightYellow),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

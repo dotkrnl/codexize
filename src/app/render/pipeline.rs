@@ -24,6 +24,20 @@ pub(super) struct RunningTailLine {
     kind: PipelineLineKind,
 }
 
+fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style {
+    use ratatui::style::{Color, Style};
+
+    match status {
+        crate::state::NodeStatus::Pending => Style::default().fg(Color::DarkGray),
+        crate::state::NodeStatus::Running => Style::default().fg(Color::Cyan),
+        crate::state::NodeStatus::WaitingUser => Style::default().fg(Color::Yellow),
+        crate::state::NodeStatus::Done => Style::default().fg(Color::Green),
+        crate::state::NodeStatus::Skipped => Style::default().fg(Color::Yellow),
+        crate::state::NodeStatus::Failed => Style::default().fg(Color::Red),
+        crate::state::NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),
+    }
+}
+
 impl Widget for PipelineWidget<'_> {
     fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
@@ -281,7 +295,7 @@ impl App {
             Span::raw(" "),
             Span::raw(node.label.clone()),
             Span::styled(" · ", dim),
-            Span::styled(node.status.label(), node.status.style()),
+            Span::styled(node.status.label(), node_status_style(node.status)),
         ];
         if node.label == "Loop" && !node.summary.is_empty() {
             spans.push(Span::styled(" · ", dim));
@@ -534,7 +548,10 @@ impl App {
                         format!("{} ", child.label),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(format!("({})", child.status.label()), child.status.style()),
+                    Span::styled(
+                        format!("({})", child.status.label()),
+                        node_status_style(child.status),
+                    ),
                 ]));
             }
         }

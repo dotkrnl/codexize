@@ -1,5 +1,5 @@
 use super::tree::VisibleNodeRow;
-use super::{ModalKind, StageId};
+use crate::app::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
 use crate::tui::wrap_input;
 use ratatui::{
@@ -14,7 +14,7 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 /// Scans forward from `index + 1` until a row with depth <= current depth is
 /// found. Returns true if no such row exists or if the found row has depth less
 /// than the current depth.
-pub(super) fn is_last_sibling(visible_rows: &[VisibleNodeRow], index: usize) -> bool {
+pub(crate) fn is_last_sibling(visible_rows: &[VisibleNodeRow], index: usize) -> bool {
     let cur_depth = visible_rows[index].depth;
     visible_rows[index + 1..]
         .iter()
@@ -27,7 +27,7 @@ pub(crate) fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 
-pub(super) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
+pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
     match status {
         NodeStatus::Running => Some(Color::Cyan),
         NodeStatus::Done => Some(Color::Green),
@@ -192,7 +192,7 @@ pub fn sanitize_live_summary(text: &str) -> String {
     collapsed.chars().take(500).collect()
 }
 
-pub(super) fn skip_to_impl_content(
+pub(crate) fn skip_to_impl_content(
     rationale: Option<&str>,
     kind: Option<crate::artifacts::SkipToImplKind>,
     width: u16,
@@ -230,7 +230,7 @@ pub(super) fn skip_to_impl_content(
     lines
 }
 
-pub(super) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line<'static>> {
+pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line<'static>> {
     let (captured_short, current_short) = decision
         .map(|d| {
             let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
@@ -255,7 +255,7 @@ pub(super) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line
     ]
 }
 
-pub(super) fn stage_error_title(stage_id: StageId) -> &'static str {
+pub(crate) fn stage_error_title(stage_id: StageId) -> &'static str {
     match stage_id {
         StageId::Brainstorm => "Brainstorm failed",
         StageId::SpecReview => "Spec review failed",
@@ -271,7 +271,7 @@ pub(super) fn stage_error_title(stage_id: StageId) -> &'static str {
 /// warning/guard/skip/quit/confirmation, Cyan = paused/informational.
 /// The renderer applies the bold modifier itself; callers pass the bare
 /// accent color.
-pub(super) fn modal_accent_color(kind: ModalKind) -> Color {
+pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
     match kind {
         ModalKind::StageError(_) => Color::Red,
         ModalKind::SkipToImpl
@@ -282,7 +282,7 @@ pub(super) fn modal_accent_color(kind: ModalKind) -> Color {
     }
 }
 
-pub(super) fn modal_title(kind: ModalKind) -> Option<&'static str> {
+pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
     match kind {
         ModalKind::SkipToImpl => Some("Skip to implementation?"),
         ModalKind::GitGuard => Some("Git guard"),
@@ -294,7 +294,7 @@ pub(super) fn modal_title(kind: ModalKind) -> Option<&'static str> {
     }
 }
 
-pub(super) fn stage_error_content(
+pub(crate) fn stage_error_content(
     _stage_id: StageId,
     error: Option<&str>,
     width: u16,

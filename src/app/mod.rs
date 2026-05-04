@@ -17,7 +17,7 @@ pub(crate) use crate::ui::palette;
 mod prompt_render;
 mod prompts;
 mod render;
-pub(crate) mod render_view_model;
+pub(crate) use crate::ui::render_view_model;
 pub use crate::ui::sheet;
 mod split;
 mod state;

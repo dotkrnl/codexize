@@ -14,6 +14,7 @@ pub mod models_area;
 pub(crate) mod models_area_view_model;
 pub(crate) mod palette;
 pub mod preflight;
+pub(crate) mod render_view_model;
 pub mod sheet;
 pub mod status_line;
 pub(crate) mod tree;

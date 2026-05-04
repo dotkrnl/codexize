@@ -23,7 +23,6 @@ pub(crate) fn run_main_panel_message_visible(
             | MessageKind::Summary
             | MessageKind::SummaryWarn
             | MessageKind::End
-            | MessageKind::UserInput
     )
 }
 
@@ -94,7 +93,6 @@ mod tests {
                         kind,
                         MessageKind::Started
                             | MessageKind::Brief
-                            | MessageKind::UserInput
                             | MessageKind::Summary
                             | MessageKind::SummaryWarn
                             | MessageKind::End

@@ -366,7 +366,7 @@ fn interactive_agent_text_is_never_visible_in_tree_body() {
 }
 
 #[test]
-fn user_input_messages_render_in_main_panel_for_both_modes() {
+fn user_input_messages_do_not_render_in_main_panel() {
     for interactive in [false, true] {
         let mut run = run_record(1, RunStatus::Running);
         run.modes.interactive = interactive;
@@ -379,8 +379,8 @@ fn user_input_messages_render_in_main_panel_for_both_modes() {
         let lines = render_lines(&app, 8);
 
         assert!(
-            lines.iter().any(|line| line.contains("› please continue")),
-            "user input echo belongs in the main panel (interactive={interactive}): {lines:#?}"
+            !lines.iter().any(|line| line.contains("please continue")),
+            "user input echo belongs only in split, not the main panel (interactive={interactive}): {lines:#?}"
         );
     }
 }
@@ -2843,8 +2843,8 @@ fn expanded_agent_row_renders_main_panel_transcript_and_excludes_acp_output() {
         "ACP output must stay in the split panel: {lines:#?}"
     );
     assert!(
-        lines.iter().any(|l| l.contains("user says hello")),
-        "user input echo belongs in the main panel: {lines:#?}"
+        !lines.iter().any(|l| l.contains("user says hello")),
+        "user input echo must stay in the split panel: {lines:#?}"
     );
 }
 
@@ -2998,7 +2998,6 @@ fn main_panel_shows_full_lifecycle_for_both_run_modes() {
         for visible in [
             "Kicked off run",
             "engineering brief",
-            "› ship it",
             "Wrapped up cleanly",
             "Watch the cache",
             "Run finished",
@@ -3008,7 +3007,7 @@ fn main_panel_shows_full_lifecycle_for_both_run_modes() {
                 "interactive={interactive}: expected `{visible}` in main panel: {lines:#?}"
             );
         }
-        for hidden in ["acp output", "internal reasoning"] {
+        for hidden in ["› ship it", "acp output", "internal reasoning"] {
             assert!(
                 !body.contains(hidden),
                 "interactive={interactive}: ACP/thought `{hidden}` must stay in split: {lines:#?}"

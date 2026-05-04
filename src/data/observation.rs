@@ -33,7 +33,7 @@ pub enum LiveSummaryWatcher {
 
 /// Snapshot of a live-summary file at a specific mtime. The content is
 /// returned verbatim; sanitization/dedup is the caller's responsibility.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveSummarySnapshot {
     pub mtime: SystemTime,
     pub content: String,

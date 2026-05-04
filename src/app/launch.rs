@@ -141,6 +141,7 @@ impl App {
         window_name: String,
         effort: EffortLevel,
         mut modes: LaunchModes,
+        prompt_path: std::path::PathBuf,
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
         modes.interactive = self.run_is_interactive(stage, round, modes);
@@ -167,6 +168,15 @@ impl App {
         };
         if run.modes.interactive {
             self.open_split_target(crate::app::split::SplitTarget::Run(run_id));
+        } else {
+            // Watchdog only arms for non-interactive runs (spec §3.8 / AC5).
+            self.watchdog.register(
+                run.id,
+                run.effort,
+                run.window_name.clone(),
+                prompt_path,
+                std::time::Instant::now(),
+            );
         }
         self.prime_yolo_exit_tracking(&run);
         let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
@@ -307,7 +317,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -347,6 +357,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -432,7 +443,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -471,6 +482,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -614,6 +626,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -744,7 +757,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -788,6 +801,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -924,6 +938,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1015,7 +1030,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -1059,6 +1074,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1160,6 +1176,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1263,7 +1280,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -1312,6 +1329,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1456,6 +1474,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 true
             }
@@ -1607,6 +1626,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1712,7 +1732,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -1752,6 +1772,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();
@@ -1893,7 +1914,7 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            prompt_path,
+            prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
@@ -1934,6 +1955,7 @@ impl App {
                     window_name,
                     effort,
                     modes,
+                    prompt_path,
                 );
                 if dirty {
                     self.emit_dirty_tree_warning();

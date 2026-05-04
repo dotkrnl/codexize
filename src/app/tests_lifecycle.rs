@@ -2781,7 +2781,6 @@ fn non_yolo_prompts_keep_interactive_operator_cues() {
             &spec_path.display().to_string(),
             &summary_path.display().to_string(),
             &live_summary.display().to_string(),
-            None,
             false,
         );
         assert!(!brainstorm.contains("You have the operator's full trust."));

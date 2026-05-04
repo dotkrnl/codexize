@@ -1,4 +1,4 @@
-use crate::cache_lock;
+use crate::data::cache_lock;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

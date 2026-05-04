@@ -183,42 +183,34 @@ impl App {
         self.maybe_refocus_to_progress();
     }
 
-    /// Drain runner-emitted tool-call lifecycle events and apply them to
-    /// the matching `WatchdogState` entries. Called from the main poll loop
-    /// alongside `process_live_summary_changes`.
-    pub(super) fn apply_pending_tool_call_transitions(&mut self) {
-        let events = runner::drain_tool_call_events();
-        if events.is_empty() {
+    /// Apply a single drained `DataEvent::ToolCallTransition` to the
+    /// matching `WatchdogState`. The drain itself lives in
+    /// [`crate::app_runtime::terminal`] so the runtime is the coordinator
+    /// that consumes [`DataEvent`]s, and `App` is the per-event handler.
+    pub(crate) fn apply_tool_call_transition(
+        &mut self,
+        window_name: &str,
+        transition: crate::data::runner::ToolCallTransition,
+    ) {
+        let Some(run_id) = self
+            .state
+            .agent_runs
+            .iter()
+            .rev()
+            .find(|run| run.window_name == window_name)
+            .map(|run| run.id)
+        else {
             return;
-        }
-        for event in events {
-            let DataEvent::ToolCallTransition {
-                window_name,
-                transition,
-            } = event
-            else {
-                continue;
-            };
-            let Some(run_id) = self
-                .state
-                .agent_runs
-                .iter()
-                .rev()
-                .find(|run| run.window_name == window_name)
-                .map(|run| run.id)
-            else {
-                continue;
-            };
-            let Some(state) = self.watchdog.get_mut(run_id) else {
-                continue;
-            };
-            match transition.kind {
-                crate::acp::ToolCallActivityKind::Start => {
-                    state.on_tool_call_started(transition.observed_at);
-                }
-                crate::acp::ToolCallActivityKind::Finish => {
-                    state.on_tool_call_finished(transition.observed_at);
-                }
+        };
+        let Some(state) = self.watchdog.get_mut(run_id) else {
+            return;
+        };
+        match transition.kind {
+            crate::acp::ToolCallActivityKind::Start => {
+                state.on_tool_call_started(transition.observed_at);
+            }
+            crate::acp::ToolCallActivityKind::Finish => {
+                state.on_tool_call_finished(transition.observed_at);
             }
         }
     }

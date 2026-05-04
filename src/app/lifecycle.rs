@@ -399,7 +399,14 @@ impl App {
         crate::app_runtime::run_terminal_app(self, terminal)
     }
 
-    pub(crate) fn runtime_tick_before_draw(&mut self, terminal: &mut AppTerminal) -> Result<bool> {
+    /// Pre-data-drain phase of the per-tick coordination. The runtime calls
+    /// this, then drains any [`DataEvent`](crate::data::events::DataEvent)s
+    /// it owns (e.g. tool-call transitions) and routes them per-event, then
+    /// finishes the tick via [`Self::runtime_tick_after_data_drain`].
+    pub(crate) fn runtime_tick_before_data_drain(
+        &mut self,
+        terminal: &mut AppTerminal,
+    ) -> Result<bool> {
         if let Some(path) = self.pending_view_path.take() {
             let banner_inserted = prepend_review_banner(&path);
             let _ = crate::tui::run_foreground(terminal, || {
@@ -424,10 +431,16 @@ impl App {
         self.maybe_auto_launch();
         self.update_agent_progress();
         self.process_live_summary_changes();
-        self.apply_pending_tool_call_transitions();
+        Ok(false)
+    }
+
+    /// Post-data-drain phase: watchdog evaluation and split-target sync after
+    /// the runtime has applied any drained `DataEvent`s. Watchdog state is
+    /// observed *after* the drain so tool-call transitions land on the
+    /// state the watchdog evaluates this tick.
+    pub(crate) fn runtime_tick_after_data_drain(&mut self) {
         self.tick_watchdog();
         self.synchronize_split_target();
-        Ok(false)
     }
 
     /// Called once per successful frame draw to advance spinner-driven UI state.

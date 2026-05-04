@@ -429,6 +429,10 @@ impl App {
     }
 
     fn unread_badge(&self) -> Option<UnreadBadge> {
+        if self.split_fullscreen {
+            return None;
+        }
+
         let unread = self.unread_below_count();
         let at_bottom = self.viewport_top >= self.max_viewport_top();
         let viewport_bottom = self.viewport_top + self.effective_body_inner_height();

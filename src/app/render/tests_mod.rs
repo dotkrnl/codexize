@@ -1422,6 +1422,23 @@ fn split_run_uses_full_body_and_hides_tree_at_small_terminal_height() {
 }
 
 #[test]
+fn full_body_split_hides_main_panel_unread_badge() {
+    let mut app = tall_app();
+    app.split_target = Some(super::super::split::SplitTarget::Run(1));
+    app.set_follow_tail(false);
+    app.messages.push(agent_text(1, "new unread"));
+    app.viewport_top = 0;
+
+    let text = full_frame_text(&mut app, 80, super::super::RESPONSIVE_HEIGHT_THRESHOLD);
+
+    assert!(text.contains("new unread"), "{text}");
+    assert!(
+        !text.contains("↓ 1 new"),
+        "main-panel unread badge must not render while the main panel is hidden by full-body split: {text}"
+    );
+}
+
+#[test]
 fn split_run_uses_split_panel_visibility_for_transcripts() {
     let mut app = test_app(
         nested_transcript_tree(),

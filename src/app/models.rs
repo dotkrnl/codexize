@@ -31,7 +31,7 @@ pub(super) fn vendor_tag(vendor: VendorKind) -> &'static str {
     }
 }
 
-pub(super) fn vendor_color(vendor: VendorKind) -> Color {
+pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
     match vendor {
         VendorKind::Claude => Color::Magenta,
         VendorKind::Codex => Color::Green,
@@ -40,7 +40,7 @@ pub(super) fn vendor_color(vendor: VendorKind) -> Color {
     }
 }
 
-pub(super) fn vendor_prefix(vendor: VendorKind) -> &'static str {
+pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::Claude => "claude-",
         VendorKind::Codex => "gpt-",

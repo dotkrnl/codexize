@@ -10,6 +10,8 @@ pub mod clock;
 pub mod focus_caps;
 pub mod footer;
 pub mod input_editor;
+pub mod models_area;
+pub(crate) mod models_area_view_model;
 pub(crate) mod palette;
 pub mod preflight;
 pub mod sheet;

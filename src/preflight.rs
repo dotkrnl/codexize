@@ -1,13 +1,12 @@
+use crate::app::chrome::modal::{modal_inner_width, render_modal_overlay};
 use crate::state::codexize_root;
-use crate::tui::AppTerminal;
+use crate::tui::{AppTerminal, wrap_input};
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
     Frame,
-    layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use std::{
     fs,
@@ -343,168 +342,174 @@ fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::
     Ok(finish_marker)
 }
 
-fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
-    let (title, body_lines): (&str, Vec<Line<'static>>) = match scenario {
+fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Line<'static>) {
+    match scenario {
         Scenario::NoGitEmpty => {
             let title = " No git repository ";
-            let lines = vec![
-                Line::from(""),
-                Line::from("codexize requires a git repository to"),
-                Line::from("function. Initialize one here?"),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Y]", Style::default().fg(Color::Green)),
-                    Span::raw("/"),
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw("  initialize git repository"),
+            (
+                title,
+                vec![
+                    "codexize requires a git repository to function. Initialize one here?"
+                        .to_string(),
+                ],
+                preflight_keymap_line(&[
+                    (
+                        "[Y]",
+                        Color::Green,
+                        "Enter",
+                        Some(Color::Green),
+                        "initialize git repository",
+                    ),
+                    ("[Q]", Color::Red, "", None, "exit codexize"),
                 ]),
-                Line::from(vec![
-                    Span::styled("[Q]", Style::default().fg(Color::Red)),
-                    Span::raw("        exit codexize"),
-                ]),
-            ];
-            (title, lines)
+            )
         }
         Scenario::NoGitHasFiles => {
             let title = " No git repository ";
-            let lines = vec![
-                Line::from(""),
-                Line::from("codexize requires a git repository to"),
-                Line::from("function. Existing files detected — it"),
-                Line::from("will generate .gitignore before initializing."),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Y]", Style::default().fg(Color::Green)),
-                    Span::raw("/"),
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw("  generate .gitignore & init git"),
+            (
+                title,
+                vec![
+                    "codexize requires a git repository to function. Existing files detected — it will generate .gitignore before initializing.".to_string(),
+                ],
+                preflight_keymap_line(&[
+                    (
+                        "[Y]",
+                        Color::Green,
+                        "Enter",
+                        Some(Color::Green),
+                        "generate .gitignore & init git",
+                    ),
+                    ("[Q]", Color::Red, "", None, "exit codexize"),
                 ]),
-                Line::from(vec![
-                    Span::styled("[Q]", Style::default().fg(Color::Red)),
-                    Span::raw("        exit codexize"),
-                ]),
-            ];
-            (title, lines)
+            )
         }
         Scenario::GitExistsNotIgnored => {
             let root = codexize_root();
             let root_display = root.display().to_string();
             let title = " .codexize not in .gitignore ";
-            let lines = vec![
-                Line::from(""),
-                Line::from(format!(
-                    "Session data in {}/ is not ignored by",
-                    root_display
-                )),
-                Line::from("git. It will appear in git status and could"),
-                Line::from("be committed accidentally."),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Y]", Style::default().fg(Color::Green)),
-                    Span::raw("/"),
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw("  add to .gitignore"),
+            (
+                title,
+                vec![format!(
+                    "Session data in {root_display}/ is not ignored by git. It will appear in git status and could be committed accidentally."
+                )],
+                preflight_keymap_line(&[
+                    (
+                        "[Y]",
+                        Color::Green,
+                        "Enter",
+                        Some(Color::Green),
+                        "add to .gitignore",
+                    ),
+                    // Keep optional skip markers light so DarkGray stays
+                    // reserved for backdrop/chrome, matching the shared modal contract.
+                    ("[N]", Color::Gray, "", None, "continue without adding"),
+                    ("[Q]", Color::Red, "", None, "exit codexize"),
                 ]),
-                Line::from(vec![
-                    Span::styled("[N]", Style::default().fg(Color::DarkGray)),
-                    Span::raw("        continue without adding"),
-                ]),
-                Line::from(vec![
-                    Span::styled("[Q]", Style::default().fg(Color::Red)),
-                    Span::raw("        exit codexize"),
-                ]),
-            ];
-            (title, lines)
+            )
         }
         Scenario::CodexAcpMissing => {
             let title = " Codex ACP not installed ";
-            let lines = vec![
-                Line::from(""),
-                Line::from("Codex CLI is installed, but codex-acp is missing."),
-                Line::from("Install it with Homebrew?"),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Y]", Style::default().fg(Color::Green)),
-                    Span::raw("/"),
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw("  brew install codex-acp"),
+            (
+                title,
+                vec![
+                    "Codex CLI is installed, but codex-acp is missing. Install it with Homebrew?"
+                        .to_string(),
+                ],
+                preflight_keymap_line(&[
+                    (
+                        "[Y]",
+                        Color::Green,
+                        "Enter",
+                        Some(Color::Green),
+                        "brew install codex-acp",
+                    ),
+                    ("[N]", Color::Gray, "Esc", Some(Color::Gray), "skip"),
                 ]),
-                Line::from(vec![
-                    Span::styled("[N]", Style::default().fg(Color::DarkGray)),
-                    Span::raw("/"),
-                    Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                    Span::raw("  skip"),
-                ]),
-            ];
-            (title, lines)
+            )
         }
         Scenario::ClaudeAcpMissing => {
             let root = crate::acp::claude_acp_install_root();
             let title = " Claude ACP not installed ";
-            let lines = vec![
-                Line::from(""),
-                Line::from("Claude CLI is installed, but claude-agent-acp is missing."),
-                Line::from(format!("Install it under {}?", root.display())),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Y]", Style::default().fg(Color::Green)),
-                    Span::raw("/"),
-                    Span::styled("Enter", Style::default().fg(Color::Green)),
-                    Span::raw("  install Claude ACP"),
+            (
+                title,
+                vec![format!(
+                    "Claude CLI is installed, but claude-agent-acp is missing. Install it under {}?",
+                    root.display()
+                )],
+                preflight_keymap_line(&[
+                    (
+                        "[Y]",
+                        Color::Green,
+                        "Enter",
+                        Some(Color::Green),
+                        "install Claude ACP",
+                    ),
+                    ("[N]", Color::Gray, "Esc", Some(Color::Gray), "skip"),
                 ]),
-                Line::from(vec![
-                    Span::styled("[N]", Style::default().fg(Color::DarkGray)),
-                    Span::raw("/"),
-                    Span::styled("Esc", Style::default().fg(Color::DarkGray)),
-                    Span::raw("  skip"),
-                ]),
-            ];
-            (title, lines)
+            )
         }
-    };
-    render_modal(frame, title, body_lines);
+    }
 }
 
-fn render_modal(frame: &mut Frame<'_>, title: &str, body_lines: Vec<Line<'static>>) {
-    let area = frame.area();
-    let modal_width = area.width.saturating_sub(8).clamp(30, 72);
+fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
+    let (title, body_copy, keymap_line) = preflight_modal_content(scenario);
+    let body_lines = preflight_body_lines(frame.area(), body_copy);
+    render_modal_overlay(
+        frame,
+        frame.area(),
+        Color::Yellow,
+        Some(title),
+        body_lines,
+        keymap_line,
+    );
+}
 
-    let inner_width = modal_width.saturating_sub(2) as usize;
-    let wrapped: u16 = body_lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if w == 0 {
-                1
-            } else {
-                w.div_ceil(inner_width).max(1) as u16
-            }
-        })
-        .sum();
-    let desired_height = wrapped.saturating_add(2);
-    let modal_height = desired_height.min(area.height.saturating_sub(2)).max(6);
+fn preflight_body_lines(
+    area: ratatui::layout::Rect,
+    paragraphs: Vec<String>,
+) -> Vec<Line<'static>> {
+    let inner_width = modal_inner_width(area) as usize;
+    let mut lines = Vec::new();
+    for (idx, paragraph) in paragraphs.into_iter().enumerate() {
+        if idx > 0 {
+            lines.push(Line::from(""));
+        }
+        for wrapped in wrap_input(&paragraph, inner_width.max(1)) {
+            lines.push(Line::from(Span::styled(
+                wrapped,
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+    lines
+}
 
-    let x = area.x + area.width.saturating_sub(modal_width) / 2;
-    let y = area.y + area.height.saturating_sub(modal_height) / 2;
-    let rect = Rect {
-        x,
-        y,
-        width: modal_width,
-        height: modal_height,
-    };
-
-    frame.render_widget(Clear, rect);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
-
-    let paragraph = Paragraph::new(body_lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, rect);
+fn preflight_keymap_line(actions: &[(&str, Color, &str, Option<Color>, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (idx, (marker, marker_color, alternate, alternate_color, action)) in
+        actions.iter().enumerate()
+    {
+        if idx > 0 {
+            spans.push(Span::styled("  ·  ", Style::default().fg(Color::Gray)));
+        }
+        spans.push(Span::styled(
+            (*marker).to_string(),
+            Style::default().fg(*marker_color),
+        ));
+        if !alternate.is_empty() {
+            spans.push(Span::raw("/"));
+            spans.push(Span::styled(
+                (*alternate).to_string(),
+                Style::default().fg(alternate_color.unwrap_or(*marker_color)),
+            ));
+        }
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            (*action).to_string(),
+            Style::default().fg(Color::Gray),
+        ));
+    }
+    Line::from(spans)
 }
 
 pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
@@ -684,6 +689,7 @@ fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
 mod tests {
     use super::*;
     use crate::state::test_fs_lock;
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, layout::Rect, style::Modifier};
     use std::ffi::OsStr;
 
     fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
@@ -792,6 +798,129 @@ mod tests {
             ModalAction::Skip
         );
         assert_eq!(classify_optional_modal_key(KeyCode::Esc), ModalAction::Skip);
+    }
+
+    fn render_preflight_buf(scenario: Scenario, width: u16, height: u16) -> Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_preflight_modal(frame, scenario))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn raw_line_text(buf: &Buffer, y: u16, width: u16) -> String {
+        (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>()
+    }
+
+    fn expected_dialog_rect(width: u16, height: u16, content_h: usize) -> Rect {
+        let max_w = width.saturating_sub(4).max(1);
+        let dialog_w = max_w.min(80).max(max_w.min(40));
+        let dialog_h = ((content_h + 5) as u16).min(height.saturating_sub(4));
+        Rect::new(
+            (width.saturating_sub(dialog_w)) / 2,
+            (height.saturating_sub(dialog_h)) / 2,
+            dialog_w,
+            dialog_h,
+        )
+    }
+
+    fn scenario_body_line_count(scenario: Scenario, width: u16, height: u16) -> usize {
+        let area = Rect::new(0, 0, width, height);
+        let (_, body_copy, _) = preflight_modal_content(scenario);
+        preflight_body_lines(area, body_copy).len()
+    }
+
+    #[test]
+    fn preflight_modals_use_shared_visual_contract_for_each_scenario() {
+        let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+        for scenario in [
+            Scenario::NoGitEmpty,
+            Scenario::NoGitHasFiles,
+            Scenario::GitExistsNotIgnored,
+            Scenario::CodexAcpMissing,
+            Scenario::ClaudeAcpMissing,
+        ] {
+            let width = 100;
+            let height = 30;
+            let buf = render_preflight_buf(scenario, width, height);
+            let dialog = expected_dialog_rect(
+                width,
+                height,
+                scenario_body_line_count(scenario, width, height),
+            );
+
+            let corner = &buf[(dialog.x, dialog.y)];
+            assert_eq!(corner.symbol(), "┌");
+            assert_eq!(corner.fg, Color::Yellow);
+            assert!(corner.modifier.contains(Modifier::BOLD));
+
+            for y in dialog.y..dialog.y + dialog.height {
+                for x in dialog.x..dialog.x + dialog.width {
+                    assert_eq!(buf[(x, y)].bg, Color::Black);
+                }
+            }
+
+            assert!(
+                raw_line_text(&buf, dialog.y + dialog.height - 3, width)
+                    .trim()
+                    .trim_matches('│')
+                    .trim()
+                    .is_empty(),
+                "expected the reserved blank separator row above the preflight keymap"
+            );
+
+            let keymap_row = raw_line_text(&buf, dialog.y + dialog.height - 2, width);
+            assert!(
+                !keymap_row.trim().trim_matches('│').trim().is_empty(),
+                "expected a visible keymap row for {scenario:?}"
+            );
+
+            for y in 0..height {
+                for x in 0..width {
+                    if (dialog.x..dialog.x + dialog.width).contains(&x)
+                        && (dialog.y..dialog.y + dialog.height).contains(&y)
+                    {
+                        continue;
+                    }
+                    assert_ne!(
+                        buf[(x, y)].bg,
+                        Color::DarkGray,
+                        "preflight should not draw the dashboard dim backdrop"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preflight_modal_action_markers_keep_allowed_semantic_colors() {
+        let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let width = 100;
+        let height = 30;
+        let buf = render_preflight_buf(Scenario::GitExistsNotIgnored, width, height);
+        let dialog = expected_dialog_rect(
+            width,
+            height,
+            scenario_body_line_count(Scenario::GitExistsNotIgnored, width, height),
+        );
+        let keymap_y = dialog.y + dialog.height - 2;
+        let keymap_text = raw_line_text(&buf, keymap_y, width);
+
+        let y_col = keymap_text.find("[Y]").expect("affirmative marker");
+        let y_x = keymap_text[..y_col].chars().count() as u16 + 1;
+        assert_eq!(buf[(y_x, keymap_y)].fg, Color::Green);
+
+        let n_col = keymap_text.find("[N]").expect("secondary marker");
+        let n_x = keymap_text[..n_col].chars().count() as u16 + 1;
+        assert!(
+            matches!(buf[(n_x, keymap_y)].fg, Color::White | Color::Gray),
+            "secondary marker should stay in shared body colors"
+        );
+
+        let q_col = keymap_text.find("[Q]").expect("quit marker");
+        let q_x = keymap_text[..q_col].chars().count() as u16 + 1;
+        assert_eq!(buf[(q_x, keymap_y)].fg, Color::Red);
     }
 
     #[test]

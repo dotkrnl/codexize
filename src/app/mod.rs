@@ -19,7 +19,7 @@ mod prompts;
 mod render;
 pub(crate) use crate::ui::render_view_model;
 pub use crate::ui::sheet;
-mod split;
+pub use crate::ui::split;
 mod state;
 pub use crate::ui::status_line;
 #[cfg(test)]

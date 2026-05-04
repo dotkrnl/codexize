@@ -9,6 +9,7 @@ pub mod artifacts;
 pub mod cache;
 pub mod cache_lock;
 pub mod persistence;
+pub mod preflight;
 pub mod providers;
 pub mod runner;
 pub mod synthetic_artifacts;

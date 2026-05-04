@@ -1,28 +1,30 @@
-use crate::app::chrome::modal::{modal_inner_width, render_modal_overlay};
-use crate::state::codexize_root;
-use crate::tui::{AppTerminal, wrap_input};
+//! Backend half of the preflight flow.
+//!
+//! Pure(-ish) backend predicates and side-effecting installers used by
+//! `ui::preflight`. The backend reports facts and performs the chosen
+//! filesystem/process actions; the UI layer renders modals and routes
+//! operator decisions back here.
+
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::{
-    Frame,
-    style::{Color, Style},
-    text::{Line, Span},
-};
 use std::{
     fs,
     path::Path,
     process::{Command, Stdio},
-    time::Duration,
 };
 
+/// Outcome of the preflight flow as observed by the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreflightOutcome {
     Continue,
     Exit,
 }
 
+/// Backend-detected scenario the runtime should surface to the operator.
+///
+/// The variants are UI-neutral facts derived from filesystem/process probes;
+/// `ui::preflight` decides how to render and what keymap to offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Scenario {
+pub enum Scenario {
     NoGitEmpty,
     NoGitHasFiles,
     GitExistsNotIgnored,
@@ -30,17 +32,9 @@ enum Scenario {
     ClaudeAcpMissing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModalAction {
-    Accept,
-    Skip,
-    Exit,
-    Ignore,
-}
+pub const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
 
-const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
-
-fn detect_git() -> bool {
+pub fn detect_git() -> bool {
     Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()
@@ -48,7 +42,7 @@ fn detect_git() -> bool {
         .unwrap_or(false)
 }
 
-fn detect_ignored(root: &Path) -> bool {
+pub fn detect_ignored(root: &Path) -> bool {
     let ignored = |path: &std::ffi::OsStr| {
         Command::new("git")
             .args(["check-ignore", "-q", "--no-index", "--"])
@@ -66,7 +60,7 @@ fn detect_ignored(root: &Path) -> bool {
     ignored(std::ffi::OsStr::new(&dir_form))
 }
 
-fn has_existing_files() -> bool {
+pub fn has_existing_files() -> bool {
     let Ok(entries) = fs::read_dir(".") else {
         return false;
     };
@@ -80,7 +74,7 @@ fn has_existing_files() -> bool {
     false
 }
 
-fn append_to_gitignore(entry: &str) -> Result<()> {
+pub fn append_to_gitignore(entry: &str) -> Result<()> {
     let path = Path::new(".gitignore");
     let mut contents = if path.exists() {
         fs::read_to_string(path).context("failed to read .gitignore")?
@@ -130,7 +124,7 @@ fn run_git_command_with_stderr(args: &[&str]) -> Result<(), String> {
     Err(format!("`git {}` failed: {}", args.join(" "), detail))
 }
 
-fn maybe_auto_commit_gitignore<F>(mut warn: F)
+pub fn maybe_auto_commit_gitignore<F>(mut warn: F)
 where
     F: FnMut(String),
 {
@@ -189,7 +183,7 @@ where
     }
 }
 
-fn run_git_init() -> Result<()> {
+pub fn run_git_init() -> Result<()> {
     let status = Command::new("git")
         .arg("init")
         .status()
@@ -200,7 +194,7 @@ fn run_git_init() -> Result<()> {
     Ok(())
 }
 
-fn install_claude_acp() -> Result<()> {
+pub fn install_claude_acp() -> Result<()> {
     let root = crate::acp::claude_acp_install_root();
     fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
     let status = Command::new("npm")
@@ -221,7 +215,7 @@ fn install_claude_acp() -> Result<()> {
     Ok(())
 }
 
-fn install_codex_acp() -> Result<()> {
+pub fn install_codex_acp() -> Result<()> {
     let status = Command::new("brew")
         .args(["install", "codex-acp"])
         .stdin(Stdio::null())
@@ -263,7 +257,7 @@ fn detect_project_type() -> Vec<&'static str> {
     types
 }
 
-fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
+pub fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     let project_types = detect_project_type();
     let mut lines = vec![
         "# OS files",
@@ -331,7 +325,7 @@ fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     lines.join("\n")
 }
 
-fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::PathBuf> {
+pub fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::PathBuf> {
     let finish_marker =
         std::env::temp_dir().join(format!("codexize-gitignore-{}.done", std::process::id()));
     // Preflight intentionally stays deterministic here instead of opening an
@@ -342,354 +336,10 @@ fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::
     Ok(finish_marker)
 }
 
-fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Line<'static>) {
-    match scenario {
-        Scenario::NoGitEmpty => {
-            let title = " No git repository ";
-            (
-                title,
-                vec![
-                    "codexize requires a git repository to function. Initialize one here?"
-                        .to_string(),
-                ],
-                preflight_keymap_line(&[
-                    (
-                        "[Y]",
-                        Color::Green,
-                        "Enter",
-                        Some(Color::Green),
-                        "initialize git repository",
-                    ),
-                    ("[Q]", Color::Red, "", None, "exit codexize"),
-                ]),
-            )
-        }
-        Scenario::NoGitHasFiles => {
-            let title = " No git repository ";
-            (
-                title,
-                vec![
-                    "codexize requires a git repository to function. Existing files detected — it will generate .gitignore before initializing.".to_string(),
-                ],
-                preflight_keymap_line(&[
-                    (
-                        "[Y]",
-                        Color::Green,
-                        "Enter",
-                        Some(Color::Green),
-                        "generate .gitignore & init git",
-                    ),
-                    ("[Q]", Color::Red, "", None, "exit codexize"),
-                ]),
-            )
-        }
-        Scenario::GitExistsNotIgnored => {
-            let root = codexize_root();
-            let root_display = root.display().to_string();
-            let title = " .codexize not in .gitignore ";
-            (
-                title,
-                vec![format!(
-                    "Session data in {root_display}/ is not ignored by git. It will appear in git status and could be committed accidentally."
-                )],
-                preflight_keymap_line(&[
-                    (
-                        "[Y]",
-                        Color::Green,
-                        "Enter",
-                        Some(Color::Green),
-                        "add to .gitignore",
-                    ),
-                    // Keep optional skip markers light so DarkGray stays
-                    // reserved for backdrop/chrome, matching the shared modal contract.
-                    ("[N]", Color::Gray, "", None, "continue without adding"),
-                    ("[Q]", Color::Red, "", None, "exit codexize"),
-                ]),
-            )
-        }
-        Scenario::CodexAcpMissing => {
-            let title = " Codex ACP not installed ";
-            (
-                title,
-                vec![
-                    "Codex CLI is installed, but codex-acp is missing. Install it with Homebrew?"
-                        .to_string(),
-                ],
-                preflight_keymap_line(&[
-                    (
-                        "[Y]",
-                        Color::Green,
-                        "Enter",
-                        Some(Color::Green),
-                        "brew install codex-acp",
-                    ),
-                    ("[N]", Color::Gray, "Esc", Some(Color::Gray), "skip"),
-                ]),
-            )
-        }
-        Scenario::ClaudeAcpMissing => {
-            let root = crate::acp::claude_acp_install_root();
-            let title = " Claude ACP not installed ";
-            (
-                title,
-                vec![format!(
-                    "Claude CLI is installed, but claude-agent-acp is missing. Install it under {}?",
-                    root.display()
-                )],
-                preflight_keymap_line(&[
-                    (
-                        "[Y]",
-                        Color::Green,
-                        "Enter",
-                        Some(Color::Green),
-                        "install Claude ACP",
-                    ),
-                    ("[N]", Color::Gray, "Esc", Some(Color::Gray), "skip"),
-                ]),
-            )
-        }
-    }
-}
-
-fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
-    let (title, body_copy, keymap_line) = preflight_modal_content(scenario);
-    let body_lines = preflight_body_lines(frame.area(), body_copy);
-    render_modal_overlay(
-        frame,
-        frame.area(),
-        Color::Yellow,
-        Some(title),
-        body_lines,
-        keymap_line,
-    );
-}
-
-fn preflight_body_lines(
-    area: ratatui::layout::Rect,
-    paragraphs: Vec<String>,
-) -> Vec<Line<'static>> {
-    let inner_width = modal_inner_width(area) as usize;
-    let mut lines = Vec::new();
-    for (idx, paragraph) in paragraphs.into_iter().enumerate() {
-        if idx > 0 {
-            lines.push(Line::from(""));
-        }
-        for wrapped in wrap_input(&paragraph, inner_width.max(1)) {
-            lines.push(Line::from(Span::styled(
-                wrapped,
-                Style::default().fg(Color::White),
-            )));
-        }
-    }
-    lines
-}
-
-fn preflight_keymap_line(actions: &[(&str, Color, &str, Option<Color>, &str)]) -> Line<'static> {
-    let mut spans = Vec::new();
-    for (idx, (marker, marker_color, alternate, alternate_color, action)) in
-        actions.iter().enumerate()
-    {
-        if idx > 0 {
-            spans.push(Span::styled("  ·  ", Style::default().fg(Color::Gray)));
-        }
-        spans.push(Span::styled(
-            (*marker).to_string(),
-            Style::default().fg(*marker_color),
-        ));
-        if !alternate.is_empty() {
-            spans.push(Span::raw("/"));
-            spans.push(Span::styled(
-                (*alternate).to_string(),
-                Style::default().fg(alternate_color.unwrap_or(*marker_color)),
-            ));
-        }
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            (*action).to_string(),
-            Style::default().fg(Color::Gray),
-        ));
-    }
-    Line::from(spans)
-}
-
-pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
-    let has_git = detect_git();
-    let root = codexize_root();
-    let codexize_entry = match std::env::current_dir() {
-        Ok(cwd) if root.is_absolute() => match root.strip_prefix(&cwd) {
-            Ok(rel) => format!("{}/", rel.display()),
-            Err(_) => format!("{}/", root.display()),
-        },
-        _ => format!("{}/", root.display()),
-    };
-
-    if has_git {
-        if detect_ignored(&root) {
-            run_acp_install_modals_if_missing(terminal)?;
-            return Ok(PreflightOutcome::Continue);
-        }
-        if run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?
-            == PreflightOutcome::Exit
-        {
-            return Ok(PreflightOutcome::Exit);
-        }
-        run_acp_install_modals_if_missing(terminal)?;
-        return Ok(PreflightOutcome::Continue);
-    }
-
-    let scenario = if has_existing_files() {
-        Scenario::NoGitHasFiles
-    } else {
-        Scenario::NoGitEmpty
-    };
-
-    if run_git_init_modal(terminal, scenario, &codexize_entry)? == PreflightOutcome::Exit {
-        return Ok(PreflightOutcome::Exit);
-    }
-    run_acp_install_modals_if_missing(terminal)?;
-    Ok(PreflightOutcome::Continue)
-}
-
-fn run_git_init_modal(
-    terminal: &mut AppTerminal,
-    scenario: Scenario,
-    codexize_entry: &str,
-) -> Result<PreflightOutcome> {
-    loop {
-        terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
-        })?;
-
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match classify_required_modal_key(key.code) {
-                ModalAction::Accept => {
-                    if scenario == Scenario::NoGitHasFiles {
-                        let finish_marker = generate_gitignore_preflight_file(codexize_entry)?;
-                        debug_assert!(
-                            finish_marker.exists(),
-                            "deterministic preflight generation should create its marker eagerly"
-                        );
-                        run_git_init()?;
-                        return Ok(PreflightOutcome::Continue);
-                    }
-                    run_git_init()?;
-                    append_to_gitignore(codexize_entry)?;
-                    return Ok(PreflightOutcome::Continue);
-                }
-                ModalAction::Exit => return Ok(PreflightOutcome::Exit),
-                ModalAction::Ignore | ModalAction::Skip => {}
-            }
-        }
-    }
-}
-
-fn run_gitignore_modal(
-    terminal: &mut AppTerminal,
-    scenario: Scenario,
-    codexize_entry: &str,
-) -> Result<PreflightOutcome> {
-    loop {
-        terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
-        })?;
-
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match classify_gitignore_modal_key(key.code) {
-                ModalAction::Accept => {
-                    append_to_gitignore(codexize_entry)?;
-                    maybe_auto_commit_gitignore(|_| {});
-                    return Ok(PreflightOutcome::Continue);
-                }
-                ModalAction::Skip => return Ok(PreflightOutcome::Continue),
-                ModalAction::Exit => return Ok(PreflightOutcome::Exit),
-                ModalAction::Ignore => {}
-            }
-        }
-    }
-}
-
-fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
-    if crate::acp::should_offer_codex_acp_install() {
-        run_acp_install_modal(terminal, Scenario::CodexAcpMissing, install_codex_acp)?;
-    }
-    if crate::acp::should_offer_claude_acp_install() {
-        run_acp_install_modal(terminal, Scenario::ClaudeAcpMissing, install_claude_acp)?;
-    }
-    Ok(())
-}
-
-fn run_acp_install_modal(
-    terminal: &mut AppTerminal,
-    scenario: Scenario,
-    install: fn() -> Result<()>,
-) -> Result<()> {
-    loop {
-        terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
-        })?;
-
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match classify_optional_modal_key(key.code) {
-                ModalAction::Accept => {
-                    install()?;
-                    return Ok(());
-                }
-                ModalAction::Skip | ModalAction::Exit => return Ok(()),
-                ModalAction::Ignore => {}
-            }
-        }
-    }
-}
-
-fn classify_required_modal_key(key: KeyCode) -> ModalAction {
-    match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
-        _ => ModalAction::Ignore,
-    }
-}
-
-fn classify_gitignore_modal_key(key: KeyCode) -> ModalAction {
-    match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('n') | KeyCode::Char('N') => ModalAction::Skip,
-        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => ModalAction::Exit,
-        _ => ModalAction::Ignore,
-    }
-}
-
-fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
-    match key {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
-        KeyCode::Char('n')
-        | KeyCode::Char('N')
-        | KeyCode::Char('q')
-        | KeyCode::Char('Q')
-        | KeyCode::Esc => ModalAction::Skip,
-        _ => ModalAction::Ignore,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::test_fs_lock;
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, layout::Rect, style::Modifier};
     use std::ffi::OsStr;
 
     fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
@@ -784,143 +434,6 @@ mod tests {
         }
 
         assert_eq!(root, home.path().join(".codexize").join("acp"));
-    }
-
-    #[test]
-    fn preflight_exit_keys_request_normal_shutdown() {
-        assert_eq!(
-            classify_required_modal_key(KeyCode::Char('q')),
-            ModalAction::Exit
-        );
-        assert_eq!(classify_required_modal_key(KeyCode::Esc), ModalAction::Exit);
-        assert_eq!(
-            classify_optional_modal_key(KeyCode::Char('q')),
-            ModalAction::Skip
-        );
-        assert_eq!(classify_optional_modal_key(KeyCode::Esc), ModalAction::Skip);
-    }
-
-    fn render_preflight_buf(scenario: Scenario, width: u16, height: u16) -> Buffer {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| render_preflight_modal(frame, scenario))
-            .unwrap();
-        terminal.backend().buffer().clone()
-    }
-
-    fn raw_line_text(buf: &Buffer, y: u16, width: u16) -> String {
-        (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>()
-    }
-
-    fn expected_dialog_rect(width: u16, height: u16, content_h: usize) -> Rect {
-        let max_w = width.saturating_sub(4).max(1);
-        let dialog_w = max_w.min(80).max(max_w.min(40));
-        let dialog_h = ((content_h + 5) as u16).min(height.saturating_sub(4));
-        Rect::new(
-            (width.saturating_sub(dialog_w)) / 2,
-            (height.saturating_sub(dialog_h)) / 2,
-            dialog_w,
-            dialog_h,
-        )
-    }
-
-    fn scenario_body_line_count(scenario: Scenario, width: u16, height: u16) -> usize {
-        let area = Rect::new(0, 0, width, height);
-        let (_, body_copy, _) = preflight_modal_content(scenario);
-        preflight_body_lines(area, body_copy).len()
-    }
-
-    #[test]
-    fn preflight_modals_use_shared_visual_contract_for_each_scenario() {
-        let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
-        for scenario in [
-            Scenario::NoGitEmpty,
-            Scenario::NoGitHasFiles,
-            Scenario::GitExistsNotIgnored,
-            Scenario::CodexAcpMissing,
-            Scenario::ClaudeAcpMissing,
-        ] {
-            let width = 100;
-            let height = 30;
-            let buf = render_preflight_buf(scenario, width, height);
-            let dialog = expected_dialog_rect(
-                width,
-                height,
-                scenario_body_line_count(scenario, width, height),
-            );
-
-            let corner = &buf[(dialog.x, dialog.y)];
-            assert_eq!(corner.symbol(), "┌");
-            assert_eq!(corner.fg, Color::Yellow);
-            assert!(corner.modifier.contains(Modifier::BOLD));
-
-            for y in dialog.y..dialog.y + dialog.height {
-                for x in dialog.x..dialog.x + dialog.width {
-                    assert_eq!(buf[(x, y)].bg, Color::Black);
-                }
-            }
-
-            assert!(
-                raw_line_text(&buf, dialog.y + dialog.height - 3, width)
-                    .trim()
-                    .trim_matches('│')
-                    .trim()
-                    .is_empty(),
-                "expected the reserved blank separator row above the preflight keymap"
-            );
-
-            let keymap_row = raw_line_text(&buf, dialog.y + dialog.height - 2, width);
-            assert!(
-                !keymap_row.trim().trim_matches('│').trim().is_empty(),
-                "expected a visible keymap row for {scenario:?}"
-            );
-
-            for y in 0..height {
-                for x in 0..width {
-                    if (dialog.x..dialog.x + dialog.width).contains(&x)
-                        && (dialog.y..dialog.y + dialog.height).contains(&y)
-                    {
-                        continue;
-                    }
-                    assert_ne!(
-                        buf[(x, y)].bg,
-                        Color::DarkGray,
-                        "preflight should not draw the dashboard dim backdrop"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn preflight_modal_action_markers_keep_allowed_semantic_colors() {
-        let _guard = test_fs_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let width = 100;
-        let height = 30;
-        let buf = render_preflight_buf(Scenario::GitExistsNotIgnored, width, height);
-        let dialog = expected_dialog_rect(
-            width,
-            height,
-            scenario_body_line_count(Scenario::GitExistsNotIgnored, width, height),
-        );
-        let keymap_y = dialog.y + dialog.height - 2;
-        let keymap_text = raw_line_text(&buf, keymap_y, width);
-
-        let y_col = keymap_text.find("[Y]").expect("affirmative marker");
-        let y_x = keymap_text[..y_col].chars().count() as u16 + 1;
-        assert_eq!(buf[(y_x, keymap_y)].fg, Color::Green);
-
-        let n_col = keymap_text.find("[N]").expect("secondary marker");
-        let n_x = keymap_text[..n_col].chars().count() as u16 + 1;
-        assert!(
-            matches!(buf[(n_x, keymap_y)].fg, Color::White | Color::Gray),
-            "secondary marker should stay in shared body colors"
-        );
-
-        let q_col = keymap_text.find("[Q]").expect("quit marker");
-        let q_x = keymap_text[..q_col].chars().count() as u16 + 1;
-        assert_eq!(buf[(q_x, keymap_y)].fg, Color::Red);
     }
 
     #[test]

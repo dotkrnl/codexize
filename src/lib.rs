@@ -15,7 +15,7 @@ pub mod logic;
 pub mod model_names;
 pub mod picker;
 pub mod picker_view_model;
-pub mod preflight;
+pub use crate::ui::preflight;
 pub use crate::data::providers;
 pub mod review;
 pub use crate::data::runner;

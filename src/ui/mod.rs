@@ -3,6 +3,8 @@
 //! These re-exports preserve existing paths while callers migrate to the
 //! explicit UI layer.
 
+pub mod chat_widget;
+pub(crate) mod chat_widget_view_model;
 pub mod chrome;
 pub mod clock;
 pub mod focus_caps;

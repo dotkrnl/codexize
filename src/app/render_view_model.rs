@@ -23,7 +23,7 @@ pub(super) fn is_last_sibling(visible_rows: &[VisibleNodeRow], index: usize) -> 
         .unwrap_or(true)
 }
 
-pub(super) fn spinner_frame(count: usize) -> &'static str {
+pub(crate) fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
 

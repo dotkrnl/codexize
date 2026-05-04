@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ChatScrollWindow {
+pub(crate) struct ChatScrollWindow {
     pub offset: usize,
     pub visible_end: usize,
     pub show_above_indicator: bool,
@@ -8,7 +8,7 @@ pub(super) struct ChatScrollWindow {
     pub below_count: usize,
 }
 
-pub(super) fn chat_scroll_window(
+pub(crate) fn chat_scroll_window(
     total_lines: usize,
     available_height: usize,
     scroll_offset: usize,
@@ -39,7 +39,7 @@ pub(super) fn chat_scroll_window(
     })
 }
 
-pub(super) fn max_chat_scroll_offset(total_lines: usize, available_height: usize) -> usize {
+pub(crate) fn max_chat_scroll_offset(total_lines: usize, available_height: usize) -> usize {
     compute_max_chat_scroll_offset(
         total_lines,
         available_height,

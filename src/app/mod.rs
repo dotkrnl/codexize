@@ -1,5 +1,5 @@
-pub mod chat_widget;
-mod chat_widget_view_model;
+pub use crate::ui::chat_widget;
+pub(crate) use crate::ui::chat_widget_view_model;
 pub use crate::ui::chrome;
 pub use crate::ui::clock;
 mod events;
@@ -18,7 +18,7 @@ pub(crate) use crate::ui::palette;
 mod prompt_render;
 mod prompts;
 mod render;
-mod render_view_model;
+pub(crate) mod render_view_model;
 pub use crate::ui::sheet;
 mod split;
 mod state;

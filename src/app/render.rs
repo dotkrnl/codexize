@@ -20,12 +20,14 @@ mod split_view;
 use self::pipeline::PipelineWidget;
 use self::split_view::SplitWidget;
 
+use crate::app_runtime::AppView;
+
 use super::{
     App, ModalKind,
     chrome::{
         UnreadBadge, bottom_rule,
         modal::{render_modal_backdrop, render_modal_overlay},
-        top_rule_with_left_spans,
+        top_rule_left_spans_for, top_rule_with_left_spans,
     },
     clock::Clock,
     focus_caps::FocusCaps,
@@ -47,7 +49,7 @@ const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
 
 impl App {
-    pub(crate) fn draw(&mut self, frame: &mut Frame<'_>) {
+    pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
         let area = frame.area();
         let term_h = area.height;
         let width = area.width;
@@ -156,8 +158,10 @@ impl App {
             y += models_h;
         }
 
-        // 2. Top rule
-        let top_rule_line = self.build_top_rule(width);
+        // 2. Top rule — pulls mode badges from the runtime's UI-neutral
+        // `AppView` so the production draw path consumes the seam rather than
+        // reading pipeline state directly.
+        let top_rule_line = self.build_top_rule(view, width);
         let top_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![top_rule_line]), top_rule_area);
         y += 1;
@@ -370,37 +374,17 @@ impl App {
         }
     }
 
-    fn build_top_rule(&self, width: u16) -> Line<'static> {
+    fn build_top_rule(&self, view: &AppView, width: u16) -> Line<'static> {
         let project = std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_default();
         let right = self.top_rule_right_text();
-        top_rule_with_left_spans(self.top_rule_left_spans(&project), right.as_deref(), width)
-    }
-
-    fn top_rule_left_spans(&self, project: &str) -> Vec<Span<'static>> {
-        let mut spans = vec![Span::styled(
-            project.to_string(),
-            Style::default().fg(Color::DarkGray),
-        )];
-        if self.state.modes.yolo {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                "[YOLO]".to_string(),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ));
-        }
-        if self.state.modes.cheap {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                "[CHEAP]".to_string(),
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-        spans
+        top_rule_with_left_spans(
+            top_rule_left_spans_for(&project, view.modes),
+            right.as_deref(),
+            width,
+        )
     }
 
     fn top_rule_right_text(&self) -> Option<String> {

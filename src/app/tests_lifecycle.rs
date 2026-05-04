@@ -984,7 +984,10 @@ fn picker_created_startup_draws_before_auto_launch() {
 
         let backend = ratatui::backend::TestBackend::new(100, 30);
         let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
-        terminal.draw(|frame| app.draw(frame)).expect("draw");
+        let view = app.current_app_view();
+        terminal
+            .draw(|frame| app.draw(frame, &view))
+            .expect("draw");
 
         assert_eq!(app.state.current_phase, Phase::BrainstormRunning);
         assert!(

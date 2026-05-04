@@ -15,10 +15,11 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
             return Ok(());
         }
         let view = app.current_app_view();
-        // The production TUI still renders through the legacy `App` frame
-        // closure; deriving `AppView` here keeps the runtime path aligned with
-        // the channel seam until widget rendering consumes the view directly.
-        crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame))?;
+        // The production draw path consumes `AppView` end-to-end: the top
+        // rule's mode badges are now derived from the seam, so the runtime
+        // wiring carries real rendering data instead of being derived and
+        // discarded.
+        crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
 
         if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration())?

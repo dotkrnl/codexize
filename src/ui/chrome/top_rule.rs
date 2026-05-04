@@ -1,5 +1,36 @@
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+
+use crate::app_runtime::ModeFlags;
+
+/// Project + mode badges that anchor the left side of the top rule.
+///
+/// Built from a UI-neutral [`ModeFlags`] so the production draw path consumes
+/// the runtime's [`crate::app_runtime::AppView`] for badge state rather than
+/// reaching into pipeline state directly.
+pub fn top_rule_left_spans_for(project: &str, modes: ModeFlags) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled(
+        project.to_string(),
+        Style::default().fg(Color::DarkGray),
+    )];
+    if modes.yolo {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "[YOLO]".to_string(),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if modes.cheap {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "[CHEAP]".to_string(),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans
+}
 
 /// Renders a full-width horizontal rule with text overlaid at left and right edges.
 ///

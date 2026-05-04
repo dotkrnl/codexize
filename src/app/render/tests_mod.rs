@@ -818,7 +818,8 @@ fn render_spec_review_paused_modal_without_panic() {
     app.state.current_phase = Phase::SpecReviewPaused;
     let backend = ratatui::backend::TestBackend::new(80, 24);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let view = app.current_app_view();
+    terminal.draw(|frame| app.draw(frame, &view)).unwrap();
 }
 
 #[test]
@@ -827,7 +828,8 @@ fn render_plan_review_paused_modal_without_panic() {
     app.state.current_phase = Phase::PlanReviewPaused;
     let backend = ratatui::backend::TestBackend::new(80, 24);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let view = app.current_app_view();
+    terminal.draw(|frame| app.draw(frame, &view)).unwrap();
 }
 
 #[test]
@@ -837,7 +839,8 @@ fn render_stage_error_modal_without_panic() {
     app.state.agent_error = Some("model timeout".to_string());
     let backend = ratatui::backend::TestBackend::new(80, 24);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let view = app.current_app_view();
+    terminal.draw(|frame| app.draw(frame, &view)).unwrap();
 }
 
 fn leaf_only_tree() -> Vec<Node> {
@@ -1123,7 +1126,8 @@ fn container_row_running_tail_keeps_tree_shape_spinner() {
 fn render_full_frame(app: &mut App, w: u16, h: u16) -> Vec<String> {
     let backend = ratatui::backend::TestBackend::new(w, h);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let view = app.current_app_view();
+    terminal.draw(|frame| app.draw(frame, &view)).unwrap();
     let buf = terminal.backend().buffer().clone();
     (0..h).map(|y| line_text(&buf, y, w)).collect()
 }
@@ -1154,7 +1158,8 @@ fn split_panel_text(app: &mut App, w: u16, h: u16) -> String {
 fn render_full_frame_buf(app: &mut App, w: u16, h: u16) -> Buffer {
     let backend = ratatui::backend::TestBackend::new(w, h);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let view = app.current_app_view();
+    terminal.draw(|frame| app.draw(frame, &view)).unwrap();
     terminal.backend().buffer().clone()
 }
 

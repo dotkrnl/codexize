@@ -936,6 +936,45 @@ pub fn request_run_label_active_for_test(window_name: &str) {
     request_run_label_for_test(window_name, false);
 }
 
+/// Test-only: drain queued `AcpInput` messages on the per-window test
+/// receiver registered by `request_run_label_*_for_test`. Returns each
+/// queued input as a stable `(kind, text)` pair so callers do not need
+/// access to the private `AcpInput` enum.
+#[cfg(test)]
+pub fn drain_test_input_receiver_for(window_name: &str) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    let map = test_input_receivers();
+    let guard = map.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(rx) = guard.get(window_name) {
+        while let Ok(input) = rx.try_recv() {
+            match input {
+                AcpInput::Prompt(text) => out.push(("prompt", text)),
+                AcpInput::Interrupt(text) => out.push(("interrupt", text)),
+            }
+        }
+    }
+    out
+}
+
+/// Test-only: drain queued `AcpCancelReason` messages on the per-window
+/// test receiver. Returns each reason as a stable string so callers do
+/// not need access to the private `AcpCancelReason` enum.
+#[cfg(test)]
+pub fn drain_test_cancel_receiver_for(window_name: &str) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let map = test_cancel_receivers();
+    let guard = map.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(rx) = guard.get(window_name) {
+        while let Ok(reason) = rx.try_recv() {
+            out.push(match reason {
+                AcpCancelReason::Terminate => "terminate",
+                AcpCancelReason::Complete => "complete",
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 fn request_run_label_for_test(window_name: &str, waiting: bool) {
     let mut guard = active_acp_runs()

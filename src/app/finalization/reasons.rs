@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use super::OperatorTerminationMarker;
+use super::{OperatorTerminationMarker, Reason};
 use crate::app::prompts::{read_review_scope_base_sha, validate_stage_toml_writes};
 use crate::app::{App, guard};
 use crate::artifacts::{RecoveryArtifact, ReviewStatus as RecoveryStatus};
@@ -12,11 +12,11 @@ impl App {
         stamp_path: &std::path::Path,
         detail: impl AsRef<str>,
     ) -> String {
-        format!(
-            "failed_unverified: {} at {}",
-            detail.as_ref(),
-            stamp_path.display()
-        )
+        Reason::FailedUnverified {
+            detail: detail.as_ref().to_string(),
+            path: stamp_path.display().to_string(),
+        }
+        .to_string()
     }
 
     pub(crate) fn coder_gate_reason(
@@ -27,17 +27,17 @@ impl App {
         let scope_file = round_dir.join("review_scope.toml");
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
-            return (!Self::artifact_present(&scope_file)).then(|| "base_missing".to_string());
+            return (!Self::artifact_present(&scope_file)).then(|| Reason::BaseMissing.to_string());
         }
         if !Self::artifact_present(&scope_file) {
-            return Some("base_missing".to_string());
+            return Some(Reason::BaseMissing.to_string());
         }
         let base = match read_review_scope_base_sha(&scope_file) {
             Ok(s) => s,
-            Err(_) => return Some("base_missing".to_string()),
+            Err(_) => return Some(Reason::BaseMissing.to_string()),
         };
         if base.is_empty() {
-            return Some("base_missing".to_string());
+            return Some(Reason::BaseMissing.to_string());
         }
         let stamp_path = self.finish_stamp_path_for(run);
         if !Self::artifact_present(&stamp_path) {
@@ -77,11 +77,11 @@ impl App {
         if summary_path.exists() {
             let summary = match coder_summary::validate(&summary_path) {
                 Ok(summary) => summary,
-                Err(_) => return Some("invalid_coder_summary".to_string()),
+                Err(_) => return Some(Reason::InvalidCoderSummary.to_string()),
             };
             return match summary.status {
                 coder_summary::CoderStatus::Done => None,
-                coder_summary::CoderStatus::Partial => Some("coder_partial".to_string()),
+                coder_summary::CoderStatus::Partial => Some(Reason::CoderPartial.to_string()),
             };
         }
         if stamp.head_after == base {
@@ -89,7 +89,7 @@ impl App {
             // legitimate when the coder declares it (status = "done", with
             // an explanation); the contract violation here is the missing
             // summary that would have explained why nothing was committed.
-            return Some("missing_coder_summary".to_string());
+            return Some(Reason::MissingCoderSummary.to_string());
         }
         None
     }
@@ -131,7 +131,8 @@ impl App {
                 let spec_path = session_dir.join("artifacts").join("spec.md");
                 (
                     true,
-                    (!Self::artifact_present(&spec_path)).then(|| "artifact_missing".to_string()),
+                    (!Self::artifact_present(&spec_path))
+                        .then(|| Reason::ArtifactMissing.to_string()),
                 )
             }
             "spec-review" => {
@@ -140,14 +141,16 @@ impl App {
                     .join(format!("spec-review-{}.md", run.round));
                 (
                     true,
-                    (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string()),
+                    (!Self::artifact_present(&review_path))
+                        .then(|| Reason::ArtifactMissing.to_string()),
                 )
             }
             "planning" => {
                 let plan_path = session_dir.join("artifacts").join("plan.md");
                 (
                     true,
-                    (!Self::artifact_present(&plan_path)).then(|| "artifact_missing".to_string()),
+                    (!Self::artifact_present(&plan_path))
+                        .then(|| Reason::ArtifactMissing.to_string()),
                 )
             }
             "plan-review" => {
@@ -156,17 +159,18 @@ impl App {
                     .join(format!("plan-review-{}.md", run.round));
                 (
                     true,
-                    (!Self::artifact_present(&review_path)).then(|| "artifact_missing".to_string()),
+                    (!Self::artifact_present(&review_path))
+                        .then(|| Reason::ArtifactMissing.to_string()),
                 )
             }
             "sharding" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
                 let reason = if !Self::artifact_present(&tasks_path) {
-                    Some("artifact_missing".to_string())
+                    Some(Reason::ArtifactMissing.to_string())
                 } else {
                     tasks::validate(&tasks_path)
                         .err()
-                        .map(|err| format!("artifact_invalid: {err}"))
+                        .map(|err| Reason::ArtifactInvalid(err.to_string()).to_string())
                 };
                 (true, reason)
             }
@@ -183,15 +187,15 @@ impl App {
                     || !Self::artifact_present(&tasks_path)
                     || !Self::artifact_present(&recovery_path)
                 {
-                    Some("artifact_missing".to_string())
+                    Some(Reason::ArtifactMissing.to_string())
                 } else if let Err(err) =
                     validate_stage_toml_writes(&session_dir, "recovery", run.round)
                 {
-                    Some(format!("artifact_invalid: {err}"))
+                    Some(Reason::ArtifactInvalid(err.to_string()).to_string())
                 } else {
                     match tasks::validate(&tasks_path) {
                         Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
-                        Err(err) => Some(format!("artifact_invalid: {err}")),
+                        Err(err) => Some(Reason::ArtifactInvalid(err.to_string()).to_string()),
                     }
                 };
                 (true, reason)
@@ -207,11 +211,11 @@ impl App {
                     .join(format!("{:03}", run.round))
                     .join("review.toml");
                 let reason = if !Self::artifact_present(&review_path) {
-                    Some("artifact_missing".to_string())
+                    Some(Reason::ArtifactMissing.to_string())
                 } else {
                     review::validate(&review_path)
                         .err()
-                        .map(|err| format!("artifact_invalid: {err}"))
+                        .map(|err| Reason::ArtifactInvalid(err.to_string()).to_string())
                 };
                 (true, reason)
             }
@@ -220,11 +224,11 @@ impl App {
                     .join("artifacts")
                     .join(format!("final_validation_{}.toml", run.round));
                 let reason = if !Self::artifact_present(&verdict_path) {
-                    Some("artifact_missing".to_string())
+                    Some(Reason::ArtifactMissing.to_string())
                 } else {
                     final_validation::validate(&verdict_path)
                         .err()
-                        .map(|err| format!("artifact_invalid: {err}"))
+                        .map(|err| Reason::ArtifactInvalid(err.to_string()).to_string())
                 };
                 (true, reason)
             }
@@ -234,9 +238,9 @@ impl App {
                     .join(format!("{:03}", run.round))
                     .join("simplification.toml");
                 let reason = if !Self::artifact_present(&simplification_path) {
-                    Some("artifact_missing".to_string())
+                    Some(Reason::ArtifactMissing.to_string())
                 } else if let Err(err) = crate::simplification::validate(&simplification_path) {
-                    Some(format!("artifact_invalid: {err}"))
+                    Some(Reason::ArtifactInvalid(err.to_string()).to_string())
                 } else {
                     self.simplifier_dirty_tree_reason(run)
                 };
@@ -332,15 +336,15 @@ impl App {
                 ));
                 if let Some(marker) = operator_marker {
                     return Ok(Some(match marker {
-                        OperatorTerminationMarker::Stopped => "Operator Killed".to_string(),
+                        OperatorTerminationMarker::Stopped => Reason::OperatorKilled.to_string(),
                         OperatorTerminationMarker::RetryRequested => {
-                            "user_forced_retry".to_string()
+                            Reason::UserForcedRetry.to_string()
                         }
                     }));
                 }
-                return Ok(Some(format!("killed({signal_num}) [{detail}]")));
+                return Ok(Some(Reason::Killed { signal_num, detail }.to_string()));
             }
-            return Ok(Some(format!("exit({code})")));
+            return Ok(Some(Reason::ExitCode(code).to_string()));
         }
 
         // Guard reason beats artifact reason (coder control-file edits are a
@@ -413,20 +417,19 @@ impl App {
     ) -> Option<String> {
         let text = match std::fs::read_to_string(recovery_path) {
             Ok(text) => text,
-            Err(err) => return Some(format!("artifact_invalid: {err}")),
+            Err(err) => return Some(Reason::ArtifactInvalid(err.to_string()).to_string()),
         };
         let artifact: RecoveryArtifact = match toml::from_str(&text) {
             Ok(artifact) => artifact,
-            Err(err) => return Some(format!("artifact_invalid: {err}")),
+            Err(err) => return Some(Reason::ArtifactInvalid(err.to_string()).to_string()),
         };
         if artifact.summary.trim().is_empty() {
-            return Some("artifact_invalid: recovery summary is empty".to_string());
+            return Some(Reason::RecoverySummaryEmpty.to_string());
         }
         if artifact.status != RecoveryStatus::Approved && artifact.feedback.is_empty() {
-            return Some(format!(
-                "artifact_invalid: recovery status={:?} requires at least one feedback item",
-                artifact.status
-            ));
+            return Some(
+                Reason::RecoveryMissingFeedback(format!("{:?}", artifact.status)).to_string(),
+            );
         }
 
         let requested_trigger = match (artifact.status, artifact.trigger) {
@@ -444,18 +447,17 @@ impl App {
 
         match artifact.status {
             RecoveryStatus::Approved => None,
-            RecoveryStatus::Revise => Some(format!(
-                "recovery_requested_revise: {}",
-                artifact.summary.trim()
-            )),
-            RecoveryStatus::HumanBlocked => Some(format!(
-                "recovery_requested_human_blocked: {}",
-                artifact.summary.trim()
-            )),
-            RecoveryStatus::AgentPivot => Some(format!(
-                "recovery_requested_agent_pivot: {}",
-                artifact.summary.trim()
-            )),
+            RecoveryStatus::Revise => Some(
+                Reason::RecoveryRequestedRevise(artifact.summary.trim().to_string()).to_string(),
+            ),
+            RecoveryStatus::HumanBlocked => Some(
+                Reason::RecoveryRequestedHumanBlocked(artifact.summary.trim().to_string())
+                    .to_string(),
+            ),
+            RecoveryStatus::AgentPivot => Some(
+                Reason::RecoveryRequestedAgentPivot(artifact.summary.trim().to_string())
+                    .to_string(),
+            ),
         }
     }
 

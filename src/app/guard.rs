@@ -7,6 +7,7 @@
 //! time and, on exit, verifies, reverts, and reports a reason string that
 //! flows through the normal run-failure machinery.
 
+use crate::app::Reason;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -260,7 +261,7 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
                     .stderr(std::process::Stdio::null())
                     .output();
                 return VerifyResult::HardError {
-                    reason: "forbidden_head_advance".to_string(),
+                    reason: Reason::ForbiddenHeadAdvance.to_string(),
                     warnings,
                 };
             }
@@ -278,7 +279,7 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
         let current = git_working_tree_baseline().unwrap_or_default();
         if &current != expected {
             return VerifyResult::HardError {
-                reason: "reviewer_modified_working_tree".to_string(),
+                reason: Reason::ReviewerModifiedWorkingTree.to_string(),
                 warnings,
             };
         }
@@ -313,7 +314,7 @@ fn verify_coder(snap: &Snapshot) -> VerifyResult {
         VerifyResult::Ok { warnings: vec![] }
     } else {
         VerifyResult::HardError {
-            reason: format!("forbidden_control_edit: {}", violated.join(", ")),
+            reason: Reason::ForbiddenControlEdit(violated.join(", ")).to_string(),
             warnings: vec![],
         }
     }

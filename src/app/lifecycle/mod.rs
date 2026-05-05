@@ -378,7 +378,7 @@ impl App {
             })?;
 
         let _ = self.state.save();
-        self.complete_run_finalization(&run, Some("forbidden_head_advance".to_string()))
+        self.complete_run_finalization(&run, Some(Reason::ForbiddenHeadAdvance.to_string()))
     }
 
     pub fn accept_guard_keep(&mut self) -> Result<()> {

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 
-use crate::app::App;
+use crate::app::{App, Reason};
 use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItem,
     PipelineItemStatus,
@@ -140,19 +140,15 @@ impl App {
                 _ => None,
             })
             .unwrap_or(1);
-        let trigger_task_id = self
-            .state
-            .builder
-            .current_task_id()
-            .or_else(|| {
-                self.state
-                    .builder
-                    .pipeline_items
-                    .iter()
-                    .filter(|i| i.stage == "coder")
-                    .filter_map(|i| i.task_id)
-                    .max()
-            });
+        let trigger_task_id = self.state.builder.current_task_id().or_else(|| {
+            self.state
+                .builder
+                .pipeline_items
+                .iter()
+                .filter(|i| i.stage == "coder")
+                .filter_map(|i| i.task_id)
+                .max()
+        });
         let next_iter = self
             .state
             .builder
@@ -163,9 +159,8 @@ impl App {
             .unwrap_or(0)
             + 1;
         self.state.builder.next_iteration_for_recovery = Some(next_iter);
-        let summary = Some(
-            "final validation cap exhausted; operator-initiated recovery".to_string(),
-        );
+        let summary =
+            Some("final validation cap exhausted; operator-initiated recovery".to_string());
         self.enter_builder_recovery(trigger_round, trigger_task_id, summary, "human_blocked");
     }
 
@@ -423,7 +418,7 @@ impl App {
                 }
             }
             Err(err) => {
-                let reason = format!("recovery_plan_review_failed: {err:#}");
+                let reason = Reason::RecoveryPlanReviewFailed(err.to_string()).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
                 let failed_run = self
                     .state
@@ -553,7 +548,7 @@ impl App {
                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
             }
             Err(err) => {
-                let reason = format!("recovery_sharding_failed: {err:#}");
+                let reason = Reason::RecoveryShardingFailed(err.to_string()).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
                 let failed_run = self
                     .state

@@ -291,10 +291,17 @@ fn review_prompts_protect_authoritative_user_requirements() {
             &live_summary.display().to_string(),
         );
         assert!(
-            plan_prompt
-                .contains("NEVER the `## User-stated requirements\n(authoritative)` section")
+            plan_prompt.contains("`## User-stated requirements (authoritative)` section"),
+            "plan reviewer prompt must protect the user-stated requirements section",
         );
-        assert!(plan_prompt.contains("it must be raised to the\noperator, not patched"));
+        assert!(
+            plan_prompt.contains("NEVER edit"),
+            "plan reviewer prompt must explicitly forbid editing the protected section",
+        );
+        assert!(
+            plan_prompt.contains("raise it via the review, not via a patch"),
+            "plan reviewer prompt must route protected-section issues through the review file",
+        );
     });
 }
 

@@ -114,11 +114,18 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     // and stays on screen. Translating it at the seam exercises an
     // operator-intent variant in production rather than routing through the
     // generic `KeyPress` bridge.
-    if matches!(view.modal, Some(ModalKind::QuitRunningAgent))
-        && key.code == KeyCode::Esc
-        && key.modifiers.is_empty()
-    {
-        return Some(AppCommand::CancelModal);
+    if matches!(view.modal, Some(ModalKind::QuitRunningAgent)) && key.modifiers.is_empty() {
+        return match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                Some(AppCommand::ConfirmModal)
+            }
+            KeyCode::Esc
+            | KeyCode::Char('n')
+            | KeyCode::Char('N')
+            | KeyCode::Char('q')
+            | KeyCode::Char('Q') => Some(AppCommand::CancelModal),
+            _ => None,
+        };
     }
     let code = match key.code {
         KeyCode::Esc => UiKeyCode::Esc,
@@ -216,6 +223,24 @@ mod tests {
     #[test]
     fn wrap_input_zero_width_returns_empty() {
         assert!(wrap_input("anything", 0).is_empty());
+    }
+
+    #[test]
+    fn quit_running_agent_modal_keys_become_domain_commands() {
+        let mut view = AppView::empty("ui-command-test");
+        view.modal = Some(ModalKind::QuitRunningAgent);
+
+        let enter = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let cancel = Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+
+        assert_eq!(
+            command_from_event(enter, &view),
+            Some(AppCommand::ConfirmModal)
+        );
+        assert_eq!(
+            command_from_event(cancel, &view),
+            Some(AppCommand::CancelModal)
+        );
     }
 
     #[test]

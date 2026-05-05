@@ -52,6 +52,32 @@ pub use super::state::sanitize_live_summary;
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
 
+fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
+    fn stage_from_runtime(stage: crate::app_runtime::StageId) -> crate::app::StageId {
+        match stage {
+            crate::app_runtime::StageId::Brainstorm => crate::app::StageId::Brainstorm,
+            crate::app_runtime::StageId::SpecReview => crate::app::StageId::SpecReview,
+            crate::app_runtime::StageId::Planning => crate::app::StageId::Planning,
+            crate::app_runtime::StageId::PlanReview => crate::app::StageId::PlanReview,
+            crate::app_runtime::StageId::Sharding => crate::app::StageId::Sharding,
+            crate::app_runtime::StageId::Implementation => crate::app::StageId::Implementation,
+            crate::app_runtime::StageId::Review => crate::app::StageId::Review,
+        }
+    }
+
+    match modal {
+        crate::app_runtime::ModalKind::SkipToImpl => ModalKind::SkipToImpl,
+        crate::app_runtime::ModalKind::GitGuard => ModalKind::GitGuard,
+        crate::app_runtime::ModalKind::QuitRunningAgent => ModalKind::QuitRunningAgent,
+        crate::app_runtime::ModalKind::InteractiveExitPrompt => ModalKind::InteractiveExitPrompt,
+        crate::app_runtime::ModalKind::SpecReviewPaused => ModalKind::SpecReviewPaused,
+        crate::app_runtime::ModalKind::PlanReviewPaused => ModalKind::PlanReviewPaused,
+        crate::app_runtime::ModalKind::StageError(stage) => {
+            ModalKind::StageError(stage_from_runtime(stage))
+        }
+    }
+}
+
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
         let area = frame.area();
@@ -86,7 +112,7 @@ impl App {
         let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
 
         // --- Determine footer zone ---
-        let modal = self.active_modal();
+        let modal = view.modal.map(modal_from_runtime);
 
         let caps = self.focus_caps();
         let split_open = self.is_split_open();

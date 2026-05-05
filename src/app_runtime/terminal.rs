@@ -7,9 +7,87 @@
 
 use anyhow::Result;
 
-use crate::data::events::DataEvent;
+use crate::app_runtime::{AppCommand, AppView, ModalKind};
+use crate::data::events::{DataEvent, DataOutcome, DataRequest};
 use crate::data::runner;
+use crate::logic::pipeline::RunStatus;
 use crate::{app::App, tui::AppTerminal};
+
+/// Result of routing an [`AppCommand`] through the terminal runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TerminalCommandOutcome {
+    /// Runtime handled the command and should keep running.
+    HandledContinue,
+    /// Runtime handled the command and should exit the app loop.
+    HandledExit,
+    /// Command is still owned by the legacy App bridge.
+    Legacy(AppCommand),
+}
+
+/// Runtime-owned production state that is not part of the legacy `App`.
+///
+/// This keeps the migrated quit-confirmation path outside `App`: the UI emits
+/// commands, app_runtime owns modal state and side-effect dispatch, and App is
+/// only asked to handle commands that have not yet moved across the seam.
+#[derive(Default)]
+pub(crate) struct TerminalRuntime {
+    modal_override: Option<ModalKind>,
+}
+
+impl TerminalRuntime {
+    pub(crate) fn view_for_render(&self, mut view: AppView) -> AppView {
+        if let Some(modal) = self.modal_override {
+            view.modal = Some(modal);
+        }
+        view
+    }
+
+    pub(crate) fn route_command(
+        &mut self,
+        command: AppCommand,
+        view: &AppView,
+    ) -> TerminalCommandOutcome {
+        self.route_command_with_dispatch(command, view, crate::data::events::dispatch)
+    }
+
+    pub(crate) fn route_command_with_dispatch<F>(
+        &mut self,
+        command: AppCommand,
+        view: &AppView,
+        mut dispatch: F,
+    ) -> TerminalCommandOutcome
+    where
+        F: FnMut(DataRequest) -> DataOutcome,
+    {
+        match command {
+            AppCommand::Quit if view.agent_running => {
+                self.modal_override = Some(ModalKind::QuitRunningAgent);
+                TerminalCommandOutcome::HandledContinue
+            }
+            AppCommand::ConfirmModal
+                if matches!(self.modal_override, Some(ModalKind::QuitRunningAgent)) =>
+            {
+                for run in view
+                    .agent_runs
+                    .iter()
+                    .filter(|run| run.status == RunStatus::Running)
+                {
+                    let _ = dispatch(DataRequest::TerminateRun {
+                        window_name: run.window_name.to_string(),
+                    });
+                }
+                TerminalCommandOutcome::HandledExit
+            }
+            AppCommand::CancelModal
+                if matches!(self.modal_override, Some(ModalKind::QuitRunningAgent)) =>
+            {
+                self.modal_override = None;
+                TerminalCommandOutcome::HandledContinue
+            }
+            other => TerminalCommandOutcome::Legacy(other),
+        }
+    }
+}
 
 /// Drain queued tool-call transitions from `data/runner` and route each
 /// one through the per-event app handler. The runtime owns the drain so
@@ -29,6 +107,7 @@ fn drain_tool_call_transitions(app: &mut App) {
 
 /// Run the production terminal app through the app-runtime seam.
 pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()> {
+    let mut runtime = TerminalRuntime::default();
     loop {
         if app.runtime_tick_before_data_drain(terminal)? {
             return Ok(());
@@ -36,7 +115,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         drain_tool_call_transitions(app);
         app.runtime_tick_after_data_drain();
 
-        let view = app.current_app_view();
+        let view = runtime.view_for_render(app.current_app_view());
         // The production draw path consumes `AppView` end-to-end: the top
         // rule's mode badges are now derived from the seam, so the runtime
         // wiring carries real rendering data instead of being derived and
@@ -44,11 +123,71 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
 
-        if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)?
-            && app.handle_app_command(command)
-        {
-            crate::runner::shutdown_all_runs();
-            return Ok(());
+        if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)? {
+            match runtime.route_command(command, &view) {
+                TerminalCommandOutcome::HandledContinue => {}
+                TerminalCommandOutcome::HandledExit => {
+                    crate::runner::shutdown_all_runs();
+                    return Ok(());
+                }
+                TerminalCommandOutcome::Legacy(command) => {
+                    if app.handle_app_command(command) {
+                        crate::runner::shutdown_all_runs();
+                        return Ok(());
+                    }
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
+    use crate::data::events::{DataOutcome, DataRequest};
+    use crate::logic::pipeline::RunStatus;
+    use std::sync::Arc;
+
+    fn running_view() -> AppView {
+        let mut view = AppView::empty("terminal-runtime-test");
+        view.agent_running = true;
+        view.agent_runs = Arc::from(vec![AgentRunSummary {
+            id: 7,
+            stage: Arc::from("planning"),
+            window_name: Arc::from("codexize-run-7-planning"),
+            status: RunStatus::Running,
+        }]);
+        view
+    }
+
+    #[test]
+    fn confirm_quit_running_agent_routes_termination_through_data_without_app_mutation() {
+        let mut runtime = TerminalRuntime::default();
+        let view = running_view();
+
+        let quit = runtime.route_command_with_dispatch(AppCommand::Quit, &view, |_| {
+            panic!("opening the runtime modal must not perform data side effects")
+        });
+        assert_eq!(quit, TerminalCommandOutcome::HandledContinue);
+        assert_eq!(
+            runtime.view_for_render(view.clone()).modal,
+            Some(ModalKind::QuitRunningAgent)
+        );
+
+        let mut requests = Vec::new();
+        let confirm =
+            runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
+                requests.push(request);
+                DataOutcome::Terminated(true)
+            });
+
+        assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
+        assert_eq!(
+            requests,
+            vec![DataRequest::TerminateRun {
+                window_name: "codexize-run-7-planning".to_string(),
+            }]
+        );
     }
 }

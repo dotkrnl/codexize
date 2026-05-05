@@ -71,7 +71,14 @@ def iter_rust_files(layer: str):
     layer_dir = SRC / layer
     if not layer_dir.exists():
         return
-    yield from sorted(layer_dir.rglob("*.rs"))
+    for path in sorted(layer_dir.rglob("*.rs")):
+        # Co-located test files declared as `#[cfg(test)] mod tests_*;` are
+        # always test-only by convention. Spec allows fixture/tempdir IO in
+        # cfg(test) modules; treat the file equivalents the same way the
+        # inline `#[cfg(test)] mod foo {}` stripper does.
+        if path.name.startswith("tests_") or path.name == "tests.rs":
+            continue
+        yield path
 
 
 violations: list[str] = []

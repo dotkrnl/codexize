@@ -1,3 +1,4 @@
+pub mod assemble;
 pub mod config;
 pub mod display;
 pub mod ranking;

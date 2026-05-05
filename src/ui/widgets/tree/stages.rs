@@ -1,4 +1,96 @@
 use super::*;
+use std::collections::BTreeSet;
+
+/// Boundary rounds — the rounds at which final-validation has run, sorted
+/// ascending and deduplicated. Iteration N's round range is bounded above
+/// by `iteration_boundaries(state)[N - 1]` (when present); when absent the
+/// iteration is "open" and accepts every round from its start onward.
+fn iteration_boundaries(state: &SessionState) -> Vec<u32> {
+    let mut bounds: Vec<u32> = state
+        .agent_runs
+        .iter()
+        .filter(|r| r.stage == "final-validation")
+        .map(|r| r.round)
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    bounds
+}
+
+/// Inclusive (start, optional end) round range for the given outer
+/// iteration. End is `None` while the iteration's closing FV hasn't run,
+/// which means the "open" iteration absorbs every round from `start`
+/// onward.
+pub(super) fn iteration_round_range(
+    state: &SessionState,
+    iteration: u32,
+) -> (u32, Option<u32>) {
+    let bounds = iteration_boundaries(state);
+    let start = if iteration <= 1 {
+        1
+    } else {
+        bounds
+            .get((iteration - 2) as usize)
+            .map(|round| round + 1)
+            .unwrap_or(1)
+    };
+    let end = bounds.get((iteration - 1) as usize).copied();
+    (start, end)
+}
+
+pub(super) fn round_in_iteration(state: &SessionState, iteration: u32, round: u32) -> bool {
+    let (start, end) = iteration_round_range(state, iteration);
+    round >= start && end.is_none_or(|last| round <= last)
+}
+
+/// Total number of iteration trios the dashboard should emit. Equal to
+/// the largest iteration recorded on a pipeline item (validator-created
+/// future tasks bump this even before they've started running) OR the
+/// number of distinct final-validation rounds observed (so a session
+/// where FV ran twice without yet bumping pipeline iteration still gets
+/// two trios). Clamped to at least 1 so a fresh session still gets one
+/// Loop trio.
+pub(super) fn total_iterations(state: &SessionState) -> u32 {
+    let max_pipeline = state
+        .builder
+        .pipeline_items
+        .iter()
+        .map(|item| item.iteration)
+        .max()
+        .unwrap_or(1);
+    let fv_iterations = iteration_boundaries(state).len() as u32;
+    max_pipeline.max(fv_iterations).max(1)
+}
+
+/// Decorate a stage label with " · iteration N" when N >= 2 so the
+/// label-based StageKey lookup can recover the iteration index. Iteration 1
+/// keeps the bare label so existing tests and snapshots stay stable.
+pub(super) fn iteration_label(base: &str, iteration: u32) -> String {
+    if iteration <= 1 {
+        base.to_string()
+    } else {
+        format!("{base} · iteration {iteration}")
+    }
+}
+
+/// Task ids that belong to the requested iteration (in pipeline order).
+pub(super) fn task_ids_for_iteration(state: &SessionState, iteration: u32) -> Vec<u32> {
+    let mut ids = Vec::new();
+    let mut seen = BTreeSet::new();
+    for item in state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|item| item.stage == "coder" && item.iteration == iteration)
+    {
+        if let Some(task_id) = item.task_id
+            && seen.insert(task_id)
+        {
+            ids.push(task_id);
+        }
+    }
+    ids
+}
 
 pub(super) fn build_idea_node(state: &SessionState) -> Node {
     let (status, summary) = match state.current_phase {
@@ -86,39 +178,87 @@ pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &
     }
 }
 
-pub(super) fn build_builder_stage(state: &SessionState) -> Node {
+pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node {
+    let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
     let coder_runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "coder")
+        .filter(|r| r.stage == "coder" && in_iteration_round(r.round))
         .collect();
     let reviewer_runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "reviewer")
+        .filter(|r| r.stage == "reviewer" && in_iteration_round(r.round))
         .collect();
     let recovery_runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "recovery")
+        .filter(|r| r.stage == "recovery" && in_iteration_round(r.round))
         .collect();
     let recovery_pr_rounds = recovery_rounds_for_stage(state, "plan-review");
     let recovery_sharding_rounds = recovery_rounds_for_stage(state, "sharding");
     let recovery_pr_runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "plan-review" && recovery_pr_rounds.contains(&r.round))
+        .filter(|r| {
+            r.stage == "plan-review"
+                && recovery_pr_rounds.contains(&r.round)
+                && in_iteration_round(r.round)
+        })
         .collect();
     let recovery_sharding_runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "sharding" && recovery_sharding_rounds.contains(&r.round))
+        .filter(|r| {
+            r.stage == "sharding"
+                && recovery_sharding_rounds.contains(&r.round)
+                && in_iteration_round(r.round)
+        })
         .collect();
-    let status = builder_status(state, &coder_runs, &reviewer_runs, &recovery_runs);
-    let summary = builder_summary(state, &recovery_runs);
+    let is_open_iteration = iteration_round_range(state, iteration).1.is_none();
+    let status = if is_open_iteration {
+        builder_status(state, &coder_runs, &reviewer_runs, &recovery_runs)
+    } else {
+        // A closed iteration (its FV has run) reports a static rollup —
+        // the global builder phase machinery only describes the *current*
+        // iteration, so reusing it for older trios would mis-color them.
+        if recovery_runs.iter().any(|r| r.status == RunStatus::Running)
+            || coder_runs.iter().any(|r| r.status == RunStatus::Running)
+            || reviewer_runs.iter().any(|r| r.status == RunStatus::Running)
+        {
+            NodeStatus::Running
+        } else if coder_runs.is_empty()
+            && reviewer_runs.is_empty()
+            && recovery_runs.is_empty()
+        {
+            NodeStatus::Pending
+        } else if coder_runs
+            .iter()
+            .chain(reviewer_runs.iter())
+            .all(|r| r.status == RunStatus::Done)
+        {
+            NodeStatus::Done
+        } else if coder_runs
+            .iter()
+            .chain(reviewer_runs.iter())
+            .chain(recovery_runs.iter())
+            .any(|r| matches!(r.status, RunStatus::Failed | RunStatus::FailedUnverified))
+        {
+            NodeStatus::Failed
+        } else {
+            NodeStatus::Pending
+        }
+    };
+    let summary = if iteration <= 1 {
+        builder_summary(state, &recovery_runs)
+    } else {
+        String::new()
+    };
+    let task_ids_in_iteration = task_ids_for_iteration(state, iteration);
+    let task_id_set = task_ids_in_iteration.iter().copied().collect::<BTreeSet<_>>();
     let mut ordered_task_ids = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    if state.builder.pipeline_items.is_empty() {
+    if state.builder.pipeline_items.is_empty() && iteration == 1 {
         for id in &state.builder.done {
             if seen.insert(*id) {
                 ordered_task_ids.push(*id);
@@ -135,24 +275,18 @@ pub(super) fn build_builder_stage(state: &SessionState) -> Node {
             }
         }
     } else {
-        for item in state
-            .builder
-            .pipeline_items
-            .iter()
-            .filter(|item| item.stage == "coder")
-        {
-            if let Some(task_id) = item.task_id
-                && seen.insert(task_id)
-            {
-                ordered_task_ids.push(task_id);
-            }
-        }
+        ordered_task_ids = task_ids_in_iteration.clone();
     }
     let task_status_by_id = state
         .builder
         .pipeline_items
         .iter()
-        .filter(|item| item.stage == "coder")
+        .filter(|item| {
+            item.stage == "coder"
+                && item
+                    .task_id
+                    .is_some_and(|task_id| task_id_set.contains(&task_id))
+        })
         .filter_map(|item| item.task_id.map(|task_id| (task_id, item.status)))
         .collect::<BTreeMap<_, _>>();
     let mut children = Vec::new();
@@ -382,7 +516,7 @@ pub(super) fn build_builder_stage(state: &SessionState) -> Node {
         }
     }
     Node {
-        label: "Loop".to_string(),
+        label: iteration_label("Loop", iteration),
         kind: NodeKind::Stage,
         status,
         summary,
@@ -392,15 +526,24 @@ pub(super) fn build_builder_stage(state: &SessionState) -> Node {
     }
 }
 
-pub(super) fn build_simplification_stage(state: &SessionState) -> Node {
+pub(super) fn build_simplification_stage(state: &SessionState, iteration: u32) -> Node {
+    let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
     let runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "simplifier")
+        .filter(|r| r.stage == "simplifier" && in_iteration_round(r.round))
         .collect();
     let latest = latest_attempts(&runs);
-    let status = stage_status_from_runs(&latest, state, "simplifier");
-    let summary = stage_summary(state, "simplifier", "Simplification", &latest);
+    let status = if iteration <= 1 {
+        stage_status_from_runs(&latest, state, "simplifier")
+    } else {
+        per_iteration_terminal_status(&latest)
+    };
+    let summary = if iteration <= 1 {
+        stage_summary(state, "simplifier", "Simplification", &latest)
+    } else {
+        String::new()
+    };
     let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
     for run in &runs {
         rounds.entry(run.round).or_default().push(*run);
@@ -423,7 +566,7 @@ pub(super) fn build_simplification_stage(state: &SessionState) -> Node {
         });
     }
     Node {
-        label: "Simplification".to_string(),
+        label: iteration_label("Simplification", iteration),
         kind: NodeKind::Stage,
         status,
         summary,
@@ -433,15 +576,24 @@ pub(super) fn build_simplification_stage(state: &SessionState) -> Node {
     }
 }
 
-pub(super) fn build_final_validation_stage(state: &SessionState) -> Node {
+pub(super) fn build_final_validation_stage(state: &SessionState, iteration: u32) -> Node {
+    let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
     let runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "final-validation")
+        .filter(|r| r.stage == "final-validation" && in_iteration_round(r.round))
         .collect();
     let latest = latest_attempts(&runs);
-    let status = stage_status_from_runs(&latest, state, "final-validation");
-    let summary = stage_summary(state, "final-validation", "Final Validation", &latest);
+    let status = if iteration <= 1 {
+        stage_status_from_runs(&latest, state, "final-validation")
+    } else {
+        per_iteration_terminal_status(&latest)
+    };
+    let summary = if iteration <= 1 {
+        stage_summary(state, "final-validation", "Final Validation", &latest)
+    } else {
+        String::new()
+    };
     let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
     for run in &runs {
         rounds.entry(run.round).or_default().push(*run);
@@ -464,12 +616,33 @@ pub(super) fn build_final_validation_stage(state: &SessionState) -> Node {
         });
     }
     Node {
-        label: "Final Validation".to_string(),
+        label: iteration_label("Final Validation", iteration),
         kind: NodeKind::Stage,
         status,
         summary,
         children,
         run_id: None,
         leaf_run_id: None,
+    }
+}
+
+/// Roll up the per-iteration Simplification / Final Validation status when
+/// iteration > 1: only the *current* iteration owns the global phase
+/// machinery (`Phase::Simplification`/`Phase::FinalValidation`), so older
+/// trios derive their status from the latest attempts of their own runs.
+fn per_iteration_terminal_status(latest: &[&RunRecord]) -> NodeStatus {
+    if latest.iter().any(|r| r.status == RunStatus::Running) {
+        NodeStatus::Running
+    } else if latest.is_empty() {
+        NodeStatus::Pending
+    } else if latest.iter().all(|r| r.status == RunStatus::Done) {
+        NodeStatus::Done
+    } else if latest
+        .iter()
+        .any(|r| matches!(r.status, RunStatus::Failed | RunStatus::FailedUnverified))
+    {
+        NodeStatus::Failed
+    } else {
+        NodeStatus::Pending
     }
 }

@@ -622,6 +622,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         mode: Some("recovery".to_string()),
         trigger: None,
         interactive: Some(false),
+        iteration: 1,
     });
     state.builder.pipeline_items.push(PipelineItem {
         id: 11,
@@ -633,6 +634,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         mode: Some("recovery".to_string()),
         trigger: None,
         interactive: Some(false),
+        iteration: 1,
     });
 
     let nodes = build_tree(&state);
@@ -672,6 +674,117 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         );
     }
     assert_eq!(recovery.status, NodeStatus::Running);
+}
+
+#[test]
+fn final_validation_gap_tasks_render_under_new_iteration_trio() {
+    // Regression for the chronology bug: tasks added by an FV goal_gap
+    // verdict carry iteration 2 and must land under their own
+    // (Loop, Simplification, FinalValidation) trio so their later-round
+    // messages render after FV[1] in the dashboard's top-down order,
+    // not before it.
+    use crate::state::PipelineItem;
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::ImplementationRound(2);
+    state.builder.task_titles.insert(1, "original".to_string());
+    state.builder.task_titles.insert(2, "validator gap".to_string());
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 1,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(1),
+        status: PipelineItemStatus::Approved,
+        title: Some("original".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 2,
+        stage: "coder".to_string(),
+        task_id: Some(2),
+        round: Some(2),
+        status: PipelineItemStatus::Pending,
+        title: Some("validator gap".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 2,
+    });
+    let mut coder1 = run(11, "coder", RunStatus::Done);
+    coder1.task_id = Some(1);
+    coder1.round = 1;
+    coder1.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(coder1);
+    let mut fv1 = run(20, "final-validation", RunStatus::Done);
+    fv1.round = 1;
+    fv1.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(fv1);
+    let mut coder2 = run(31, "coder", RunStatus::Running);
+    coder2.task_id = Some(2);
+    coder2.round = 2;
+    state.agent_runs.push(coder2);
+
+    let nodes = build_tree(&state);
+    let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
+
+    // Iteration 1 trio must precede iteration 2 trio (chronological order).
+    let pos = |label: &str| {
+        labels
+            .iter()
+            .position(|l| *l == label)
+            .unwrap_or_else(|| panic!("missing top-level node {label} (got {labels:?})"))
+    };
+    assert!(pos("Loop") < pos("Final Validation"));
+    assert!(pos("Final Validation") < pos("Loop · iteration 2"));
+    assert!(pos("Loop · iteration 2") < pos("Final Validation · iteration 2"));
+
+    // Original task lives under Loop[1]; validator-gap task only under Loop[2].
+    let loop1 = nodes.iter().find(|n| n.label == "Loop").unwrap();
+    let loop2 = nodes
+        .iter()
+        .find(|n| n.label == "Loop · iteration 2")
+        .unwrap();
+    let task_labels = |stage: &Node| -> Vec<String> {
+        stage
+            .children
+            .iter()
+            .filter(|c| c.kind == NodeKind::Task)
+            .map(|c| c.label.clone())
+            .collect()
+    };
+    let loop1_tasks = task_labels(loop1);
+    let loop2_tasks = task_labels(loop2);
+    assert!(
+        loop1_tasks.iter().any(|t| t.starts_with("Task 1")),
+        "Loop[1] must contain Task 1: {loop1_tasks:?}"
+    );
+    assert!(
+        loop1_tasks.iter().all(|t| !t.starts_with("Task 2")),
+        "Loop[1] must NOT contain validator-gap Task 2: {loop1_tasks:?}"
+    );
+    assert!(
+        loop2_tasks.iter().any(|t| t.starts_with("Task 2")),
+        "Loop[2] must contain Task 2: {loop2_tasks:?}"
+    );
+
+    // Run-id chronology: round-1 runs only in iteration-1 trio,
+    // round-2 runs only in iteration-2 trio.
+    let mut iter1_runs = Vec::new();
+    collect_run_ids(loop1, &mut iter1_runs);
+    let mut iter2_runs = Vec::new();
+    collect_run_ids(loop2, &mut iter2_runs);
+    assert!(iter1_runs.contains(&11), "round-1 coder under Loop[1]");
+    assert!(
+        !iter1_runs.contains(&31),
+        "round-2 coder must not leak into Loop[1]: {iter1_runs:?}"
+    );
+    assert!(iter2_runs.contains(&31), "round-2 coder under Loop[2]");
+    assert!(
+        !iter2_runs.contains(&11),
+        "round-1 coder must not leak into Loop[2]: {iter2_runs:?}"
+    );
 }
 
 #[test]
@@ -1090,7 +1203,10 @@ fn final_validation_skipped_under_yolo_done() {
 }
 
 #[test]
-fn final_validation_groups_runs_by_round() {
+fn final_validation_runs_split_across_iteration_trios() {
+    // Each FV run closes its own outer iteration, so the dashboard now
+    // renders two `Final Validation` stages — one per iteration — instead
+    // of aggregating both rounds under a single node.
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::FinalValidation(2);
     let mut r1 = run(10, "final-validation", RunStatus::Done);
@@ -1102,15 +1218,27 @@ fn final_validation_groups_runs_by_round() {
     state.agent_runs.push(r2);
 
     let nodes = build_tree(&state);
-    let stage = nodes
+
+    let fv1 = nodes
         .iter()
         .find(|n| n.label == "Final Validation")
-        .unwrap();
-    let mut run_ids = Vec::new();
-    collect_run_ids(stage, &mut run_ids);
-    assert!(run_ids.contains(&10));
-    assert!(run_ids.contains(&20));
-    assert_eq!(stage.status, NodeStatus::Running);
+        .expect("iteration 1 FV present");
+    let mut fv1_runs = Vec::new();
+    collect_run_ids(fv1, &mut fv1_runs);
+    assert!(fv1_runs.contains(&10), "FV[1] holds round-1 run 10");
+    assert!(
+        !fv1_runs.contains(&20),
+        "round-2 FV must not appear inside FV[1]: {fv1_runs:?}"
+    );
+
+    let fv2 = nodes
+        .iter()
+        .find(|n| n.label == "Final Validation · iteration 2")
+        .expect("iteration 2 FV present");
+    let mut fv2_runs = Vec::new();
+    collect_run_ids(fv2, &mut fv2_runs);
+    assert!(fv2_runs.contains(&20), "FV[2] holds round-2 run 20");
+    assert_eq!(fv2.status, NodeStatus::Running);
 }
 
 #[test]

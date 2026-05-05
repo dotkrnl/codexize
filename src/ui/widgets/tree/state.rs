@@ -5,7 +5,7 @@ use crate::state::{
 mod stages;
 use self::stages::{
     build_builder_stage, build_final_validation_stage, build_idea_node, build_review_stage,
-    build_simple_stage, build_simplification_stage,
+    build_simple_stage, build_simplification_stage, total_iterations,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,9 +20,16 @@ pub enum StageKey {
     Planning,
     PlanReview,
     Sharding,
-    BuilderLoop,
-    Simplification,
-    FinalValidation,
+    /// Per-iteration builder loop. Iteration 1 is the original tasks;
+    /// iteration N (N >= 2) is the batch of tasks added by the (N-1)-th
+    /// final-validation goal_gap verdict. Each iteration owns its own
+    /// `Loop`, `Simplification`, and `FinalValidation` top-level node so
+    /// the message timeline stays chronological — round-N messages from
+    /// validator-inserted tasks render after FV[N-1] instead of mixing
+    /// into the original Loop subtree.
+    BuilderLoop(u32),
+    Simplification(u32),
+    FinalValidation(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -95,10 +102,18 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
         build_simple_stage(state, "planning", "Planning"),
         build_review_stage(state, "plan-review", "Plan Review"),
         build_simple_stage(state, "sharding", "Sharding"),
-        build_builder_stage(state),
-        build_simplification_stage(state),
-        build_final_validation_stage(state),
     ];
+    // Per-iteration trio: each outer iteration (the original tasks plus
+    // every subsequent batch added by an FV goal_gap verdict) gets its own
+    // (Loop, Simplification, FinalValidation) top-level group so the
+    // message timeline stays chronological — round-N messages from
+    // validator-inserted tasks render after FV[N-1] instead of mixing
+    // back into Loop[1].
+    for iteration in 1..=total_iterations(state) {
+        nodes.push(build_builder_stage(state, iteration));
+        nodes.push(build_simplification_stage(state, iteration));
+        nodes.push(build_final_validation_stage(state, iteration));
+    }
     for node in &mut nodes {
         collapse_tree(node);
     }
@@ -312,7 +327,7 @@ fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
     }
 
     match node.kind {
-        NodeKind::Stage => stage_key_for(path.first().copied(), path)
+        NodeKind::Stage => stage_key_for(node, path)
             .map(NodeKeyPart::Stage)
             .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path.to_vec())),
         NodeKind::Task => NodeKeyPart::Task(task_key_for(node, path)),
@@ -327,20 +342,40 @@ fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
     }
 }
 
-fn stage_key_for(index: Option<usize>, path: &[usize]) -> Option<StageKey> {
+/// Identify a top-level stage node by its label rather than by position so
+/// the dynamic per-iteration trio (Loop[N] / Simplification[N] /
+/// FinalValidation[N]) can repeat without breaking expansion-state lookups,
+/// unread-badge tracking, or focus-by-key recovery.
+///
+/// Iteration 1 keeps the bare labels ("Loop", "Simplification", "Final
+/// Validation"); higher iterations append " · iteration N" so the parser
+/// here can recover the index. Anything not at the top level (path.len() !=
+/// 1) returns None — only stage rows participate in this scheme.
+fn stage_key_for(node: &Node, path: &[usize]) -> Option<StageKey> {
     if path.len() != 1 {
         return None;
     }
-    match index? {
-        0 => Some(StageKey::Idea),
-        1 => Some(StageKey::Brainstorm),
-        2 => Some(StageKey::SpecReview),
-        3 => Some(StageKey::Planning),
-        4 => Some(StageKey::PlanReview),
-        5 => Some(StageKey::Sharding),
-        6 => Some(StageKey::BuilderLoop),
-        7 => Some(StageKey::Simplification),
-        8 => Some(StageKey::FinalValidation),
+    match node.label.as_str() {
+        "Idea" => Some(StageKey::Idea),
+        "Brainstorm" => Some(StageKey::Brainstorm),
+        "Spec Review" => Some(StageKey::SpecReview),
+        "Planning" => Some(StageKey::Planning),
+        "Plan Review" => Some(StageKey::PlanReview),
+        "Sharding" => Some(StageKey::Sharding),
+        "Loop" => Some(StageKey::BuilderLoop(1)),
+        "Simplification" => Some(StageKey::Simplification(1)),
+        "Final Validation" => Some(StageKey::FinalValidation(1)),
+        other => parse_iteration_label(other),
+    }
+}
+
+fn parse_iteration_label(label: &str) -> Option<StageKey> {
+    let (base, suffix) = label.rsplit_once(" · iteration ")?;
+    let index: u32 = suffix.parse().ok()?;
+    match base {
+        "Loop" => Some(StageKey::BuilderLoop(index)),
+        "Simplification" => Some(StageKey::Simplification(index)),
+        "Final Validation" => Some(StageKey::FinalValidation(index)),
         _ => None,
     }
 }

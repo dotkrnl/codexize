@@ -7,20 +7,11 @@ use crate::logic::pipeline::phase::Phase;
 use crate::logic::pipeline::state::SessionState;
 
 /// Errors that can occur when attempting to resume a session.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ResumeError {
+    #[error("Cannot resume: {0}")]
     InvalidState(String),
 }
-
-impl std::fmt::Display for ResumeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ResumeError::InvalidState(msg) => write!(f, "Cannot resume: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for ResumeError {}
 
 /// Check whether the current state can be safely resumed.
 pub fn can_resume(state: &SessionState) -> Result<(), ResumeError> {

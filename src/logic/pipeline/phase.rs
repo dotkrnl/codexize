@@ -41,6 +41,14 @@ pub enum Phase {
     BlockedNeedsUser,
 }
 
+impl std::fmt::Display for Phase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Temporary: delegates to display_name() until Phase derives
+        // strum::Display as part of the pipeline FSM simplification task.
+        f.write_str(&self.display_name())
+    }
+}
+
 impl Phase {
     pub fn label(&self) -> String {
         match self {

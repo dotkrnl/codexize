@@ -17,32 +17,15 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
 
 /// Errors that can occur during phase transitions.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum TransitionError {
+    #[error("Cannot transition from {from} to {to}: {reason}")]
     InvalidTransition {
         from: Phase,
         to: Phase,
         reason: String,
     },
 }
-
-impl std::fmt::Display for TransitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TransitionError::InvalidTransition { from, to, reason } => {
-                write!(
-                    f,
-                    "Cannot transition from {} to {}: {}",
-                    from.display_name(),
-                    to.display_name(),
-                    reason
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for TransitionError {}
 
 /// Validate that a transition from `from` to `to` is allowed.
 pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionError> {

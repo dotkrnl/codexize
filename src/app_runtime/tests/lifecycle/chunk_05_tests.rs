@@ -671,3 +671,51 @@ fn active_modal_persists_across_serialization_roundtrip() {
         assert_eq!(resumed.active_modal(), Some(ModalKind::FinalValidationBlocked));
     });
 }
+
+#[test]
+fn force_ship_key_transitions_blocked_to_done() {
+    use crate::state::{BlockOrigin, Phase};
+    use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    with_temp_root(|| {
+        let mut state = SessionState::new("force-ship-key-f".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        state.validation_attempts = VALIDATION_ATTEMPT_CAP;
+        let mut app = mk_app(state);
+        let consumed = app.handle_final_validation_blocked_modal_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('f'),
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+        assert!(!consumed, "modal handler must not signal app exit");
+        assert_eq!(app.state.current_phase, Phase::Done);
+        let events_path =
+            session_state::session_dir(&app.state.session_id).join("events.toml");
+        let log = std::fs::read_to_string(events_path).expect("events.toml exists");
+        assert!(
+            log.contains("force-ship"),
+            "force-ship audit event must be logged: {log}"
+        );
+    });
+}
+
+#[test]
+fn enter_key_in_modal_also_force_ships() {
+    use crate::state::{BlockOrigin, Phase};
+    use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    with_temp_root(|| {
+        let mut state = SessionState::new("force-ship-key-enter".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        state.validation_attempts = VALIDATION_ATTEMPT_CAP;
+        let mut app = mk_app(state);
+        app.handle_final_validation_blocked_modal_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+        assert_eq!(app.state.current_phase, Phase::Done);
+    });
+}

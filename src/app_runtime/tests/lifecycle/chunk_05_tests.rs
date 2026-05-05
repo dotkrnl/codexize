@@ -633,3 +633,41 @@ fn modal_kind_has_final_validation_blocked_variant() {
     let kind = ModalKind::FinalValidationBlocked;
     assert_eq!(format!("{kind:?}"), "FinalValidationBlocked");
 }
+
+#[test]
+fn active_modal_surfaces_final_validation_blocked() {
+    use crate::state::{BlockOrigin, Phase};
+    with_temp_root(|| {
+        let mut state = SessionState::new("active-modal-fv-blocked".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        let app = mk_app(state);
+        assert_eq!(app.active_modal(), Some(ModalKind::FinalValidationBlocked));
+    });
+}
+
+#[test]
+fn active_modal_does_not_surface_for_simplification_block() {
+    use crate::state::{BlockOrigin, Phase};
+    with_temp_root(|| {
+        let mut state = SessionState::new("active-modal-simplification-block".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::Simplification);
+        let app = mk_app(state);
+        assert_eq!(app.active_modal(), None);
+    });
+}
+
+#[test]
+fn active_modal_persists_across_serialization_roundtrip() {
+    use crate::state::{BlockOrigin, Phase, SessionState};
+    with_temp_root(|| {
+        let mut state = SessionState::new("active-modal-fv-roundtrip".to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        let serialized = toml::to_string(&state).expect("serialize");
+        let deserialized: SessionState = toml::from_str(&serialized).expect("deserialize");
+        let resumed = mk_app(deserialized);
+        assert_eq!(resumed.active_modal(), Some(ModalKind::FinalValidationBlocked));
+    });
+}

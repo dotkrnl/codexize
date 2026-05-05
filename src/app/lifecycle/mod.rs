@@ -144,6 +144,12 @@ impl App {
             Phase::ReviewRound(_) if self.state.agent_error.is_some() => {
                 Some(ModalKind::StageError(StageId::Review))
             }
+            Phase::BlockedNeedsUser
+                if self.state.block_origin
+                    == Some(crate::state::BlockOrigin::FinalValidation) =>
+            {
+                Some(ModalKind::FinalValidationBlocked)
+            }
             _ => None,
         }
     }

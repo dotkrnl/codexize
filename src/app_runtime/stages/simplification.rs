@@ -35,7 +35,17 @@ impl App {
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
-        let review_scope_file = round_dir.join("review_scope.toml");
+        // Diff scope is anchored at the *session* base (rounds/001's
+        // review_scope.toml — captured at the first round entry and never
+        // overwritten), not the current round's base. The simplifier needs
+        // to see every commit produced this session so cross-task cleanups
+        // remain in scope; using `rounds/{round}/review_scope.toml` would
+        // restrict it to the last task's diff only and miss the
+        // accumulating refactor opportunities the user expects it to find.
+        let review_scope_file = session_dir
+            .join("rounds")
+            .join("001")
+            .join("review_scope.toml");
         let simplification_path = round_dir.join("simplification.toml");
 
         // Force a fresh verdict each entry so a stale TOML can't be mistaken

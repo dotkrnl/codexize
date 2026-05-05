@@ -382,8 +382,14 @@ fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
     with_temp_root(|| {
         let session_id = "simplifier-retry-reuse";
         let session_dir = session_state::session_dir(session_id);
+        // The simplifier diffs session_base..HEAD using rounds/001's
+        // review scope, so seed both round 1 (session base) and the
+        // current round (its own dir for the simplification.toml output).
+        let round1_dir = session_dir.join("rounds").join("001");
         let round_dir = session_dir.join("rounds").join("002");
-        std::fs::create_dir_all(&round_dir).expect("round dir");
+        std::fs::create_dir_all(&round1_dir).expect("round 1 dir");
+        std::fs::create_dir_all(&round_dir).expect("round 2 dir");
+        write_review_scope(&round1_dir, "session-base");
         write_review_scope(&round_dir, "base-r2");
 
         let mut state = SessionState::new(session_id.to_string());
@@ -464,6 +470,85 @@ fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
             "simplifier retry must reuse the prior simplifier model, not the coder's"
         );
         assert_eq!(run.vendor, "codex");
+    });
+}
+
+#[test]
+fn simplifier_uses_session_base_scope_not_current_round_scope() {
+    // The simplifier must diff session_base..HEAD so it sees every commit
+    // produced this session, not just the last task's. Round 1's
+    // review_scope.toml carries the session base (HEAD captured at the
+    // very first round entry) and is never overwritten on later round
+    // entries. A round-5 simplifier therefore must reference rounds/001's
+    // review scope, not rounds/005's.
+    with_temp_root(|| {
+        let session_id = "simplifier-session-base-scope";
+        let session_dir = session_state::session_dir(session_id);
+        let round1_dir = session_dir.join("rounds").join("001");
+        let round5_dir = session_dir.join("rounds").join("005");
+        std::fs::create_dir_all(&round1_dir).expect("round 1 dir");
+        std::fs::create_dir_all(&round5_dir).expect("round 5 dir");
+        write_review_scope(&round1_dir, "session-base-sha");
+        write_review_scope(&round5_dir, "round-5-base-sha");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::Simplification(5);
+        // Seed a coder run on round 5 so the model picker has something
+        // to inherit; the simplifier launcher's other lookups cope with
+        // this minimal session shape.
+        state.agent_runs.push(RunRecord {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(2),
+            round: 5,
+            attempt: 1,
+            model: "claude-sonnet-4-6".to_string(),
+            vendor: "claude".to_string(),
+            window_name: "[Round 5 Coder]".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: Some(chrono::Utc::now()),
+            status: RunStatus::Done,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: crate::state::LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+        });
+
+        let mut app = idle_app(state);
+        app.models = vec![ranked_model(
+            selection::VendorKind::Claude,
+            "claude-sonnet-4-6",
+            10,
+            10,
+            10,
+        )];
+        app.test_launch_harness = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            TestLaunchHarness {
+                outcomes: std::collections::VecDeque::from(vec![TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(
+                        "status = \"no_changes\"\nsummary = \"clean\"\n".to_string(),
+                    ),
+                    launch_error: None,
+                }]),
+            },
+        )));
+
+        assert!(app.launch_simplifier_with_model(None));
+
+        let prompt_path = session_dir.join("prompts").join("simplifier-r5.md");
+        let prompt = std::fs::read_to_string(&prompt_path).expect("prompt file");
+        let round1_scope = round1_dir.join("review_scope.toml").display().to_string();
+        let round5_scope = round5_dir.join("review_scope.toml").display().to_string();
+        assert!(
+            prompt.contains(&round1_scope),
+            "simplifier prompt must reference rounds/001/review_scope.toml so it diffs session_base..HEAD: prompt did not contain {round1_scope}"
+        );
+        assert!(
+            !prompt.contains(&round5_scope),
+            "simplifier prompt leaked the current round's review_scope.toml — that file's base_sha is HEAD at round 5 start, which would limit the diff to the last task only: prompt contained {round5_scope}"
+        );
     });
 }
 

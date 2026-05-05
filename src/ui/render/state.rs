@@ -1,7 +1,7 @@
 use crate::app::tree::VisibleNodeRow;
 use crate::app::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
-use crate::tui::wrap_input;
+use crate::tui::{strip_ansi, wrap_text};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -37,39 +37,27 @@ pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
     }
 }
 
-fn strip_ansi_codes(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&c) = chars.peek() {
-                    chars.next();
-                    if c.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}
-
 /// Render the parsed final-validation verdict for the dashboard body.
 ///
 /// Always emits the full report (status, summary, findings, gaps with
 /// citations, and any pushed gap tasks) regardless of verdict — per spec,
 /// goal validation is high-trust and the operator should always see what
 /// the validator checked.
+///
+/// `width` is the available terminal column count. Body text — summary,
+/// findings, gap descriptions, citations, follow-up task titles — is wrapped
+/// through the shared [`wrap_text`] helper so long fields don't overflow the
+/// viewport. Continuation lines indent to match the visual prefix on the
+/// first line so wrapped bullets stay column-aligned with their first row.
 pub fn final_validation_report_lines(
     verdict: &crate::final_validation::ValidationVerdict,
     indent: &str,
+    width: usize,
 ) -> Vec<Line<'static>> {
     use crate::final_validation::ValidationStatus;
     let dim = Style::default().fg(Color::DarkGray);
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let cyan = Style::default().fg(Color::Cyan);
     let (status_text, status_style) = match verdict.status {
         ValidationStatus::GoalMet => (
             "goal_met",
@@ -89,67 +77,137 @@ pub fn final_validation_report_lines(
         ),
     };
 
+    let indent_width = indent.chars().count();
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
         Span::styled(indent.to_string(), dim),
-        Span::styled(
-            "Validation report",
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Validation report", bold),
         Span::styled(" · ", dim),
         Span::styled(status_text.to_string(), status_style),
     ]));
-    lines.push(Line::from(vec![
-        Span::styled(indent.to_string(), dim),
-        Span::styled("Summary: ", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(verdict.summary.clone()),
-    ]));
+
+    push_wrapped_field(
+        &mut lines,
+        indent,
+        indent_width,
+        "Summary: ",
+        bold,
+        &verdict.summary,
+        Style::default(),
+        width,
+    );
+
     if !verdict.findings.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(indent.to_string(), dim),
-            Span::styled("Findings:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("Findings:", bold),
         ]));
         for finding in &verdict.findings {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{indent}  • "), dim),
-                Span::raw(finding.clone()),
-            ]));
+            push_wrapped_field(
+                &mut lines,
+                indent,
+                indent_width,
+                "  • ",
+                dim,
+                finding,
+                Style::default(),
+                width,
+            );
         }
     }
     if !verdict.gaps.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(indent.to_string(), dim),
-            Span::styled("Gaps:", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("Gaps:", bold),
         ]));
         for gap in &verdict.gaps {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{indent}  • "), dim),
-                Span::raw(gap.description.clone()),
-            ]));
+            push_wrapped_field(
+                &mut lines,
+                indent,
+                indent_width,
+                "  • ",
+                dim,
+                &gap.description,
+                Style::default(),
+                width,
+            );
             for citation in &gap.checked {
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{indent}      checked: "), dim),
-                    Span::styled(citation.clone(), Style::default().fg(Color::Cyan)),
-                ]));
+                push_wrapped_field(
+                    &mut lines,
+                    indent,
+                    indent_width,
+                    "      checked: ",
+                    dim,
+                    citation,
+                    cyan,
+                    width,
+                );
             }
         }
     }
     if !verdict.new_tasks.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(indent.to_string(), dim),
-            Span::styled(
-                "Follow-up tasks:",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Follow-up tasks:", bold),
         ]));
         for task in &verdict.new_tasks {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{indent}  • "), dim),
-                Span::raw(task.title.clone()),
-            ]));
+            push_wrapped_field(
+                &mut lines,
+                indent,
+                indent_width,
+                "  • ",
+                dim,
+                &task.title,
+                Style::default(),
+                width,
+            );
         }
     }
     lines
+}
+
+/// Push a "<prefix><body>" entry where `body` is wrapped to fit `width` and
+/// continuation lines indent to align under `body`'s first column. Used by
+/// every text-bearing field in the validation report so wrap behavior stays
+/// consistent across summary, findings, gaps, citations, and follow-up
+/// tasks.
+#[allow(clippy::too_many_arguments)]
+fn push_wrapped_field(
+    lines: &mut Vec<Line<'static>>,
+    indent: &str,
+    indent_width: usize,
+    prefix: &str,
+    prefix_style: Style,
+    body: &str,
+    body_style: Style,
+    width: usize,
+) {
+    let prefix_width = prefix.chars().count();
+    let content_width = width
+        .saturating_sub(indent_width + prefix_width)
+        .max(1);
+    let cont_indent: String = " ".repeat(indent_width + prefix_width);
+    let wrapped = wrap_text(body, content_width);
+    if wrapped.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(indent.to_string(), Style::default().fg(Color::DarkGray)),
+            Span::styled(prefix.to_string(), prefix_style),
+        ]));
+        return;
+    }
+    let mut iter = wrapped.into_iter();
+    let first = iter.next().expect("wrapped non-empty");
+    lines.push(Line::from(vec![
+        Span::styled(indent.to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled(prefix.to_string(), prefix_style),
+        Span::styled(first, body_style),
+    ]));
+    for chunk in iter {
+        lines.push(Line::from(vec![
+            Span::raw(cont_indent.clone()),
+            Span::styled(chunk, body_style),
+        ]));
+    }
 }
 
 /// Banner shown when `BlockedNeedsUser` was entered with
@@ -187,7 +245,7 @@ pub fn final_validation_block_banner_lines(width: u16) -> Vec<Line<'static>> {
 }
 
 pub fn sanitize_live_summary(text: &str) -> String {
-    let stripped = strip_ansi_codes(text);
+    let stripped = strip_ansi(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()
 }
@@ -210,7 +268,7 @@ pub(crate) fn skip_to_impl_content(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("(no rationale provided)");
-    let rationale_lines = wrap_input(rationale_text, width.max(1) as usize);
+    let rationale_lines = wrap_text(rationale_text, width.max(1) as usize);
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -304,7 +362,7 @@ pub(crate) fn stage_error_content(
         .filter(|s| !s.is_empty())
         .unwrap_or("(no error details)");
     let truncated: String = error_text.chars().take(300).collect();
-    let wrapped = wrap_input(&truncated, width.max(1) as usize);
+    let wrapped = wrap_text(&truncated, width.max(1) as usize);
 
     // The modal title already carries the semantic red accent. Keep the body
     // content light so stage errors follow the shared modal body-color
@@ -377,7 +435,7 @@ mod tests {
 
     #[test]
     fn strip_ansi_codes_removes_escape_sequences() {
-        assert_eq!(strip_ansi_codes("\u{1b}[31mred\u{1b}[0m"), "red");
+        assert_eq!(strip_ansi("\u{1b}[31mred\u{1b}[0m"), "red");
     }
 
     #[test]
@@ -460,7 +518,7 @@ mod tests {
             gaps: Vec::new(),
             new_tasks: Vec::new(),
         };
-        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
         assert!(text.contains("goal_met"));
         assert!(text.contains("All goals achieved"));
         assert!(text.contains("Inspected src/ and tests/"));
@@ -484,7 +542,7 @@ mod tests {
                 estimated_tokens: 5000,
             }],
         };
-        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
         assert!(text.contains("goal_gap"));
         assert!(text.contains("No retry on HTTP 503"));
         assert!(text.contains("src/client.rs"));
@@ -505,11 +563,79 @@ mod tests {
             }],
             new_tasks: Vec::new(),
         };
-        let text = lines_text(&final_validation_report_lines(&verdict, ""));
+        let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
         assert!(text.contains("needs_human"));
         assert!(text.contains("Operator must decide"));
         assert!(text.contains("A or B?"));
         assert!(text.contains("artifacts/spec.md"));
+    }
+
+    #[test]
+    fn validation_report_wraps_long_summary_to_width() {
+        // Bug regression: a verdict whose summary exceeds the body width used
+        // to render as a single overflowing line because
+        // `final_validation_report_lines` ignored the available width.
+        use crate::final_validation::{ValidationStatus, ValidationVerdict};
+        const WIDTH: usize = 30;
+        let summary =
+            "This is an intentionally long summary that should be wrapped across several rows".to_string();
+        let verdict = ValidationVerdict {
+            status: ValidationStatus::GoalMet,
+            summary: summary.clone(),
+            findings: Vec::new(),
+            gaps: Vec::new(),
+            new_tasks: Vec::new(),
+        };
+        let lines = final_validation_report_lines(&verdict, "", WIDTH);
+        // No printable line may exceed the requested width.
+        for line in &lines {
+            let printable: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(
+                printable.chars().count() <= WIDTH,
+                "report line {printable:?} ({} chars) exceeds width {WIDTH}",
+                printable.chars().count()
+            );
+        }
+        // Every word of the summary must survive the wrap intact.
+        let text = lines_text(&lines);
+        for word in summary.split_whitespace() {
+            assert!(text.contains(word), "missing summary word {word:?}");
+        }
+    }
+
+    #[test]
+    fn validation_report_wraps_long_finding_and_gap_description() {
+        use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict};
+        const WIDTH: usize = 30;
+        let long_finding =
+            "audited every module under src/ and verified each public API".to_string();
+        let long_gap =
+            "The pipeline still allows agents to short-circuit retries past the cap".to_string();
+        let verdict = ValidationVerdict {
+            status: ValidationStatus::GoalGap,
+            summary: "ok".to_string(),
+            findings: vec![long_finding.clone()],
+            gaps: vec![Gap {
+                description: long_gap.clone(),
+                checked: Vec::new(),
+            }],
+            new_tasks: Vec::new(),
+        };
+        let lines = final_validation_report_lines(&verdict, "", WIDTH);
+        for line in &lines {
+            let printable: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(
+                printable.chars().count() <= WIDTH,
+                "report line {printable:?} exceeds width {WIDTH}"
+            );
+        }
+        let text = lines_text(&lines);
+        for word in long_finding.split_whitespace() {
+            assert!(text.contains(word), "missing finding word {word:?}");
+        }
+        for word in long_gap.split_whitespace() {
+            assert!(text.contains(word), "missing gap word {word:?}");
+        }
     }
 
     #[test]

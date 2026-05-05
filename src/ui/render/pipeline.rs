@@ -388,7 +388,9 @@ impl App {
             if run.stage == "final-validation" {
                 let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
                 let indent = format!(" {} ", "│ ".repeat(depth));
-                for report_line in self.final_validation_report_lines_for_run(run, &indent) {
+                for report_line in
+                    self.final_validation_report_lines_for_run(run, &indent, available_width)
+                {
                     lines.push(PipelineLine {
                         line: report_line,
                         kind: PipelineLineKind::Other,
@@ -500,6 +502,7 @@ impl App {
         &self,
         run: &RunRecord,
         indent: &str,
+        width: usize,
     ) -> Vec<Line<'static>> {
         let path = crate::state::session_dir(&self.state.session_id)
             .join("artifacts")
@@ -510,7 +513,7 @@ impl App {
         let Ok(verdict) = crate::final_validation::validate(&path) else {
             return Vec::new();
         };
-        super::super::state::final_validation_report_lines(&verdict, indent)
+        super::super::state::final_validation_report_lines(&verdict, indent, width)
     }
 
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {

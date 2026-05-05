@@ -19,7 +19,7 @@ use crate::selection::{
     CachedModel, QuotaError, VendorKind,
     config::SelectionPhase,
     display::{phase_rank, visible_models},
-    ranking::{VersionIndex, candidate_pool_weights, phase_rank_score},
+    ranking::{candidate_pool_weights, phase_rank_score},
 };
 
 use super::state::{
@@ -52,13 +52,12 @@ const RESPONSIVE_MODELS_AREA_THRESHOLD: u16 = 50;
 /// `models_budget >= visible_count + 1`.
 pub fn responsive_models_area(
     models: &[CachedModel],
-    versions: &VersionIndex,
     quota_errors: &[QuotaError],
     width: u16,
     term_h: u16,
     prev_mode: ModelsAreaMode,
 ) -> (Vec<Line<'static>>, ModelsAreaMode) {
-    let visible = visible_models(models, versions);
+    let visible = visible_models(models);
     let visible_count = visible.len() as u16;
     let models_budget = term_h.saturating_sub(CHROME_RESERVED_LINES);
 
@@ -77,7 +76,7 @@ pub fn responsive_models_area(
     let mode = choose_mode(visible_count, models_budget, prev_mode);
 
     let lines = match mode {
-        ModelsAreaMode::FullTable => render_full_table(models, versions, quota_errors, width),
+        ModelsAreaMode::FullTable => render_full_table(models, quota_errors, width),
         ModelsAreaMode::CompactQuota => render_compact_quota(models, quota_errors, width),
     };
 
@@ -148,11 +147,10 @@ fn choose_layout(
 
 fn render_full_table(
     models: &[CachedModel],
-    versions: &VersionIndex,
     quota_errors: &[QuotaError],
     width: u16,
 ) -> Vec<Line<'static>> {
-    let visible_set = visible_models(models, versions);
+    let visible_set = visible_models(models);
 
     let max_req_name_width = models
         .iter()
@@ -213,10 +211,10 @@ fn render_full_table(
     let total_build = total_for(SelectionPhase::Build);
     let total_review = total_for(SelectionPhase::Review);
 
-    let idea_ranks = phase_rank(models, SelectionPhase::Idea, versions);
-    let planning_ranks = phase_rank(models, SelectionPhase::Planning, versions);
-    let build_ranks = phase_rank(models, SelectionPhase::Build, versions);
-    let review_ranks = phase_rank(models, SelectionPhase::Review, versions);
+    let idea_ranks = phase_rank(models, SelectionPhase::Idea);
+    let planning_ranks = phase_rank(models, SelectionPhase::Planning);
+    let build_ranks = phase_rank(models, SelectionPhase::Build);
+    let review_ranks = phase_rank(models, SelectionPhase::Review);
 
     let max_for = |totals: f64, phase: SelectionPhase| -> u8 {
         models

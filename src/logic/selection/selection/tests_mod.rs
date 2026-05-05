@@ -1,4 +1,3 @@
-use super::super::ranking::build_version_index;
 use super::*;
 use crate::selection::types::{IpbrPhaseScores, ScoreSource};
 
@@ -40,8 +39,7 @@ fn sample_model_with_score(vendor: VendorKind, name: &str, quota: u8, score: f64
 
 #[test]
 fn pick_for_phase_returns_none_for_empty() {
-    let index = build_version_index(&[]);
-    let result = pick_for_phase(&[], SelectionPhase::Build, None, &index);
+    let result = pick_for_phase(&[], SelectionPhase::Build, None);
     assert!(result.is_none());
 }
 
@@ -54,10 +52,8 @@ fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
         sample_model(VendorKind::Claude, "high", 80),
         sample_model(VendorKind::Codex, "low", 1),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
         .expect("should pick high-quota model");
     assert_eq!(chosen.name, "high");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -69,10 +65,8 @@ fn pick_for_phase_excludes_known_zero_quota() {
         sample_model(VendorKind::Claude, "exhausted", 0),
         sample_model(VendorKind::Codex, "available", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
         .expect("non-exhausted candidate exists");
     assert_eq!(chosen.name, "available");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -88,10 +82,8 @@ fn pick_for_phase_excludes_models_missing_phase_score() {
     // unselectable for Build but its presence in the slice must not
     // poison the pool.
     models[1].ipbr_phase_scores.build = None;
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
         .expect("ranked candidate exists");
     assert_eq!(chosen.name, "ranked");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -104,10 +96,8 @@ fn pick_for_phase_unknown_quota_remains_selectable() {
     let mut model = sample_model(VendorKind::Claude, "unknown-quota", 0);
     model.quota_percent = None;
     let models = vec![model];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index)
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
         .expect("unknown quota stays selectable");
     assert_eq!(chosen.name, "unknown-quota");
     assert_eq!(chosen.quota_percent, None);
@@ -124,9 +114,7 @@ fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
     unranked.score_source = ScoreSource::None;
     unranked.ipbr_row_matched = false;
     let models = vec![sample_model(VendorKind::Claude, "exhausted", 0), unranked];
-    let index = build_version_index(&models);
-
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None, &index);
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, None);
     assert!(chosen.is_none());
 }
 
@@ -136,14 +124,11 @@ fn pick_for_phase_respects_vendor_filter() {
         sample_model(VendorKind::Claude, "claude-model", 80),
         sample_model(VendorKind::Codex, "codex-model", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase(
         &models,
         SelectionPhase::Build,
         Some(VendorKind::Claude),
-        &index,
     )
     .expect("should pick claude");
     assert_eq!(chosen.vendor, VendorKind::Claude);
@@ -156,13 +141,11 @@ fn select_for_review_prefers_fresh_vendor() {
         sample_model(VendorKind::Claude, "claude-1", 80),
         sample_model(VendorKind::Codex, "codex-1", 80),
     ];
-    let index = build_version_index(&models);
-
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review(&models, &used_vendors, &used_models, &index)
+    let chosen = select_for_review(&models, &used_vendors, &used_models)
         .expect("should pick fresh vendor");
     assert_eq!(chosen.vendor, VendorKind::Codex);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -174,13 +157,11 @@ fn select_for_review_falls_back_to_unused_model_same_vendor() {
         sample_model(VendorKind::Claude, "claude-1", 80),
         sample_model(VendorKind::Claude, "claude-2", 80),
     ];
-    let index = build_version_index(&models);
-
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review(&models, &used_vendors, &used_models, &index)
+    let chosen = select_for_review(&models, &used_vendors, &used_models)
         .expect("should pick unused model");
     assert_eq!(chosen.name, "claude-2");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -189,12 +170,10 @@ fn select_for_review_falls_back_to_unused_model_same_vendor() {
 #[test]
 fn select_for_review_returns_none_when_all_used() {
     let models = vec![sample_model(VendorKind::Claude, "claude-1", 80)];
-    let index = build_version_index(&models);
-
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
 
-    let chosen = select_for_review(&models, &used_vendors, &used_models, &index);
+    let chosen = select_for_review(&models, &used_vendors, &used_models);
     assert!(chosen.is_none());
 }
 
@@ -204,12 +183,10 @@ fn select_excluding_excludes_listed_models() {
         sample_model(VendorKind::Claude, "excluded", 80),
         sample_model(VendorKind::Codex, "included", 80),
     ];
-    let index = build_version_index(&models);
-
     let excluded = vec![(VendorKind::Claude, "excluded".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None, &index)
+    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None)
         .expect("should pick non-excluded");
     assert_eq!(chosen.name, "included");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -225,11 +202,9 @@ fn select_excluding_excludes_listed_models() {
 #[test]
 fn select_excluding_returns_none_when_all_excluded() {
     let models = vec![sample_model(VendorKind::Claude, "model-1", 80)];
-    let index = build_version_index(&models);
-
     let excluded = vec![(VendorKind::Claude, "model-1".to_string())];
 
-    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None, &index);
+    let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None);
     assert!(chosen.is_none());
 }
 
@@ -284,13 +259,10 @@ fn pick_with_effort_normal_does_not_filter_ineligible_models() {
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
-    let index = build_version_index(&models);
-
     let chosen = pick_for_phase_with_effort(
         &models,
         SelectionPhase::Build,
         None,
-        &index,
         EffortLevel::Normal,
         false,
     )
@@ -307,13 +279,10 @@ fn pick_with_effort_low_does_not_use_tough_filter() {
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
-    let index = build_version_index(&models);
-
     let chosen = pick_for_phase_with_effort(
         &models,
         SelectionPhase::Build,
         None,
-        &index,
         EffortLevel::Low,
         false,
     )
@@ -332,15 +301,12 @@ fn pick_with_effort_cheap_filters_to_budget_subset() {
         sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5-flash", 80),
     ];
-    let index = build_version_index(&models);
-
     for seed in 1..100_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
         let chosen = pick_for_phase_with_effort(
             &models,
             SelectionPhase::Build,
             None,
-            &index,
             EffortLevel::Tough,
             true,
         )
@@ -366,14 +332,11 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
         sample_model(VendorKind::Gemini, "gemini-2.5-flash", 0),
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase_with_effort(
         &models,
         SelectionPhase::Build,
         None,
-        &index,
         EffortLevel::Low,
         true,
     )
@@ -392,15 +355,12 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
 #[test]
 fn pick_with_effort_tough_only_picks_eligible() {
     let models = opus_sonnet_codex_kimi();
-    let index = build_version_index(&models);
-
     for seed in 1..200_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
         let chosen = pick_for_phase_with_effort(
             &models,
             SelectionPhase::Build,
             None,
-            &index,
             EffortLevel::Tough,
             false,
         )
@@ -422,14 +382,11 @@ fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase_with_effort(
         &models,
         SelectionPhase::Build,
         None,
-        &index,
         EffortLevel::Tough,
         false,
     )
@@ -447,14 +404,11 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
         sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(VendorKind::Claude, "claude-haiku-4-5", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase_with_effort(
         &models,
         SelectionPhase::Build,
         None,
-        &index,
         EffortLevel::Tough,
         false,
     )
@@ -470,7 +424,6 @@ fn select_for_review_normal_can_pick_ineligible_vendor() {
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
     ];
-    let index = build_version_index(&models);
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
 
@@ -479,7 +432,6 @@ fn select_for_review_normal_can_pick_ineligible_vendor() {
         &models,
         &used_vendors,
         &used_models,
-        &index,
         EffortLevel::Normal,
         false,
     )
@@ -494,7 +446,6 @@ fn select_for_review_low_can_pick_ineligible_vendor() {
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
     ];
-    let index = build_version_index(&models);
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
 
@@ -503,7 +454,6 @@ fn select_for_review_low_can_pick_ineligible_vendor() {
         &models,
         &used_vendors,
         &used_models,
-        &index,
         EffortLevel::Low,
         false,
     )
@@ -518,7 +468,6 @@ fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
         sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
     ];
-    let index = build_version_index(&models);
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-sonnet-4-6".to_string())];
 
@@ -527,7 +476,6 @@ fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
         &models,
         &used_vendors,
         &used_models,
-        &index,
         EffortLevel::Low,
         true,
     )
@@ -544,10 +492,8 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
         sample_model(VendorKind::Kimi, "kimi-k2", 0),
         sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Low, true)
+    let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Low, true)
         .expect("full-pool fallback must yield a reviewer");
     assert_eq!(chosen.model.name, "gemini-2.5-pro");
     assert_eq!(
@@ -567,7 +513,6 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
         sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
     ];
-    let index = build_version_index(&models);
     let used_vendors = vec![VendorKind::Claude];
     let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
 
@@ -576,7 +521,6 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
         &models,
         &used_vendors,
         &used_models,
-        &index,
         EffortLevel::Tough,
         false,
     )
@@ -592,11 +536,9 @@ fn select_for_review_tough_degrades_when_no_eligible_remain() {
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
-        select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough, false)
+        select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
             .expect("degraded fallback must yield a candidate");
     assert!(matches!(
         chosen.vendor,
@@ -613,11 +555,9 @@ fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
         sample_model(VendorKind::Kimi, "kimi-k2", 80),
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
-    let index = build_version_index(&models);
-
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
-        select_for_review_with_effort(&models, &[], &[], &index, EffortLevel::Tough, false)
+        select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
             .expect("degraded fallback must yield an available candidate");
     assert!(
         matches!(chosen.vendor, VendorKind::Kimi | VendorKind::Gemini),

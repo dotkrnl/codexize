@@ -1,6 +1,7 @@
 use super::config::SelectionPhase;
-use super::types::{CachedModel, ScoreSource, VendorKind};
-use std::collections::BTreeMap;
+use super::types::{CachedModel, ScoreSource};
+#[cfg(test)]
+use super::types::VendorKind;
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,87 +51,6 @@ const RANK_SOFTMAX_TEMPERATURE: f64 = 5.5;
 const UNKNOWN_QUOTA_PERCENT: u8 = 30;
 
 pub type CandidateRef<'a> = &'a CachedModel;
-
-pub(crate) fn extract_version(name: &str) -> Option<(u32, u32)> {
-    let bytes = name.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i].is_ascii_digit() {
-            let start = i;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                i += 1;
-            }
-            let run = i - start;
-            if run > 2 {
-                continue;
-            }
-            let major: u32 = name[start..i].parse().ok()?;
-
-            if i < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'.') {
-                let j = i + 1;
-                if j < bytes.len() && bytes[j].is_ascii_digit() {
-                    let mut k = j;
-                    while k < bytes.len() && bytes[k].is_ascii_digit() {
-                        k += 1;
-                    }
-                    if k - j <= 2 {
-                        let minor: u32 = name[j..k].parse().ok()?;
-                        return Some((major, minor));
-                    }
-                }
-            }
-            return Some((major, 0));
-        } else {
-            i += 1;
-        }
-    }
-    None
-}
-
-/// Per-vendor version ranking built once from the final assembled model set.
-/// Retained for callers that still thread a version index through selection.
-/// Ranking and pool weights do not apply version penalties.
-#[derive(Debug, Clone)]
-pub struct VersionIndex {
-    per_vendor: BTreeMap<VendorKind, Vec<(u32, u32)>>,
-}
-
-impl VersionIndex {
-    /// Returns the version rank for the given model (0 = newest, 1 = second-newest, etc.).
-    /// Models with no parseable version or only one version in their vendor get rank 0.
-    pub fn version_rank(&self, vendor: VendorKind, name: &str) -> usize {
-        let Some(unique) = self.per_vendor.get(&vendor) else {
-            return 0;
-        };
-        if unique.len() <= 1 {
-            return 0;
-        }
-        extract_version(name)
-            .and_then(|v| unique.iter().position(|u| *u == v))
-            .unwrap_or(0)
-    }
-}
-
-/// Builds a version index from the final assembled model set.
-/// Must be called after synthesis and collapse steps complete.
-pub fn build_version_index(models: &[CachedModel]) -> VersionIndex {
-    let mut per_vendor: BTreeMap<VendorKind, Vec<(u32, u32)>> = BTreeMap::new();
-
-    // Collect all versions per vendor
-    for model in models {
-        if let Some(version) = extract_version(&model.name) {
-            per_vendor.entry(model.vendor).or_default().push(version);
-        }
-    }
-
-    // Sort newest-first and deduplicate
-    for unique in per_vendor.values_mut() {
-        unique.sort_unstable_by(|a, b| b.cmp(a));
-        unique.dedup();
-    }
-
-    VersionIndex { per_vendor }
-}
 
 /// Return the authoritative ipbr rank score for `phase`, if this model has one.
 pub fn phase_rank_score(model: &CachedModel, phase: SelectionPhase) -> Option<f64> {
@@ -212,12 +132,12 @@ fn relative_quota_factor(deficit: u8) -> f64 {
     1.0 - 0.90 * smooth
 }
 
-/// Compatibility wrapper for legacy single-model callers.
-pub fn selection_probability(
-    model: &CachedModel,
-    phase: SelectionPhase,
-    _version_index: &VersionIndex,
-) -> f64 {
+/// Single-model phase score for legacy callers (dashboard fixture diff
+/// tooling, mainly). Returns the raw 0–100 ipbr phase score, NOT a
+/// normalized probability — callers that need the row's pool share must use
+/// [`candidate_pool_weights`] directly. Models with `Some(0)` quota or no
+/// ipbr score for the phase return `0.0`.
+pub fn phase_score_for_legacy_callers(model: &CachedModel, phase: SelectionPhase) -> f64 {
     if model.quota_percent == Some(0) {
         return 0.0;
     }
@@ -258,6 +178,7 @@ pub fn stamp_selection_provenance(model: &mut CachedModel) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn sample_cached_model() -> CachedModel {
         CachedModel {
@@ -408,85 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn build_version_index_ranks_newest_first() {
-        let models = vec![
-            CachedModel {
-                name: "gpt-5.2".to_string(),
-                vendor: VendorKind::Codex,
-                ..sample_cached_model()
-            },
-            CachedModel {
-                name: "gpt-5.5".to_string(),
-                vendor: VendorKind::Codex,
-                ..sample_cached_model()
-            },
-            CachedModel {
-                name: "gpt-5.4".to_string(),
-                vendor: VendorKind::Codex,
-                ..sample_cached_model()
-            },
-        ];
-
-        let index = build_version_index(&models);
-
-        assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.5"), 0);
-        assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.4"), 1);
-        assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.2"), 2);
-    }
-
-    #[test]
-    fn extract_version_parses_supported_model_names() {
-        assert_eq!(extract_version("gpt-5.5"), Some((5, 5)));
-        assert_eq!(extract_version("gpt-5.4"), Some((5, 4)));
-        assert_eq!(extract_version("gpt-5.2"), Some((5, 2)));
-        assert_eq!(extract_version("gemini-2.5-flash"), Some((2, 5)));
-        assert_eq!(extract_version("gemini-3-pro-preview"), Some((3, 0)));
-        assert_eq!(extract_version("gemini-3-flash-preview"), Some((3, 0)));
-        assert_eq!(extract_version("claude-sonnet-4-6"), Some((4, 6)));
-        assert_eq!(extract_version("gpt-4-turbo-2024-04-09"), Some((4, 0)));
-    }
-
-    #[test]
-    fn build_version_index_isolates_per_vendor() {
-        let models = vec![
-            CachedModel {
-                name: "gpt-5.5".to_string(),
-                vendor: VendorKind::Codex,
-                ..sample_cached_model()
-            },
-            CachedModel {
-                name: "claude-sonnet-4-6".to_string(),
-                vendor: VendorKind::Claude,
-                ..sample_cached_model()
-            },
-        ];
-
-        let index = build_version_index(&models);
-
-        // Each vendor has only one version, so rank is 0
-        assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.5"), 0);
-        assert_eq!(
-            index.version_rank(VendorKind::Claude, "claude-sonnet-4-6"),
-            0
-        );
-    }
-
-    #[test]
-    fn version_index_returns_zero_for_single_version() {
-        let models = vec![CachedModel {
-            name: "gpt-5.5".to_string(),
-            vendor: VendorKind::Codex,
-            ..sample_cached_model()
-        }];
-
-        let index = build_version_index(&models);
-
-        assert_eq!(index.version_rank(VendorKind::Codex, "gpt-5.5"), 0);
-    }
-
-    #[test]
-    fn selection_probability_wrapper_uses_ipbr_phase_rank_only() {
-        let index = build_version_index(&[]);
+    fn phase_score_for_legacy_callers_returns_ipbr_phase_score() {
         let mut high_variance_old_flash = ipbr_model("gemini-2.5-flash", 90.0, Some(80));
         high_variance_old_flash.vendor = VendorKind::Gemini;
         high_variance_old_flash.standard_error = 99.0;
@@ -497,26 +340,25 @@ mod tests {
             ..ipbr_model("gemini-2.5-pro", 80.0, Some(80))
         };
 
-        let flash_prob =
-            selection_probability(&high_variance_old_flash, SelectionPhase::Build, &index);
-        let pro_prob = selection_probability(&low_variance_pro, SelectionPhase::Build, &index);
+        let flash_score =
+            phase_score_for_legacy_callers(&high_variance_old_flash, SelectionPhase::Build);
+        let pro_score = phase_score_for_legacy_callers(&low_variance_pro, SelectionPhase::Build);
 
-        assert_eq!(flash_prob, 90.0);
-        assert_eq!(pro_prob, 80.0);
+        assert_eq!(flash_score, 90.0);
+        assert_eq!(pro_score, 80.0);
     }
 
     #[test]
-    fn selection_probability_wrapper_excludes_zero_quota_and_unranked_models() {
-        let index = build_version_index(&[]);
+    fn phase_score_for_legacy_callers_excludes_zero_quota_and_unranked_models() {
         let exhausted = ipbr_model("exhausted", 90.0, Some(0));
         let unranked = sample_cached_model();
 
         assert_eq!(
-            selection_probability(&exhausted, SelectionPhase::Build, &index),
+            phase_score_for_legacy_callers(&exhausted, SelectionPhase::Build),
             0.0
         );
         assert_eq!(
-            selection_probability(&unranked, SelectionPhase::Build, &index),
+            phase_score_for_legacy_callers(&unranked, SelectionPhase::Build),
             0.0
         );
     }

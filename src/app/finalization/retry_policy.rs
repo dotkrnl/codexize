@@ -127,7 +127,6 @@ impl App {
             Self::phase_for_stage(&failed_run.stage),
             &excluded,
             last_failed_vendor,
-            &self.versions,
         );
 
         if let Some(next_model) = next_model.cloned() {

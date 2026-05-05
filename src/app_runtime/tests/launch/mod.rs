@@ -4,7 +4,7 @@ use super::*;
 use super::{prompts::*, test_harness::*};
 use crate::{
     adapters::EffortLevel,
-    selection::{self, ranking::build_version_index},
+    selection,
     state::{
         self as session_state, MessageKind, Phase, PipelineItem, RunRecord, RunStatus, SessionState,
     },

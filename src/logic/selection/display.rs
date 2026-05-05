@@ -1,5 +1,5 @@
 use super::config::SelectionPhase;
-use super::ranking::{VersionIndex, phase_rank_score};
+use super::ranking::phase_rank_score;
 use super::types::{CachedModel, VendorKind};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// would otherwise have no representative in the union. Cosmetic
 /// `current_score` / `overall_score` MUST NOT influence visibility, since
 /// the spec restricts those fields to display-only roles.
-pub fn visible_models(models: &[CachedModel], _version_index: &VersionIndex) -> BTreeSet<String> {
+pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
     let mut visible = BTreeSet::new();
 
     for phase in [
@@ -79,11 +79,7 @@ pub fn visible_models(models: &[CachedModel], _version_index: &VersionIndex) -> 
 /// from the map (rendered as unscored/unranked by callers). Equal scores
 /// get the same rank; the next strictly lower score gets the next rank
 /// (dense ranking, e.g. 1, 1, 2 — not competition ranking 1, 1, 3).
-pub fn phase_rank(
-    models: &[CachedModel],
-    phase: SelectionPhase,
-    _version_index: &VersionIndex,
-) -> BTreeMap<String, u32> {
+pub fn phase_rank(models: &[CachedModel], phase: SelectionPhase) -> BTreeMap<String, u32> {
     let mut ranked: Vec<(&CachedModel, f64)> = models
         .iter()
         .filter_map(|m| phase_rank_score(m, phase).map(|score| (m, score)))
@@ -113,7 +109,6 @@ pub fn phase_rank(
 
 #[cfg(test)]
 mod tests {
-    use super::super::ranking::build_version_index;
     use super::*;
 
     fn ipbr_model(vendor: VendorKind, name: &str, score: f64, quota: Option<u8>) -> CachedModel {
@@ -169,9 +164,7 @@ mod tests {
             // phase, even though quota is healthy.
             ipbr_model(VendorKind::Claude, "claude-d", 10.0, Some(100)),
         ];
-        let index = build_version_index(&models);
-
-        let visible = visible_models(&models, &index);
+        let visible = visible_models(&models);
 
         assert!(visible.contains("claude-a"));
         assert!(visible.contains("claude-b"));
@@ -201,9 +194,7 @@ mod tests {
                 ..unscored_model(VendorKind::Kimi, "kimi-later", 5)
             },
         ];
-        let index = build_version_index(&models);
-
-        let visible = visible_models(&models, &index);
+        let visible = visible_models(&models);
 
         assert!(
             visible.contains("kimi-first"),
@@ -225,9 +216,7 @@ mod tests {
             ipbr_model(VendorKind::Gemini, "gemini-top", 95.0, Some(80)),
             unscored_model(VendorKind::Kimi, "kimi-cli-only", 0),
         ];
-        let index = build_version_index(&models);
-
-        let visible = visible_models(&models, &index);
+        let visible = visible_models(&models);
 
         assert!(visible.contains("kimi-cli-only"));
     }
@@ -257,9 +246,7 @@ mod tests {
                 ..ipbr_model(VendorKind::Gemini, "low", 10.0, Some(80))
             },
         ];
-        let index = build_version_index(&models);
-
-        let ranks = phase_rank(&models, SelectionPhase::Build, &index);
+        let ranks = phase_rank(&models, SelectionPhase::Build);
 
         assert_eq!(ranks.len(), 3);
         assert_eq!(ranks["top"], 1);
@@ -284,9 +271,7 @@ mod tests {
             unscored_model(VendorKind::Gemini, "inventory-only", 0),
             cosmetic_only,
         ];
-        let index = build_version_index(&models);
-
-        let ranks = phase_rank(&models, SelectionPhase::Build, &index);
+        let ranks = phase_rank(&models, SelectionPhase::Build);
 
         assert_eq!(ranks.len(), 1);
         assert_eq!(ranks["ranked"], 1);
@@ -319,9 +304,7 @@ mod tests {
                 ..ipbr_model(VendorKind::Gemini, "lower", 50.0, Some(80))
             },
         ];
-        let index = build_version_index(&models);
-
-        let ranks = phase_rank(&models, SelectionPhase::Build, &index);
+        let ranks = phase_rank(&models, SelectionPhase::Build);
 
         assert_eq!(ranks["tie-a"], 1);
         assert_eq!(ranks["tie-b"], 1);
@@ -330,17 +313,14 @@ mod tests {
 
     #[test]
     fn phase_rank_empty_when_no_models_or_no_scores() {
-        let index = build_version_index(&[]);
-        assert!(phase_rank(&[], SelectionPhase::Build, &index).is_empty());
+        assert!(phase_rank(&[], SelectionPhase::Build).is_empty());
 
         let unscored = vec![unscored_model(VendorKind::Claude, "a", 0)];
-        let index = build_version_index(&unscored);
-        assert!(phase_rank(&unscored, SelectionPhase::Build, &index).is_empty());
+        assert!(phase_rank(&unscored, SelectionPhase::Build).is_empty());
     }
 
     #[test]
     fn visible_models_empty_input() {
-        let index = build_version_index(&[]);
-        assert!(visible_models(&[], &index).is_empty());
+        assert!(visible_models(&[]).is_empty());
     }
 }

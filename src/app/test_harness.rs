@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     adapters::EffortLevel,
-    selection::{self, ranking::build_version_index},
+    selection,
     state::{PendingGuardDecision, Phase, RunRecord, RunStatus, SessionState},
 };
 
@@ -122,7 +122,6 @@ pub(crate) fn mk_app(state: SessionState) -> App {
         nodes,
         visible_rows: Vec::new(),
         models: Vec::new(),
-        versions: build_version_index(&[]),
         model_refresh: ModelRefreshState::Idle(Instant::now()),
         selected: 0,
         selected_key,
@@ -429,7 +428,6 @@ pub(crate) fn idle_app(state: SessionState) -> App {
         nodes,
         visible_rows: Vec::new(),
         models: Vec::new(),
-        versions: build_version_index(&[]),
         model_refresh: ModelRefreshState::Idle(Instant::now()),
         selected: 0,
         selected_key,

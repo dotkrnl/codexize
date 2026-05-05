@@ -1,8 +1,6 @@
 use super::*;
 use crate::selection::config::SelectionPhase;
-use crate::selection::ranking::{
-    build_version_index, selection_probability, stamp_selection_provenance,
-};
+use crate::selection::ranking::{phase_score_for_legacy_callers, stamp_selection_provenance};
 use crate::selection::types::{CachedModel, VendorKind};
 
 fn model(name: &str, score: f64) -> DashboardModel {
@@ -108,7 +106,6 @@ fn fixture_postchange_snapshot() -> BTreeMap<String, BTreeMap<String, f64>> {
     for model in &mut models {
         stamp_selection_provenance(model);
     }
-    let version_index = build_version_index(&models);
     let phases = [
         ("idea", SelectionPhase::Idea),
         ("planning", SelectionPhase::Planning),
@@ -121,7 +118,7 @@ fn fixture_postchange_snapshot() -> BTreeMap<String, BTreeMap<String, f64>> {
         for (label, phase) in phases {
             phase_probabilities.insert(
                 label.to_string(),
-                rounded_probability(selection_probability(model, phase, &version_index)),
+                rounded_probability(phase_score_for_legacy_callers(model, phase)),
             );
         }
         snapshot.insert(model.name.clone(), phase_probabilities);
@@ -130,7 +127,7 @@ fn fixture_postchange_snapshot() -> BTreeMap<String, BTreeMap<String, f64>> {
 }
 
 #[test]
-fn fixture_postchange_selection_probability_matches_artifact() {
+fn fixture_postchange_phase_score_for_legacy_callers_matches_artifact() {
     let snapshot = fixture_postchange_snapshot();
     let expected: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/aistupidlevel_2026-04-26_postchange_selection_probabilities.json"
@@ -155,25 +152,22 @@ fn glm46_preserves_pinned_nonzero_build_score() {
     let actual: std::collections::BTreeSet<&str> = models.iter().map(|m| m.name.as_str()).collect();
     let expected: std::collections::BTreeSet<&str> = filtered_model_set.iter().copied().collect();
     assert_eq!(actual, expected, "filtered fixture model set drifted");
-    let version_index = build_version_index(&models);
     let anchor = models
         .iter()
         .find(|m| m.name == COMPARISON_ANCHOR_MODEL)
         .unwrap();
-    let anchor_prob = rounded_probability(selection_probability(
+    let anchor_prob = rounded_probability(phase_score_for_legacy_callers(
         anchor,
         SelectionPhase::Build,
-        &version_index,
     ));
     assert_eq!(
         anchor_prob, COMPARISON_ANCHOR_BUILD,
         "{COMPARISON_ANCHOR_MODEL} Build anchor drifted"
     );
     let glm46 = models.iter().find(|m| m.name == "glm-4.6").unwrap();
-    let glm46_prob = rounded_probability(selection_probability(
+    let glm46_prob = rounded_probability(phase_score_for_legacy_callers(
         glm46,
         SelectionPhase::Build,
-        &version_index,
     ));
     assert_eq!(glm46_prob, GLM46_BUILD, "glm-4.6 Build score drifted");
     assert!(glm46_prob > 0.0, "glm-4.6 Build should remain scored");
@@ -205,7 +199,6 @@ fn prechange_selectable_models_remain_above_gate() {
     for model in &mut models {
         stamp_selection_provenance(model);
     }
-    let version_index = build_version_index(&models);
     let ratio = 1.0 / 3.0;
 
     for phase in [
@@ -218,7 +211,7 @@ fn prechange_selectable_models_remain_above_gate() {
             .map(|m| {
                 (
                     m.name.as_str(),
-                    selection_probability(m, phase, &version_index),
+                    phase_score_for_legacy_callers(m, phase),
                 )
             })
             .collect();
@@ -291,8 +284,7 @@ fn idea_phase_uses_contextawareness_and_taskcompletion() {
         "fixture model should have taskcompletion"
     );
 
-    let index = build_version_index(&models);
-    let score_with = selection_probability(glm, SelectionPhase::Idea, &index);
+    let score_with = phase_score_for_legacy_callers(glm, SelectionPhase::Idea);
 
     // Synthetic variant with contextawareness and taskcompletion removed
     let mut stripped = glm.clone();
@@ -300,7 +292,7 @@ fn idea_phase_uses_contextawareness_and_taskcompletion() {
         .axes
         .retain(|(k, _)| k != "contextawareness" && k != "taskcompletion");
     stripped.ipbr_phase_scores.idea = None;
-    let score_without = selection_probability(&stripped, SelectionPhase::Idea, &index);
+    let score_without = phase_score_for_legacy_callers(&stripped, SelectionPhase::Idea);
 
     assert!(
         (score_with - score_without).abs() > 1e-6,

@@ -7,7 +7,6 @@ use std::{
 
 use crate::{
     cache,
-    selection::ranking::build_version_index,
     state::{self as session_state, Phase, SessionState},
     tasks,
 };
@@ -51,7 +50,6 @@ impl App {
             nodes,
             visible_rows: Vec::new(),
             models: Vec::new(),
-            versions: build_version_index(&[]),
             model_refresh: ModelRefreshState::Fetching {
                 rx: spawn_refresh(),
                 started_at: Instant::now(),

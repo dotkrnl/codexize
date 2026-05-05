@@ -1,6 +1,5 @@
 use codexize::logic::selection::{
     SelectionPhase,
-    ranking::build_version_index,
     selection::pick_for_phase_with_seed,
     types::{CachedModel, IpbrPhaseScores, ScoreSource, VendorKind},
 };
@@ -40,9 +39,7 @@ fn pick_for_phase_with_seed_is_deterministic_without_clock_access() {
         sample_model(VendorKind::Claude, "high", 80),
         sample_model(VendorKind::Codex, "low", 1),
     ];
-    let index = build_version_index(&models);
-
-    let chosen = pick_for_phase_with_seed(&models, SelectionPhase::Build, None, &index, 1)
+    let chosen = pick_for_phase_with_seed(&models, SelectionPhase::Build, None, 1)
         .expect("should pick a model");
     assert_eq!(chosen.name, "high");
 }

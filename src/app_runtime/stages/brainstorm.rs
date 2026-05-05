@@ -221,15 +221,11 @@ impl App {
     }
 
     #[cfg(test)]
-    pub(crate) fn select_brainstorm_model<'a>(
-        models: &'a [CachedModel],
-        versions: &crate::selection::ranking::VersionIndex,
-    ) -> Option<&'a CachedModel> {
+    pub(crate) fn select_brainstorm_model(models: &[CachedModel]) -> Option<&CachedModel> {
         crate::selection::selection::pick_for_phase(
             models,
             crate::selection::config::SelectionPhase::Idea,
             None,
-            versions,
         )
     }
 }

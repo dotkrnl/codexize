@@ -1,6 +1,6 @@
 use crate::{
     cache,
-    selection::{CachedModel, QuotaError, VendorKind, ranking::build_version_index},
+    selection::{CachedModel, QuotaError, VendorKind},
 };
 use ratatui::style::Color;
 use std::{
@@ -60,7 +60,6 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
 
 impl App {
     pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
-        self.versions = build_version_index(&models);
         self.models = models;
     }
 

@@ -17,29 +17,24 @@ pub use config::*;
 pub mod selection {
     use crate::adapters::EffortLevel;
     use crate::logic::selection::{SelectionPhase, selection as pure};
-    use crate::logic::selection::{
-        ranking::VersionIndex,
-        types::{CachedModel, VendorKind},
-    };
+    use crate::logic::selection::types::{CachedModel, VendorKind};
 
     fn sample_seed() -> u64 {
         chrono::Utc::now().timestamp_subsec_nanos() as u64
     }
 
-    pub fn pick_for_phase<'a>(
-        models: &'a [CachedModel],
+    pub fn pick_for_phase(
+        models: &[CachedModel],
         phase: SelectionPhase,
         vendor_filter: Option<VendorKind>,
-        version_index: &VersionIndex,
-    ) -> Option<&'a CachedModel> {
-        pure::pick_for_phase_with_seed(models, phase, vendor_filter, version_index, sample_seed())
+    ) -> Option<&CachedModel> {
+        pure::pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed())
     }
 
     pub fn pick_for_phase_with_effort<'a>(
         models: &'a [CachedModel],
         phase: SelectionPhase,
         vendor_filter: Option<VendorKind>,
-        version_index: &VersionIndex,
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<pure::SelectionOutcome<'a>> {
@@ -47,7 +42,6 @@ pub mod selection {
             models,
             phase,
             vendor_filter,
-            version_index,
             effort,
             cheap,
             sample_seed(),
@@ -58,22 +52,16 @@ pub mod selection {
         models: &'a [CachedModel],
         used_vendors: &[VendorKind],
         used_models: &[(VendorKind, String)],
-        version_index: &VersionIndex,
     ) -> Option<&'a CachedModel> {
-        pure::select_for_review_with_seed(
-            models,
-            used_vendors,
-            used_models,
-            version_index,
-            sample_seed(),
-        )
+        // Lifetime is explicit so callers can hold the picked model alive for
+        // the lifetime of `models` independent of `used_*`.
+        pure::select_for_review_with_seed(models, used_vendors, used_models, sample_seed())
     }
 
     pub fn select_for_review_with_effort<'a>(
         models: &'a [CachedModel],
         used_vendors: &[VendorKind],
         used_models: &[(VendorKind, String)],
-        version_index: &VersionIndex,
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<pure::SelectionOutcome<'a>> {
@@ -81,7 +69,6 @@ pub mod selection {
             models,
             used_vendors,
             used_models,
-            version_index,
             effort,
             cheap,
             sample_seed(),
@@ -93,14 +80,12 @@ pub mod selection {
         phase: SelectionPhase,
         excluded: &[(VendorKind, String)],
         last_failed_vendor: Option<VendorKind>,
-        version_index: &VersionIndex,
     ) -> Option<&'a CachedModel> {
         pure::select_excluding_with_seed(
             models,
             phase,
             excluded,
             last_failed_vendor,
-            version_index,
             sample_seed(),
         )
     }

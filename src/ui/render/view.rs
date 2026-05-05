@@ -91,7 +91,6 @@ impl App {
         } else {
             models_area::responsive_models_area(
                 &self.models,
-                &self.versions,
                 &self.quota_errors,
                 width,
                 term_h,

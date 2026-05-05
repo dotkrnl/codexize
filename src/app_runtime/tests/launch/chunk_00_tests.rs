@@ -7,9 +7,7 @@ fn brainstorm_selection_uses_idea_task_kind() {
         sample_model("build-first", 2, 1),
     ];
 
-    let versions = build_version_index(&models);
-    let chosen =
-        App::select_brainstorm_model(&models, &versions).expect("expected brainstorm model");
+    let chosen = App::select_brainstorm_model(&models).expect("expected brainstorm model");
 
     assert_eq!(chosen.name, "idea-first");
 }

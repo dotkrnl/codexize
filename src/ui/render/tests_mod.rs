@@ -28,7 +28,6 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         nodes,
         visible_rows,
         models: Vec::new(),
-        versions: crate::selection::ranking::build_version_index(&[]),
         model_refresh: ModelRefreshState::Idle(Instant::now()),
         selected: 0,
         selected_key,

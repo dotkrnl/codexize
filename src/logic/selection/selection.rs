@@ -1,5 +1,5 @@
 use super::config::SelectionPhase;
-use super::ranking::{VersionIndex, candidate_pool_weights};
+use super::ranking::candidate_pool_weights;
 use super::types::{CachedModel, VendorKind};
 use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
@@ -92,26 +92,18 @@ fn pool_pick<'a>(
 /// `vendor_filter`: hard inclusion filter applied before the pool scorer —
 /// vendor preferences are not multiplied into the post-softmax weights.
 #[cfg(test)]
-pub fn pick_for_phase<'a>(
-    models: &'a [CachedModel],
+pub fn pick_for_phase(
+    models: &[CachedModel],
     phase: SelectionPhase,
     vendor_filter: Option<VendorKind>,
-    version_index: &VersionIndex,
-) -> Option<&'a CachedModel> {
-    pick_for_phase_with_seed(
-        models,
-        phase,
-        vendor_filter,
-        version_index,
-        test_sample_seed(),
-    )
+) -> Option<&CachedModel> {
+    pick_for_phase_with_seed(models, phase, vendor_filter, test_sample_seed())
 }
 
 pub fn pick_for_phase_with_seed<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     vendor_filter: Option<VendorKind>,
-    _version_index: &VersionIndex,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let candidates: Vec<&'a CachedModel> = models
@@ -137,7 +129,6 @@ pub fn pick_for_phase_with_effort<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     vendor_filter: Option<VendorKind>,
-    version_index: &VersionIndex,
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
@@ -145,7 +136,6 @@ pub fn pick_for_phase_with_effort<'a>(
         models,
         phase,
         vendor_filter,
-        version_index,
         effort,
         cheap,
         test_sample_seed(),
@@ -156,7 +146,6 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
     vendor_filter: Option<VendorKind>,
-    version_index: &VersionIndex,
     effort: EffortLevel,
     cheap: bool,
     sample_seed: u64,
@@ -172,28 +161,21 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
             return Some(SelectionOutcome::ok(chosen));
         }
 
-        return pick_for_phase_with_seed(models, phase, vendor_filter, version_index, sample_seed)
-            .map(|model| {
-                SelectionOutcome::with_warning(
-                    model,
-                    SelectionWarning::CheapFallback {
-                        phase,
-                        reason: "no_eligible_with_quota",
-                    },
-                )
-            });
+        return pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed).map(|model| {
+            SelectionOutcome::with_warning(
+                model,
+                SelectionWarning::CheapFallback {
+                    phase,
+                    reason: "no_eligible_with_quota",
+                },
+            )
+        });
     }
 
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return pick_for_phase_with_seed(
-                models,
-                phase,
-                vendor_filter,
-                version_index,
-                sample_seed,
-            )
-            .map(SelectionOutcome::ok);
+            return pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed)
+                .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
@@ -211,8 +193,7 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
     // Degraded fallback: no tough-eligible model has any pool weight at all
     // (all exhausted or unranked). Fall back to the full slice so the run
     // still launches.
-    pick_for_phase_with_seed(models, phase, vendor_filter, version_index, sample_seed)
-        .map(SelectionOutcome::ok)
+    pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed).map(SelectionOutcome::ok)
 }
 
 /// Select a model for review with unused-vendor preference.
@@ -225,22 +206,14 @@ pub fn select_for_review<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
-    select_for_review_with_seed(
-        models,
-        used_vendors,
-        used_models,
-        version_index,
-        test_sample_seed(),
-    )
+    select_for_review_with_seed(models, used_vendors, used_models, test_sample_seed())
 }
 
 pub fn select_for_review_with_seed<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    _version_index: &VersionIndex,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let tier_1: Vec<&'a CachedModel> = models
@@ -278,7 +251,6 @@ pub fn select_for_review_with_effort<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    version_index: &VersionIndex,
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
@@ -286,7 +258,6 @@ pub fn select_for_review_with_effort<'a>(
         models,
         used_vendors,
         used_models,
-        version_index,
         effort,
         cheap,
         test_sample_seed(),
@@ -297,7 +268,6 @@ pub fn select_for_review_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
     used_vendors: &[VendorKind],
     used_models: &[(VendorKind, String)],
-    version_index: &VersionIndex,
     effort: EffortLevel,
     cheap: bool,
     sample_seed: u64,
@@ -313,34 +283,23 @@ pub fn select_for_review_with_effort_and_seed<'a>(
             return Some(SelectionOutcome::ok(chosen));
         }
 
-        return select_for_review_with_seed(
-            models,
-            used_vendors,
-            used_models,
-            version_index,
-            sample_seed,
-        )
-        .map(|model| {
-            SelectionOutcome::with_warning(
-                model,
-                SelectionWarning::CheapFallback {
-                    phase: SelectionPhase::Review,
-                    reason: "no_eligible_with_quota",
-                },
-            )
-        });
+        return select_for_review_with_seed(models, used_vendors, used_models, sample_seed).map(
+            |model| {
+                SelectionOutcome::with_warning(
+                    model,
+                    SelectionWarning::CheapFallback {
+                        phase: SelectionPhase::Review,
+                        reason: "no_eligible_with_quota",
+                    },
+                )
+            },
+        );
     }
 
     match effort {
         EffortLevel::Low | EffortLevel::Normal => {
-            return select_for_review_with_seed(
-                models,
-                used_vendors,
-                used_models,
-                version_index,
-                sample_seed,
-            )
-            .map(SelectionOutcome::ok);
+            return select_for_review_with_seed(models, used_vendors, used_models, sample_seed)
+                .map(SelectionOutcome::ok);
         }
         EffortLevel::Tough => {}
     }
@@ -353,14 +312,8 @@ pub fn select_for_review_with_effort_and_seed<'a>(
     select_for_review_from_eligible(&eligible, used_vendors, used_models, sample_seed)
         .map(SelectionOutcome::ok)
         .or_else(|| {
-            select_for_review_with_seed(
-                models,
-                used_vendors,
-                used_models,
-                version_index,
-                sample_seed,
-            )
-            .map(SelectionOutcome::ok)
+            select_for_review_with_seed(models, used_vendors, used_models, sample_seed)
+                .map(SelectionOutcome::ok)
         })
 }
 
@@ -408,16 +361,8 @@ pub fn select_excluding<'a>(
     phase: SelectionPhase,
     excluded: &[(VendorKind, String)],
     _last_failed_vendor: Option<VendorKind>,
-    version_index: &VersionIndex,
 ) -> Option<&'a CachedModel> {
-    select_excluding_with_seed(
-        models,
-        phase,
-        excluded,
-        None,
-        version_index,
-        test_sample_seed(),
-    )
+    select_excluding_with_seed(models, phase, excluded, None, test_sample_seed())
 }
 
 pub fn select_excluding_with_seed<'a>(
@@ -425,7 +370,6 @@ pub fn select_excluding_with_seed<'a>(
     phase: SelectionPhase,
     excluded: &[(VendorKind, String)],
     _last_failed_vendor: Option<VendorKind>,
-    _version_index: &VersionIndex,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     if models.is_empty() {

@@ -106,8 +106,7 @@ impl App {
             ));
         }
 
-        let outcome =
-            pick_for_phase_with_effort(&self.models, phase, None, &self.versions, effort, cheap)?;
+        let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
         let picked = (
             outcome.model.name.clone(),
             outcome.model.vendor,
@@ -137,7 +136,6 @@ impl App {
             &self.models,
             used_vendors,
             used_models,
-            &self.versions,
             effort,
             cheap,
         )?;

@@ -54,7 +54,7 @@ pub(crate) use status_line::{Severity, StatusLine};
 
 use crate::{
     cache,
-    selection::{CachedModel, QuotaError, VendorKind, ranking::VersionIndex},
+    selection::{CachedModel, QuotaError, VendorKind},
     state::{Message, Node, SessionState},
 };
 
@@ -245,7 +245,6 @@ pub struct App {
     pub(crate) nodes: Vec<Node>,
     pub(crate) visible_rows: Vec<VisibleNodeRow>,
     pub(crate) models: Vec<CachedModel>,
-    pub(crate) versions: VersionIndex,
     pub(crate) model_refresh: ModelRefreshState,
     pub(crate) selected: usize,
     pub(crate) selected_key: Option<NodeKey>,

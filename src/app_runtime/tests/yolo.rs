@@ -1,4 +1,5 @@
-// tests_yolo.rs
+// Re-organized from app tests_yolo.rs; kept under app_runtime because these
+// cases exercise cross-layer finalization and YOLO gate routing.
 use super::*;
 use super::{guard, prompts::*, test_harness::*};
 use crate::{

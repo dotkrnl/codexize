@@ -91,11 +91,15 @@ impl App {
         true
     }
 
-    /// Iteration the recovery sub-pipeline should join: the iteration of
-    /// the task that triggered recovery, falling back to the latest
+    /// Iteration the recovery sub-pipeline should join: consumes the one-shot
+    /// override `next_iteration_for_recovery` if present, otherwise falls back
+    /// to the iteration of the task that triggered recovery, or the latest
     /// iteration recorded in `pipeline_items`. Recovery never starts a new
     /// outer iteration on its own — that's reserved for FV goal_gap.
-    fn recovery_outer_iteration(&self) -> u32 {
+    pub(crate) fn recovery_outer_iteration(&mut self) -> u32 {
+        if let Some(override_iter) = self.state.builder.next_iteration_for_recovery.take() {
+            return override_iter;
+        }
         if let Some(task_id) = self.state.builder.recovery_trigger_task_id
             && let Some(item) = self
                 .state

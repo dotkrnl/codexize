@@ -576,6 +576,62 @@ fn circuit_breaker_resets_after_approved_plan_review() {
 }
 
 #[test]
+fn recovery_outer_iteration_consumes_one_shot_override() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("recovery-iter-override".to_string());
+        state.current_phase = Phase::BuilderRecovery(1);
+        // Add a coder pipeline item at iteration 2 so fallback would return 2.
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("Task 1".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 2,
+        });
+        state.builder.next_iteration_for_recovery = Some(5);
+        let mut app = idle_app(state);
+        let iter = app.recovery_outer_iteration();
+        assert_eq!(iter, 5, "must read the override");
+        assert_eq!(
+            app.state.builder.next_iteration_for_recovery,
+            None,
+            "override is consumed once"
+        );
+    });
+}
+
+#[test]
+fn recovery_outer_iteration_falls_back_when_no_override() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("recovery-iter-fallback".to_string());
+        state.current_phase = Phase::BuilderRecovery(1);
+        state.builder.recovery_trigger_task_id = Some(1);
+        // Add a coder pipeline item with task_id=1 at iteration 2.
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("Task 1".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 2,
+        });
+        // next_iteration_for_recovery is None (default) — fallback to trigger task
+        let mut app = idle_app(state);
+        let iter = app.recovery_outer_iteration();
+        assert_eq!(iter, 2, "trigger task's iteration when no override");
+    });
+}
+
+#[test]
 fn recovery_queue_validation_rejects_completed_id_collision() {
     // reconcile_builder_recovery must reject recovered task ids that
     // collide with completed task ids.

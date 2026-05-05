@@ -1,6 +1,6 @@
 use crate::{
     cache,
-    selection::{self, CachedModel, QuotaError, VendorKind, ranking::build_version_index},
+    selection::{CachedModel, QuotaError, VendorKind, ranking::build_version_index},
 };
 use ratatui::style::Color;
 use std::{
@@ -17,7 +17,7 @@ const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(selection::assemble::assemble_models());
+        let _ = tx.send(crate::data::selection_assembly::assemble_models());
     });
     rx
 }

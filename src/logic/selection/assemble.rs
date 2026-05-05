@@ -13,7 +13,7 @@ use super::types::{CachedModel, QuotaError, ScoreSource, VendorKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::dashboard::{self, DashboardModel};
-use crate::selection::quota;
+use super::quota;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Build the canonical model universe from already-resolved snapshots.

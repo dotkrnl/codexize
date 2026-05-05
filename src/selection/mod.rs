@@ -1,5 +1,11 @@
-pub mod assemble;
-pub mod quota;
+//! Flat `crate::selection::*` public surface.
+//!
+//! This module is the intentional flat alias for the layered selection
+//! homes — pure logic in [`crate::logic::selection`] and IO loaders in
+//! [`crate::data::selection_quota`] / [`crate::data::selection_assembly`].
+//! Keeping the alias lets `main.rs`, integration tests, and a future
+//! server-mode binary import everything selection-shaped from one root
+//! path; new logic/data callers should still prefer the layered names.
 
 pub use crate::logic::selection::{
     CachedModel, IpbrPhaseScores, QuotaError, ScoreSource, VendorKind,

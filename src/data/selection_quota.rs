@@ -1,12 +1,16 @@
-use super::types::{QuotaError, VendorKind};
-use crate::{
-    model_names,
-    providers::{self, LiveModel},
-};
+//! Backend probes that resolve per-vendor quota and reset maps from the
+//! provider adapters. Pure quota heuristics that operate on already-resolved
+//! maps live in [`crate::logic::selection::quota`].
+
+use crate::data::providers::{self, LiveModel};
+use crate::logic::selection::types::{QuotaError, VendorKind};
+use crate::model_names;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::thread;
+
+pub use crate::logic::selection::quota::{find_quota_by_heuristic, find_reset_by_heuristic};
 
 type VendorQuotaMap = BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>;
 type VendorResetMap = BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>;
@@ -16,7 +20,7 @@ type ModelQuotaAndResetMaps = (ModelQuotaMap, ModelResetMap);
 type QuotaLoadResult = (VendorQuotaMap, VendorResetMap, Vec<QuotaError>);
 
 pub fn load_quota_maps() -> QuotaLoadResult {
-    let vendors = crate::adapters::all_vendors();
+    let vendors = crate::data::adapters::all_vendors();
     load_quota_maps_for(vendors)
 }
 
@@ -64,86 +68,17 @@ fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndResetMap
     }
 }
 
-pub fn find_quota_by_heuristic(
-    model_name: &str,
-    vendor: VendorKind,
-    quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
-) -> Option<u8> {
-    let vendor_quotas = quotas.get(&vendor)?;
-
-    // For unknown models, try to find a similar model's quota
-    match vendor {
-        VendorKind::Codex => {
-            // Check if it's a spark variant
-            if model_name.contains("spark") || model_name.contains("mini") {
-                vendor_quotas
-                    .iter()
-                    .find(|(name, _)| name.contains("spark"))
-                    .and_then(|(_, quota)| *quota)
-            } else {
-                // Use any non-spark model's quota as shared quota
-                vendor_quotas
-                    .iter()
-                    .find(|(name, _)| !name.contains("spark"))
-                    .and_then(|(_, quota)| *quota)
-            }
-        }
-        VendorKind::Claude => {
-            // All Claude models typically share quota
-            vendor_quotas.values().find_map(|q| *q)
-        }
-        VendorKind::Gemini => {
-            // Check for pro vs flash variants
-            if model_name.contains("flash") || model_name.contains("nano") {
-                vendor_quotas
-                    .iter()
-                    .find(|(name, _)| name.contains("flash") || name.contains("nano"))
-                    .and_then(|(_, quota)| *quota)
-            } else {
-                vendor_quotas
-                    .iter()
-                    .find(|(name, _)| name.contains("pro") || name.contains("ultra"))
-                    .and_then(|(_, quota)| *quota)
-                    .or_else(|| vendor_quotas.values().find_map(|q| *q))
-            }
-        }
-        VendorKind::Kimi => {
-            // All Kimi models typically share quota
-            vendor_quotas.values().find_map(|q| *q)
-        }
-    }
-}
-
-pub fn find_reset_by_heuristic(
-    model_name: &str,
-    vendor: VendorKind,
-    resets: &BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>,
-) -> Option<DateTime<Utc>> {
-    let vendor_resets = resets.get(&vendor)?;
-
-    match vendor {
-        VendorKind::Claude => vendor_resets
-            .get(model_name)
-            .copied()
-            .flatten()
-            .or_else(|| vendor_resets.values().find_map(|reset| *reset)),
-        _ => vendor_resets.get(model_name).copied().flatten(),
-    }
-}
-
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let raw = models
         .into_iter()
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
         .collect::<BTreeMap<_, _>>();
 
-    // Find shared quota from any non-spark model that has quota
     let shared = raw
         .iter()
         .filter(|(name, _)| !name.contains("spark"))
         .find_map(|(_, quota)| *quota);
 
-    // Find spark quota
     let spark = raw
         .get("gpt-5.3-codex-spark")
         .copied()
@@ -154,10 +89,8 @@ fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
                 .and_then(|(_, quota)| *quota)
         });
 
-    // Map all known Codex models to appropriate quota
     let mut mapped = BTreeMap::new();
 
-    // Add models we found in live probe
     for name in raw.keys() {
         let quota = if name.contains("spark") {
             spark
@@ -167,7 +100,6 @@ fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
         mapped.insert(name.clone(), quota);
     }
 
-    // Add additional known Codex models that might appear from dashboard
     for known_model in &[
         "gpt-5.3-codex",
         "gpt-5.3-codex-nova",
@@ -201,7 +133,6 @@ fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
         })
         .collect::<BTreeMap<_, _>>();
 
-    // Find shared quota from any Claude model or fallback keys
     let shared = raw
         .iter()
         .find(|(name, _)| {
@@ -213,11 +144,9 @@ fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
         .or_else(|| raw.values().find_map(|(quota, _)| *quota));
     let shared_reset = raw.values().filter_map(|(_, reset)| *reset).min();
 
-    // Map all known Claude models to shared quota
     let mut mapped = BTreeMap::new();
     let mut resets = BTreeMap::new();
 
-    // Add models we found in live probe
     for name in raw.keys() {
         if name.starts_with("claude-") {
             mapped.insert(name.clone(), shared);
@@ -225,7 +154,6 @@ fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
         }
     }
 
-    // Add all known Claude models that might appear from dashboard
     for known_model in &[
         "claude-opus-4.7",
         "claude-opus-4.1",
@@ -257,8 +185,7 @@ fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     // Google's retrieveUserQuota only returns buckets it knows about, which
     // can lag new model names (e.g. gemini-3-flash-preview). Inject known
     // names so dashboard::synthesize_sibling has something to extend a
-    // sibling fallback onto. Use the best observed quota as the shared
-    // default.
+    // sibling fallback onto.
     let shared = mapped.values().find_map(|q| *q);
     for known in model_names::GEMINI_KNOWN_QUOTA_MODELS {
         mapped.entry(known.to_string()).or_insert(shared);

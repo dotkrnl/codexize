@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     cache,
-    selection::{self, ranking::build_version_index},
+    selection::ranking::build_version_index,
     state::{self as session_state, Phase, SessionState},
     tasks,
 };
@@ -114,7 +114,7 @@ impl App {
         // The background refresh spawned above will replace this if any section
         // is expired.
         let loaded = cache::load();
-        let cached = selection::assemble::assemble_from_loaded(&loaded);
+        let cached = crate::data::selection_assembly::assemble_from_loaded(&loaded);
         if !cached.is_empty() {
             let cache_has_expired_section = startup_cache_has_expired_section(&loaded);
             app.set_models(cached);

@@ -18,6 +18,7 @@ pub mod preflight;
 pub mod providers;
 pub mod runner;
 pub mod selection_assembly;
+pub mod selection_quota;
 pub mod snapshot;
 pub mod synthetic_artifacts;
 pub mod validation;

@@ -1341,3 +1341,120 @@ fn simplification_groups_runs_by_round() {
     assert!(run_ids.contains(&40));
     assert_eq!(stage.status, NodeStatus::Running);
 }
+
+/// Walk a single subtree and count Round nodes whose ancestor chain
+/// contains a node labelled `task_label` and whose own label equals
+/// `round_label`. Inline helper — defined here rather than as a shared
+/// util to keep the diff local.
+#[cfg(test)]
+fn count_round_nodes_under_task(node: &Node, task_label: &str, round_label: &str) -> usize {
+    fn walk(node: &Node, in_task: bool, task_label: &str, round_label: &str, count: &mut usize) {
+        let now_in_task = in_task || node.label == task_label;
+        if now_in_task && node.kind == NodeKind::Round && node.label == round_label {
+            *count += 1;
+        }
+        for child in &node.children {
+            walk(child, now_in_task, task_label, round_label, count);
+        }
+    }
+    let mut count = 0;
+    walk(node, false, task_label, round_label, &mut count);
+    count
+}
+
+#[test]
+fn non_contiguous_same_round_runs_emit_sibling_round_nodes() {
+    use crate::state::PipelineItem;
+    use super::stages::build_builder_stage;
+    let mut state = SessionState::new("non-contig".to_string());
+    state.current_phase = Phase::ImplementationRound(1);
+    state.builder.task_titles.insert(1, "alpha".to_string());
+    state.builder.task_titles.insert(2, "beta".to_string());
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 100,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(1),
+        status: PipelineItemStatus::Done,
+        title: Some("alpha".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 101,
+        stage: "coder".to_string(),
+        task_id: Some(2),
+        round: Some(1),
+        status: PipelineItemStatus::Done,
+        title: Some("beta".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    // Run 1: task 1, round 1 — earliest.
+    let mut r1 = run(1, "coder", RunStatus::Done);
+    r1.task_id = Some(1);
+    r1.round = 1;
+    state.agent_runs.push(r1);
+    // Run 2: task 2, round 1 — same round, different task, interleaved.
+    let mut r2 = run(2, "coder", RunStatus::Done);
+    r2.task_id = Some(2);
+    r2.round = 1;
+    state.agent_runs.push(r2);
+    // Run 3: task 1, round 1 again — chronologically AFTER task 2's run.
+    let mut r3 = run(3, "coder", RunStatus::Done);
+    r3.task_id = Some(1);
+    r3.round = 1;
+    state.agent_runs.push(r3);
+
+    // Inspect the pre-collapse builder stage so collapse_tree's single-child
+    // Round absorption doesn't mask the contiguity invariant.
+    let loop_node = build_builder_stage(&state, 1);
+    let task1_round1 = count_round_nodes_under_task(&loop_node, "Task 1: alpha", "Round 1");
+    assert_eq!(
+        task1_round1, 2,
+        "task 1 round 1 must appear twice — separated by task 2's round-1 run.\nTree:\n{loop_node:#?}"
+    );
+}
+
+#[test]
+fn contiguous_same_round_attempts_nest_under_one_round_node() {
+    use crate::state::PipelineItem;
+    use super::stages::build_builder_stage;
+    let mut state = SessionState::new("contig".to_string());
+    state.current_phase = Phase::ImplementationRound(1);
+    state.builder.task_titles.insert(1, "alpha".to_string());
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 100,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(1),
+        status: PipelineItemStatus::Done,
+        title: Some("alpha".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    // Two adjacent coder attempts at task 1, round 1.
+    let mut r1 = run(1, "coder", RunStatus::Failed);
+    r1.task_id = Some(1);
+    r1.round = 1;
+    r1.attempt = 1;
+    state.agent_runs.push(r1);
+    let mut r2 = run(2, "coder", RunStatus::Done);
+    r2.task_id = Some(1);
+    r2.round = 1;
+    r2.attempt = 2;
+    state.agent_runs.push(r2);
+
+    let loop_node = build_builder_stage(&state, 1);
+    let task1_round1 = count_round_nodes_under_task(&loop_node, "Task 1: alpha", "Round 1");
+    assert_eq!(
+        task1_round1, 1,
+        "two attempts at the same round must nest under ONE Round node.\nTree:\n{loop_node:#?}"
+    );
+}

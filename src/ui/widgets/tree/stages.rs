@@ -289,6 +289,47 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         })
         .filter_map(|item| item.task_id.map(|task_id| (task_id, item.status)))
         .collect::<BTreeMap<_, _>>();
+
+    // Group runs into chronological round segments. A "segment" is one
+    // contiguous streak of same-(task_id, round) runs in global id order,
+    // with no run of a different (task_id, round) interleaved between them.
+    // Two non-contiguous occurrences of the same (task, round) — e.g. a
+    // palette_retry that re-enters round 8 after rounds 10-22 already
+    // completed — produce sibling Round nodes so the rendered tree stays
+    // chronological.
+    type RoundSegment<'a> = (u32, Vec<&'a RunRecord>, Vec<&'a RunRecord>);
+    let mut segments_by_task: BTreeMap<u32, Vec<RoundSegment<'_>>> = BTreeMap::new();
+    let ordered_task_id_set: BTreeSet<u32> = ordered_task_ids.iter().copied().collect();
+    let mut chronological: Vec<(&RunRecord, bool)> = coder_runs
+        .iter()
+        .map(|r| (*r, true))
+        .chain(reviewer_runs.iter().map(|r| (*r, false)))
+        .filter(|(r, _)| r.task_id.is_some_and(|t| ordered_task_id_set.contains(&t)))
+        .collect();
+    chronological.sort_by_key(|(r, _)| r.id);
+    let mut last_key: Option<(u32, u32)> = None;
+    for (run, is_coder) in chronological {
+        let task_id = run.task_id.expect("filtered above");
+        let key = (task_id, run.round);
+        let task_segments = segments_by_task.entry(task_id).or_default();
+        let same_streak = last_key == Some(key)
+            && task_segments
+                .last()
+                .is_some_and(|seg| seg.0 == run.round);
+        if !same_streak {
+            task_segments.push((run.round, Vec::new(), Vec::new()));
+        }
+        let last_seg = task_segments
+            .last_mut()
+            .expect("segment was just pushed if needed");
+        if is_coder {
+            last_seg.1.push(run);
+        } else {
+            last_seg.2.push(run);
+        }
+        last_key = Some(key);
+    }
+
     let mut children = Vec::new();
     for &task_id in &ordered_task_ids {
         let task_coder: Vec<&RunRecord> = coder_runs
@@ -301,19 +342,15 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             .filter(|r| r.task_id == Some(task_id))
             .copied()
             .collect();
-        let mut rounds: std::collections::BTreeMap<u32, (Vec<&RunRecord>, Vec<&RunRecord>)> =
-            std::collections::BTreeMap::new();
-        for run in &task_coder {
-            rounds.entry(run.round).or_default().0.push(*run);
-        }
-        for run in &task_reviewer {
-            rounds.entry(run.round).or_default().1.push(*run);
-        }
-        if rounds.is_empty() {
-            rounds.insert(state.builder.iteration.max(1), (Vec::new(), Vec::new()));
+        let mut segments: Vec<RoundSegment<'_>> =
+            segments_by_task.remove(&task_id).unwrap_or_default();
+        if segments.is_empty() {
+            // Empty placeholder (no runs yet) — keeps an empty Round so the
+            // task pipeline still renders before its first run lands.
+            segments.push((state.builder.iteration.max(1), Vec::new(), Vec::new()));
         }
         let mut round_nodes = Vec::new();
-        for (round_num, (c_runs, r_runs)) in rounds {
+        for (round_num, c_runs, r_runs) in segments {
             let mut mode_nodes = Vec::new();
             let mut combined: Vec<&RunRecord> = Vec::new();
             if !c_runs.is_empty() {

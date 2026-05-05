@@ -122,19 +122,6 @@ impl App {
 
     fn compute_pipeline_render_lines(&self) -> Vec<PipelineLine> {
         let mut lines = Vec::new();
-        if matches!(
-            self.state.current_phase,
-            crate::state::Phase::BlockedNeedsUser
-        ) && self.state.block_origin == Some(crate::state::BlockOrigin::FinalValidation)
-        {
-            let width = self.body_inner_width.min(u16::MAX as usize) as u16;
-            for line in super::super::state::final_validation_block_banner_lines(width) {
-                lines.push(PipelineLine {
-                    line,
-                    kind: PipelineLineKind::Other,
-                });
-            }
-        }
         for index in 0..self.visible_rows.len() {
             let Some(node) = self.node_for_row(index) else {
                 continue;

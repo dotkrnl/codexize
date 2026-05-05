@@ -3227,25 +3227,6 @@ checked = ["artifacts/spec.md"]
 }
 
 #[test]
-fn validation_origin_block_shows_force_ship_and_rewind_banner() {
-    with_temp_codexize_root(|| {
-        let mut app = test_app(final_validation_tree(404), Vec::new(), Vec::new());
-        app.state.current_phase = Phase::BlockedNeedsUser;
-        app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
-
-        let lines = render_lines(&app, 12);
-        let joined = lines.join("\n");
-        assert!(joined.contains("Final validation blocked"), "{joined}");
-        assert!(joined.contains("Force ship"), "{joined}");
-        assert!(joined.contains("Rewind to spec review"), "{joined}");
-        assert!(
-            joined.contains("Other blocked-state transitions remain available"),
-            "{joined}"
-        );
-    });
-}
-
-#[test]
 fn block_banner_absent_when_block_origin_is_not_final_validation() {
     with_temp_codexize_root(|| {
         let mut app = test_app(final_validation_tree(505), Vec::new(), Vec::new());
@@ -3299,4 +3280,29 @@ fn final_validation_blocked_modal_body_lists_actions() {
     assert!(text.contains("Recover"), "missing Recover hint: {text}");
     assert!(text.contains("F"), "missing F key hint: {text}");
     assert!(text.contains("R"), "missing R key hint: {text}");
+}
+
+#[test]
+fn pipeline_no_longer_renders_inline_block_banner() {
+    with_temp_codexize_root(|| {
+        let mut app = test_app(final_validation_tree(999), Vec::new(), Vec::new());
+        app.state.current_phase = Phase::BlockedNeedsUser;
+        app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+        let lines = app.pipeline_render_lines(&Default::default());
+        let text: String = lines
+            .iter()
+            .map(|pl| {
+                pl.line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !text.contains("Final validation blocked. Operator action required."),
+            "inline banner must be gone (modal owns it now); pipeline text was:\n{text}"
+        );
+    });
 }

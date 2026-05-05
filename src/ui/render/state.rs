@@ -198,40 +198,6 @@ fn push_wrapped_field(
     ));
 }
 
-/// Banner shown when `BlockedNeedsUser` was entered with
-/// `block_origin = FinalValidation`. Highlights the two prominent
-/// affordances (force-ship → Done, rewind to spec review) while explicitly
-/// noting that the other blocked-state transitions remain available.
-pub fn final_validation_block_banner_lines(width: u16) -> Vec<Line<'static>> {
-    let dim = Style::default().fg(Color::DarkGray);
-    let highlight = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
-    let bar = "─".repeat(width.max(1) as usize);
-    vec![
-        Line::from(Span::styled(bar.clone(), dim)),
-        Line::from(vec![
-            Span::styled(
-                "Final validation blocked. ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("Operator action required."),
-        ]),
-        Line::from(vec![
-            Span::styled("→ ", highlight),
-            Span::styled("Force ship to Done", highlight),
-            Span::styled("    ", Style::default()),
-            Span::styled("→ ", highlight),
-            Span::styled("Rewind to spec review", highlight),
-        ]),
-        Line::from(Span::styled(
-            "Other blocked-state transitions remain available.".to_string(),
-            dim,
-        )),
-        Line::from(Span::styled(bar, dim)),
-    ]
-}
-
 pub fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -628,14 +594,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn block_banner_highlights_force_ship_and_rewind() {
-        let text = lines_text(&final_validation_block_banner_lines(60));
-        assert!(text.contains("Final validation blocked"));
-        assert!(text.contains("Force ship"));
-        assert!(text.contains("Rewind to spec review"));
-        // Other transitions remain available — do not remove them, just
-        // de-emphasise.
-        assert!(text.contains("Other blocked-state transitions remain available"));
-    }
 }

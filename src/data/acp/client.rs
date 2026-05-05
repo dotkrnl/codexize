@@ -1,3 +1,20 @@
+// Documented MVP deferral (per spec Risks-and-mitigations + Goal #3).
+//
+// This file intertwines the JSON-RPC transport (subprocess spawn, stdio
+// framing, request/response correlation, lifecycle/cancel plumbing) with
+// the `session/update` interpretation that drives transcripts and tool-call
+// state. A clean transport-vs-policy split would either invent a stable
+// internal trait boundary that doesn't yet exist or carve large mutable
+// state across two modules — both options carry meaningful behavioural
+// risk for an MVP whose acceptance gate is a manual dogfood run.
+//
+// The deferred follow-up is to factor the JSON-RPC subprocess connector and
+// the prompt/text/tool-call interpretation into peer modules under
+// `data/acp/`, with the tool-call lifecycle rules (already partly extracted
+// into `tool_call.rs`) eventually moving to `logic/`. Until that work
+// lands, this file is permitted to exceed the 800-line cap that the spec
+// applies to every other production module.
+
 use super::{
     AcpError, AcpResolvedLaunch, AcpResult, AcpTextBoundary, ClientUpdate, PromptPayload,
     ToolCallActivityKind,

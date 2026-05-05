@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use clap::Parser;
 use codexize::{
-    app, picker, preflight,
+    app, app_runtime, picker, preflight,
     state::{self},
     tui,
 };
@@ -117,7 +117,8 @@ fn try_main() -> Result<()> {
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume::resume_session(&mut state);
 
-    let result = app::App::new_with_startup_origin(state, startup_origin).run(&mut terminal);
+    let mut app = app::App::new_with_startup_origin(state, startup_origin);
+    let result = app_runtime::run_terminal_app(&mut app, &mut terminal);
     tui::stop(&mut terminal)?;
     result
 }

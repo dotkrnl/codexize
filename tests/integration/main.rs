@@ -121,3 +121,18 @@ fn runtime_harness_drains_commands_until_quit() {
     assert_eq!(first.session_id.as_ref(), "integration-quit");
     assert_eq!(second.session_id.as_ref(), "integration-quit");
 }
+
+#[test]
+fn production_entrypoint_routes_via_app_runtime() {
+    // Ambiguous but intentional seam guard: until `try_main` is injectable
+    // without a real terminal, pin the production wiring by source assertion.
+    let main_rs = std::fs::read_to_string(format!(
+        "{}/src/main.rs",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("read src/main.rs");
+    assert!(
+        main_rs.contains("app_runtime::run_terminal_app(&mut app, &mut terminal)"),
+        "production main entrypoint must route through app_runtime"
+    );
+}

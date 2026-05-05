@@ -28,8 +28,8 @@ pub mod view;
 
 pub use command::{AppCommand, UiKey, UiKeyCode};
 pub use harness::{
-    RuntimeChannels, RuntimeControl, RuntimeHarness, UiChannels, channel_pair,
-    run_harness_until_exit,
+    HeadlessRuntime, RuntimeChannels, RuntimeControl, RuntimeHarness, UiChannels, channel_pair,
+    headless_runtime_for_live_summary, run_harness_until_exit, run_headless_until_exit,
 };
 pub use terminal::run_terminal_app;
 pub use view::{

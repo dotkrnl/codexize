@@ -1,57 +1,28 @@
 //! Public-surface harness test: drive the runtime/UI seam end-to-end
 //! without any terminal IO.
 //!
-//! The TUI extraction is staged: today the production runtime still owns
-//! state through `App`, but the seam types it will publish on
+//! The TUI extraction is staged, but the seam types it will publish on
 //! ([`AppView`], [`AppCommand`]) and the channel pair the future server
 //! mode will reuse must be reachable through the crate's public surface
-//! and exercise without `ratatui`/`crossterm`. This test pins both
-//! contracts so that subsequent slices of the refactor cannot quietly
-//! break the stubbed-UI path.
+//! and exercise without `ratatui`/`crossterm`. This test pins those
+//! contracts so subsequent slices cannot quietly break the stubbed-UI path.
 
 use std::time::Duration;
 
 use codexize::app_runtime::{
     AgentRunSummary, AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId,
-    StatusMessage, StatusSeverity, channel_pair, run_harness_until_exit,
+    StatusSeverity, channel_pair, headless_runtime_for_live_summary, run_harness_until_exit,
+    run_headless_until_exit,
 };
 use codexize::logic::pipeline::Phase;
-
-/// Mirrors the stub used in the in-tree unit test, kept here so the
-/// integration crate proves the seam from outside the library.
-fn stub_runtime_step(view: &mut AppView, command: AppCommand) {
-    match command {
-        AppCommand::Quit => view.modal = Some(ModalKind::QuitRunningAgent),
-        AppCommand::OpenPalette => view.modal = None,
-        AppCommand::ToggleYolo => view.follow_tail = !view.follow_tail,
-        AppCommand::RetryStage(stage) => view.modal = Some(ModalKind::StageError(stage)),
-        AppCommand::CancelModal => view.modal = None,
-        AppCommand::SubmitInput { text } => {
-            view.status = Some(StatusMessage {
-                text: text.into(),
-                severity: StatusSeverity::Info,
-            });
-        }
-        _ => {}
-    }
-}
+use tempfile::tempdir;
 
 #[test]
 fn channels_carry_a_full_command_view_round_trip() {
+    let dir = tempdir().expect("tempdir");
+    let live_summary_path = dir.path().join("live.txt");
+    std::fs::write(&live_summary_path, "approved").expect("seed");
     let (ui, runtime) = channel_pair();
-    let mut view = AppView::empty("integration-session");
-
-    runtime
-        .views_tx
-        .send(view.clone())
-        .expect("publish initial view");
-    let initial = ui
-        .views_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("ui receives initial view");
-    assert_eq!(initial.session_id.as_ref(), "integration-session");
-    assert_eq!(initial.phase, Phase::IdeaInput);
-    assert!(initial.agent_runs.is_empty());
 
     let script = [
         AppCommand::ToggleYolo,
@@ -63,30 +34,32 @@ fn channels_carry_a_full_command_view_round_trip() {
     ];
 
     for command in script {
-        ui.commands_tx
-            .send(command.clone())
-            .expect("ui sends command");
-        let received = runtime
-            .commands_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("runtime drains command");
-        assert_eq!(received, command);
-        stub_runtime_step(&mut view, received);
-        runtime
-            .views_tx
-            .send(view.clone())
-            .expect("runtime publishes view");
-        let _next = ui
-            .views_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("ui receives next view");
+        ui.commands_tx.send(command).expect("ui sends command");
     }
+    let mut app_runtime =
+        headless_runtime_for_live_summary("integration-session", &live_summary_path);
+    let control = run_headless_until_exit(&mut app_runtime, runtime).expect("run headless runtime");
 
-    assert!(view.modal.is_none(), "modal should clear after CancelModal");
-    let status = view.status.as_ref().expect("submitted text became status");
+    assert_eq!(control, RuntimeControl::Continue);
+    let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+    assert_eq!(snapshots[0].session_id.as_ref(), "integration-session");
+    assert_eq!(snapshots[0].phase, Phase::IdeaInput);
+    assert!(snapshots[0].agent_runs.is_empty());
+    assert!(snapshots[1].modes.yolo, "ToggleYolo flipped yolo on");
+    assert_eq!(
+        snapshots[2].modal,
+        Some(ModalKind::StageError(StageId::Sharding))
+    );
+    assert!(
+        snapshots[3].modal.is_none(),
+        "modal should clear after CancelModal"
+    );
+    let status = snapshots[4]
+        .status
+        .as_ref()
+        .expect("submitted text triggered data status");
     assert_eq!(status.text.as_ref(), "approved");
     assert_eq!(status.severity, StatusSeverity::Info);
-    assert!(!view.follow_tail, "ToggleYolo flipped follow_tail off");
 }
 
 #[test]

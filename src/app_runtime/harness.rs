@@ -1,4 +1,4 @@
-//! Stubbed-UI harness exercising the [`AppView`]/[`AppCommand`] seam.
+//! Headless runtime and stubbed-UI harness for the [`AppView`]/[`AppCommand`] seam.
 //!
 //! The seam between [`crate::app_runtime`] and [`crate::ui`] is two
 //! channels: the runtime publishes [`AppView`] snapshots, the UI emits
@@ -6,16 +6,21 @@
 //! callers) a pair of typed channels they can wire up without any
 //! terminal or rendering dependencies.
 //!
-//! Today the production TUI still owns the state directly via
-//! [`crate::app::App`]; the harness proves the seam is real and works
-//! end-to-end without touching `ratatui`/`crossterm`. The next slice of
-//! the refactor will switch the production runtime to publish through
-//! [`UiChannels::views_tx`] instead of mutating the TUI struct in place.
+//! Today the production TUI still owns some state directly via
+//! [`crate::app::App`], but this headless runner owns its [`AppView`]
+//! state inside `app_runtime` and routes representative commands through
+//! real logic and data entrypoints. That gives integration tests and
+//! future server-mode callers a runtime-owned surface without touching
+//! `ratatui`/`crossterm`.
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use super::{AppCommand, AppView};
+use super::{AppCommand, AppView, ModalKind, StageId, StatusMessage, StatusSeverity};
+use crate::data::events::{DataOutcome, DataRequest, dispatch};
+use crate::logic::rules::retry_phase_for_stage;
 
 /// UI side of the runtime seam. The UI sends operator intent and reads
 /// derived snapshots; it does not have access to runtime-internal state.
@@ -83,6 +88,131 @@ impl RuntimeHarness {
     }
 }
 
+/// Runtime-owned, terminal-free event pump for tests and future non-TUI UIs.
+///
+/// The runner owns the authoritative [`AppView`], consumes [`AppCommand`]s
+/// from the UI channel, routes domain decisions through [`crate::logic`],
+/// dispatches side-effect reads through [`crate::data`], then publishes the
+/// resulting snapshot. Tests should assert on the published snapshots, not
+/// mutate or recompute a local view.
+pub struct HeadlessRuntime {
+    view: AppView,
+    live_summary_path: PathBuf,
+}
+
+impl HeadlessRuntime {
+    pub fn new(view: AppView, live_summary_path: impl Into<PathBuf>) -> Self {
+        Self {
+            view,
+            live_summary_path: live_summary_path.into(),
+        }
+    }
+
+    pub fn view(&self) -> &AppView {
+        &self.view
+    }
+
+    fn apply_command(&mut self, command: AppCommand) -> RuntimeControl {
+        let is_quit = matches!(command, AppCommand::Quit);
+        match command {
+            AppCommand::Quit => {
+                self.view.modal = Some(ModalKind::QuitRunningAgent);
+            }
+            AppCommand::OpenPalette | AppCommand::CancelModal => {
+                self.view.modal = None;
+            }
+            AppCommand::ToggleYolo => {
+                self.view.modes.yolo = !self.view.modes.yolo;
+            }
+            AppCommand::ToggleCheap => {
+                self.view.modes.cheap = !self.view.modes.cheap;
+            }
+            AppCommand::RetryStage(stage) => {
+                if let Some(phase) = retry_phase_for_stage(stage_name(stage)) {
+                    self.view.phase = phase;
+                    self.view.modal = Some(ModalKind::StageError(stage));
+                }
+            }
+            AppCommand::SubmitInput { text } => {
+                self.apply_live_summary_status(&text);
+            }
+            AppCommand::DismissStatus => {
+                self.view.status = None;
+            }
+            _ => {}
+        }
+        if is_quit {
+            RuntimeControl::Exit
+        } else {
+            RuntimeControl::Continue
+        }
+    }
+
+    fn apply_live_summary_status(&mut self, fallback: &str) {
+        let outcome = dispatch(DataRequest::ReadLiveSummary {
+            path: self.live_summary_path.clone(),
+        });
+        let DataOutcome::LiveSummaryRead(snapshot) = outcome else {
+            // Keep this explicit so future DataRequest rewrites cannot
+            // silently publish a status for the wrong side-effect outcome.
+            panic!("ReadLiveSummary must return LiveSummaryRead");
+        };
+        self.view.status = Some(match snapshot {
+            Some(snap) => StatusMessage {
+                text: Arc::from(snap.content.as_str()),
+                severity: StatusSeverity::Info,
+            },
+            None => StatusMessage {
+                text: Arc::from(fallback),
+                severity: StatusSeverity::Warn,
+            },
+        });
+    }
+}
+
+fn stage_name(stage: StageId) -> &'static str {
+    match stage {
+        StageId::Brainstorm => "brainstorm",
+        StageId::SpecReview => "spec-review",
+        StageId::Planning => "planning",
+        StageId::PlanReview => "plan-review",
+        StageId::Sharding => "sharding",
+        StageId::Implementation => "implementation",
+        StageId::Review => "review",
+    }
+}
+
+/// Run a headless app runtime until it drains commands or receives quit.
+///
+/// An initial view is published before command processing starts. Every
+/// drained command publishes exactly one subsequent runtime-owned snapshot.
+pub fn run_headless_until_exit(
+    runtime: &mut HeadlessRuntime,
+    channels: RuntimeChannels,
+) -> Result<RuntimeControl> {
+    channels.views_tx.send(runtime.view.clone())?;
+    let mut control = RuntimeControl::Continue;
+    while let Ok(command) = channels.commands_rx.try_recv() {
+        control = runtime.apply_command(command);
+        channels.views_tx.send(runtime.view.clone())?;
+        if control == RuntimeControl::Exit {
+            break;
+        }
+    }
+    Ok(control)
+}
+
+/// Convenience helper for tests that need a real data dispatch path.
+pub fn headless_runtime_for_live_summary(
+    session_id: impl Into<Arc<str>>,
+    live_summary_path: impl AsRef<Path>,
+) -> HeadlessRuntime {
+    HeadlessRuntime::new(
+        AppView::empty(session_id),
+        live_summary_path.as_ref().to_path_buf(),
+    )
+}
+
 /// Drive the app-runtime command/view seam without terminal UI.
 pub fn run_harness_until_exit(
     harness: &mut RuntimeHarness,
@@ -102,8 +232,8 @@ pub fn run_harness_until_exit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_runtime::view::{ModalKind, StageId};
     use crate::logic::pipeline::Phase;
+    use tempfile::tempdir;
 
     /// Minimal stubbed runtime that reacts to commands by mutating an
     /// [`AppView`] and publishing the next snapshot. This is not the
@@ -184,5 +314,36 @@ mod tests {
         // After the script the modal returns to None — proves command
         // routing is bidirectional and pure-value.
         assert!(view.modal.is_none());
+    }
+
+    #[test]
+    fn headless_runtime_routes_logic_and_data_before_publishing() {
+        let dir = tempdir().expect("tempdir");
+        let live_summary_path = dir.path().join("live.txt");
+        std::fs::write(&live_summary_path, "runtime-owned").expect("seed");
+        let (ui, channels) = channel_pair();
+        ui.commands_tx
+            .send(AppCommand::RetryStage(StageId::Brainstorm))
+            .expect("send retry");
+        ui.commands_tx
+            .send(AppCommand::SubmitInput {
+                text: "fallback".to_string(),
+            })
+            .expect("send input");
+        ui.commands_tx.send(AppCommand::Quit).expect("send quit");
+
+        let mut runtime = headless_runtime_for_live_summary("headless", &live_summary_path);
+        let control = run_headless_until_exit(&mut runtime, channels).expect("run");
+
+        assert_eq!(control, RuntimeControl::Exit);
+        assert_eq!(runtime.view().phase, Phase::BrainstormRunning);
+        let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+        assert_eq!(snapshots.len(), 4);
+        assert_eq!(snapshots[1].phase, Phase::BrainstormRunning);
+        assert_eq!(
+            snapshots[2].status.as_ref().unwrap().text.as_ref(),
+            "runtime-owned"
+        );
+        assert_eq!(snapshots[3].modal, Some(ModalKind::QuitRunningAgent));
     }
 }

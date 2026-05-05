@@ -2,21 +2,12 @@ use super::*;
 use crate::app::chat_widget;
 use crate::app::clock::WallClock;
 use crate::app::split::{SplitTarget, run_main_panel_message_visible};
+use crate::ui::render::frame_cache::{
+    PipelineLine, PipelineLineKind, cached_pipeline_lines, cached_pipeline_lines_filtered,
+};
 
 pub(crate) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PipelineLineKind {
-    Other,
-    RunningLeafTail { run_id: u64 },
-    RunningContainerPlaceholder { run_id: u64 },
-}
-
-struct PipelineLine {
-    line: Line<'static>,
-    kind: PipelineLineKind,
 }
 
 pub(crate) struct RunningTailLine {
@@ -109,10 +100,25 @@ impl App {
             .any(|run| run.status == RunStatus::Running)
     }
 
-    fn pipeline_render_lines(
+    pub(crate) fn pipeline_render_lines(
         &self,
         suppressed_container_runs: &BTreeSet<u64>,
     ) -> Vec<PipelineLine> {
+        // The render frame cache holds the empty-suppressed result; callers
+        // with a non-empty suppressed set are served by a cheap O(N_lines)
+        // filter that drops `RunningContainerPlaceholder` rows for the
+        // suppressed run ids. Recomputing the whole transcript every call was
+        // the dominant TUI cost on large sessions.
+        if suppressed_container_runs.is_empty() {
+            cached_pipeline_lines(|| self.compute_pipeline_render_lines())
+        } else {
+            cached_pipeline_lines_filtered(suppressed_container_runs, || {
+                self.compute_pipeline_render_lines()
+            })
+        }
+    }
+
+    fn compute_pipeline_render_lines(&self) -> Vec<PipelineLine> {
         let mut lines = Vec::new();
         if matches!(
             self.state.current_phase,
@@ -137,7 +143,7 @@ impl App {
                 kind: PipelineLineKind::Other,
             });
             if expanded && self.is_expanded_body(index) {
-                lines.extend(self.node_body_for_render(index, suppressed_container_runs));
+                lines.extend(self.node_body_for_render(index, &BTreeSet::new()));
             }
         }
         lines

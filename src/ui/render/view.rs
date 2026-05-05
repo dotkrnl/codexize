@@ -80,6 +80,12 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
 
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
+        // Hold a frame cache for the duration of this draw so the helpers
+        // that pre-rendered the transcript several times per frame
+        // (header_y_offsets, running_depth_0_header, pipeline_render_lines)
+        // share one computation. The guard's Drop clears the cache, so
+        // event-handler paths outside `draw` keep recomputing live.
+        let _frame_guard = super::frame_cache::FrameGuard::enter();
         let area = frame.area();
         let term_h = area.height;
         let width = area.width;

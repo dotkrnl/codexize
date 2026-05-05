@@ -6,9 +6,14 @@
 
 use crate::app::App;
 use crate::state::NodeStatus;
+use crate::ui::render::frame_cache::{cached_header_y_offsets, cached_running_depth_0_header};
 
 impl App {
     pub(crate) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
+        cached_header_y_offsets(|| self.compute_header_y_offsets())
+    }
+
+    fn compute_header_y_offsets(&self) -> (Vec<usize>, usize) {
         let mut ys = Vec::with_capacity(self.visible_rows.len());
         let mut y = 0usize;
         for i in 0..self.visible_rows.len() {
@@ -22,6 +27,10 @@ impl App {
     }
 
     pub(crate) fn running_depth_0_header(&self) -> Option<(usize, usize)> {
+        cached_running_depth_0_header(|| self.compute_running_depth_0_header())
+    }
+
+    fn compute_running_depth_0_header(&self) -> Option<(usize, usize)> {
         let (ys, _) = self.header_y_offsets();
         let mut candidates = self
             .visible_rows

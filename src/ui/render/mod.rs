@@ -1,3 +1,4 @@
+pub(crate) mod frame_cache;
 pub(crate) mod state;
 pub(crate) mod view;
 

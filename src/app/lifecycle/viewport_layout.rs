@@ -20,7 +20,9 @@ impl App {
             ys.push(y);
             y += 1;
             if self.is_expanded_body(i) {
-                y += self.node_body(i).len();
+                // `node_body_len` reads from the per-row body cache without
+                // cloning every `Line` just to take `.len()`.
+                y += self.node_body_len(i);
             }
         }
         (ys, y)

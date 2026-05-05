@@ -4,7 +4,9 @@ use crate::app::clock::WallClock;
 use crate::app::split::{SplitTarget, run_main_panel_message_visible};
 use crate::ui::render::frame_cache::{
     PipelineLine, PipelineLineKind, cached_pipeline_lines, cached_pipeline_lines_filtered,
+    cached_row_body,
 };
+use std::rc::Rc;
 
 pub(crate) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
@@ -143,7 +145,9 @@ impl App {
                 kind: PipelineLineKind::Other,
             });
             if expanded && self.is_expanded_body(index) {
-                lines.extend(self.node_body_for_render(index, &BTreeSet::new()));
+                // Pull from the per-row cache so `header_y_offsets` and the
+                // pipeline body share one wrapping pass.
+                lines.extend(self.cached_row_body_with_empty(index).iter().cloned());
             }
         }
         lines
@@ -310,23 +314,19 @@ impl App {
         Line::from(spans).style(style)
     }
 
-    pub(crate) fn node_body(&self, index: usize) -> Vec<Line<'static>> {
-        let width = self.body_inner_width.max(1);
-        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        self.node_body_lines_with_offset(index, width, &local_offset, &BTreeSet::new())
-            .into_iter()
-            .map(|rendered| rendered.line)
-            .collect()
+    pub(crate) fn cached_row_body_with_empty(&self, index: usize) -> Rc<Vec<PipelineLine>> {
+        cached_row_body(index, || {
+            let width = self.body_inner_width.max(1);
+            let local_offset = chrono::Local::now().fixed_offset().offset().fix();
+            self.node_body_lines_with_offset(index, width, &local_offset, &BTreeSet::new())
+        })
     }
 
-    fn node_body_for_render(
-        &self,
-        index: usize,
-        suppressed_container_runs: &BTreeSet<u64>,
-    ) -> Vec<PipelineLine> {
-        let width = self.body_inner_width.max(1);
-        let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-        self.node_body_lines_with_offset(index, width, &local_offset, suppressed_container_runs)
+    /// Cheap length-only accessor for `node_body`. Reads the cached row
+    /// body's length without cloning each `Line`, which `header_y_offsets`
+    /// drives once per row per frame.
+    pub(crate) fn node_body_len(&self, index: usize) -> usize {
+        self.cached_row_body_with_empty(index).len()
     }
 
     fn node_body_lines_with_offset(

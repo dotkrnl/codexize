@@ -18,7 +18,8 @@
 
 use ratatui::text::Line;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PipelineLineKind {
@@ -38,6 +39,12 @@ struct FrameCache {
     pipeline_lines: Option<Vec<PipelineLine>>,
     header_y_offsets: Option<(Vec<usize>, usize)>,
     running_depth_0_header: Option<Option<(usize, usize)>>,
+    /// Per-row body lines, keyed by `visible_rows` index. Both
+    /// `header_y_offsets` (which needs only the body length) and
+    /// `compute_pipeline_render_lines` (which extends the line list) read
+    /// from the same cache, so each row's messages are wrapped at most once
+    /// per frame.
+    row_bodies: HashMap<usize, Rc<Vec<PipelineLine>>>,
 }
 
 thread_local! {
@@ -169,6 +176,27 @@ where
     })
 }
 
+/// Return the cached body lines for `index` (computed with an empty
+/// `suppressed_container_runs`), populating via `populate` on first miss.
+/// Returns an `Rc` so callers can share the cached body without cloning the
+/// inner vec; copying out individual `Line`s remains the caller's choice.
+pub(crate) fn cached_row_body<F>(index: usize, populate: F) -> Rc<Vec<PipelineLine>>
+where
+    F: FnOnce() -> Vec<PipelineLine>,
+{
+    if !in_frame() {
+        return Rc::new(populate());
+    }
+    if let Some(body) = CACHE.with(|c| c.borrow().row_bodies.get(&index).cloned()) {
+        return body;
+    }
+    let body = Rc::new(populate());
+    CACHE.with(|c| {
+        c.borrow_mut().row_bodies.insert(index, Rc::clone(&body));
+    });
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +245,34 @@ mod tests {
             (vec![2], 2)
         });
         assert_eq!(count, 1, "cache must repopulate in the new frame");
+    }
+
+    #[test]
+    fn cached_row_body_populates_each_index_once() {
+        let _guard = FrameGuard::enter();
+        let mut count = 0;
+        let body_a1 = cached_row_body(0, || {
+            count += 1;
+            vec![PipelineLine {
+                line: Line::from("a"),
+                kind: PipelineLineKind::Other,
+            }]
+        });
+        let body_a2 = cached_row_body(0, || {
+            count += 1;
+            unreachable!("row 0 already cached");
+        });
+        let body_b = cached_row_body(1, || {
+            count += 1;
+            vec![PipelineLine {
+                line: Line::from("b"),
+                kind: PipelineLineKind::Other,
+            }]
+        });
+        assert_eq!(count, 2);
+        assert!(Rc::ptr_eq(&body_a1, &body_a2));
+        assert_eq!(body_a1.len(), 1);
+        assert_eq!(body_b.len(), 1);
     }
 
     #[test]

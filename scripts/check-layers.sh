@@ -20,6 +20,20 @@ LAYER_RULES = {
             "backend IO/process",
             re.compile(r"\b(?:std::fs|std::process|tokio::fs|notify|portable_pty|reqwest)\b"),
         ),
+        (
+            "backend cache/dashboard/quota IO",
+            # Forbids the IO entrypoints regardless of which alias the call
+            # site uses (`crate::cache::load`, `cache::save_dashboard`,
+            # `dashboard::load_models`, `quota::load_quota_maps_for`, …).
+            # Type imports such as `cache::DashboardEntry` or
+            # `cache::LoadedSection` are intentionally NOT matched —
+            # only the IO-performing functions are.
+            re.compile(
+                r"\b(?:cache::(?:load\b|save_(?:dashboard|quotas|quota_resets))"
+                r"|dashboard(?:_io)?::load_models"
+                r"|load_quota_maps(?:_for)?)\b"
+            ),
+        ),
     ],
     "data": [
         ("terminal UI", re.compile(r"\b(?:ratatui|crossterm)\b")),

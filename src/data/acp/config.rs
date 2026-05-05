@@ -88,11 +88,11 @@ impl AcpConfig {
         );
         env.insert(
             "CODEXIZE_ACP_EFFECTIVE_EFFORT".to_string(),
-            reasoning_effort.as_str().to_string(),
+            reasoning_effort.to_string(),
         );
         env.insert(
             "CODEXIZE_ACP_PERMISSION_MODE".to_string(),
-            permission_mode.as_str().to_string(),
+            permission_mode.to_string(),
         );
         env.insert(
             "CODEXIZE_ACP_INTERACTIVE".to_string(),
@@ -140,11 +140,11 @@ impl AcpConfig {
         );
         metadata.insert(
             "codexize.effective_effort".to_string(),
-            reasoning_effort.as_str().to_string(),
+            reasoning_effort.to_string(),
         );
         metadata.insert(
             "codexize.permission_mode".to_string(),
-            permission_mode.as_str().to_string(),
+            permission_mode.to_string(),
         );
         metadata.insert(
             "codexize.interactive".to_string(),

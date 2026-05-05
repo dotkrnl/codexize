@@ -1147,12 +1147,9 @@ fn apply_session_config(
     // uses the common ask/code convention and falls back to the codexize env
     // contract whenever an agent exposes different labels.
     let desired = [
-        ("mode", session.permission_mode.as_str().to_string()),
+        ("mode", session.permission_mode.to_string()),
         ("model", session.model.clone()),
-        (
-            "thought_level",
-            session.reasoning_effort.as_str().to_string(),
-        ),
+        ("thought_level", session.reasoning_effort.to_string()),
     ];
     let baseline_options = config_options.clone();
 

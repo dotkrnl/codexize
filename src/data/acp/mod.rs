@@ -22,11 +22,15 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 pub type AcpResult<T> = Result<T, AcpError>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AcpError {
+    #[error("{0}")]
     HumanBlock(String),
+    #[error("{0}")]
     Busy(String),
+    #[error("{0}")]
     Io(String),
+    #[error("{0}")]
     Protocol(String),
 }
 
@@ -48,19 +52,6 @@ impl AcpError {
     }
 }
 
-impl std::fmt::Display for AcpError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::HumanBlock(message)
-            | Self::Busy(message)
-            | Self::Io(message)
-            | Self::Protocol(message) => f.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for AcpError {}
-
 impl From<std::io::Error> for AcpError {
     fn from(value: std::io::Error) -> Self {
         Self::io(value.to_string())
@@ -73,36 +64,22 @@ pub enum PromptPayload {
     File(PathBuf),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpReasoningEffort {
+    #[strum(to_string = "low")]
     Low,
+    #[strum(to_string = "medium")]
     Medium,
+    #[strum(to_string = "high")]
     High,
 }
 
-impl AcpReasoningEffort {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpPermissionMode {
+    #[strum(to_string = "ask")]
     Ask,
+    #[strum(to_string = "code")]
     Code,
-}
-
-impl AcpPermissionMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ask => "ask",
-            Self::Code => "code",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -74,7 +74,7 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
         crate::app_runtime::ModalKind::StageError(stage) => {
             ModalKind::StageError(stage_from_runtime(stage))
         }
-        crate::app_runtime::ModalKind::FinalValidationBlocked => ModalKind::FinalValidationBlocked, // TODO: Task A2 wires this
+        crate::app_runtime::ModalKind::FinalValidationBlocked => ModalKind::FinalValidationBlocked, // structural pass-through; active_modal() is wired in Task A2
     }
 }
 

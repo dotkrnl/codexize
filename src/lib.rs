@@ -8,7 +8,7 @@ pub use crate::data::cache_lock;
 pub mod coder_summary;
 pub use crate::data::dashboard_io as dashboard;
 pub mod data;
-pub mod final_validation;
+pub use crate::data::validation as final_validation;
 pub use crate::ui::input_editor;
 pub mod logic;
 pub mod model_names;

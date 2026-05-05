@@ -3279,3 +3279,24 @@ fn main_panel_shows_live_summary_tail_for_both_run_modes() {
         );
     }
 }
+
+#[test]
+fn final_validation_blocked_modal_body_lists_actions() {
+    let mut app = test_app(Vec::new(), Vec::new(), Vec::new());
+    app.state.current_phase = Phase::BlockedNeedsUser;
+    app.state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+
+    let lines = app.modal_content_lines(ModalKind::FinalValidationBlocked, 80);
+    let text = lines
+        .iter()
+        .map(line_to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(text.contains("Final validation blocked"), "missing header: {text}");
+    assert!(text.contains("Operator action required"), "missing operator message: {text}");
+    assert!(text.contains("Force ship"), "missing Force ship hint: {text}");
+    assert!(text.contains("Recover"), "missing Recover hint: {text}");
+    assert!(text.contains("F"), "missing F key hint: {text}");
+    assert!(text.contains("R"), "missing R key hint: {text}");
+}

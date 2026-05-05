@@ -540,7 +540,27 @@ impl App {
             ModalKind::StageError(stage_id) => {
                 stage_error_content(stage_id, self.state.agent_error.as_deref(), width)
             }
-            ModalKind::FinalValidationBlocked => vec![], // TODO: Task A3 wires this
+            ModalKind::FinalValidationBlocked => vec![
+                Line::from(Span::styled(
+                    "Final validation blocked.".to_string(),
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "Operator action required.".to_string(),
+                    Style::default().fg(Color::White),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        "  [ F ] Force ship to Done       ".to_string(),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "[ R ] Recover".to_string(),
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+            ],
         }
     }
 }

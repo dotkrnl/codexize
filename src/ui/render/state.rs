@@ -325,7 +325,7 @@ pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
         | ModalKind::QuitRunningAgent
         | ModalKind::InteractiveExitPrompt => Color::Yellow,
         ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => Color::Cyan,
-        ModalKind::FinalValidationBlocked => Color::Yellow, // TODO: Task A3 wires this
+        ModalKind::FinalValidationBlocked => Color::Red,
     }
 }
 
@@ -338,7 +338,7 @@ pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
         ModalKind::SpecReviewPaused => Some("Spec review complete"),
         ModalKind::PlanReviewPaused => Some("Plan review complete"),
         ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),
-        ModalKind::FinalValidationBlocked => None, // TODO: Task A3 wires this
+        ModalKind::FinalValidationBlocked => Some("Final Validation Blocked"),
     }
 }
 

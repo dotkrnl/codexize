@@ -2,6 +2,7 @@ use super::*;
 use crate::app::chat_widget::ChatWidget;
 use crate::app::split::SplitTarget;
 use crate::state::Phase;
+use crate::tui::wrap_text;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -82,7 +83,7 @@ impl SplitWidget<'_> {
             Style::default().fg(Color::DarkGray),
         )));
 
-        for chunk in wrap_input(idea, inner_width) {
+        for chunk in wrap_text(idea, inner_width) {
             let padding = inner_width.saturating_sub(chunk.chars().count());
             lines.push(Line::from(vec![
                 Span::styled("│ ", Style::default().fg(Color::DarkGray)),
@@ -143,7 +144,7 @@ impl SplitWidget<'_> {
         };
 
         let inner_width = width.saturating_sub(4);
-        let mut wrapped = wrap_input(&text, inner_width);
+        let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }

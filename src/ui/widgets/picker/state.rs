@@ -2,7 +2,7 @@ use super::helpers as picker_view_model;
 use crate::app::palette::{self, PaletteCommand, PaletteState};
 use crate::app::{Capability, KeyBinding, Severity, StatusLine, bottom_sheet, render_keymap_line};
 use crate::state::{self as session_state, Modes, Phase, SessionState};
-use crate::tui::{AppTerminal, wrap_input};
+use crate::tui::{AppTerminal, wrap_text};
 use crate::ui::chrome::{
     bottom_rule,
     modal::{render_modal_backdrop, render_modal_overlay},

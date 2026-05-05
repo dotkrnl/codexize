@@ -9,7 +9,7 @@ use crate::data::preflight as backend;
 pub use crate::data::preflight::PreflightOutcome;
 use crate::data::preflight::Scenario;
 use crate::state::codexize_root;
-use crate::tui::{AppTerminal, wrap_input};
+use crate::tui::{AppTerminal, wrap_text};
 use crate::ui::chrome::modal::{modal_inner_width, render_modal_overlay};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -160,7 +160,7 @@ fn preflight_body_lines(
         if idx > 0 {
             lines.push(Line::from(""));
         }
-        for wrapped in wrap_input(&paragraph, inner_width.max(1)) {
+        for wrapped in wrap_text(&paragraph, inner_width.max(1)) {
             lines.push(Line::from(Span::styled(
                 wrapped,
                 Style::default().fg(Color::White),

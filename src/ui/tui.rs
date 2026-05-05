@@ -150,21 +150,54 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     }))
 }
 
-/// Hard-wrap the input text into lines of at most `width` chars, preferring
-/// word boundaries when the line has any spaces. Preserves explicit newlines.
-pub fn wrap_input(text: &str, width: usize) -> Vec<String> {
+/// Strip ANSI escape sequences (CSI form `ESC[…<final-byte>`) from `s`.
+/// Shared across the TUI so chat transcript wrapping, validation report
+/// rendering, and live-summary sanitation all agree on what counts as a
+/// printable column.
+pub fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&c) = chars.peek() {
+                    chars.next();
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Hard-wrap `text` into lines of at most `width` printable chars, preferring
+/// word boundaries when the line has any spaces. Preserves explicit newlines
+/// and strips ANSI escape sequences first so width math counts only what the
+/// terminal actually renders.
+///
+/// This is the single text-wrap helper for the TUI — chat messages, input
+/// sheets, palette/picker hints, validation reports, and modal bodies all
+/// route through it so width handling stays consistent (and so a missing
+/// wrap call shows up as a search hit).
+pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return Vec::new();
     }
     let mut out = Vec::new();
     for raw_line in text.split('\n') {
-        if raw_line.is_empty() {
+        let clean = strip_ansi(raw_line);
+        if clean.is_empty() {
             out.push(String::new());
             continue;
         }
         let mut current = String::new();
         let mut current_len = 0usize;
-        for word in raw_line.split_inclusive(' ') {
+        for word in clean.split_inclusive(' ') {
             let word_len = word.chars().count();
             if current_len + word_len <= width {
                 current.push_str(word);
@@ -179,7 +212,7 @@ pub fn wrap_input(text: &str, width: usize) -> Vec<String> {
                 current.push_str(word);
                 current_len = word_len;
             } else {
-                let mut remaining = word;
+                let mut remaining: &str = word;
                 while remaining.chars().count() > width {
                     let split_at = remaining
                         .char_indices()
@@ -221,8 +254,8 @@ mod tests {
     }
 
     #[test]
-    fn wrap_input_zero_width_returns_empty() {
-        assert!(wrap_input("anything", 0).is_empty());
+    fn wrap_text_zero_width_returns_empty() {
+        assert!(wrap_text("anything", 0).is_empty());
     }
 
     #[test]
@@ -244,14 +277,14 @@ mod tests {
     }
 
     #[test]
-    fn wrap_input_preserves_explicit_newlines() {
-        let lines = wrap_input("first\nsecond", 100);
+    fn wrap_text_preserves_explicit_newlines() {
+        let lines = wrap_text("first\nsecond", 100);
         assert_eq!(lines, vec!["first".to_string(), "second".to_string()]);
     }
 
     #[test]
-    fn wrap_input_keeps_trailing_blank_lines() {
-        let lines = wrap_input("a\n\n\nb", 5);
+    fn wrap_text_keeps_trailing_blank_lines() {
+        let lines = wrap_text("a\n\n\nb", 5);
         assert_eq!(
             lines,
             vec![
@@ -264,16 +297,16 @@ mod tests {
     }
 
     #[test]
-    fn wrap_input_short_input_fits_one_line() {
+    fn wrap_text_short_input_fits_one_line() {
         assert_eq!(
-            wrap_input("hello world", 80),
+            wrap_text("hello world", 80),
             vec!["hello world".to_string()]
         );
     }
 
     #[test]
-    fn wrap_input_breaks_on_word_boundary_when_possible() {
-        let lines = wrap_input("alpha beta gamma", 10);
+    fn wrap_text_breaks_on_word_boundary_when_possible() {
+        let lines = wrap_text("alpha beta gamma", 10);
         // "alpha beta" is 10 chars (incl. trailing space "alpha beta " = 11),
         // so the wrap point should split at the first space that overflows.
         assert!(
@@ -285,10 +318,10 @@ mod tests {
     }
 
     #[test]
-    fn wrap_input_hard_breaks_overlong_word() {
+    fn wrap_text_hard_breaks_overlong_word() {
         // A single word longer than width must be split mid-word into chunks
         // each at most `width` chars wide.
-        let lines = wrap_input("aaaaaaaaaaaaaaaaa", 5);
+        let lines = wrap_text("aaaaaaaaaaaaaaaaa", 5);
         assert_eq!(lines.len(), 4);
         assert_eq!(lines[0], "aaaaa");
         assert_eq!(lines[1], "aaaaa");
@@ -297,9 +330,9 @@ mod tests {
     }
 
     #[test]
-    fn wrap_input_handles_unicode_by_char_count() {
+    fn wrap_text_handles_unicode_by_char_count() {
         // Non-ASCII chars count as 1 char each (not bytes).
-        let lines = wrap_input("héllo wörld", 5);
+        let lines = wrap_text("héllo wörld", 5);
         assert!(
             lines.iter().all(|l| l.chars().count() <= 5),
             "lines must not exceed width by char count: {:?}",

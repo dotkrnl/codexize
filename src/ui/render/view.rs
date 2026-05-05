@@ -7,7 +7,6 @@ use ratatui::{
 };
 
 use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
-use crate::tui::wrap_input;
 use chrono::Offset;
 use std::collections::BTreeSet;
 

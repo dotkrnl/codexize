@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::wrap_text;
 
 impl App {
     pub(crate) fn input_sheet_content(&self, width: u16) -> Vec<Line<'static>> {
@@ -15,7 +16,7 @@ impl App {
             (self.input_buffer.clone(), Style::default().fg(Color::White))
         };
 
-        let mut wrapped = wrap_input(&text, inner_width);
+        let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }

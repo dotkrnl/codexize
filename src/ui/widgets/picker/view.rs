@@ -30,7 +30,7 @@ impl SessionPicker {
 
         let footer_h = if self.input_mode {
             let inner_width = width.saturating_sub(4).max(1) as usize;
-            let wrapped_len = wrap_input(&self.input_buffer, inner_width).len().max(1) as u16;
+            let wrapped_len = wrap_text(&self.input_buffer, inner_width).len().max(1) as u16;
             wrapped_len + 2
         } else {
             1 + status_h
@@ -195,7 +195,7 @@ impl SessionPicker {
                 };
 
                 let wrap_width = area.width.saturating_sub(14).max(1) as usize;
-                let idea_lines = wrap_input(&idea_text, wrap_width);
+                let idea_lines = wrap_text(&idea_text, wrap_width);
                 for (i, il) in idea_lines.iter().enumerate() {
                     let prefix = if i == 0 { "Idea: " } else { "      " };
                     details.push(Line::from(vec![
@@ -358,7 +358,7 @@ impl SessionPicker {
             (self.input_buffer.clone(), Style::default().fg(Color::White))
         };
 
-        let mut wrapped = wrap_input(&text, inner_width);
+        let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }

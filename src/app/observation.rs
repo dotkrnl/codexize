@@ -1,6 +1,5 @@
 // observation.rs
 use super::*;
-use crate::data::events::DataEvent;
 #[cfg(test)]
 use crate::data::events::LiveSummaryEvents;
 use crate::data::observation::{
@@ -59,23 +58,6 @@ impl App {
     #[cfg(test)]
     fn test_uses_real_live_summary_watcher() -> bool {
         std::env::var_os("CODEXIZE_TEST_REAL_WATCHER").is_some()
-    }
-
-    pub(crate) fn process_live_summary_changes(&mut self) {
-        // Drain typed `DataEvent::LiveSummaryChanged` notifications from the
-        // data-owned watcher seam. Multiple coalesced events still trigger a
-        // single re-read because the pipeline is idempotent on repeated
-        // reads of the same mtime.
-        if let Some(ref events) = self.live_summary_change_events {
-            let drained = events.drain();
-            if drained
-                .iter()
-                .any(|event| matches!(event, DataEvent::LiveSummaryChanged))
-            {
-                self.read_live_summary_pipeline();
-            }
-        }
-        self.poll_live_summary_fallback();
     }
 
     pub(crate) fn poll_live_summary_fallback(&mut self) {

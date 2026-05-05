@@ -312,7 +312,7 @@ fn progress_follow_live_summary_refocuses_while_enabled() {
 }
 
 #[test]
-fn live_summary_process_polls_even_when_watcher_has_no_event() {
+fn live_summary_fallback_polls_even_when_watcher_has_no_event() {
     with_temp_root(|| {
         let session_id = "live-summary-watch-delete";
         let mut state = coder_round_state(session_id);
@@ -325,7 +325,7 @@ fn live_summary_process_polls_even_when_watcher_has_no_event() {
         let (_tx, rx) = std::sync::mpsc::channel();
         app.live_summary_change_events = Some(crate::data::events::LiveSummaryEvents::new(rx));
 
-        app.process_live_summary_changes();
+        app.poll_live_summary_fallback();
 
         assert_eq!(app.live_summary_cached_text, "");
         assert_eq!(app.live_summary_cached_mtime, None);

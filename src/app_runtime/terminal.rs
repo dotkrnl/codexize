@@ -7,7 +7,7 @@
 use anyhow::Result;
 
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
-use crate::data::events::{DataOutcome, DataRequest};
+use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::logic::pipeline::RunStatus;
 use crate::{app::App, tui::AppTerminal};
 
@@ -38,6 +38,24 @@ impl TerminalRuntime {
             view.modal = Some(modal);
         }
         view
+    }
+
+    pub(crate) fn drain_live_summary_data_events(
+        &self,
+        events: Option<&LiveSummaryEvents>,
+    ) -> Vec<DataEvent> {
+        events.map(LiveSummaryEvents::drain).unwrap_or_default()
+    }
+
+    fn drain_app_data_events(&mut self, app: &mut App) {
+        let drained = self.drain_live_summary_data_events(app.live_summary_change_events.as_ref());
+        if drained
+            .iter()
+            .any(|event| matches!(event, DataEvent::LiveSummaryChanged))
+        {
+            app.read_live_summary_pipeline();
+        }
+        app.poll_live_summary_fallback();
     }
 
     pub(crate) fn route_command(
@@ -94,6 +112,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         if app.runtime_tick_before_data_drain(terminal)? {
             return Ok(());
         }
+        runtime.drain_app_data_events(app);
         app.runtime_tick_after_data_drain();
 
         let view = runtime.view_for_render(app.current_app_view());
@@ -126,9 +145,10 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
 mod tests {
     use super::*;
     use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
-    use crate::data::events::{DataOutcome, DataRequest};
+    use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
     use crate::logic::pipeline::RunStatus;
     use std::sync::Arc;
+    use std::sync::mpsc;
 
     fn running_view() -> AppView {
         let mut view = AppView::empty("terminal-runtime-test");
@@ -169,6 +189,24 @@ mod tests {
             vec![DataRequest::TerminateRun {
                 window_name: "codexize-run-7-planning".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn runtime_drains_live_summary_watcher_as_data_events() {
+        let runtime = TerminalRuntime::default();
+        let (tx, rx) = mpsc::channel();
+        tx.send(()).expect("send watcher signal");
+        tx.send(()).expect("send watcher signal");
+        let events = LiveSummaryEvents::new(rx);
+
+        assert_eq!(
+            runtime.drain_live_summary_data_events(Some(&events)),
+            vec![DataEvent::LiveSummaryChanged, DataEvent::LiveSummaryChanged]
+        );
+        assert_eq!(
+            runtime.drain_live_summary_data_events(Some(&events)),
+            vec![]
         );
     }
 }

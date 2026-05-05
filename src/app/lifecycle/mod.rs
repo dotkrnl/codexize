@@ -178,9 +178,8 @@ impl App {
     }
 
     /// Pre-data-drain phase of the per-tick coordination. The runtime calls
-    /// this, then drains any [`DataEvent`](crate::data::events::DataEvent)s
-    /// it owns (e.g. tool-call transitions) and routes them per-event, then
-    /// finishes the tick via [`Self::runtime_tick_after_data_drain`].
+    /// this, then drains and routes any [`DataEvent`](crate::data::events::DataEvent)s,
+    /// then finishes the tick via [`Self::runtime_tick_after_data_drain`].
     pub(crate) fn runtime_tick_before_data_drain(
         &mut self,
         terminal: &mut AppTerminal,
@@ -208,7 +207,6 @@ impl App {
         self.maybe_yolo_auto_resolve();
         self.maybe_auto_launch();
         self.update_agent_progress();
-        self.process_live_summary_changes();
         Ok(false)
     }
 

@@ -100,6 +100,7 @@ fn queue_empty_approved_review_enters_simplification_when_not_yolo() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         state.agent_runs.push(RunRecord {
@@ -227,6 +228,7 @@ fn skip_to_impl_coder_completion_enters_simplification_when_not_yolo() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         let run = make_coder_run(1, 1, 1);
@@ -412,6 +414,7 @@ estimated_tokens = 250
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         let run = RunRecord {
@@ -502,6 +505,7 @@ estimated_tokens = 200
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.push_pipeline_item(PipelineItem {
             id: 0,
@@ -513,6 +517,7 @@ estimated_tokens = 200
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         let review_run = RunRecord {

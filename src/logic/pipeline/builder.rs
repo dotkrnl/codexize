@@ -159,6 +159,7 @@ impl BuilderState {
                 mode: None,
                 trigger: None,
                 interactive: None,
+                iteration: 1,
             });
         }
         self.iteration = 0;
@@ -401,6 +402,7 @@ impl BuilderState {
                     mode: None,
                     trigger: None,
                     interactive: None,
+                    iteration: 1,
                 },
             );
         }
@@ -460,6 +462,7 @@ mod tests {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         assert_eq!(builder.max_task_id(), 5);
     }
@@ -487,6 +490,7 @@ mod tests {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         builder.done = vec![1, 2];
         builder.task_titles.insert(7, "t7".to_string());
@@ -507,6 +511,7 @@ mod tests {
                 mode: None,
                 trigger: None,
                 interactive: None,
+                iteration: 1,
             });
             builder.task_titles.insert(tid, format!("Task {tid}"));
         }
@@ -637,6 +642,7 @@ mod tests {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
 
         let ids = builder

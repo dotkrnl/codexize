@@ -275,6 +275,21 @@ pub struct PipelineItem {
     pub trigger: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
+    /// Outer iteration this task belongs to. Original tasks (and stages
+    /// without an iteration concept, e.g. recovery sub-pipeline items) are
+    /// in iteration 1. Tasks added by a final-validation goal_gap verdict
+    /// are in iteration 2, the next goal_gap's tasks in iteration 3, and so
+    /// on. The dashboard groups tasks into a separate
+    /// (Loop, Simplification, FinalValidation) trio per iteration so the
+    /// message timeline stays chronological — round-2 messages from
+    /// validator-inserted tasks render after FV[1] instead of mixing into
+    /// the original Loop subtree.
+    #[serde(default = "default_iteration")]
+    pub iteration: u32,
+}
+
+fn default_iteration() -> u32 {
+    1
 }
 
 /// A non-coder run that produced an unauthorized HEAD advance under

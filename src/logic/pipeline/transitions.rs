@@ -220,9 +220,20 @@ pub fn apply_revise_with_new_tasks(
     assigned
 }
 
+/// Append validator-emitted gap tasks under a fresh outer iteration so the
+/// dashboard can render them in their own (Loop, Simplification,
+/// FinalValidation) trio after the prior iteration's FV. Without the bump,
+/// the new tasks would land in the same `Loop` subtree as the original
+/// tasks and their later-round messages would render *before* the prior
+/// FV's messages, breaking the chronology of the message timeline.
+///
+/// `iteration` is the new outer iteration for these tasks — typically
+/// `(max existing pipeline_items.iteration) + 1`. The caller computes it
+/// once so all gap tasks emitted by the same FV verdict share an iteration.
 pub fn append_final_validation_gap_tasks(
     state: &mut SessionState,
     tasks: impl IntoIterator<Item = (u32, String)>,
+    iteration: u32,
 ) {
     for (task_id, title) in tasks {
         state.builder.task_titles.insert(task_id, title.clone());
@@ -236,6 +247,7 @@ pub fn append_final_validation_gap_tasks(
             mode: None,
             trigger: None,
             interactive: None,
+            iteration,
         });
     }
     state.builder.sync_legacy_queue_views();
@@ -252,6 +264,7 @@ pub fn queue_recovery_stage(
     } else {
         "Agent pivot recovery"
     };
+    let iteration = recovery_iteration(state);
     state.builder.push_pipeline_item(PipelineItem {
         id: 0,
         stage: "recovery".to_string(),
@@ -262,10 +275,12 @@ pub fn queue_recovery_stage(
         mode: None,
         trigger: Some(trigger.into()),
         interactive: Some(interactive),
+        iteration,
     });
 }
 
 pub fn queue_recovery_plan_review(state: &mut SessionState, round: u32) {
+    let iteration = recovery_iteration(state);
     state.builder.push_pipeline_item(PipelineItem {
         id: 0,
         stage: "plan-review".to_string(),
@@ -276,10 +291,12 @@ pub fn queue_recovery_plan_review(state: &mut SessionState, round: u32) {
         mode: Some("recovery".to_string()),
         trigger: None,
         interactive: Some(false),
+        iteration,
     });
 }
 
 pub fn queue_recovery_sharding(state: &mut SessionState, round: u32) {
+    let iteration = recovery_iteration(state);
     state.builder.push_pipeline_item(PipelineItem {
         id: 0,
         stage: "sharding".to_string(),
@@ -290,7 +307,32 @@ pub fn queue_recovery_sharding(state: &mut SessionState, round: u32) {
         mode: Some("recovery".to_string()),
         trigger: None,
         interactive: Some(false),
+        iteration,
     });
+}
+
+/// Pick the outer iteration that recovery sub-pipeline items should join:
+/// the iteration of the task that triggered recovery (so the recovery node
+/// renders inside the same Loop[N] subtree as its trigger task), falling
+/// back to the latest iteration in the pipeline.
+fn recovery_iteration(state: &SessionState) -> u32 {
+    let trigger = state.builder.recovery_trigger_task_id;
+    if let Some(task_id) = trigger
+        && let Some(item) = state
+            .builder
+            .pipeline_items
+            .iter()
+            .find(|item| item.stage == "coder" && item.task_id == Some(task_id))
+    {
+        return item.iteration;
+    }
+    state
+        .builder
+        .pipeline_items
+        .iter()
+        .map(|item| item.iteration)
+        .max()
+        .unwrap_or(1)
 }
 
 pub fn mark_latest_pipeline_stage_running(state: &mut SessionState, stage: &str) -> bool {
@@ -702,6 +744,7 @@ mod tests {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
 
         replace_recovery_pipeline(
@@ -717,6 +760,7 @@ mod tests {
                     mode: None,
                     trigger: None,
                     interactive: None,
+                    iteration: 1,
                 },
                 PipelineItem {
                     id: 0,
@@ -728,6 +772,7 @@ mod tests {
                     mode: None,
                     trigger: None,
                     interactive: None,
+                    iteration: 1,
                 },
             ],
             [(2, "new".to_string())],

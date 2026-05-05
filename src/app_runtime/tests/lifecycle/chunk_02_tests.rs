@@ -77,6 +77,7 @@ fn enter_builder_recovery_sets_interactive_for_human_blocked() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         let session_dir = session_state::session_dir("recovery-interactive");

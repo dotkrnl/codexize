@@ -946,6 +946,7 @@ fn test_pipeline_item_create_minimal() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     assert_eq!(item.id, 1);
     assert_eq!(item.stage, "coder");
@@ -965,6 +966,7 @@ fn test_pipeline_item_recovery_with_trigger() {
         mode: None,
         trigger: Some("human_blocked".to_string()),
         interactive: Some(true),
+        iteration: 1,
     };
     assert_eq!(item.trigger.as_deref(), Some("human_blocked"));
     assert_eq!(item.interactive, Some(true));
@@ -982,6 +984,7 @@ fn test_pipeline_item_plan_review_with_mode() {
         mode: Some("recovery".to_string()),
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     assert_eq!(item.mode.as_deref(), Some("recovery"));
     assert_eq!(item.stage, "plan-review");
@@ -1030,6 +1033,7 @@ fn test_builder_push_pipeline_item_auto_id() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     let id = builder.push_pipeline_item(item);
     assert_eq!(id, 1);
@@ -1046,6 +1050,7 @@ fn test_builder_push_pipeline_item_auto_id() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     let id2 = builder.push_pipeline_item(item2);
     assert_eq!(id2, 2);
@@ -1065,6 +1070,7 @@ fn test_builder_push_pipeline_item_explicit_id() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     let id = builder.push_pipeline_item(item);
     assert_eq!(id, 42);
@@ -1083,6 +1089,7 @@ fn test_builder_get_pipeline_item() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     });
     let item = builder.get_pipeline_item(1).unwrap();
     assert_eq!(item.task_id, Some(5));
@@ -1102,6 +1109,7 @@ fn test_builder_update_pipeline_status() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     });
     assert!(builder.update_pipeline_status(1, PipelineItemStatus::Running));
     assert_eq!(
@@ -1130,6 +1138,7 @@ fn test_builder_pipeline_items_by_stage() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
     }
     assert_eq!(builder.pipeline_items_by_stage("coder").len(), 2);
@@ -1151,6 +1160,7 @@ fn test_builder_pending_and_running_items() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     });
     builder.push_pipeline_item(PipelineItem {
         id: 0,
@@ -1162,6 +1172,7 @@ fn test_builder_pending_and_running_items() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     });
     builder.push_pipeline_item(PipelineItem {
         id: 0,
@@ -1173,6 +1184,7 @@ fn test_builder_pending_and_running_items() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     });
     assert_eq!(builder.pending_pipeline_items().len(), 1);
     assert_eq!(builder.running_pipeline_items().len(), 1);
@@ -1192,6 +1204,7 @@ fn test_pipeline_item_toml_roundtrip() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
 
     #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -1220,6 +1233,7 @@ fn test_pipeline_item_toml_skip_none_fields() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
 
     let toml_str = toml::to_string_pretty(&item).unwrap();
@@ -1259,6 +1273,7 @@ fn test_pipeline_item_status_serde_snake_case() {
         mode: None,
         trigger: None,
         interactive: None,
+        iteration: 1,
     };
     let toml_str = toml::to_string_pretty(&item).unwrap();
     assert!(toml_str.contains("human_blocked"));
@@ -1281,6 +1296,7 @@ fn test_pipeline_items_persist_in_session() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.push_pipeline_item(PipelineItem {
             id: 0,
@@ -1292,6 +1308,7 @@ fn test_pipeline_items_persist_in_session() {
             mode: Some("recovery".to_string()),
             trigger: Some("human_blocked".to_string()),
             interactive: Some(true),
+            iteration: 1,
         });
 
         state.save().unwrap();
@@ -1332,6 +1349,7 @@ fn test_pipeline_items_update_then_persist() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state
             .builder

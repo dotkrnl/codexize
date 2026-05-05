@@ -40,6 +40,7 @@ fn recovery_queue_reconcile_preserves_completed_tasks() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.push_pipeline_item(PipelineItem {
             id: 0,
@@ -51,6 +52,7 @@ fn recovery_queue_reconcile_preserves_completed_tasks() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.push_pipeline_item(PipelineItem {
             id: 0,
@@ -62,6 +64,7 @@ fn recovery_queue_reconcile_preserves_completed_tasks() {
             mode: None,
             trigger: Some("agent_pivot".to_string()),
             interactive: Some(false),
+            iteration: 1,
         });
         state.builder.recovery_prev_max_task_id = Some(2);
         state.builder.sync_legacy_queue_views();
@@ -118,6 +121,7 @@ fn approved_review_with_feedback_emits_advisory_message() {
             mode: None,
             trigger: None,
             interactive: None,
+            iteration: 1,
         });
         state.builder.sync_legacy_queue_views();
         state.agent_runs.push(RunRecord {

@@ -180,6 +180,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
             mode: None,
             trigger: Some("agent_pivot".to_string()),
             interactive: Some(false),
+            iteration: 1,
         });
         let run = RunRecord {
             id: 77,
@@ -618,6 +619,7 @@ fn recovery_queue_validation_rejects_completed_id_collision() {
             mode: None,
             trigger: Some("agent_pivot".to_string()),
             interactive: Some(false),
+            iteration: 1,
         });
         let app = idle_app(state);
         // The reconcile should fail because task 1 is already completed

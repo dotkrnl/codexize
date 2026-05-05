@@ -455,9 +455,23 @@ impl App {
         parsed.tasks.extend(new_tasks.iter().cloned());
         let text = toml::to_string_pretty(&parsed)?;
         std::fs::write(&tasks_path, text)?;
+        // Bump the outer iteration so the dashboard renders these tasks
+        // under their own Loop/Simplification/FinalValidation trio. Without
+        // this, later-round messages from the new tasks would land in the
+        // original Loop subtree and break the chronological timeline.
+        let next_iteration = self
+            .state
+            .builder
+            .pipeline_items
+            .iter()
+            .map(|item| item.iteration)
+            .max()
+            .unwrap_or(1)
+            + 1;
         session_state::transitions::append_final_validation_gap_tasks(
             &mut self.state,
             new_tasks.iter().map(|task| (task.id, task.title.clone())),
+            next_iteration,
         );
         Ok(())
     }

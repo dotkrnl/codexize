@@ -86,6 +86,7 @@ fn launch_recovery_uses_interactive_prompt_for_human_blocked() {
             mode: None,
             trigger: Some("human_blocked".to_string()),
             interactive: Some(true),
+            iteration: 1,
         });
 
         let mut app = idle_app(state);
@@ -152,6 +153,7 @@ fn launch_recovery_uses_noninteractive_prompt_for_agent_pivot() {
             mode: None,
             trigger: Some("agent_pivot".to_string()),
             interactive: Some(false),
+            iteration: 1,
         });
 
         let mut app = idle_app(state);

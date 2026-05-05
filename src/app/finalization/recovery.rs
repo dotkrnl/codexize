@@ -91,6 +91,30 @@ impl App {
         true
     }
 
+    /// Iteration the recovery sub-pipeline should join: the iteration of
+    /// the task that triggered recovery, falling back to the latest
+    /// iteration recorded in `pipeline_items`. Recovery never starts a new
+    /// outer iteration on its own — that's reserved for FV goal_gap.
+    fn recovery_outer_iteration(&self) -> u32 {
+        if let Some(task_id) = self.state.builder.recovery_trigger_task_id
+            && let Some(item) = self
+                .state
+                .builder
+                .pipeline_items
+                .iter()
+                .find(|item| item.stage == "coder" && item.task_id == Some(task_id))
+        {
+            return item.iteration;
+        }
+        self.state
+            .builder
+            .pipeline_items
+            .iter()
+            .map(|item| item.iteration)
+            .max()
+            .unwrap_or(1)
+    }
+
     pub(crate) fn started_builder_task_ids(&self) -> BTreeSet<u32> {
         self.state
             .agent_runs
@@ -212,6 +236,11 @@ impl App {
 
         let completed_ids = self.state.builder.done_task_ids();
         let completed_set = completed_ids.iter().copied().collect::<BTreeSet<_>>();
+        // Recovery preserves Approved entries verbatim (with their original
+        // iteration) and inherits the recovery iteration for newly-rewritten
+        // pending tasks, so the rebuilt pipeline still groups under the right
+        // Loop[N] subtree.
+        let recovery_iteration = self.recovery_outer_iteration();
         let mut next_items = self
             .state
             .builder
@@ -237,6 +266,7 @@ impl App {
                     mode: None,
                     trigger: None,
                     interactive: None,
+                    iteration: recovery_iteration,
                 });
             }
         }
@@ -257,6 +287,7 @@ impl App {
                     mode: None,
                     trigger: None,
                     interactive: None,
+                    iteration: recovery_iteration,
                 });
             }
         }
@@ -402,6 +433,7 @@ impl App {
                 self.clear_agent_error();
 
                 // Rebuild pipeline: completed tasks stay as-is, add pending from recovered tasks.
+                let recovery_iteration = self.recovery_outer_iteration();
                 let mut next_items: Vec<PipelineItem> = self
                     .state
                     .builder
@@ -426,6 +458,7 @@ impl App {
                             mode: None,
                             trigger: None,
                             interactive: None,
+                            iteration: recovery_iteration,
                         });
                     }
                 }
@@ -447,6 +480,7 @@ impl App {
                             mode: None,
                             trigger: None,
                             interactive: None,
+                            iteration: recovery_iteration,
                         });
                     }
                 }

@@ -1,8 +1,11 @@
 // finalization/mod.rs
 mod complete;
+mod reason;
 mod reasons;
 mod recovery;
 mod retry_policy;
+
+pub(crate) use reason::Reason;
 
 use super::*;
 use crate::{

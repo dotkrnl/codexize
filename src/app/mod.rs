@@ -7,6 +7,7 @@ mod expansion;
 mod finalization;
 pub use crate::ui::focus_caps;
 pub use crate::ui::footer;
+pub(crate) use finalization::Reason;
 pub(crate) mod guard;
 mod lifecycle;
 pub(crate) mod models;

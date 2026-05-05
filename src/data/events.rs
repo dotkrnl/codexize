@@ -16,27 +16,19 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
-use crate::data::runner::ToolCallTransition;
 
 /// Facts emitted by the data layer that the runtime drains each tick.
 ///
 /// Events are produced by long-lived observers (the live-summary `notify`
-/// watcher; the runner's per-run tool-call transition channels). They carry
-/// just enough context for `app_runtime` to identify which run/path the
-/// event belongs to; the runtime decides what UI updates or follow-up
-/// requests to issue.
+/// watcher). They carry just enough context for `app_runtime` to identify
+/// which run/path the event belongs to; the runtime decides what UI updates
+/// or follow-up requests to issue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataEvent {
     /// The live-summary watcher reported a write. The runtime should
     /// (re-)read the live-summary file via [`DataRequest::ReadLiveSummary`]
     /// and update the watchdog idle clock for the active run.
     LiveSummaryChanged,
-    /// The runner observed a tool-call lifecycle transition for `window_name`.
-    /// The runtime maps it onto the matching watchdog entry.
-    ToolCallTransition {
-        window_name: String,
-        transition: ToolCallTransition,
-    },
 }
 
 /// Typed drain handle for the live-summary `notify` watcher. Holds the raw

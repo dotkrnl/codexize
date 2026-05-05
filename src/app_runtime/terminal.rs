@@ -1,15 +1,13 @@
 //! Production terminal runtime coordinator.
 //!
 //! The TUI owns crossterm event collection and terminal drawing, while this
-//! module owns the application loop ordering: pre-drain tick, drain
-//! [`DataEvent`]s and route them per-event, post-drain tick, render, then
-//! command dispatch.
+//! module owns the application loop ordering: pre-drain tick, post-drain
+//! tick, render, then command dispatch.
 
 use anyhow::Result;
 
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
-use crate::data::events::{DataEvent, DataOutcome, DataRequest};
-use crate::data::runner;
+use crate::data::events::{DataOutcome, DataRequest};
 use crate::logic::pipeline::RunStatus;
 use crate::{app::App, tui::AppTerminal};
 
@@ -89,22 +87,6 @@ impl TerminalRuntime {
     }
 }
 
-/// Drain queued tool-call transitions from `data/runner` and route each
-/// one through the per-event app handler. The runtime owns the drain so
-/// the coordinator (rather than `App`) consumes [`DataEvent`] values.
-fn drain_tool_call_transitions(app: &mut App) {
-    for event in runner::drain_tool_call_events() {
-        let DataEvent::ToolCallTransition {
-            window_name,
-            transition,
-        } = event
-        else {
-            continue;
-        };
-        app.apply_tool_call_transition(&window_name, transition);
-    }
-}
-
 /// Run the production terminal app through the app-runtime seam.
 pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()> {
     let mut runtime = TerminalRuntime::default();
@@ -112,7 +94,6 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         if app.runtime_tick_before_data_drain(terminal)? {
             return Ok(());
         }
-        drain_tool_call_transitions(app);
         app.runtime_tick_after_data_drain();
 
         let view = runtime.view_for_render(app.current_app_view());

@@ -1,99 +1,10 @@
 use super::*;
 
-#[test]
-fn watchdog_clock_pauses_during_tool_call_activity() {
-    with_temp_root(|| {
-        let session_id = "watchdog-toolcall-ac4";
-        let mut state = coder_round_state(session_id);
-        let run = make_coder_run(50, 1, 1);
-        let window_name = run.window_name.clone();
-        state.agent_runs.push(run.clone());
-        let mut app = idle_app(state);
-        app.current_run_id = Some(run.id);
-        app.run_launched = true;
-
-        crate::runner::request_run_label_active_for_test(&window_name);
-        let prompt_path = write_watchdog_test_prompt(session_id, "coder-r1.md");
-        install_watchdog_run(
-            &mut app,
-            run.id,
-            &window_name,
-            prompt_path,
-            EffortLevel::Normal,
-        );
-
-        // Anchor: 30 simulated minutes since the last summary write — but a
-        // single tool call has been in flight for the last 25 minutes,
-        // freezing the idle clock at 5 minutes idle-adjusted.
-        let now = std::time::Instant::now();
-        let state_mut = app
-            .watchdog
-            .get_mut(run.id)
-            .expect("watchdog state registered");
-        state_mut.last_live_summary_event = now - Duration::from_secs(30 * 60);
-        state_mut.pause_began_at = Some(now - Duration::from_secs(25 * 60));
-        state_mut.in_flight_tool_calls = 1;
-
-        app.tick_watchdog();
-        assert!(
-            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
-            "AC4: clock must stay paused while a tool call is in flight",
-        );
-        assert!(
-            crate::runner::drain_test_cancel_receiver_for(&window_name).is_empty(),
-            "AC4: kill must not fire while the clock is paused",
-        );
-
-        // A second concurrent tool call must not advance the clock further.
-        // Its terminal counterpart only releases the pause when in-flight
-        // count returns to zero.
-        let state_mut = app.watchdog.get_mut(run.id).expect("state");
-        state_mut.on_tool_call_started(now);
-        state_mut.on_tool_call_finished(now);
-        assert_eq!(
-            state_mut.in_flight_tool_calls, 1,
-            "AC4: counter (not bool) — concurrent calls do not unpause early"
-        );
-
-        // Now release the long-running call. Tool call ran for 25 minutes; the
-        // idle-adjusted clock advances to 30 - 25 = 5 minutes. Below warn.
-        let state_mut = app.watchdog.get_mut(run.id).expect("state");
-        state_mut.on_tool_call_finished(now);
-        assert_eq!(state_mut.in_flight_tool_calls, 0);
-        app.tick_watchdog();
-        assert!(
-            crate::runner::drain_test_input_receiver_for(&window_name).is_empty(),
-            "AC4: 5 min idle-adjusted is below the 10 min warn threshold",
-        );
-
-        // Push raw idle to 40 minutes; tool-call subtracts 25 → 15 min idle
-        // adjusted, past warn.
-        if let Some(s) = app.watchdog.get_mut(run.id) {
-            s.last_live_summary_event = now - Duration::from_secs(40 * 60);
-        }
-        app.tick_watchdog();
-        let inputs = crate::runner::drain_test_input_receiver_for(&window_name);
-        assert_eq!(
-            inputs.len(),
-            1,
-            "AC4: warning must fire once tool-call-adjusted elapsed crosses warn"
-        );
-
-        // Push to 45 minutes → 20 min idle adjusted, past kill.
-        if let Some(s) = app.watchdog.get_mut(run.id) {
-            s.last_live_summary_event = now - Duration::from_secs(45 * 60);
-        }
-        app.tick_watchdog();
-        let cancels = crate::runner::drain_test_cancel_receiver_for(&window_name);
-        assert_eq!(
-            cancels,
-            vec!["terminate"],
-            "AC4: kill must fire after tool-call-adjusted elapsed crosses kill"
-        );
-
-        crate::runner::cancel_run_labels_matching(&window_name);
-    });
-}
+// The watchdog now measures wall-clock idle since the last live-summary
+// write — there is no tool-call exclusion to test (see chunk_06's prior
+// `watchdog_clock_pauses_during_tool_call_activity` removal). The other
+// AC tests in this file still exercise warn/kill thresholds, no-rearm,
+// degraded prompt fallback, and clock compression.
 
 #[test]
 fn watchdog_does_not_arm_for_interactive_runs() {

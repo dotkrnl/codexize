@@ -80,4 +80,4 @@ with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
 
 
-Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. (process killed after 10 min wall-time idle, tool-call time excluded).
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls — and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. Keep this file current until you exit. The watchdog measures plain wall-clock idle since the last write; the run is killed and retried if the file goes 10 min without an update.

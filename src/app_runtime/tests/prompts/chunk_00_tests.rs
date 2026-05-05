@@ -306,8 +306,11 @@ fn live_summary_instruction_requires_immediate_creation_and_current_updates() {
     let expected = path.display().to_string();
 
     assert!(prompt.contains(&format!("Immediately create {expected}")));
-    assert!(prompt.contains("every 2–3 min and on each sub-goal change"));
+    assert!(prompt.contains("every 2–3 min"));
+    assert!(prompt.contains("across long tool calls"));
+    assert!(prompt.contains("on each sub-goal change"));
     assert!(prompt.contains("Keep this file current until you exit."));
+    assert!(prompt.contains("plain wall-clock idle"));
 }
 
 #[test]

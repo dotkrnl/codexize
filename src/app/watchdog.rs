@@ -60,7 +60,15 @@ pub(crate) enum WatchdogDecision {
     EmitKill,
 }
 
-/// Per-run idle-adjusted timing state. Spec §3.2.
+/// Per-run wall-clock idle state.
+///
+/// The watchdog measures plain wall time since the agent last wrote
+/// `live_summary.txt`. There's no tool-call exclusion: an agent that
+/// disappears down a long tool call without checkpointing the live summary
+/// is indistinguishable from one that's hung, and the spec's "every 2–3
+/// min" cadence is supposed to keep the summary fresh through tool calls
+/// anyway. Anything else that wants to pause the clock should write the
+/// live-summary file.
 #[derive(Debug, Clone)]
 pub(crate) struct WatchdogState {
     #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
@@ -70,13 +78,6 @@ pub(crate) struct WatchdogState {
     #[allow(dead_code)] // retained for Debug logs and future operator-visible diagnostics
     pub(super) started_at: Instant,
     pub(super) last_live_summary_event: Instant,
-    /// Counter (not bool) so concurrent tool calls pause the clock for the
-    /// full overlap window without an early unpause when one of several
-    /// in-flight calls finishes.
-    pub(super) in_flight_tool_calls: usize,
-    pub(super) pause_began_at: Option<Instant>,
-    /// Pause time accumulated since `last_live_summary_event`.
-    pub(super) paused_total: Duration,
     pub(super) warned: bool,
     pub(super) effort: EffortLevel,
     /// Scaled threshold (real wall-clock duration). Equal to `warn_after`
@@ -111,9 +112,6 @@ impl WatchdogState {
             prompt_path,
             started_at: now,
             last_live_summary_event: now,
-            in_flight_tool_calls: 0,
-            pause_began_at: None,
-            paused_total: Duration::ZERO,
             warned: false,
             effort,
             warn_threshold,
@@ -137,53 +135,16 @@ impl WatchdogState {
         )
     }
 
-    /// Idle-adjusted duration since the last observed `live_summary.txt`
-    /// mtime advance. Spec §3.2.
+    /// Wall-clock duration since the last observed `live_summary.txt` mtime
+    /// advance — no tool-call exclusion.
     pub(crate) fn idle_elapsed(&self, now: Instant) -> Duration {
-        let raw = now.saturating_duration_since(self.last_live_summary_event);
-        let active_pause = self
-            .pause_began_at
-            .map(|t| now.saturating_duration_since(t))
-            .unwrap_or_default();
-        raw.saturating_sub(self.paused_total)
-            .saturating_sub(active_pause)
-    }
-
-    /// One ACP tool call entered a non-terminal status. The first such call
-    /// opens the pause window; concurrent ones only bump the counter.
-    pub(crate) fn on_tool_call_started(&mut self, now: Instant) {
-        self.in_flight_tool_calls = self.in_flight_tool_calls.saturating_add(1);
-        if self.in_flight_tool_calls == 1 {
-            self.pause_began_at = Some(now);
-        }
-    }
-
-    /// One ACP tool call entered a terminal status. The pause window closes
-    /// only when the last in-flight call finishes. Defensive against
-    /// unbalanced finishes.
-    pub(crate) fn on_tool_call_finished(&mut self, now: Instant) {
-        if self.in_flight_tool_calls == 0 {
-            return;
-        }
-        self.in_flight_tool_calls -= 1;
-        if self.in_flight_tool_calls == 0
-            && let Some(started) = self.pause_began_at.take()
-        {
-            self.paused_total = self
-                .paused_total
-                .saturating_add(now.saturating_duration_since(started));
-        }
+        now.saturating_duration_since(self.last_live_summary_event)
     }
 
     /// `live_summary.txt` mtime advance observed at `now`. Resets the idle
-    /// clock and pause budget; if a call is in flight, restart the pause
-    /// window from `now` so pre-reset pause is not double-credited.
+    /// clock.
     pub(crate) fn on_live_summary_event(&mut self, now: Instant) {
         self.last_live_summary_event = now;
-        self.paused_total = Duration::ZERO;
-        if self.pause_began_at.is_some() {
-            self.pause_began_at = Some(now);
-        }
     }
 
     /// Decide whether the idle-adjusted clock has crossed a threshold at
@@ -355,15 +316,16 @@ impl WatchdogRegistry {
     }
 }
 
-/// Build the warning interrupt payload (spec §3.4). The remaining-minutes
-/// value comes from the unscaled spec constants so the agent-facing text is
-/// identical between production and clock-compressed tests. `idle_minutes`
-/// is the (unscaled) idle-adjusted minutes value already mapped onto the
-/// spec axis by `WatchdogState::idle_minutes_for_message`.
+/// Build the warning interrupt payload. The remaining-minutes value comes
+/// from the unscaled spec constants so the agent-facing text is identical
+/// between production and clock-compressed tests. `idle_minutes` is the
+/// (unscaled) wall-clock minutes since the last live-summary mtime
+/// advance, already mapped onto the spec axis by
+/// `WatchdogState::idle_minutes_for_message`.
 pub(crate) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
     format!(
         "\u{26a0} Liveness warning from codexize watchdog \u{26a0}\n\n\
-You have not updated `live_summary.txt` in {idle} minutes (excluding time spent waiting on tool calls). \
+You have not updated `live_summary.txt` in {idle} minutes. \
 You will be killed and the run will be retried automatically if you go another {remaining} minutes without writing a summary. \
 This is your only warning.\n\n\
 The original prompt is repeated below verbatim so you can resume from it. Continue the task; \
@@ -398,79 +360,19 @@ mod tests {
     }
 
     #[test]
-    fn idle_elapsed_no_tool_calls_tracks_wall_clock() {
+    fn idle_elapsed_tracks_wall_clock() {
         let (start, state) = fresh(EffortLevel::Normal);
         let now = start + Duration::from_secs(7 * 60);
         assert_eq!(state.idle_elapsed(now), Duration::from_secs(7 * 60));
     }
 
     #[test]
-    fn single_tool_call_spans_the_whole_window_no_idle_accumulates() {
+    fn live_summary_event_resets_idle_clock() {
         let (start, mut state) = fresh(EffortLevel::Normal);
-        state.on_tool_call_started(start);
-        let now = start + Duration::from_secs(12 * 60);
-        assert_eq!(state.idle_elapsed(now), Duration::ZERO);
-    }
-
-    #[test]
-    fn overlapping_concurrent_tool_calls_use_counter_not_bool() {
-        let (start, mut state) = fresh(EffortLevel::Normal);
-        state.on_tool_call_started(start + Duration::from_secs(60));
-        state.on_tool_call_started(start + Duration::from_secs(120));
-        state.on_tool_call_finished(start + Duration::from_secs(180));
-        assert!(state.pause_began_at.is_some());
-        assert_eq!(state.in_flight_tool_calls, 1);
-
-        state.on_tool_call_finished(start + Duration::from_secs(240));
-        assert!(state.pause_began_at.is_none());
-        let now = start + Duration::from_secs(300);
-        // Pause spanned 60..240 = 180s; idle 300 - 180 = 120s.
-        assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
-    }
-
-    #[test]
-    fn live_summary_event_resets_idle_and_pause_budget() {
-        let (start, mut state) = fresh(EffortLevel::Normal);
-        state.on_tool_call_started(start + Duration::from_secs(60));
-        state.on_tool_call_finished(start + Duration::from_secs(120));
-        assert_eq!(state.paused_total, Duration::from_secs(60));
-
-        state.on_live_summary_event(start + Duration::from_secs(180));
-        assert_eq!(state.paused_total, Duration::ZERO);
-
-        let now = start + Duration::from_secs(300);
-        assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
-    }
-
-    #[test]
-    fn live_summary_event_during_pause_does_not_double_credit_pre_reset_pause() {
-        let (start, mut state) = fresh(EffortLevel::Normal);
-        state.on_tool_call_started(start + Duration::from_secs(60));
-        state.on_live_summary_event(start + Duration::from_secs(120));
-        assert_eq!(state.pause_began_at, Some(start + Duration::from_secs(120)));
-        assert_eq!(state.paused_total, Duration::ZERO);
-
-        state.on_tool_call_finished(start + Duration::from_secs(300));
-        assert_eq!(state.paused_total, Duration::from_secs(180));
-
-        let now = start + Duration::from_secs(420);
-        assert_eq!(state.idle_elapsed(now), Duration::from_secs(120));
-    }
-
-    #[test]
-    fn pause_began_at_none_at_start_until_first_tool_call() {
-        let (_, state) = fresh(EffortLevel::Normal);
-        assert!(state.pause_began_at.is_none());
-        assert_eq!(state.in_flight_tool_calls, 0);
-    }
-
-    #[test]
-    fn unbalanced_finish_is_a_no_op() {
-        let (start, mut state) = fresh(EffortLevel::Normal);
-        state.on_tool_call_finished(start + Duration::from_secs(10));
-        assert_eq!(state.in_flight_tool_calls, 0);
-        assert!(state.pause_began_at.is_none());
-        assert_eq!(state.paused_total, Duration::ZERO);
+        let later = start + Duration::from_secs(8 * 60);
+        state.on_live_summary_event(later);
+        let now = later + Duration::from_secs(2 * 60);
+        assert_eq!(state.idle_elapsed(now), Duration::from_secs(2 * 60));
     }
 
     #[test]
@@ -565,11 +467,6 @@ mod tests {
         assert_eq!(stored.warn_threshold, Duration::from_secs(15 * 60));
         assert_eq!(stored.kill_threshold, Duration::from_secs(30 * 60));
         assert_eq!(stored.warning_remaining_minutes, 15);
-
-        if let Some(state) = registry.get_mut(42) {
-            state.on_tool_call_started(now);
-        }
-        assert_eq!(registry.get(42).map(|s| s.in_flight_tool_calls), Some(1));
 
         let removed = registry.remove(42).expect("was inserted");
         assert_eq!(removed.run_id, 42);

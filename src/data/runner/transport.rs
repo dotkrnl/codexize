@@ -5,16 +5,14 @@
 //! `runner::supervise` consumes these primitives; nothing here owns process
 //! lifecycle or finish-stamp policy.
 
-use crate::acp::{
-    AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ToolCallActivityKind,
-};
+use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Polling cadence for the runner's ACP receive loop. Kept here so transport
@@ -31,18 +29,6 @@ pub(in crate::data::runner) enum AcpCancelReason {
 pub(in crate::data::runner) enum AcpInput {
     Prompt(String),
     Interrupt(String),
-}
-
-/// Runner→App tool-call lifecycle transition. The runner stamps
-/// `observed_at` at the moment it receives the ACP `session/update` for
-/// the transition; the App applies transitions in arrival (timestamp)
-/// order so the watchdog idle-clock correctly accounts for tool calls
-/// that begin and end between consecutive App polls.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolCallTransition {
-    pub tool_call_id: String,
-    pub kind: ToolCallActivityKind,
-    pub observed_at: Instant,
 }
 
 /// Resolved per-launch context the supervisor hands to transport helpers.

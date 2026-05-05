@@ -23,11 +23,10 @@ mod transport;
 
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
 pub use supervise::{
-    cancel_run_labels_matching, drain_tool_call_events, force_interrupt_run_label,
-    interrupt_run_label_input, request_run_label_exit, run_label_is_active,
-    run_label_is_waiting_for_input, send_run_label_input, shutdown_all_runs, terminate_run_label,
+    cancel_run_labels_matching, force_interrupt_run_label, interrupt_run_label_input,
+    request_run_label_exit, run_label_is_active, run_label_is_waiting_for_input,
+    send_run_label_input, shutdown_all_runs, terminate_run_label,
 };
-pub use transport::ToolCallTransition;
 
 #[cfg(test)]
 pub use supervise::{

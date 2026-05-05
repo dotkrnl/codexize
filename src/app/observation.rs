@@ -183,38 +183,6 @@ impl App {
         self.maybe_refocus_to_progress();
     }
 
-    /// Apply a single drained `DataEvent::ToolCallTransition` to the
-    /// matching `WatchdogState`. The drain itself lives in
-    /// [`crate::app_runtime::terminal`] so the runtime is the coordinator
-    /// that consumes [`DataEvent`]s, and `App` is the per-event handler.
-    pub(crate) fn apply_tool_call_transition(
-        &mut self,
-        window_name: &str,
-        transition: crate::data::runner::ToolCallTransition,
-    ) {
-        let Some(run_id) = self
-            .state
-            .agent_runs
-            .iter()
-            .rev()
-            .find(|run| run.window_name == window_name)
-            .map(|run| run.id)
-        else {
-            return;
-        };
-        let Some(state) = self.watchdog.get_mut(run_id) else {
-            return;
-        };
-        match transition.kind {
-            crate::acp::ToolCallActivityKind::Start => {
-                state.on_tool_call_started(transition.observed_at);
-            }
-            crate::acp::ToolCallActivityKind::Finish => {
-                state.on_tool_call_finished(transition.observed_at);
-            }
-        }
-    }
-
     /// Per-tick watchdog evaluation. Walks every registered run's state at
     /// `now`, then performs the spec §3.4/§3.5 side effects (warning
     /// interrupt + `SummaryWarn`, or kill `Terminate` + `SummaryWarn`)
@@ -273,8 +241,8 @@ impl App {
             run_id,
             MessageKind::SummaryWarn,
             format!(
-                "watchdog warning: live summary stale for {idle_minutes} min \
-                 (tool-call time excluded); sent interrupt with original prompt"
+                "watchdog warning: live summary stale for {idle_minutes} min; \
+                 sent interrupt with original prompt"
             ),
         );
     }

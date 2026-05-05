@@ -19,7 +19,7 @@ pub mod review;
 pub use crate::data::runner;
 pub mod selection;
 pub mod simplification;
-pub mod smoke;
+pub use crate::data::snapshot as smoke;
 pub mod state;
 pub use crate::data::synthetic_artifacts;
 pub mod tasks;

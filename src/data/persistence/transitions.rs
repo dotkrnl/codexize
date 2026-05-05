@@ -163,14 +163,6 @@ fn compute_section_path(
             ]
         }
         "plan-review" => vec![SectionPart::PlanReview, SectionPart::Stage(stage.to_string())],
-        // pipeline-item stage used by the plan-reviewer stage IO; maps to the
-        // same logical nodes as "plan-review" (recovery vs. normal paths).
-        "plan-reviewer" if state.builder.recovery_trigger_task_id.is_some() => vec![
-            SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
-            SectionPart::RecoveryPlanReview { round },
-            SectionPart::Stage(stage.to_string()),
-        ],
-        "plan-reviewer" => vec![SectionPart::PlanReview, SectionPart::Stage(stage.to_string())],
         "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => {
             vec![
                 SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),

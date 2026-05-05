@@ -9,7 +9,7 @@ use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
 use crate::logic::pipeline::state::{
     Event, EventsFile, LaunchModes, Message, MessageKind, MessageSender, MessagesFile, RunRecord,
-    RunStatus, SessionState, session_dir,
+    RunStatus, SectionPart, SessionState, session_dir,
 };
 use anyhow::{Context, Result};
 use std::fs;
@@ -173,6 +173,7 @@ impl SessionState {
         window_name: String,
         effort: EffortLevel,
         modes: LaunchModes,
+        section_path: Option<Vec<SectionPart>>,
     ) -> u64 {
         let id = self.next_agent_run_id();
         let hostname = capture_hostname();
@@ -194,7 +195,7 @@ impl SessionState {
             modes,
             hostname,
             mount_device_id,
-            section_path: None,
+            section_path,
         };
         self.agent_runs.push(run);
         id

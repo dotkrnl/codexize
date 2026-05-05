@@ -7,7 +7,7 @@
 
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::{BlockOrigin, LaunchModes, RunStatus, SessionState};
+use crate::logic::pipeline::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
@@ -140,6 +140,126 @@ pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<Simp
     Ok(SimplificationEntry::Entered { attempt: next })
 }
 
+/// Compute the section path for a new agent run at creation time.
+///
+/// The path is frozen once here so the renderer can group runs by structural
+/// identity without re-deriving it from mutable session counters at read time.
+fn compute_section_path(
+    state: &SessionState,
+    stage: &str,
+    task_id: Option<u32>,
+    round: u32,
+    attempt: u32,
+) -> Vec<SectionPart> {
+    match stage {
+        "brainstorm" => vec![SectionPart::Brainstorm, SectionPart::Stage(stage.to_string())],
+        "spec-review" => vec![SectionPart::SpecReview, SectionPart::Stage(stage.to_string())],
+        "planning" => vec![SectionPart::Planning, SectionPart::Stage(stage.to_string())],
+        "plan-review" if matches!(state.current_phase, Phase::BuilderRecoveryPlanReview(_)) => {
+            vec![
+                SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
+                SectionPart::RecoveryPlanReview { round },
+                SectionPart::Stage(stage.to_string()),
+            ]
+        }
+        "plan-review" => vec![SectionPart::PlanReview, SectionPart::Stage(stage.to_string())],
+        // pipeline-item stage used by the plan-reviewer stage IO; maps to the
+        // same logical nodes as "plan-review" (recovery vs. normal paths).
+        "plan-reviewer" if state.builder.recovery_trigger_task_id.is_some() => vec![
+            SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
+            SectionPart::RecoveryPlanReview { round },
+            SectionPart::Stage(stage.to_string()),
+        ],
+        "plan-reviewer" => vec![SectionPart::PlanReview, SectionPart::Stage(stage.to_string())],
+        "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => {
+            vec![
+                SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
+                SectionPart::RecoverySharding { round },
+                SectionPart::Stage(stage.to_string()),
+            ]
+        }
+        "sharding" => vec![SectionPart::Sharding, SectionPart::Stage(stage.to_string())],
+        "recovery" => vec![
+            SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
+            SectionPart::Recovery { round },
+            SectionPart::Stage(stage.to_string()),
+        ],
+        "simplifier" => vec![
+            SectionPart::Iteration(loop_iteration_for_round(state, round)),
+            SectionPart::Simplification,
+            SectionPart::Round { n: round, attempt },
+            SectionPart::Stage(stage.to_string()),
+        ],
+        "final-validation" => vec![
+            SectionPart::Iteration(loop_iteration_for_round(state, round)),
+            SectionPart::FinalValidation,
+            SectionPart::Round { n: round, attempt },
+            SectionPart::Stage(stage.to_string()),
+        ],
+        "coder" | "reviewer" => {
+            let iteration = task_id
+                .and_then(|tid| {
+                    state
+                        .builder
+                        .pipeline_items
+                        .iter()
+                        .find(|i| i.stage == "coder" && i.task_id == Some(tid))
+                        .map(|i| i.iteration)
+                })
+                .unwrap_or(1);
+            let mut path = vec![SectionPart::Iteration(iteration), SectionPart::Loop];
+            if let Some(tid) = task_id {
+                path.push(SectionPart::Task(tid));
+            }
+            path.push(SectionPart::Round { n: round, attempt });
+            path.push(SectionPart::Stage(stage.to_string()));
+            path
+        }
+        _ => vec![SectionPart::Stage(stage.to_string())],
+    }
+}
+
+/// Find the iteration number for a round based on pipeline items.
+///
+/// Used for simplifier/final-validation which are not tied to a specific task.
+fn loop_iteration_for_round(state: &SessionState, round: u32) -> u32 {
+    state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|i| i.round == Some(round))
+        .map(|i| i.iteration)
+        .max()
+        .unwrap_or(1)
+}
+
+/// Determine the outer iteration number for a recovery stage run.
+///
+/// Peeks at `next_iteration_for_recovery` without consuming it: the override
+/// must survive for B2's `recovery_outer_iteration` consumer which also reads
+/// it. Falls back to the task's own iteration, then the session maximum.
+fn recovery_iteration_for_path(state: &SessionState, task_id: Option<u32>) -> u32 {
+    if let Some(override_iter) = state.builder.next_iteration_for_recovery {
+        return override_iter;
+    }
+    if let Some(tid) = task_id.or(state.builder.recovery_trigger_task_id)
+        && let Some(item) = state
+            .builder
+            .pipeline_items
+            .iter()
+            .find(|i| i.stage == "coder" && i.task_id == Some(tid))
+    {
+        return item.iteration;
+    }
+    state
+        .builder
+        .pipeline_items
+        .iter()
+        .map(|i| i.iteration)
+        .max()
+        .unwrap_or(1)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn start_agent_run(
     state: &mut SessionState,
@@ -153,6 +273,7 @@ pub fn start_agent_run(
     effort: EffortLevel,
     modes: LaunchModes,
 ) -> u64 {
+    let path = compute_section_path(state, &stage, task_id, round, attempt);
     state.create_run_record(
         stage,
         task_id,
@@ -163,6 +284,7 @@ pub fn start_agent_run(
         window_name,
         effort,
         modes,
+        Some(path),
     )
 }
 
@@ -208,6 +330,129 @@ pub fn try_parse_toml_artifact<T: serde::de::DeserializeOwned>(path: &Path) -> R
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("artifact missing or unreadable: {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("unparseable TOML artifact: {}", path.display()))
+}
+
+#[cfg(test)]
+mod section_path_capture_tests {
+    use super::*;
+    use crate::adapters::EffortLevel;
+    use crate::logic::pipeline::phase::Phase;
+    use crate::logic::pipeline::state::{
+        LaunchModes, PipelineItem, PipelineItemStatus, SectionPart, SessionState,
+    };
+
+    #[test]
+    fn coder_run_captures_iteration_loop_task_round_stage_path() {
+        let mut state = SessionState::new("path-capture".to_string());
+        state.current_phase = Phase::ImplementationRound(9);
+        state.builder.pipeline_items.push(PipelineItem {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(4),
+            round: Some(9),
+            status: PipelineItemStatus::Running,
+            title: Some("Extract UI".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+        let id = start_agent_run(
+            &mut state,
+            "coder".to_string(),
+            Some(4),
+            9,
+            1,
+            "claude-opus-4.7".to_string(),
+            "claude".to_string(),
+            "[Round 9 Coder]".to_string(),
+            EffortLevel::Tough,
+            LaunchModes::default(),
+        );
+        let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+        assert_eq!(
+            run.section_path.as_deref(),
+            Some(
+                &[
+                    SectionPart::Iteration(1),
+                    SectionPart::Loop,
+                    SectionPart::Task(4),
+                    SectionPart::Round { n: 9, attempt: 1 },
+                    SectionPart::Stage("coder".to_string()),
+                ][..]
+            )
+        );
+    }
+
+    #[test]
+    fn simplifier_run_captures_iteration_simplification_round_stage_path() {
+        let mut state = SessionState::new("simpl-capture".to_string());
+        state.current_phase = Phase::Simplification(9);
+        state.builder.pipeline_items.push(PipelineItem {
+            id: 1,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(9),
+            status: PipelineItemStatus::Approved,
+            title: Some("Some task".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+        let id = start_agent_run(
+            &mut state,
+            "simplifier".to_string(),
+            None,
+            9,
+            2,
+            "claude-opus-4-6".to_string(),
+            "claude".to_string(),
+            "[Simplifier]".to_string(),
+            EffortLevel::Normal,
+            LaunchModes::default(),
+        );
+        let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+        assert_eq!(
+            run.section_path.as_deref(),
+            Some(
+                &[
+                    SectionPart::Iteration(1),
+                    SectionPart::Simplification,
+                    SectionPart::Round { n: 9, attempt: 2 },
+                    SectionPart::Stage("simplifier".to_string()),
+                ][..]
+            )
+        );
+    }
+
+    #[test]
+    fn brainstorm_run_captures_brainstorm_stage_path() {
+        let mut state = SessionState::new("brainstorm".to_string());
+        state.current_phase = Phase::BrainstormRunning;
+        let id = start_agent_run(
+            &mut state,
+            "brainstorm".to_string(),
+            None,
+            0,
+            1,
+            "x".to_string(),
+            "y".to_string(),
+            "[Brainstorm]".to_string(),
+            EffortLevel::Normal,
+            LaunchModes::default(),
+        );
+        let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+        assert_eq!(
+            run.section_path.as_deref(),
+            Some(
+                &[
+                    SectionPart::Brainstorm,
+                    SectionPart::Stage("brainstorm".to_string()),
+                ][..]
+            )
+        );
+    }
 }
 
 #[cfg(test)]

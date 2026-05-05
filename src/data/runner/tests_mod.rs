@@ -1728,6 +1728,7 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
         crate::state::LaunchModes::default(),
+        None,
     );
     with_test_env(
         dir.path(),
@@ -1793,6 +1794,7 @@ fn acp_launch_persists_thought_chunks_as_agent_thought() {
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
         crate::state::LaunchModes::default(),
+        None,
     );
     with_test_env(
         dir.path(),
@@ -1855,6 +1857,7 @@ fn acp_launch_concatenates_thought_chunks_per_turn() {
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
         crate::state::LaunchModes::default(),
+        None,
     );
     with_test_env(
         dir.path(),

@@ -1,10 +1,14 @@
 use super::types::VendorKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
 pub enum SelectionPhase {
+    #[strum(to_string = "idea")]
     Idea,
+    #[strum(to_string = "planning")]
     Planning,
+    #[strum(to_string = "build")]
     Build,
+    #[strum(to_string = "review")]
     Review,
 }
 
@@ -36,12 +40,8 @@ impl SelectionPhase {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            SelectionPhase::Idea => "idea",
-            SelectionPhase::Planning => "planning",
-            SelectionPhase::Build => "build",
-            SelectionPhase::Review => "review",
-        }
+        // Kept for backward compatibility until callers migrate.
+        self.into()
     }
 
     pub const ALL: [SelectionPhase; 4] = [

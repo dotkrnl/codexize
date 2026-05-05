@@ -234,28 +234,29 @@ pub enum NodeKind {
     AgentRun,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
 pub enum NodeStatus {
+    #[strum(to_string = "pending")]
     Pending,
+    #[strum(to_string = "running")]
     Running,
+    #[strum(to_string = "waiting-user")]
     WaitingUser,
+    #[strum(to_string = "done")]
     Done,
+    #[strum(to_string = "skipped")]
     Skipped,
+    #[strum(to_string = "failed")]
     Failed,
+    #[strum(to_string = "failed-unverified")]
     FailedUnverified,
 }
 
 impl NodeStatus {
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::WaitingUser => "waiting-user",
-            Self::Done => "done",
-            Self::Skipped => "skipped",
-            Self::Failed => "failed",
-            Self::FailedUnverified => "failed-unverified",
-        }
+        // Kept for backward compatibility until UI callers migrate.
+        self.into()
     }
 }
 

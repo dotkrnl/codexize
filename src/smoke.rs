@@ -15,7 +15,7 @@ pub enum NormalizedArtifact {
 pub type NormalizedTree = BTreeMap<String, NormalizedArtifact>;
 
 pub fn live_smoke_prereqs_available() -> bool {
-    std::io::stdout().is_terminal() && std::env::var_os("TMUX").is_some()
+    std::io::stdout().is_terminal()
 }
 
 pub fn headless_fallback_active() -> bool {

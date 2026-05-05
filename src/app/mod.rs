@@ -121,6 +121,7 @@ pub(crate) enum ModalKind {
     SpecReviewPaused,
     PlanReviewPaused,
     StageError(StageId),
+    FinalValidationBlocked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

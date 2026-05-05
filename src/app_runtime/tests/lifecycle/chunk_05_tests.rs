@@ -626,3 +626,10 @@ fn watchdog_uses_tough_thresholds() {
         crate::runner::cancel_run_labels_matching(&window_name);
     });
 }
+
+#[test]
+fn modal_kind_has_final_validation_blocked_variant() {
+    use crate::app_runtime::view::ModalKind;
+    let kind = ModalKind::FinalValidationBlocked;
+    assert_eq!(format!("{kind:?}"), "FinalValidationBlocked");
+}

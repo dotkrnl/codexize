@@ -275,6 +275,7 @@ impl App {
             ModalKind::SpecReviewPaused => self.handle_spec_review_paused_modal_key(key),
             ModalKind::PlanReviewPaused => self.handle_plan_review_paused_modal_key(key),
             ModalKind::StageError(stage_id) => self.handle_stage_error_modal_key(stage_id, key),
+            ModalKind::FinalValidationBlocked => false, // TODO: Task A2 wires this
         }
     }
 

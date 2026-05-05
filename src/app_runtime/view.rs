@@ -65,6 +65,7 @@ pub enum ModalKind {
     SpecReviewPaused,
     PlanReviewPaused,
     StageError(StageId),
+    FinalValidationBlocked,
 }
 
 /// Compact run summary for tree rows. The full [`RunRecord`] is also

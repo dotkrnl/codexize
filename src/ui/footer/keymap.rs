@@ -481,6 +481,7 @@ pub fn keymap(
             ModalKind::QuitRunningAgent => quit_running_agent_bindings(),
             ModalKind::InteractiveExitPrompt => interactive_exit_prompt_bindings(),
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
+            ModalKind::FinalValidationBlocked => (vec![], vec![]), // TODO: Task A2 wires this
         };
         return render_keymap_line(&[&actions, &system], &caps_fn, width);
     }

@@ -86,6 +86,7 @@ impl App {
                 ModalKind::SpecReviewPaused => RuntimeModalKind::SpecReviewPaused,
                 ModalKind::PlanReviewPaused => RuntimeModalKind::PlanReviewPaused,
                 ModalKind::StageError(stage) => RuntimeModalKind::StageError(stage_id(stage)),
+                ModalKind::FinalValidationBlocked => RuntimeModalKind::FinalValidationBlocked,
             }
         }
 

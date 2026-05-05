@@ -23,18 +23,16 @@ pub enum Reason {
     #[strum(serialize = "invalid_coder_summary")]
     InvalidCoderSummary,
 
-    // REVIEWER: payload-bearing variants preserve legacy wire formatting but stay
-    // display-only because there is no stable parse contract for free-form detail.
-    #[strum(disabled, to_string = "failed_unverified: {detail} at {path}")]
+    #[strum(to_string = "failed_unverified: {detail} at {path}")]
     FailedUnverified { detail: String, path: String },
 
-    #[strum(disabled, to_string = "exit({0})")]
+    #[strum(to_string = "exit({0})")]
     ExitCode(i32),
 
-    #[strum(disabled, to_string = "killed({signal_num}) [{detail}]")]
+    #[strum(to_string = "killed({signal_num}) [{detail}]")]
     Killed { signal_num: i32, detail: String },
 
-    #[strum(disabled, to_string = "artifact_invalid: {0}")]
+    #[strum(to_string = "artifact_invalid: {0}")]
     ArtifactInvalid(String),
 
     #[strum(serialize = "Operator Killed")]
@@ -49,29 +47,28 @@ pub enum Reason {
     #[strum(serialize = "reviewer_modified_working_tree")]
     ReviewerModifiedWorkingTree,
 
-    #[strum(disabled, to_string = "forbidden_control_edit: {0}")]
+    #[strum(to_string = "forbidden_control_edit: {0}")]
     ForbiddenControlEdit(String),
 
-    #[strum(disabled, to_string = "recovery_requested_revise: {0}")]
+    #[strum(to_string = "recovery_requested_revise: {0}")]
     RecoveryRequestedRevise(String),
 
-    #[strum(disabled, to_string = "recovery_requested_human_blocked: {0}")]
+    #[strum(to_string = "recovery_requested_human_blocked: {0}")]
     RecoveryRequestedHumanBlocked(String),
 
-    #[strum(disabled, to_string = "recovery_requested_agent_pivot: {0}")]
+    #[strum(to_string = "recovery_requested_agent_pivot: {0}")]
     RecoveryRequestedAgentPivot(String),
 
-    #[strum(disabled, to_string = "recovery_plan_review_failed: {0}")]
+    #[strum(to_string = "recovery_plan_review_failed: {0}")]
     RecoveryPlanReviewFailed(String),
 
-    #[strum(disabled, to_string = "recovery_sharding_failed: {0}")]
+    #[strum(to_string = "recovery_sharding_failed: {0}")]
     RecoveryShardingFailed(String),
 
     #[strum(serialize = "artifact_invalid: recovery summary is empty")]
     RecoverySummaryEmpty,
 
     #[strum(
-        disabled,
         to_string = "artifact_invalid: recovery status={0} requires at least one feedback item"
     )]
     RecoveryMissingFeedback(String),

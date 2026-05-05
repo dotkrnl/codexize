@@ -236,27 +236,70 @@ fn assemble_collapses_kimi_models() {
 }
 
 #[test]
-fn assemble_collapses_kimi_by_display_order_not_overall_score() {
-    // Explicit conflict: the model with the higher overall_score has a
-    // worse (higher) display_order. The collapse MUST NOT use
-    // overall_score as a proxy for rank or selection authority.
-    let mut low_order = make_entry_with_order("kimi-k2", "moonshotai", 60.0, 58.0, 0);
-    low_order.score_source = crate::selection::ScoreSource::Ipbr;
-    low_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        build: Some(80.0),
-        review: Some(78.0),
-        ..Default::default()
+fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
+    // Real-feed scenario the previous display-order-only collapse mishandled:
+    // the inventory feed lists `kimi-k2-0905-preview` ahead of `kimi-latest`
+    // (lower display_order) but ipbr's phase scores show `kimi-latest` is the
+    // stronger model. The collapse MUST keep the better ipbr scores so
+    // downstream phase-rank / pool-weight cells reflect the canonical kimi.
+    let mut weaker_low_order =
+        make_entry_with_order("kimi-k2-0905-preview", "moonshotai", 38.0, 38.0, 14);
+    weaker_low_order.score_source = crate::selection::ScoreSource::Ipbr;
+    weaker_low_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+        idea: Some(22.8),
+        planning: Some(28.0),
+        build: Some(52.2),
+        review: Some(48.6),
     };
 
-    let mut high_order = make_entry_with_order("kimi-k1.5", "moonshotai", 95.0, 93.0, 10);
-    high_order.score_source = crate::selection::ScoreSource::Ipbr;
-    high_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+    let mut stronger_high_order = make_entry_with_order("kimi-real", "moonshotai", 73.0, 73.0, 15);
+    stronger_high_order.score_source = crate::selection::ScoreSource::Ipbr;
+    stronger_high_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+        idea: Some(69.0),
+        planning: Some(69.4),
+        build: Some(73.6),
+        review: Some(80.1),
+    };
+
+    let dashboard = vec![weaker_low_order, stronger_high_order];
+    let quotas = make_quota_payload(&[("moonshotai", "kimi-k2-0905-preview", Some(90))]);
+
+    let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
+
+    assert_eq!(models.len(), 1);
+    let kimi = &models[0];
+    assert_eq!(kimi.name, "kimi-latest");
+    // The retained model must be the one with the higher ipbr phase-score
+    // sum, even though its display_order is later in the inventory feed.
+    assert_eq!(kimi.ipbr_phase_scores.build, Some(73.6));
+    assert_eq!(kimi.ipbr_phase_scores.review, Some(80.1));
+    assert_eq!(kimi.score_source, crate::selection::ScoreSource::Ipbr);
+}
+
+#[test]
+fn assemble_collapses_kimi_ignores_cosmetic_overall_score() {
+    // overall_score / current_score are display-only summaries — they MUST
+    // NOT win against another sibling whose ipbr phase scores are stronger.
+    // Here the higher-overall-score kimi has *lower* ipbr scores, so the
+    // ipbr-favored row must be retained.
+    let mut weak_ipbr_high_overall =
+        make_entry_with_order("kimi-k1.5", "moonshotai", 95.0, 93.0, 0);
+    weak_ipbr_high_overall.score_source = crate::selection::ScoreSource::Ipbr;
+    weak_ipbr_high_overall.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(50.0),
         review: Some(48.0),
         ..Default::default()
     };
 
-    let dashboard = vec![low_order, high_order];
+    let mut strong_ipbr_low_overall = make_entry_with_order("kimi-k2", "moonshotai", 60.0, 58.0, 5);
+    strong_ipbr_low_overall.score_source = crate::selection::ScoreSource::Ipbr;
+    strong_ipbr_low_overall.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+        build: Some(80.0),
+        review: Some(78.0),
+        ..Default::default()
+    };
+
+    let dashboard = vec![weak_ipbr_high_overall, strong_ipbr_low_overall];
     let quotas = make_quota_payload(&[("moonshotai", "kimi-k2", Some(90))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
@@ -264,14 +307,11 @@ fn assemble_collapses_kimi_by_display_order_not_overall_score() {
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
     assert_eq!(kimi.name, "kimi-latest");
-    // The retained model must be the one with lower display_order,
-    // regardless of its lower overall_score.
+    // overall_score 95 lost to overall_score 60 because ipbr phase scores
+    // were stronger on the kimi-k2 row.
     assert_eq!(kimi.overall_score, 60.0);
-    // Its ipbr phase scores must survive collapse so downstream
-    // selection uses them, not the high-overall-score model's scores.
     assert_eq!(kimi.ipbr_phase_scores.build, Some(80.0));
     assert_eq!(kimi.ipbr_phase_scores.review, Some(78.0));
-    assert_eq!(kimi.score_source, crate::selection::ScoreSource::Ipbr);
 }
 
 #[test]

@@ -123,18 +123,35 @@ pub fn assemble_universe(
         .collect();
 
     // Collapse all Kimi models into a single "kimi-latest" representative.
-    // The canonical model is chosen by stable inventory order (lowest
-    // display_order first, then name for determinism), NOT by cosmetic
-    // overall_score or current_score. This ensures the retained phase
-    // scores and quota come from a policy-driven choice rather than a
-    // display-only summary that must not affect selection.
+    // The canonical pick is the ipbr-matched sibling with the largest sum of
+    // present phase scores; ipbr scores are authoritative (unlike cosmetic
+    // overall_score / current_score, which selection MUST NOT consult).
+    // Display_order and name only break ties — including the no-ipbr case,
+    // where every candidate has phase-score sum 0 and falls through to
+    // stable inventory order.
     let best_kimi_idx = models
         .iter()
         .enumerate()
         .filter(|(_, m)| m.vendor == VendorKind::Kimi)
         .min_by(|(_, a), (_, b)| {
-            a.display_order
-                .cmp(&b.display_order)
+            let ipbr = |m: &CachedModel| m.score_source == ScoreSource::Ipbr;
+            let phase_score_sum = |m: &CachedModel| -> f64 {
+                let scores = m.ipbr_phase_scores;
+                [scores.idea, scores.planning, scores.build, scores.review]
+                    .into_iter()
+                    .flatten()
+                    .sum()
+            };
+            // `min_by` picks the smaller key, so reverse the "prefer ipbr"
+            // and "prefer higher score" comparisons.
+            ipbr(b)
+                .cmp(&ipbr(a))
+                .then_with(|| {
+                    phase_score_sum(b)
+                        .partial_cmp(&phase_score_sum(a))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.display_order.cmp(&b.display_order))
                 .then_with(|| a.name.cmp(&b.name))
         })
         .map(|(i, _)| i);

@@ -1,11 +1,13 @@
-//! Compatibility re-exports for the pre-refactor `crate::state::*` paths.
+//! Flat `crate::state::*` public surface.
 //!
-//! The canonical home for pipeline state lives in
-//! [`crate::logic::pipeline`] (pure data + mutators) and
-//! [`crate::data::persistence`] (filesystem-backed methods and persisting
-//! transition wrappers). New code should import from there directly; this
-//! module exists so unmoved callers and tests keep compiling while the
-//! migration is in flight.
+//! Pipeline state lives canonically in [`crate::logic::pipeline`] (pure
+//! data + mutators) and [`crate::data::persistence`] (filesystem-backed
+//! save/load and persisting transition wrappers). This module flattens
+//! both halves into the single `crate::state::{transitions, resume, …}`
+//! shape consumed by `main.rs`, integration tests, and the future
+//! server-mode binary — it is the intentional public API surface, not a
+//! migration leftover. New logic/data callers should still prefer the
+//! layered names above.
 
 pub use crate::logic::pipeline::{
     BRAINSTORM_IO, BlockOrigin, BuilderState, CODER_IO, Event, FinishedRunRecord, LaunchModes,

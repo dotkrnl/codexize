@@ -1,7 +1,4 @@
 //! Canonical home for persistence, process supervision, and provider IO.
-//!
-//! The current crate keeps existing module paths live while later slices move
-//! files under this layer. Re-exports here are intentionally compatibility-only.
 
 pub mod acp;
 pub mod adapters;

@@ -128,6 +128,27 @@ fn stage_error_bindings(stage_id: StageId) -> (Vec<KeyBinding>, Vec<KeyBinding>)
     (actions, system_bindings())
 }
 
+/// Final validation blocked modal: actions + system.
+fn final_validation_blocked_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![
+            KeyBinding {
+                glyph: "f",
+                action: "force ship to done",
+                is_primary: true,
+                capability: None,
+            },
+            KeyBinding {
+                glyph: "r",
+                action: "recover",
+                is_primary: false,
+                capability: None,
+            },
+        ],
+        system_bindings(),
+    )
+}
+
 /// Skip-to-impl modal: actions + system.
 fn skip_to_impl_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
@@ -481,7 +502,7 @@ pub fn keymap(
             ModalKind::QuitRunningAgent => quit_running_agent_bindings(),
             ModalKind::InteractiveExitPrompt => interactive_exit_prompt_bindings(),
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
-            ModalKind::FinalValidationBlocked => (vec![], vec![]), // TODO: Task A2 wires this
+            ModalKind::FinalValidationBlocked => final_validation_blocked_bindings(),
         };
         return render_keymap_line(&[&actions, &system], &caps_fn, width);
     }

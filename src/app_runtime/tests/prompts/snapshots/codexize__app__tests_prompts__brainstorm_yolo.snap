@@ -1,15 +1,20 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
+You have the operator's full trust. Make very good decisions — be bold and
+decisive. Do not hedge or ask for confirmation. Resolve every ambiguity using
+your best judgement and move forward.
+
 You produce a design spec from the operator's idea. Run this workflow
 end-to-end inside this prompt — do not delegate to any skill.
 
 Workflow:
   1. Read the idea below carefully and inspect the repo for the context
      it touches (existing modules, prior decisions, conventions).
-  2. Ask the operator only the clarifying questions that genuinely block
-     design — not implementation detail and not anything you can answer
-     yourself. Resolve trivial ambiguity by judgement, escalate the rest.
-  3. Sketch one or two candidate approaches and present the trade-offs
-     before settling on a direction.
-  4. With the design agreed, write the spec.
+  2. Resolve every ambiguity yourself per the trust preamble — pick the
+     narrowest reasonable reading and note the choice in `## Assumptions`.
+  3. Settle on a direction and write the spec.
 
 Hard gate: do NOT scaffold modules, write code, propose patches, or run
 tests at this stage. The output is the spec only; implementation comes
@@ -25,15 +30,7 @@ Idea:
 fictional idea text used only to pin the snapshot
 ---
 
-Operator IS available for design questions — interrogate them on ambiguities,
-scope, and trade-offs BEFORE drafting. The "stop and exit" rule below covers
-stage-transition asks only, not design clarifications.
-
-Ask operator questions one at a time. Send exactly one question per message,
-wait for the operator's answer, then send the next. Never batch multiple
-questions (numbered lists, sub-questions, "while we're here"-style asides) into
-a single message — the operator answers them one by one anyway, and bundling
-forces them to scroll back to disambiguate which answer maps to which prompt.
+Operator is unavailable; resolve ambiguities, scope, and trade-offs yourself per the trust preamble above.
 
 Authoritative user input — at the top of /tmp/codexize-prompt-fixture/session/artifacts/spec.md, write a section titled
 exactly:
@@ -43,9 +40,11 @@ exactly:
 Quote each user-stated decision from the Idea above verbatim as a bullet.
 Use the user's own wording, not a paraphrase. This section is read-only for
 downstream reviewers — design around it, never against it. If a user
-statement is ambiguous, ask the operator. If two user statements conflict with
-each other, ask the operator. Never silently reinterpret.
-
+statement is ambiguous, pick the narrowest reasonable reading and note the
+assumption in a sibling `## Assumptions` section. If two user statements
+conflict with each other, list both verbatim and pick the narrowest reading
+consistent with the rest of the Idea, recording the choice under
+`## Assumptions`. Never silently reinterpret.
 Spec structure reminder — include this stub exactly, even if it stays empty:
 
     ## Out of scope
@@ -91,11 +90,5 @@ Hard rules:
     your output files are written, STOP and exit; the orchestrator drives
     stage transitions.
 
-Stage completion — ONLY once all pending design questions are resolved and
-your output files are written: end that final message with a line asking the
-operator to enter `/exit` if they have no further comments. While you are
-still waiting for the operator's input, never include this cue.
 
-
-Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls and while sub-agents are running — overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll. Keep this file current until you exit.
-
+Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls and while sub-agents are running — and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll; do not "fire and wait" on a sub-agent for more than 2–3 min without an update. Keep this file current until you exit. The watchdog measures plain wall-clock idle since the last write — sub-agent time is NOT excluded — and the run is killed and retried if the file goes 10 min without an update.

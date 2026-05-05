@@ -1,3 +1,7 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
 You produce an implementation plan from an approved spec and its
 spec reviews. Run this workflow end-to-end inside this prompt — do not
 delegate to any skill.
@@ -82,4 +86,3 @@ for the operator's input, never include this cue.
 
 
 Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls and while sub-agents are running — overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll. Keep this file current until you exit.
-

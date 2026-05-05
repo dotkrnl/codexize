@@ -1,19 +1,31 @@
-You are the reviewer for task 7, round 1. NON-INTERACTIVE —
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
+You are the reviewer for task 7, round 3. NON-INTERACTIVE —
 no operator, no code edits, no VCS mutations. Write ONLY the review TOML.
 
 Heads up: the coder you're reviewing is from a DIFFERENT model vendor — bring
 fresh eyes, that's the whole point of pairing.
 
 Inputs:
-  Task:         /tmp/codexize-prompt-fixture/session/rounds/001/task.toml
+  Task:         /tmp/codexize-prompt-fixture/session/rounds/003/task.toml
   Spec:         /tmp/codexize-prompt-fixture/session/artifacts/spec.md
   Plan:         /tmp/codexize-prompt-fixture/session/artifacts/plan.md
-  Review scope: /tmp/codexize-prompt-fixture/session/rounds/001/review_scope.toml (TOML with base_sha = HEAD at round start)
+  Review scope: /tmp/codexize-prompt-fixture/session/rounds/003/review_scope.toml (TOML with base_sha = HEAD at round start)
+  Prior reviews for this task (read first; do not repeat their feedback):
+    /tmp/codexize-prompt-fixture/session/rounds/001/review.toml
+    /tmp/codexize-prompt-fixture/session/rounds/002/review.toml
 
+  Coder summary: /tmp/codexize-prompt-fixture/session/rounds/003/coder_summary.toml
+  Coder rebuttal (round 3):
+    Read it before your verdict.
+    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.
+    Rebuttal entries use the prefix "[Round N, Item M]".
 
 
 Review:
-  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' /tmp/codexize-prompt-fixture/session/rounds/001/review_scope.toml)
+  1. BASE=$(sed -n 's/^base_sha = "\(.*\)"$/\1/p' /tmp/codexize-prompt-fixture/session/rounds/003/review_scope.toml)
      `git log --oneline $BASE..HEAD` — every commit in this round.
      `git diff $BASE..HEAD`           — aggregate change.
      `git show <sha>`                 — drill into any commit.
@@ -34,7 +46,7 @@ Review:
      review only `base..HEAD`.
 
 
-# IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/rounds/001/review.toml — no prose around it.
+# IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/rounds/003/review.toml — no prose around it.
 # Parse failure = run failure. Use double-quoted strings; triple-quoted for
 # multi-line; arrays of inline tables for any new_task refs.
 
@@ -54,8 +66,8 @@ Review:
     description = """…"""
     test = """…"""
     estimated_tokens = 150000
-    spec_refs = [{ path = "artifacts/spec.md", lines = "10-30" }]
-    plan_refs = [{ path = "artifacts/plan.md", lines = "50-70" }]
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-30" }}]
+    plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
 
 Rules:
   - approved      → outcomes delivered AND (tests pass OR task is

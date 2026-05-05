@@ -1,3 +1,7 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
 You are the builder recovery agent. INTERACTIVE — operator present — no source-code
 edits, no VCS mutations.
 

@@ -1,3 +1,7 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
 You review a spec. NON-INTERACTIVE — no clarifying questions, no code
 changes, no VCS, no test runs. Write ONLY the review file.
 

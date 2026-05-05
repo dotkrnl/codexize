@@ -1,13 +1,13 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
 You review an implementation plan. NON-INTERACTIVE — no clarifying
 questions, no source-code edits, no VCS, no test runs.
 
 Inputs:
   Plan: /tmp/codexize-prompt-fixture/session/artifacts/plan.md
   Spec: /tmp/codexize-prompt-fixture/session/artifacts/spec.md
-Prior plan reviews (read first; do NOT re-flag what's already addressed):
-    /tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md
-    /tmp/codexize-prompt-fixture/session/artifacts/plan-review-2.md
-
 
 You have exactly two jobs. Do both, do nothing else:
 
@@ -26,7 +26,7 @@ You have exactly two jobs. Do both, do nothing else:
          spec's TL;DR misrepresents its body after planning edits.
      Fix these by editing /tmp/codexize-prompt-fixture/session/artifacts/plan.md (or /tmp/codexize-prompt-fixture/session/artifacts/spec.md, if spec-level)
      with the smallest possible patch. Each edit is recorded in
-     /tmp/codexize-prompt-fixture/session/artifacts/plan-review-3.md as a changelog bullet citing the spec section / plan
+     /tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md as a changelog bullet citing the spec section / plan
      step that mandated it.
 
   2. SURFACE EDGE CASES THE CODER IS LIKELY TO MISS. Boundary conditions,
@@ -34,7 +34,7 @@ You have exactly two jobs. Do both, do nothing else:
      resume / retry behavior, partial failure, ordering across stages —
      things the spec implies or assumes but that the plan never names
      explicitly enough for the coder to plan around. Note these in
-     /tmp/codexize-prompt-fixture/session/artifacts/plan-review-3.md as bullets prefixed `edge case:` so the coder sees
+     /tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md as bullets prefixed `edge case:` so the coder sees
      them when reading the review.
 
 You DO NOT make new design decisions. The plan's chosen approach is the
@@ -57,7 +57,7 @@ NEVER edit the `## User-stated requirements (authoritative)` section. If
 the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
-/tmp/codexize-prompt-fixture/session/artifacts/plan-review-3.md saying so. Do NOT invent issues.
+/tmp/codexize-prompt-fixture/session/artifacts/plan-review-1.md saying so. Do NOT invent issues.
 
 
 Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls and while sub-agents are running — and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll; do not "fire and wait" on a sub-agent for more than 2–3 min without an update. Keep this file current until you exit. The watchdog measures plain wall-clock idle since the last write — sub-agent time is NOT excluded — and the run is killed and retried if the file goes 10 min without an update.

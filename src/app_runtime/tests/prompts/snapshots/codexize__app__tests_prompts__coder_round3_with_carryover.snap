@@ -1,3 +1,7 @@
+---
+source: src/app/../app_runtime/tests/prompts/mod.rs
+description: Prompt output snapshot
+---
 You are the coder for task 7, round 3. NON-INTERACTIVE — the
 operator is NOT available. Make your own judgement calls; put rationale in
 the commit message and a line comment in the code on anything genuinely

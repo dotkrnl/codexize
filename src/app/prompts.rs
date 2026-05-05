@@ -1,12 +1,11 @@
 // prompts.rs
 //
 // Public prompt-builder functions for every agent stage. Long prompt bodies
-// live in `src/app/prompts/*.md` and are rendered via the substitution helper
-// in the sibling `prompt_render` module — keep this file thin and reserve it
-// for orchestration-side helpers and the public function signatures.
+// live in `src/app/prompts/*.md` and are rendered via static token replacement
+// in this module — keep this file thin and reserve it for orchestration-side
+// helpers and the public function signatures.
 use crate::{
     adapters::EffortLevel,
-    app::prompt_render::render,
     artifacts::ReviewScopeArtifact,
     state::{self as session_state},
     tasks,
@@ -31,6 +30,46 @@ const RECOVERY_INTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_inter
 const RECOVERY_NONINTERACTIVE_TEMPLATE: &str = include_str!("prompts/recovery_noninteractive.md");
 const RECOVERY_PLAN_REVIEW_TEMPLATE: &str = include_str!("prompts/recovery_plan_review.md");
 const RECOVERY_SHARDING_TEMPLATE: &str = include_str!("prompts/recovery_sharding.md");
+
+macro_rules! prompt_template {
+    ($template:expr $(, $name:ident = $value:expr )* $(,)?) => {{
+        let mut rendered = $template.to_owned();
+        $(
+            rendered = rendered.replace(concat!("{", stringify!($name), "}"), $value);
+        )*
+        rendered
+    }};
+}
+
+struct PromptCtx {
+    project_doc_instr: String,
+}
+
+impl PromptCtx {
+    fn new() -> Self {
+        Self {
+            project_doc_instr: project_doc_instr(),
+        }
+    }
+
+    fn path(&self, path: &Path) -> String {
+        agent_path(path)
+    }
+
+    fn project_doc_instr(&self) -> &str {
+        &self.project_doc_instr
+    }
+
+    fn live_summary_instruction(&self, path: &Path) -> String {
+        let path = self.path(path);
+        prompt_template!(LIVE_SUMMARY_TEMPLATE, path = &path)
+    }
+
+    fn live_summary_instruction_interactive(&self, path: &Path) -> String {
+        let path = self.path(path);
+        prompt_template!(LIVE_SUMMARY_INTERACTIVE_TEMPLATE, path = &path)
+    }
+}
 pub(crate) fn cancel_run_label(base: &str) {
     crate::runner::cancel_run_labels_matching(base);
 }
@@ -224,14 +263,14 @@ pub(crate) fn project_doc_instr() -> String {
     format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
 }
 
+#[cfg(test)]
 pub(crate) fn live_summary_instruction(path: &std::path::Path) -> String {
-    let path_str = agent_path(path);
-    render(LIVE_SUMMARY_TEMPLATE, &[("path", &path_str)])
+    PromptCtx::new().live_summary_instruction(path)
 }
 
+#[cfg(test)]
 pub(crate) fn live_summary_instruction_interactive(path: &std::path::Path) -> String {
-    let path_str = agent_path(path);
-    render(LIVE_SUMMARY_INTERACTIVE_TEMPLATE, &[("path", &path_str)])
+    PromptCtx::new().live_summary_instruction_interactive(path)
 }
 
 pub(crate) fn spec_review_prompt(
@@ -239,18 +278,16 @@ pub(crate) fn spec_review_prompt(
     review_path: &str,
     live_summary_path: &str,
 ) -> String {
-    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
-    let project_doc_instr = project_doc_instr();
-    let spec_path = agent_path(Path::new(spec_path));
-    let review_path = agent_path(Path::new(review_path));
-    render(
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(Path::new(live_summary_path));
+    let spec_path = ctx.path(Path::new(spec_path));
+    let review_path = ctx.path(Path::new(review_path));
+    prompt_template!(
         SPEC_REVIEW_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec_path", &spec_path),
-            ("review_path", &review_path),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec_path = &spec_path,
+        review_path = &review_path,
+        instr = &instr,
     )
 }
 
@@ -261,11 +298,11 @@ pub(crate) fn plan_review_prompt(
     round: u32,
     live_summary_path: &str,
 ) -> String {
-    let instr = live_summary_instruction(std::path::Path::new(live_summary_path));
-    let project_doc_instr = project_doc_instr();
-    let spec_path = agent_path(Path::new(spec_path));
-    let plan_path = agent_path(Path::new(plan_path));
-    let review_path = agent_path(Path::new(review_path));
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(Path::new(live_summary_path));
+    let spec_path = ctx.path(Path::new(spec_path));
+    let plan_path = ctx.path(Path::new(plan_path));
+    let review_path = ctx.path(Path::new(review_path));
     let review_dir = Path::new(&review_path)
         .parent()
         .map(|p| p.display().to_string())
@@ -281,16 +318,14 @@ pub(crate) fn plan_review_prompt(
     } else {
         String::new()
     };
-    render(
+    prompt_template!(
         PLAN_REVIEW_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec_path", &spec_path),
-            ("plan_path", &plan_path),
-            ("review_path", &review_path),
-            ("prior_block", &prior_block),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec_path = &spec_path,
+        plan_path = &plan_path,
+        review_path = &review_path,
+        prior_block = &prior_block,
+        instr = &instr,
     )
 }
 
@@ -303,35 +338,33 @@ pub(crate) fn brainstorm_prompt(
     live_summary_path: &str,
     yolo: bool,
 ) -> String {
-    let project_doc_instr = project_doc_instr();
-    let spec_path = agent_path(Path::new(spec_path));
-    let summary_path = agent_path(Path::new(summary_path));
+    let ctx = PromptCtx::new();
+    let spec_path = ctx.path(Path::new(spec_path));
+    let summary_path = ctx.path(Path::new(summary_path));
     let skip_proposal_path = Path::new(&summary_path)
         .parent()
         .map(|dir| dir.join("skip_proposal.toml"))
         .unwrap_or_else(|| resolved_agent_path(Path::new("skip_proposal.toml")));
-    let skip_proposal_path = agent_path(&skip_proposal_path);
+    let skip_proposal_path = ctx.path(&skip_proposal_path);
     let (template, instr) = if yolo {
         (
             BRAINSTORM_YOLO_TEMPLATE,
-            live_summary_instruction(std::path::Path::new(live_summary_path)),
+            ctx.live_summary_instruction(Path::new(live_summary_path)),
         )
     } else {
         (
             BRAINSTORM_INTERACTIVE_TEMPLATE,
-            live_summary_instruction_interactive(std::path::Path::new(live_summary_path)),
+            ctx.live_summary_instruction_interactive(Path::new(live_summary_path)),
         )
     };
-    render(
+    prompt_template!(
         template,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("idea", idea),
-            ("spec_path", &spec_path),
-            ("summary_path", &summary_path),
-            ("skip_proposal_path", &skip_proposal_path),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        idea = idea,
+        spec_path = &spec_path,
+        summary_path = &summary_path,
+        skip_proposal_path = &skip_proposal_path,
+        instr = &instr,
     )
 }
 
@@ -342,39 +375,37 @@ pub(crate) fn planning_prompt(
     live_summary_path: &std::path::Path,
     yolo: bool,
 ) -> String {
+    let ctx = PromptCtx::new();
     let reviews_block = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
     } else {
         review_paths
             .iter()
             .enumerate()
-            .map(|(i, p)| format!("  - review {}: {}", i + 1, agent_path(p)))
+            .map(|(i, p)| format!("  - review {}: {}", i + 1, ctx.path(p)))
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let project_doc_instr = project_doc_instr();
     let (template, instr) = if yolo {
         (
             PLANNING_YOLO_TEMPLATE,
-            live_summary_instruction(live_summary_path),
+            ctx.live_summary_instruction(live_summary_path),
         )
     } else {
         (
             PLANNING_INTERACTIVE_TEMPLATE,
-            live_summary_instruction_interactive(live_summary_path),
+            ctx.live_summary_instruction_interactive(live_summary_path),
         )
     };
-    let spec_str = agent_path(spec_path);
-    let plan_str = agent_path(plan_path);
-    render(
+    let spec_str = ctx.path(spec_path);
+    let plan_str = ctx.path(plan_path);
+    prompt_template!(
         template,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec", &spec_str),
-            ("reviews", &reviews_block),
-            ("plan", &plan_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec = &spec_str,
+        reviews = &reviews_block,
+        plan = &plan_str,
+        instr = &instr,
     )
 }
 
@@ -385,31 +416,29 @@ pub(crate) fn final_validation_prompt(
     live_summary_path: &std::path::Path,
     simplification_path: Option<&std::path::Path>,
 ) -> String {
-    let instr = live_summary_instruction(live_summary_path);
-    let project_doc_instr = project_doc_instr();
-    let verdict_str = agent_path(verdict_path);
-    let live_summary_str = agent_path(live_summary_path);
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(live_summary_path);
+    let verdict_str = ctx.path(verdict_path);
+    let live_summary_str = ctx.path(live_summary_path);
     // Pass the simplifier's self-report only when a TOML exists for this
     // round. The validator may inspect it for context but its own verdict
     // remains independent — the simplifier's claim is never authoritative.
     let simplification_block = match simplification_path {
         Some(path) if path.exists() => format!(
             "\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n",
-            agent_path(path)
+            ctx.path(path)
         ),
         _ => String::new(),
     };
-    render(
+    prompt_template!(
         FINAL_VALIDATION_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("idea_text", idea_text),
-            ("spec_text", spec_text),
-            ("verdict", &verdict_str),
-            ("live_summary", &live_summary_str),
-            ("simplification_block", &simplification_block),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        idea_text = idea_text,
+        spec_text = spec_text,
+        verdict = &verdict_str,
+        live_summary = &live_summary_str,
+        simplification_block = &simplification_block,
+        instr = &instr,
     )
 }
 
@@ -419,20 +448,18 @@ pub(crate) fn sharding_prompt(
     tasks_path: &std::path::Path,
     live_summary_path: &std::path::Path,
 ) -> String {
-    let instr = live_summary_instruction(live_summary_path);
-    let project_doc_instr = project_doc_instr();
-    let spec_str = agent_path(spec_path);
-    let plan_str = agent_path(plan_path);
-    let tasks_str = agent_path(tasks_path);
-    render(
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(live_summary_path);
+    let spec_str = ctx.path(spec_path);
+    let plan_str = ctx.path(plan_path);
+    let tasks_str = ctx.path(tasks_path);
+    prompt_template!(
         SHARDING_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("tasks", &tasks_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec = &spec_str,
+        plan = &plan_str,
+        tasks = &tasks_str,
+        instr = &instr,
     )
 }
 
@@ -449,10 +476,11 @@ pub(crate) fn recovery_prompt(
     recovery_path: &std::path::Path,
     interactive: bool,
 ) -> String {
+    let ctx = PromptCtx::new();
     let instr = if interactive {
-        live_summary_instruction_interactive(live_summary_path)
+        ctx.live_summary_instruction_interactive(live_summary_path)
     } else {
-        live_summary_instruction(live_summary_path)
+        ctx.live_summary_instruction(live_summary_path)
     };
     let trigger_task = trigger_task_id
         .map(|id| id.to_string())
@@ -476,30 +504,27 @@ pub(crate) fn recovery_prompt(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let project_doc_instr = project_doc_instr();
     let template = if interactive {
         RECOVERY_INTERACTIVE_TEMPLATE
     } else {
         RECOVERY_NONINTERACTIVE_TEMPLATE
     };
-    let spec_str = agent_path(spec_path);
-    let plan_str = agent_path(plan_path);
-    let tasks_str = agent_path(tasks_path);
-    let recovery_str = agent_path(recovery_path);
-    render(
+    let spec_str = ctx.path(spec_path);
+    let plan_str = ctx.path(plan_path);
+    let tasks_str = ctx.path(tasks_path);
+    let recovery_str = ctx.path(recovery_path);
+    prompt_template!(
         template,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("tasks", &tasks_str),
-            ("recovery", &recovery_str),
-            ("trigger_task", &trigger_task),
-            ("trigger_summary", trigger_summary),
-            ("completed", &completed),
-            ("started", &started),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec = &spec_str,
+        plan = &plan_str,
+        tasks = &tasks_str,
+        recovery = &recovery_str,
+        trigger_task = &trigger_task,
+        trigger_summary = trigger_summary,
+        completed = &completed,
+        started = &started,
+        instr = &instr,
     )
 }
 
@@ -511,24 +536,22 @@ pub(crate) fn recovery_plan_review_prompt(
     live_summary_path: &std::path::Path,
     plan_review_output_path: &std::path::Path,
 ) -> String {
-    let project_doc_instr = project_doc_instr();
-    let instr = live_summary_instruction(live_summary_path);
-    let spec_str = agent_path(spec_path);
-    let plan_str = agent_path(plan_path);
-    let review_str = agent_path(triggering_review_path);
-    let recovery_str = agent_path(recovery_path);
-    let output_str = agent_path(plan_review_output_path);
-    render(
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(live_summary_path);
+    let spec_str = ctx.path(spec_path);
+    let plan_str = ctx.path(plan_path);
+    let review_str = ctx.path(triggering_review_path);
+    let recovery_str = ctx.path(recovery_path);
+    let output_str = ctx.path(plan_review_output_path);
+    prompt_template!(
         RECOVERY_PLAN_REVIEW_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("review", &review_str),
-            ("recovery", &recovery_str),
-            ("output", &output_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec = &spec_str,
+        plan = &plan_str,
+        review = &review_str,
+        recovery = &recovery_str,
+        output = &output_str,
+        instr = &instr,
     )
 }
 
@@ -549,23 +572,21 @@ pub(crate) fn recovery_sharding_prompt(
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let project_doc_instr = project_doc_instr();
-    let instr = live_summary_instruction(live_summary_path);
-    let spec_str = agent_path(spec_path);
-    let plan_str = agent_path(plan_path);
-    let output_str = agent_path(tasks_output_path);
+    let ctx = PromptCtx::new();
+    let instr = ctx.live_summary_instruction(live_summary_path);
+    let spec_str = ctx.path(spec_path);
+    let plan_str = ctx.path(plan_path);
+    let output_str = ctx.path(tasks_output_path);
     let id_floor_str = id_floor.to_string();
-    render(
+    prompt_template!(
         RECOVERY_SHARDING_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("completed", &completed_str),
-            ("id_floor", &id_floor_str),
-            ("output", &output_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec = &spec_str,
+        plan = &plan_str,
+        completed = &completed_str,
+        id_floor = &id_floor_str,
+        output = &output_str,
+        instr = &instr,
     )
 }
 
@@ -597,6 +618,7 @@ pub(crate) fn coder_prompt(
     resume: bool,
     refine_carryover: &[String],
 ) -> String {
+    let ctx = PromptCtx::new();
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
     let coder_summary = session_dir
@@ -612,7 +634,7 @@ pub(crate) fn coder_prompt(
             format!(
                 "\nPrevious reviewer feedback (round {}): {}\nReviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.\n",
                 round - 1,
-                agent_path(&p)
+                ctx.path(&p)
             )
         } else {
             String::new()
@@ -637,29 +659,26 @@ pub(crate) fn coder_prompt(
     } else {
         ""
     };
-    let instr = live_summary_instruction(live_summary_path);
-    let project_doc_instr = project_doc_instr();
+    let instr = ctx.live_summary_instruction(live_summary_path);
     let task_id_str = task_id.to_string();
     let round_str = round.to_string();
-    let task_str = agent_path(task_file);
-    let spec_str = agent_path(&spec);
-    let plan_str = agent_path(&plan);
-    let coder_summary_str = agent_path(&coder_summary);
-    render(
+    let task_str = ctx.path(task_file);
+    let spec_str = ctx.path(&spec);
+    let plan_str = ctx.path(&plan);
+    let coder_summary_str = ctx.path(&coder_summary);
+    prompt_template!(
         CODER_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("task_id", &task_id_str),
-            ("round", &round_str),
-            ("task", &task_str),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("coder_summary", &coder_summary_str),
-            ("prev_review", &prev_review),
-            ("refine_block", &refine_block),
-            ("resume_hint", resume_hint),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        task_id = &task_id_str,
+        round = &round_str,
+        task = &task_str,
+        spec = &spec_str,
+        plan = &plan_str,
+        coder_summary = &coder_summary_str,
+        prev_review = &prev_review,
+        refine_block = &refine_block,
+        resume_hint = resume_hint,
+        instr = &instr,
     )
 }
 
@@ -675,6 +694,7 @@ pub(crate) struct ReviewerPromptInputs<'a> {
 }
 
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
+    let ctx = PromptCtx::new();
     let ReviewerPromptInputs {
         session_dir,
         task_id,
@@ -687,7 +707,7 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     } = inputs;
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
-    let instr = live_summary_instruction(live_summary_path);
+    let instr = ctx.live_summary_instruction(live_summary_path);
     let prior_reviews = if round > 1 {
         let lines: Vec<String> = (1..round)
             .map(|r| {
@@ -695,7 +715,7 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
                     .join("rounds")
                     .join(format!("{r:03}"))
                     .join("review.toml");
-                format!("    {}", agent_path(&p))
+                format!("    {}", ctx.path(&p))
             })
             .collect();
         format!(
@@ -708,35 +728,32 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let coder_summary_section = coder_summary_file.map_or(String::new(), |path| {
         format!(
             "  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n",
-            agent_path(path),
+            ctx.path(path),
             round
         )
     });
     let review_scope_text = "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n";
-    let project_doc_instr = project_doc_instr();
     let task_id_str = task_id.to_string();
     let round_str = round.to_string();
-    let task_str = agent_path(task_file);
-    let spec_str = agent_path(&spec);
-    let plan_str = agent_path(&plan);
-    let review_scope_str = agent_path(review_scope_file);
-    let review_str = agent_path(review_file);
-    render(
+    let task_str = ctx.path(task_file);
+    let spec_str = ctx.path(&spec);
+    let plan_str = ctx.path(&plan);
+    let review_scope_str = ctx.path(review_scope_file);
+    let review_str = ctx.path(review_file);
+    prompt_template!(
         REVIEWER_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("task_id", &task_id_str),
-            ("round", &round_str),
-            ("task", &task_str),
-            ("spec", &spec_str),
-            ("plan", &plan_str),
-            ("review_scope", &review_scope_str),
-            ("prior_reviews", &prior_reviews),
-            ("coder_summary_section", &coder_summary_section),
-            ("review_scope_text", review_scope_text),
-            ("review", &review_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        task_id = &task_id_str,
+        round = &round_str,
+        task = &task_str,
+        spec = &spec_str,
+        plan = &plan_str,
+        review_scope = &review_scope_str,
+        prior_reviews = &prior_reviews,
+        coder_summary_section = &coder_summary_section,
+        review_scope_text = review_scope_text,
+        review = &review_str,
+        instr = &instr,
     )
 }
 
@@ -750,23 +767,21 @@ pub(crate) fn simplifier_prompt(
     simplification_path: &std::path::Path,
     live_summary_path: &std::path::Path,
 ) -> String {
+    let ctx = PromptCtx::new();
     let spec = session_dir.join("artifacts/spec.md");
     let plan = session_dir.join("artifacts/plan.md");
-    let project_doc_instr = project_doc_instr();
-    let instr = live_summary_instruction(live_summary_path);
-    let spec_str = agent_path(&spec);
-    let plan_str = agent_path(&plan);
-    let review_scope_str = agent_path(review_scope_file);
-    let simplification_str = agent_path(simplification_path);
-    render(
+    let instr = ctx.live_summary_instruction(live_summary_path);
+    let spec_str = ctx.path(&spec);
+    let plan_str = ctx.path(&plan);
+    let review_scope_str = ctx.path(review_scope_file);
+    let simplification_str = ctx.path(simplification_path);
+    prompt_template!(
         SIMPLIFIER_TEMPLATE,
-        &[
-            ("project_doc_instr", &project_doc_instr),
-            ("spec_path", &spec_str),
-            ("plan_path", &plan_str),
-            ("review_scope_path", &review_scope_str),
-            ("simplification_path", &simplification_str),
-            ("instr", &instr),
-        ],
+        project_doc_instr = ctx.project_doc_instr(),
+        spec_path = &spec_str,
+        plan_path = &plan_str,
+        review_scope_path = &review_scope_str,
+        simplification_path = &simplification_str,
+        instr = &instr,
     )
 }

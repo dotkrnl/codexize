@@ -126,12 +126,9 @@ fn shipped_templates_emit_literal_braces_unescaped() {
 }
 
 #[test]
-fn prompt_snapshots_match_fixtures() {
+fn prompt_insta_snapshots_match_fixtures() {
     use std::path::{Path, PathBuf};
     with_temp_root_and_cwd(|_root| {
-        // Use stable absolute path strings so every snapshot is
-        // byte-deterministic across runs while matching production prompt
-        // behavior: agents always receive full resolved artifact paths.
         let session_dir = PathBuf::from("/tmp/codexize-prompt-fixture/session");
         let artifacts = session_dir.join("artifacts");
         let round1 = session_dir.join("rounds/001");
@@ -158,20 +155,17 @@ fn prompt_snapshots_match_fixtures() {
         let plan_review_r1_out = artifacts.join("plan-review-1.md");
         let plan_review_r3_out = artifacts.join("plan-review-3.md");
 
-        // Live summary instructions (the smallest templates).
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "live_summary",
             &live_summary_instruction(&session_dir.join("artifacts/live_summary.txt")),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "live_summary_interactive",
             &live_summary_instruction_interactive(Path::new(
                 "/tmp/codexize-prompt-fixture/session/artifacts/live_summary.interactive.txt",
             )),
         );
-
-        // Spec review.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "spec_review",
             &spec_review_prompt(
                 &spec.display().to_string(),
@@ -179,10 +173,7 @@ fn prompt_snapshots_match_fixtures() {
                 &live.display().to_string(),
             ),
         );
-
-        // Plan review at round 1 (no prior reviews) and round 3 (has prior
-        // reviews to embed). Both branches go through the same template.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "plan_review_round1",
             &plan_review_prompt(
                 &spec.display().to_string(),
@@ -192,7 +183,7 @@ fn prompt_snapshots_match_fixtures() {
                 &live.display().to_string(),
             ),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "plan_review_round3",
             &plan_review_prompt(
                 &spec.display().to_string(),
@@ -203,10 +194,8 @@ fn prompt_snapshots_match_fixtures() {
             ),
         );
 
-        // Brainstorm: yolo and interactive. Both intentionally changed in
-        // this iteration to embed the workflow + no-skill clause.
         let idea = "fictional idea text used only to pin the snapshot";
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "brainstorm_interactive",
             &brainstorm_prompt(
                 idea,
@@ -216,7 +205,7 @@ fn prompt_snapshots_match_fixtures() {
                 false,
             ),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "brainstorm_yolo",
             &brainstorm_prompt(
                 idea,
@@ -227,29 +216,23 @@ fn prompt_snapshots_match_fixtures() {
             ),
         );
 
-        // Planning: yolo and interactive, both with two prior spec reviews
-        // to exercise the reviews block.
         let spec_reviews = vec![
             artifacts.join("spec-review-1.md"),
             artifacts.join("spec-review-2.md"),
         ];
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "planning_interactive",
             &planning_prompt(&spec, &spec_reviews, &plan, &live, false),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "planning_yolo",
             &planning_prompt(&spec, &spec_reviews, &plan, &live, true),
         );
-
-        // Sharding.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "sharding",
             &sharding_prompt(&spec, &plan, &tasks_path, &live),
         );
-
-        // Final validation.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "final_validation",
             &final_validation_prompt(
                 "fictional idea body — pinned for snapshot",
@@ -259,9 +242,7 @@ fn prompt_snapshots_match_fixtures() {
                 None,
             ),
         );
-
-        // Recovery (interactive + non-interactive).
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "recovery_interactive",
             &recovery_prompt(
                 &spec,
@@ -276,7 +257,7 @@ fn prompt_snapshots_match_fixtures() {
                 true,
             ),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "recovery_noninteractive",
             &recovery_prompt(
                 &spec,
@@ -291,7 +272,7 @@ fn prompt_snapshots_match_fixtures() {
                 false,
             ),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "recovery_plan_review",
             &recovery_plan_review_prompt(
                 &spec,
@@ -302,23 +283,18 @@ fn prompt_snapshots_match_fixtures() {
                 &plan_review_r1_out,
             ),
         );
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "recovery_sharding",
             &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
         );
-
-        // Coder: round 1 with no prior review and no carryover, plus round 3
-        // with carryover and resume to exercise every conditional block.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "coder_round1",
             &coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]),
         );
-        // For round 3 the prior review exists, so the prev_review block
-        // renders. Touch the file so `coder_prompt` sees it.
         let prev_review_path = session_dir.join("rounds/002/review.toml");
         std::fs::create_dir_all(prev_review_path.parent().unwrap()).unwrap();
         std::fs::write(&prev_review_path, "status = \"refine\"\n").unwrap();
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "coder_round3_with_carryover",
             &coder_prompt(
                 &session_dir,
@@ -333,10 +309,7 @@ fn prompt_snapshots_match_fixtures() {
                 ],
             ),
         );
-
-        // Reviewer: round 1 (no prior reviews, no coder summary path), and
-        // round 3 with both — both branches of the optional blocks.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "reviewer_round1",
             &reviewer_prompt(ReviewerPromptInputs {
                 session_dir: &session_dir,
@@ -350,7 +323,7 @@ fn prompt_snapshots_match_fixtures() {
             }),
         );
         let coder_summary_path = round3.join("coder_summary.toml");
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "reviewer_round3_with_summary",
             &reviewer_prompt(ReviewerPromptInputs {
                 session_dir: &session_dir,
@@ -363,10 +336,7 @@ fn prompt_snapshots_match_fixtures() {
                 live_summary_path: &live,
             }),
         );
-
-        // Simplifier — new prompt; intentionally has its own snapshot from
-        // day one.
-        assert_prompt_snapshot(
+        assert_prompt_insta_snapshot(
             "simplifier",
             &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live),
         );

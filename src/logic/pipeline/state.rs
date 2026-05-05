@@ -271,7 +271,7 @@ pub struct Node {
     pub leaf_run_id: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, strum::EnumIs)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineItemStatus {
     #[default]

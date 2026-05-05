@@ -62,29 +62,15 @@ pub struct BuilderState {
 
 impl PipelineItemStatus {
     pub fn is_lifecycle(self) -> bool {
-        matches!(
-            self,
-            Self::Pending | Self::Running | Self::Done | Self::Failed
-        )
+        self.is_pending() || self.is_running() || self.is_done() || self.is_failed()
     }
 
     pub fn is_verdict(self) -> bool {
-        matches!(
-            self,
-            Self::Approved | Self::Revise | Self::HumanBlocked | Self::AgentPivot
-        )
+        self.is_approved() || self.is_revise() || self.is_human_blocked() || self.is_agent_pivot()
     }
 
     pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Done
-                | Self::Failed
-                | Self::Approved
-                | Self::Revise
-                | Self::HumanBlocked
-                | Self::AgentPivot
-        )
+        self.is_done() || self.is_failed() || self.is_verdict()
     }
 }
 

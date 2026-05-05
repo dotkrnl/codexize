@@ -1002,6 +1002,11 @@ fn test_pipeline_item_plan_review_with_mode() {
 
 #[test]
 fn test_pipeline_item_status_lifecycle_vs_verdict() {
+    assert!(PipelineItemStatus::Pending.is_pending());
+    assert!(PipelineItemStatus::HumanBlocked.is_human_blocked());
+    assert!(PipelineItemStatus::AgentPivot.is_agent_pivot());
+    assert!(!PipelineItemStatus::Done.is_pending());
+
     assert!(PipelineItemStatus::Pending.is_lifecycle());
     assert!(PipelineItemStatus::Running.is_lifecycle());
     assert!(PipelineItemStatus::Done.is_lifecycle());
@@ -1602,7 +1607,10 @@ fn section_part_roundtrips_through_toml() {
     struct Wrap {
         path: Vec<SectionPart>,
     }
-    let serialized = toml::to_string(&Wrap { path: parts.clone() }).expect("serialize");
+    let serialized = toml::to_string(&Wrap {
+        path: parts.clone(),
+    })
+    .expect("serialize");
     let back: Wrap = toml::from_str(&serialized).expect("deserialize");
     assert_eq!(back.path, parts);
 }

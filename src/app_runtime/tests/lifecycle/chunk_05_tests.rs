@@ -719,3 +719,108 @@ fn enter_key_in_modal_also_force_ships() {
         assert_eq!(app.state.current_phase, Phase::Done);
     });
 }
+
+#[test]
+fn r_key_in_modal_triggers_recovery_with_iteration_bump() {
+    use crate::state::{BlockOrigin, Phase};
+    use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    with_temp_root(|| {
+        let session_id = "r-key-modal-recovery";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        // Provide tasks.toml so enter_builder_recovery can read prev_task_ids.
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"Task 1\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 10\n",
+        )
+        .expect("tasks");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        state.validation_attempts = VALIDATION_ATTEMPT_CAP;
+        // One coder pipeline item at iteration 1 so enter_builder_recovery_from_block
+        // has something to work with.
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("Task 1".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+
+        let mut app = mk_app(state);
+        let consumed = app.handle_final_validation_blocked_modal_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('r'),
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+        assert!(!consumed, "modal handler must not signal app exit");
+        assert!(
+            matches!(app.state.current_phase, Phase::BuilderRecovery(_)),
+            "phase is {:?}",
+            app.state.current_phase
+        );
+        // The iteration override must be set to max_pipeline_iteration + 1 = 2
+        // for later consumption during reconcile_builder_recovery.
+        assert_eq!(
+            app.state.builder.next_iteration_for_recovery,
+            Some(2),
+            "iteration override must be bumped to 2 for the recovery reconcile"
+        );
+    });
+}
+
+#[test]
+fn capital_r_key_in_modal_also_triggers_recovery() {
+    use crate::state::{BlockOrigin, Phase};
+    use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    with_temp_root(|| {
+        let session_id = "capital-r-key-modal-recovery";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"Task 1\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 10\n",
+        )
+        .expect("tasks");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(BlockOrigin::FinalValidation);
+        state.validation_attempts = VALIDATION_ATTEMPT_CAP;
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("Task 1".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+
+        let mut app = mk_app(state);
+        app.handle_final_validation_blocked_modal_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('R'),
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+        assert!(
+            matches!(app.state.current_phase, Phase::BuilderRecovery(_)),
+            "phase is {:?}",
+            app.state.current_phase
+        );
+    });
+}

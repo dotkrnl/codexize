@@ -403,7 +403,13 @@ impl App {
                 let _ = self.transition_to_phase(Phase::Done);
                 false
             }
-            // 'r'/'R' wired in Task B3.
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                let _ = self
+                    .state
+                    .log_event("palette_invoked: command=recover-from-fv-block".to_string());
+                self.enter_builder_recovery_from_block();
+                false
+            }
             _ => false,
         }
     }

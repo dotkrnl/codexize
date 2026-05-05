@@ -1,6 +1,56 @@
 use super::*;
 
 #[test]
+fn enter_builder_recovery_from_block_bumps_iteration() {
+    with_temp_root(|| {
+        let session_id = "enter-recovery-from-block-iter";
+        let session_dir = session_state::session_dir(session_id);
+        let artifacts = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts).expect("artifacts dir");
+        std::fs::write(
+            artifacts.join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"Task 1\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 10\n",
+        )
+        .expect("tasks");
+
+        let mut state = SessionState::new(session_id.to_string());
+        state.current_phase = Phase::BlockedNeedsUser;
+        state.block_origin = Some(crate::state::BlockOrigin::FinalValidation);
+        // One coder pipeline item at iteration 1.
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status: PipelineItemStatus::Approved,
+            title: Some("Task 1".to_string()),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+
+        let mut app = idle_app(state);
+        app.enter_builder_recovery_from_block();
+
+        assert!(
+            matches!(app.state.current_phase, Phase::BuilderRecovery(_)),
+            "must transition into BuilderRecovery; phase is {:?}",
+            app.state.current_phase
+        );
+
+        // The override must have been set to max_iteration + 1 = 2.
+        // It is NOT consumed during enter_builder_recovery; it is consumed
+        // later by recovery_outer_iteration() during reconcile.
+        assert_eq!(
+            app.state.builder.next_iteration_for_recovery,
+            Some(2),
+            "override must be set to 2 (max pipeline iteration 1 + 1) for later reconcile consumption"
+        );
+    });
+}
+
+#[test]
 fn recovery_retry_exhaustion_falls_back_to_blocked() {
     with_temp_root(|| {
         let mut state = SessionState::new("recovery-retry-cap".to_string());

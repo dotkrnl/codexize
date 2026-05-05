@@ -119,6 +119,56 @@ impl App {
             .unwrap_or(1)
     }
 
+    /// Operator-initiated recovery from a `BlockedNeedsUser + FinalValidation`
+    /// modal. Picks a sensible trigger round/task from existing pipeline state,
+    /// bumps the outer iteration once via `next_iteration_for_recovery`, then
+    /// delegates to `enter_builder_recovery` with `trigger = "human_blocked"`
+    /// so the recovery agent runs interactively.
+    pub(crate) fn enter_builder_recovery_from_block(&mut self) {
+        let trigger_round = self
+            .state
+            .builder
+            .pipeline_items
+            .iter()
+            .filter_map(|item| item.round)
+            .max()
+            .or_else(|| match self.state.current_phase {
+                Phase::ImplementationRound(r)
+                | Phase::ReviewRound(r)
+                | Phase::Simplification(r)
+                | Phase::FinalValidation(r) => Some(r),
+                _ => None,
+            })
+            .unwrap_or(1);
+        let trigger_task_id = self
+            .state
+            .builder
+            .current_task_id()
+            .or_else(|| {
+                self.state
+                    .builder
+                    .pipeline_items
+                    .iter()
+                    .filter(|i| i.stage == "coder")
+                    .filter_map(|i| i.task_id)
+                    .max()
+            });
+        let next_iter = self
+            .state
+            .builder
+            .pipeline_items
+            .iter()
+            .map(|i| i.iteration)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        self.state.builder.next_iteration_for_recovery = Some(next_iter);
+        let summary = Some(
+            "final validation cap exhausted; operator-initiated recovery".to_string(),
+        );
+        self.enter_builder_recovery(trigger_round, trigger_task_id, summary, "human_blocked");
+    }
+
     pub(crate) fn started_builder_task_ids(&self) -> BTreeSet<u32> {
         self.state
             .agent_runs

@@ -18,6 +18,7 @@ fn run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 
@@ -140,6 +141,7 @@ fn test_collapse_review_single_round_multiple_attempts() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -158,6 +160,7 @@ fn test_collapse_review_single_round_multiple_attempts() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let nodes = build_tree(&state);
     let spec_review = nodes.iter().find(|n| n.label == "Spec Review").unwrap();
@@ -195,6 +198,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -213,6 +217,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let nodes = build_tree(&state);
     let planning = nodes.iter().find(|n| n.label == "Planning").unwrap();
@@ -242,6 +247,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -260,6 +266,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let nodes = build_tree(&state);
     let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
@@ -308,6 +315,7 @@ fn failed_unverified_run_maps_to_distinct_node_status() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     let nodes = build_tree(&state);
@@ -357,6 +365,7 @@ fn builder_stage_orders_done_recovery_current_pending() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let nodes = build_tree(&state);
     let builder = nodes.iter().find(|n| n.label == "Loop").unwrap();
@@ -536,6 +545,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -554,6 +564,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     // Recovery plan-review and sharding runs (round 6) — should be routed
     // under Builder Recovery, not the top-level stages.
@@ -574,6 +585,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 4,
@@ -592,6 +604,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 5,
@@ -610,6 +623,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     // Pipeline items mark the recovery rounds.
     state.builder.pipeline_items.push(PipelineItem {
@@ -914,6 +928,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -932,6 +947,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     let nodes = build_tree(&state);
@@ -967,6 +983,7 @@ fn flatten_visible_rows_hides_collapsed_descendants() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     let nodes = build_tree(&state);
@@ -1015,6 +1032,7 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -1033,6 +1051,7 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     let nodes = build_tree(&state);
@@ -1120,6 +1139,7 @@ fn test_task_node_tough_badge() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     state.agent_runs.push(normal_run.clone());
 

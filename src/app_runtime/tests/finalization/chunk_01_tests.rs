@@ -84,6 +84,7 @@ fn recovery_retry_exhaustion_falls_back_to_blocked() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         let handled = app.maybe_auto_retry(&failed);
         assert!(handled);
@@ -172,6 +173,7 @@ estimated_tokens = 10
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = idle_app(state);
         let run = app.state.agent_runs[0].clone();
@@ -249,6 +251,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);
@@ -344,6 +347,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 8,
@@ -362,6 +366,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = idle_app(state);
         let run = app
@@ -428,6 +433,7 @@ estimated_tokens = 10
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = idle_app(state);
         let err = app

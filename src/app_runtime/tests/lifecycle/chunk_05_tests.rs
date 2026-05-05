@@ -67,6 +67,7 @@ fn split_viewport_height_accounts_for_separator_row() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = idle_app(state);
         app.split_target = Some(super::split::SplitTarget::Run(7));

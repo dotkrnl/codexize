@@ -141,6 +141,7 @@ fn approved_review_with_feedback_emits_advisory_message() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -341,6 +342,7 @@ fn orphan_live_summary_files_removed_at_session_start() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let live_txt = artifacts_dir.join("live_summary.txt");
@@ -398,6 +400,7 @@ fn resume_missing_window_honors_present_finish_stamp_for_coder() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let round_dir = session_dir.join("rounds").join("001");
@@ -456,6 +459,7 @@ fn resume_missing_window_missing_stamp_fails_unverified_for_coder() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let round_dir = session_dir.join("rounds").join("001");
@@ -518,6 +522,7 @@ fn resume_missing_window_missing_stamp_warns_and_finalizes_for_non_coder() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let resumed = state
@@ -581,6 +586,7 @@ fn stamp_archival_moves_old_stamps_at_session_start() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.save().unwrap();
 

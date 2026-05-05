@@ -85,6 +85,7 @@ fn agent_run_summary_is_constructible_from_public_surface() {
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     let summary = AgentRunSummary::from_record(&run);
     assert_eq!(summary.id, 7);

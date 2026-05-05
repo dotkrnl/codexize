@@ -142,6 +142,8 @@ pub struct RunRecord {
     pub hostname: Option<String>,
     #[serde(default)]
     pub mount_device_id: Option<u64>,
+    #[serde(default)]
+    pub section_path: Option<Vec<SectionPart>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -27,6 +27,7 @@ fn synchronize_split_target_force_opens_interactive_prompt() {
         },
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     state.agent_runs.push(run);
 
@@ -105,6 +106,7 @@ fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
         },
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     state.agent_runs.push(run);
     crate::runner::request_run_label_interactive_input_for_test("test-run");
@@ -150,6 +152,7 @@ fn interactive_split_input_routes_leading_colon_into_command_mode() {
         },
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     state.agent_runs.push(run);
     crate::runner::request_run_label_interactive_input_for_test("test-run");

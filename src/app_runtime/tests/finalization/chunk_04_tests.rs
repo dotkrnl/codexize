@@ -23,6 +23,7 @@ fn final_validation_missing_verdict_fails_closed_to_blocked() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 
@@ -88,6 +89,7 @@ checked = ["artifacts/spec.md"]
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 

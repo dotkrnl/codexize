@@ -103,6 +103,7 @@ fn space_collapse_override_collapses_active_path_row() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let mut app = mk_app(state);
     let coder_idx = row_index(&app, "Builder");
@@ -158,6 +159,7 @@ fn builder_task_row_can_be_focused_and_expanded_to_transcript_descendant() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 81,
@@ -176,6 +178,7 @@ fn builder_task_row_can_be_focused_and_expanded_to_transcript_descendant() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let mut app = mk_app(state);
     let task_idx = row_index(&app, "Task 7");
@@ -215,6 +218,7 @@ fn repeated_attempt_labels_keep_independent_expansion_state() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
     }
     let mut app = mk_app(state);
@@ -415,6 +419,7 @@ fn app_new_rebuilds_failed_models_without_force_retry_runs() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -433,6 +438,7 @@ fn app_new_rebuilds_failed_models_without_force_retry_runs() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 3,
@@ -451,6 +457,7 @@ fn app_new_rebuilds_failed_models_without_force_retry_runs() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.save().expect("save session");
 
@@ -562,6 +569,7 @@ fn non_builder_retry_exhaustion_still_blocks() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         let handled = app.maybe_auto_retry(&failed);
         assert!(handled);
@@ -596,6 +604,7 @@ fn app_new_rebuild_failed_models_skips_builder_failures_before_retry_reset_cutof
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 11,
@@ -614,6 +623,7 @@ fn app_new_rebuild_failed_models_skips_builder_failures_before_retry_reset_cutof
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.save().expect("save");
         let app = App::new(SessionState::load(session_id).expect("load"));

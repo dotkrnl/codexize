@@ -28,6 +28,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         modes: LaunchModes::default(),
         hostname: Some("test-host".to_string()),
         mount_device_id: Some(42),
+        section_path: None,
     }
 }
 

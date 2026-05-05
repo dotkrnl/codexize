@@ -179,6 +179,7 @@ fn simplifier_launch_reuses_most_recent_coder_model_for_round() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -197,6 +198,7 @@ fn simplifier_launch_reuses_most_recent_coder_model_for_round() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -297,6 +299,7 @@ fn simplifier_picks_chronologically_latest_coder_run_across_tasks() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -315,6 +318,7 @@ fn simplifier_picks_chronologically_latest_coder_run_across_tasks() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 3,
@@ -333,6 +337,7 @@ fn simplifier_picks_chronologically_latest_coder_run_across_tasks() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -413,6 +418,7 @@ fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 8,
@@ -431,6 +437,7 @@ fn simplifier_retry_reuses_existing_simplifier_run_model_over_coder() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -513,6 +520,7 @@ fn simplifier_uses_session_base_scope_not_current_round_scope() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -627,6 +635,7 @@ fn simplifier_auto_launches_via_maybe_auto_launch() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);

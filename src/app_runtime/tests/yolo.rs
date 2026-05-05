@@ -416,6 +416,7 @@ changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut run = make_stage_run(8, "recovery", 2, 1);
         run.modes = crate::state::LaunchModes {

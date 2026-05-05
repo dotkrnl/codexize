@@ -40,6 +40,7 @@ fn previous_stage_stays_expanded_after_phase_advance() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = mk_app(state);
         let bs_idx = row_index(&app, "Brainstorm");
@@ -130,6 +131,7 @@ fn active_path_respects_collapsed_ancestors() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let mut app = mk_app(state);
     let task_idx = row_index(&app, "Task 7");
@@ -180,6 +182,7 @@ fn selection_restores_same_key_after_reorder() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     app.state = state;
 
@@ -216,6 +219,7 @@ fn selection_falls_back_to_nearest_visible_ancestor() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
     }
     let mut app = mk_app(state.clone());
@@ -407,6 +411,7 @@ fn progress_follow_re_enables_on_phase_transition() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = build_progress_follow_app(state, 1);
@@ -628,6 +633,7 @@ fn progress_follow_back_during_running_agent_focuses_new_stage() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -646,6 +652,7 @@ fn progress_follow_back_during_running_agent_focuses_new_stage() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);

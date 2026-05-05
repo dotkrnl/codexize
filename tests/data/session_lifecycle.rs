@@ -22,6 +22,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 

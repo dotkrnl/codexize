@@ -74,6 +74,7 @@ fn review_round_row_can_be_expanded_for_multiround_transcript_access() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 32,
@@ -92,6 +93,7 @@ fn review_round_row_can_be_expanded_for_multiround_transcript_access() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let mut app = mk_app(state);
     let round_one_idx = row_index(&app, "Round 1");
@@ -138,6 +140,7 @@ feedback = ["task 2 is superseded"]
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let mut app = idle_app(state);
         let run = app.state.agent_runs[0].clone();
@@ -240,6 +243,7 @@ estimated_tokens = 12
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);

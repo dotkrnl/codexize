@@ -194,6 +194,7 @@ impl SessionState {
             modes,
             hostname,
             mount_device_id,
+            section_path: None,
         };
         self.agent_runs.push(run);
         id

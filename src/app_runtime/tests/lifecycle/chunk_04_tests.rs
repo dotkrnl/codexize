@@ -558,6 +558,7 @@ fn poll_agent_run_closes_matching_interactive_run_split_on_exit() {
             },
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -600,6 +601,7 @@ fn poll_agent_run_preserves_switched_split_target_on_interactive_exit() {
             },
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);

@@ -667,6 +667,7 @@ pub fn create_run_record_in_memory(
         modes,
         hostname,
         mount_device_id,
+        section_path: None,
     };
     state.agent_runs.push(run);
     id

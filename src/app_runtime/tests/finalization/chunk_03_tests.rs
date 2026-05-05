@@ -25,6 +25,7 @@ fn archived_stamps_not_consulted_by_coder_gate() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.save().unwrap();
 
@@ -120,6 +121,7 @@ fn queue_empty_approved_review_enters_simplification_when_not_yolo() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -183,6 +185,7 @@ fn queue_empty_approved_review_bypasses_simplification_in_yolo() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         run.modes.yolo = true;
         state.agent_runs.push(run.clone());
@@ -293,6 +296,7 @@ fn queue_empty_review_blocks_when_simplification_cap_is_already_exhausted() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -355,6 +359,7 @@ fn final_validation_goal_met_transitions_to_done() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 
@@ -434,6 +439,7 @@ estimated_tokens = 250
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 
@@ -537,6 +543,7 @@ estimated_tokens = 200
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(review_run.clone());
 
@@ -582,6 +589,7 @@ estimated_tokens = 200
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         app.state.agent_runs.push(validation_run.clone());
         app.current_run_id = Some(validation_run.id);
@@ -633,6 +641,7 @@ checked = ["artifacts/spec.md"]
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 

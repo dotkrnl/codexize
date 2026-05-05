@@ -33,6 +33,7 @@ pub(super) fn make_non_interactive_run(id: u64, window_name: &str) -> RunRecord 
         },
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 

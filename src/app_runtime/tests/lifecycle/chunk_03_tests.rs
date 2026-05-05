@@ -146,6 +146,7 @@ fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 2,
@@ -164,6 +165,7 @@ fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.agent_runs.push(RunRecord {
             id: 3,
@@ -182,6 +184,7 @@ fn palette_retry_clears_selected_task_attempt_logs_and_relaunches() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let removed_run = state.agent_runs[0].clone();
         state.save().expect("save");
@@ -265,6 +268,7 @@ fn palette_retry_is_available_from_builder_loop_focus() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let mut app = idle_app(state);
@@ -331,6 +335,7 @@ fn palette_retry_clears_brainstorm_attempt_logs_and_relaunches() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let removed_run = state.agent_runs[0].clone();
         state.save().expect("save");
@@ -424,6 +429,7 @@ fn palette_retry_is_available_from_non_task_stage_focus() {
                 modes: crate::state::LaunchModes::default(),
                 hostname: None,
                 mount_device_id: None,
+                section_path: None,
             });
         }
         let mut app = idle_app(state);
@@ -573,6 +579,7 @@ fn idle_enter_retries_selected_target() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         let removed_run = state.agent_runs[0].clone();
         let mut app = idle_app(state);

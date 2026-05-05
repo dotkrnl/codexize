@@ -164,6 +164,7 @@ fn test_run_record_lifecycle_create_to_done() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     runs.push(run);
 
@@ -190,6 +191,7 @@ fn test_run_record_transition_to_done() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
 
     run.status = RunStatus::Done;
@@ -219,6 +221,7 @@ fn test_run_record_transition_to_failed() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
 
     run.status = RunStatus::Failed;
@@ -293,6 +296,7 @@ fn test_session_state_schema_v3() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         state.save().unwrap();
@@ -741,6 +745,7 @@ fn test_next_agent_run_id() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     assert_eq!(state.next_agent_run_id(), 2);
@@ -767,6 +772,7 @@ fn test_resume_one_running_live_window() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let result = state.resume_running_runs();
@@ -798,6 +804,7 @@ fn test_resume_one_running_missing_window() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
 
         let result = state.resume_running_runs();
@@ -828,6 +835,7 @@ fn test_resume_multiple_running_runs() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -846,6 +854,7 @@ fn test_resume_multiple_running_runs() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
 
     let result = state.resume_running_runs();
@@ -897,6 +906,7 @@ fn test_agent_runs_roundtrip() {
         },
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     let toml = toml::to_string(&state).unwrap();
     let loaded: SessionState = toml::from_str(&toml).unwrap();
@@ -1412,6 +1422,7 @@ fn test_resume_hostname_mismatch_marks_failed_unverified() {
                 Some("some-host".to_string())
             },
             mount_device_id: None,
+            section_path: None,
         });
 
         let result = state.resume_running_runs();
@@ -1475,6 +1486,7 @@ fn test_resume_mount_device_mismatch_marks_failed_unverified() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: different_device,
+            section_path: None,
         });
 
         let result = state.resume_running_runs();
@@ -1517,6 +1529,7 @@ fn test_resume_same_host_identity_preserves_running() {
             modes: crate::state::LaunchModes::default(),
             hostname: current_hostname,
             mount_device_id: current_device,
+            section_path: None,
         });
 
         let result = state.resume_running_runs();
@@ -1592,4 +1605,54 @@ fn section_part_roundtrips_through_toml() {
     let serialized = toml::to_string(&Wrap { path: parts.clone() }).expect("serialize");
     let back: Wrap = toml::from_str(&serialized).expect("deserialize");
     assert_eq!(back.path, parts);
+}
+
+#[test]
+fn run_record_section_path_defaults_to_none_for_legacy_runs() {
+    let toml = r#"id = 1
+stage = "coder"
+task_id = 4
+round = 9
+attempt = 1
+model = "claude-opus-4.7"
+vendor = "claude"
+window_name = "[Round 9 Coder]"
+started_at = "2026-05-04T16:22:57.127045Z"
+status = "Done"
+"#;
+    let run: crate::state::RunRecord = toml::from_str(toml).expect("deserialize legacy run");
+    assert!(run.section_path.is_none());
+}
+
+#[test]
+fn run_record_section_path_roundtrips() {
+    use crate::state::{LaunchModes, RunRecord, RunStatus, SectionPart};
+    let run = RunRecord {
+        id: 7,
+        stage: "coder".to_string(),
+        task_id: Some(4),
+        round: 9,
+        attempt: 1,
+        model: "x".to_string(),
+        vendor: "y".to_string(),
+        window_name: "w".to_string(),
+        started_at: chrono::Utc::now(),
+        ended_at: None,
+        status: RunStatus::Running,
+        error: None,
+        effort: EffortLevel::Normal,
+        modes: LaunchModes::default(),
+        hostname: None,
+        mount_device_id: None,
+        section_path: Some(vec![
+            SectionPart::Iteration(2),
+            SectionPart::Loop,
+            SectionPart::Task(4),
+            SectionPart::Round { n: 9, attempt: 1 },
+            SectionPart::Stage("coder".to_string()),
+        ]),
+    };
+    let s = toml::to_string(&run).expect("serialize");
+    let back: RunRecord = toml::from_str(&s).expect("deserialize");
+    assert_eq!(back.section_path, run.section_path);
 }

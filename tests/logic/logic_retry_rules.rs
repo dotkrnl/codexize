@@ -29,6 +29,7 @@ fn retry_target_for_run_prefers_task_and_falls_back_to_stage() {
         modes: Default::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     };
     assert_eq!(retry_target_for_run(&task_run), Some(RetryTarget::Task(42)));
 

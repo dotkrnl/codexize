@@ -84,6 +84,7 @@ pub(crate) fn mk_state_with_runs() -> SessionState {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.agent_runs.push(RunRecord {
         id: 2,
@@ -102,6 +103,7 @@ pub(crate) fn mk_state_with_runs() -> SessionState {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state
 }
@@ -197,6 +199,7 @@ pub(crate) fn make_coder_run(id: u64, round: u32, attempt: u32) -> RunRecord {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 
@@ -218,6 +221,7 @@ pub(crate) fn make_planning_run(id: u64, attempt: u32) -> RunRecord {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 
@@ -239,6 +243,7 @@ pub(crate) fn make_stage_run(id: u64, stage: &str, round: u32, attempt: u32) -> 
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 
@@ -503,6 +508,7 @@ pub(crate) fn make_brainstorm_run(id: u64) -> RunRecord {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 

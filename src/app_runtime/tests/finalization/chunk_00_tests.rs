@@ -25,6 +25,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
 
         write_finish_stamp_for_run(&app, &run, 1, "");
@@ -78,6 +79,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         crate::runner::write_finish_stamp(
             &app.finish_stamp_path_for(&hup_run),
@@ -115,6 +117,7 @@ fn normalize_failure_reason_reports_exit_signal_and_artifact_errors() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         crate::runner::write_finish_stamp(
             &app.finish_stamp_path_for(&self_exit_run),
@@ -248,6 +251,7 @@ fn normalize_failure_reason_artifact_present_still_fails_on_head_advance() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
 
         // Valid plan artifact so artifact_reason is None.
@@ -631,6 +635,7 @@ fn recovery_sharding_retry_uses_recovery_launcher() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         app.state.agent_runs.push(failed.clone());
 

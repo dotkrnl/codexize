@@ -29,6 +29,7 @@ fn make_run(status: RunStatus) -> RunRecord {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 

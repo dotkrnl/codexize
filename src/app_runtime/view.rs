@@ -173,6 +173,7 @@ mod tests {
             modes: LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         }
     }
 

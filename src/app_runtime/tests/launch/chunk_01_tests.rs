@@ -24,6 +24,7 @@ fn brainstorm_finalization_overlength_nothing_to_do_enters_skip_pending() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
 

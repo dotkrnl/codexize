@@ -297,6 +297,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
@@ -403,6 +404,7 @@ fn seed_stream_session(session_id: &str, window_name: &str) {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.save().unwrap();
 }
@@ -1008,6 +1010,7 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {

@@ -565,6 +565,7 @@ fn cheap_toggle_persists_audits_flashes_and_preserves_running_snapshot() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         });
         state.save().expect("save session");
         let mut app = idle_app(state);
@@ -637,6 +638,7 @@ fn brainstorm_failure_auto_retries_with_next_model() {
             modes: crate::state::LaunchModes::default(),
             hostname: None,
             mount_device_id: None,
+            section_path: None,
         };
         state.agent_runs.push(run.clone());
         let mut app = idle_app(state);

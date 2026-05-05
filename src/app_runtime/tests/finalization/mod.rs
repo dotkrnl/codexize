@@ -30,6 +30,7 @@ pub(super) fn make_simplifier_run(id: u64, round: u32, attempt: u32) -> RunRecor
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
+        section_path: None,
     }
 }
 

@@ -1,4 +1,11 @@
+use super::exit::*;
+use super::supervise::*;
+use super::transport::*;
 use super::*;
+use crate::acp::{AcpTextAccumulator, PromptPayload};
+use crate::state::{MessageKind, RunStatus, SessionState};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 fn active_run_test_lock() -> std::sync::MutexGuard<'static, ()> {

@@ -4,13 +4,16 @@ fn production_source_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
     for entry in fs::read_dir(dir).expect("read source dir") {
         let entry = entry.expect("read source entry");
         let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str());
         if path.is_dir() {
+            // Skip directories whose name marks them as test fixtures (e.g.
+            // `src/app/tests_lifecycle/` after the test reorg).
+            if name.is_some_and(|n| n.starts_with("tests_")) {
+                continue;
+            }
             production_source_files(&path, files);
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs")
-            && !path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("tests_") || name == "test_harness.rs")
+            && !name.is_some_and(|n| n.starts_with("tests_") || n == "test_harness.rs")
             && !path.starts_with("src/state")
         {
             files.push(path);

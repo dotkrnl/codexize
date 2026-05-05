@@ -52,6 +52,12 @@ pub struct BuilderState {
     /// Used to label task nodes in the pipeline tree.
     #[serde(default)]
     pub task_titles: std::collections::BTreeMap<u32, String>,
+    /// One-shot iteration override consumed by `recovery_outer_iteration` when
+    /// the operator triggers recovery from a `BlockedNeedsUser + FinalValidation`
+    /// modal. `None` for the reviewer-driven `human_blocked` path so its
+    /// existing iteration semantics stay intact.
+    #[serde(default)]
+    pub next_iteration_for_recovery: Option<u32>,
 }
 
 impl PipelineItemStatus {

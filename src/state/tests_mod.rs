@@ -1554,3 +1554,23 @@ fn test_run_record_backward_compat_missing_effort() {
     assert_eq!(record2.modes, LaunchModes::default());
     assert_eq!(record2.id, 42);
 }
+
+#[test]
+fn next_iteration_for_recovery_roundtrips_through_toml() {
+    use crate::state::SessionState;
+    let mut state = SessionState::new("iter-bump-roundtrip".to_string());
+    state.builder.next_iteration_for_recovery = Some(7);
+    let serialized = toml::to_string(&state).expect("serialize");
+    let back: SessionState = toml::from_str(&serialized).expect("deserialize");
+    assert_eq!(back.builder.next_iteration_for_recovery, Some(7));
+}
+
+#[test]
+fn next_iteration_for_recovery_defaults_to_none_for_legacy_session() {
+    let toml = r#"session_id = "legacy"
+schema_version = 3
+current_phase = "IdeaInput"
+"#;
+    let state: crate::state::SessionState = toml::from_str(toml).expect("deserialize");
+    assert_eq!(state.builder.next_iteration_for_recovery, None);
+}

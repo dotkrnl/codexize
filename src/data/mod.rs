@@ -17,6 +17,7 @@ pub mod picker_io;
 pub mod preflight;
 pub mod providers;
 pub mod runner;
+pub mod selection_assembly;
 pub mod synthetic_artifacts;
 pub mod warmup;
 pub use crate::data::events::{DataEvent, DataOutcome, DataRequest, dispatch};

@@ -1,0 +1,5 @@
+---
+source: src/ui/footer/keymap/tests_mod.rs
+expression: "snapshot_text(&keymap(Phase::IdeaInput, None, disabled_expand_caps, false,\nfalse, 120,))"
+---
+[fg=White]↑↓[fg=DarkGray] move[fg=DarkGray] · [fg=Rgb(80, 80, 80)]Space[fg=DarkGray] · [fg=White]PgUp/PgDn[fg=DarkGray] page[fg=DarkGray]  ·  [fg=Blue]Enter[fg=DarkGray] show[fg=DarkGray] · [fg=White]:[fg=DarkGray] palette[fg=DarkGray]  ·                                                  [fg=White]Esc[fg=DarkGray] quit

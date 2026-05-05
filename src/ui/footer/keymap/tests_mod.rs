@@ -12,6 +12,20 @@ fn has_dim_spans(line: &Line) -> bool {
     line.spans.iter().any(|s| s.style.fg == Some(DISABLED_DIM))
 }
 
+fn snapshot_text(line: &Line) -> String {
+    line.spans
+        .iter()
+        .map(|span| {
+            let fg = span
+                .style
+                .fg
+                .map(|color| format!("{color:?}"))
+                .unwrap_or_else(|| "None".to_string());
+            format!("[fg={fg}]{}", span.content)
+        })
+        .collect::<String>()
+}
+
 #[test]
 fn default_phase_exact_string_wide() {
     let caps = FocusCaps {
@@ -615,6 +629,77 @@ fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
         default_text.chars().count(),
         modal_text.chars().count(),
         "line lengths must be equal for stable right-anchor"
+    );
+}
+
+#[test]
+fn insta_snapshots_cover_footer_rendering() {
+    let enabled_caps = FocusCaps {
+        can_expand: true,
+        can_edit: true,
+        can_back: true,
+        can_input: true,
+        can_split: true,
+    };
+    let disabled_expand_caps = FocusCaps {
+        can_expand: false,
+        ..enabled_caps
+    };
+
+    insta::assert_snapshot!(
+        "default_wide",
+        snapshot_text(&keymap(
+            Phase::IdeaInput,
+            None,
+            enabled_caps,
+            false,
+            false,
+            120,
+        ))
+    );
+    insta::assert_snapshot!(
+        "default_expand_disabled",
+        snapshot_text(&keymap(
+            Phase::IdeaInput,
+            None,
+            disabled_expand_caps,
+            false,
+            false,
+            120,
+        ))
+    );
+    insta::assert_snapshot!(
+        "pause_modal",
+        snapshot_text(&keymap(
+            Phase::SpecReviewPaused,
+            Some(ModalKind::SpecReviewPaused),
+            FocusCaps::default(),
+            false,
+            false,
+            80,
+        ))
+    );
+    insta::assert_snapshot!(
+        "input_mode",
+        snapshot_text(&keymap(
+            Phase::IdeaInput,
+            None,
+            FocusCaps::default(),
+            true,
+            false,
+            80,
+        ))
+    );
+    insta::assert_snapshot!(
+        "split_view",
+        snapshot_text(&keymap(
+            Phase::IdeaInput,
+            None,
+            enabled_caps,
+            false,
+            true,
+            100,
+        ))
     );
 }
 

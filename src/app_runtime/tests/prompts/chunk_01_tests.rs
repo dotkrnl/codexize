@@ -119,10 +119,28 @@ fn shipped_templates_emit_literal_braces_unescaped() {
     let live = session_dir.join("artifacts/live_summary.txt");
 
     let sharding = sharding_prompt(&spec, &plan, &tasks_path, &live);
-    // The sharding prompt embeds a TOML snippet with `{ path, lines }`
-    // arrays; both literal braces must come through as single characters.
+    let recovery = recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5);
+    let reviewer = reviewer_prompt(ReviewerPromptInputs {
+        session_dir,
+        task_id: 7,
+        round: 1,
+        task_file: &session_dir.join("rounds/001/task.toml"),
+        review_scope_file: &session_dir.join("rounds/001/review_scope.toml"),
+        coder_summary_file: None,
+        review_file: &session_dir.join("rounds/001/review.toml"),
+        live_summary_path: &live,
+    });
+
+    for rendered in [&sharding, &recovery, &reviewer] {
+        // These TOML examples are literal prompt text, not template tokens.
+        assert!(!rendered.contains("{{ path"));
+        assert!(!rendered.contains("{{ path ="));
+    }
     assert!(sharding.contains("{ path, lines }"));
     assert!(sharding.contains("{ path = \"artifacts/spec.md\", lines = \"10-45\" }"));
+    assert!(recovery.contains("{ path, lines }"));
+    assert!(recovery.contains("{ path = \"artifacts/spec.md\", lines = \"10-45\" }"));
+    assert!(reviewer.contains("{ path = \"artifacts/spec.md\", lines = \"10-30\" }"));
 }
 
 #[test]

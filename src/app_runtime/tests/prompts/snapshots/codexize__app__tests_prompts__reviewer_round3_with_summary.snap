@@ -66,8 +66,8 @@ Review:
     description = """…"""
     test = """…"""
     estimated_tokens = 150000
-    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-30" }}]
-    plan_refs = [{{ path = "artifacts/plan.md", lines = "50-70" }}]
+    spec_refs = [{ path = "artifacts/spec.md", lines = "10-30" }]
+    plan_refs = [{ path = "artifacts/plan.md", lines = "50-70" }]
 
 Rules:
   - approved      → outcomes delivered AND (tests pass OR task is

@@ -8,7 +8,7 @@ mod viewport_layout;
 use super::*;
 use crate::{
     artifacts::{ArtifactKind, Spec},
-    state::{self as session_state, MessageKind, Phase, RunStatus},
+    state::{self as session_state, BlockOrigin, MessageKind, Phase, RunStatus},
     tasks,
     tui::AppTerminal,
 };
@@ -145,8 +145,7 @@ impl App {
                 Some(ModalKind::StageError(StageId::Review))
             }
             Phase::BlockedNeedsUser
-                if self.state.block_origin
-                    == Some(crate::state::BlockOrigin::FinalValidation) =>
+                if self.state.block_origin == Some(BlockOrigin::FinalValidation) =>
             {
                 Some(ModalKind::FinalValidationBlocked)
             }

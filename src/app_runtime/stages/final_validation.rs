@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::final_validation_prompt;
+use crate::app::{App, guard};
 use crate::final_validation::{self, ValidationStatus};
 use crate::runner::launch_noninteractive_with_policy;
 use crate::selection::CachedModel;

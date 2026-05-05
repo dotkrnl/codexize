@@ -1,19 +1,13 @@
 // finalization/mod.rs
 mod complete;
-mod retry_policy;
 mod reasons;
 mod recovery;
+mod retry_policy;
 
 use super::*;
 use crate::{
-    selection::{
-        self, VendorKind,
-        config::SelectionPhase,
-        selection::SelectionWarning,
-    },
-    state::{
-        self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus,
-    },
+    selection::{self, VendorKind, config::SelectionPhase, selection::SelectionWarning},
+    state::{self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus},
     tasks,
 };
 use anyhow::Result;
@@ -27,7 +21,6 @@ pub(crate) enum OperatorTerminationMarker {
 }
 
 impl App {
-
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
             .agent_runs
@@ -412,7 +405,6 @@ impl App {
             ));
         }
     }
-
 
     pub(crate) fn finalize_current_run(&mut self, run: &crate::state::RunRecord) -> Result<()> {
         self.drain_live_summary(run);

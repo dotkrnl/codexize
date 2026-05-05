@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::planning_prompt;
+use crate::app::{App, guard};
 use crate::runner::{launch_interactive, launch_noninteractive};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, RunStatus};

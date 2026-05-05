@@ -173,7 +173,6 @@ impl App {
         Some(key)
     }
 
-
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         crate::app_runtime::run_terminal_app(self, terminal)
     }
@@ -240,7 +239,6 @@ impl App {
             Duration::from_millis(DEFAULT_EVENT_POLL_MS)
         }
     }
-
 
     pub(crate) fn transition_to_phase(&mut self, next_phase: Phase) -> Result<()> {
         session_state::transitions::execute_transition(&mut self.state, next_phase)?;
@@ -469,5 +467,4 @@ impl App {
     pub(crate) fn can_go_back(&self) -> bool {
         !matches!(self.state.current_phase, Phase::IdeaInput | Phase::Done)
     }
-
 }

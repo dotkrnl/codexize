@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::sharding_prompt;
+use crate::app::{App, guard};
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};

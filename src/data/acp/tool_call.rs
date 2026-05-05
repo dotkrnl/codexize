@@ -516,6 +516,5 @@ pub(super) fn format_result_line(state: &ToolCallDisplayState) -> String {
     truncate_with_ellipsis(&collapsed, RESULT_LINE_MAX)
 }
 
-
 #[cfg(test)]
 mod tests_mod;

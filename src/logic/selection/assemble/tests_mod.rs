@@ -136,7 +136,10 @@ fn assemble_from_cache_with_available(
         .dashboard
         .map(|section| section.data)
         .unwrap_or_default();
-    let quotas = loaded.quotas.map(|section| section.data).unwrap_or_default();
+    let quotas = loaded
+        .quotas
+        .map(|section| section.data)
+        .unwrap_or_default();
     let resets = loaded
         .quota_resets
         .map(|section| section.data)

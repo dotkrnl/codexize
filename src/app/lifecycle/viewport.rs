@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use crate::app::{App, ExpansionOverride, effective_expansion, split::SplitTarget};
 use crate::app::tree::{
     NodeKey, active_path_keys, build_tree, current_node_index, deepest_path_for_run,
     flatten_visible_rows, node_at_path, node_key_at_path,
 };
+use crate::app::{App, ExpansionOverride, effective_expansion, split::SplitTarget};
 use crate::state::{Node, NodeStatus, Phase, RunStatus};
 
 impl App {
@@ -288,7 +288,6 @@ impl App {
             SplitTarget::Idea => 0,
         }
     }
-
 
     pub(crate) fn clamp_viewport(&mut self) {
         let area_h = self.body_inner_height;

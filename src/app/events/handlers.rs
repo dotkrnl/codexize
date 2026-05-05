@@ -266,7 +266,6 @@ impl App {
         }
     }
 
-
     pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
         match modal {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
@@ -344,7 +343,11 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_stage_error_modal_key(&mut self, stage_id: StageId, key: KeyEvent) -> bool {
+    pub(crate) fn handle_stage_error_modal_key(
+        &mut self,
+        stage_id: StageId,
+        key: KeyEvent,
+    ) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
             KeyCode::Char('r') | KeyCode::Enter => {
@@ -362,7 +365,6 @@ impl App {
             _ => false,
         }
     }
-
 
     pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
@@ -407,4 +409,3 @@ impl App {
         }
     }
 }
-

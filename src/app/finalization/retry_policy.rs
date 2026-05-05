@@ -1,13 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::selection::{
-    self, VendorKind,
-    selection::select_excluding,
-};
+use crate::selection::{self, VendorKind, selection::select_excluding};
 use crate::state::{MessageKind, RunStatus, SessionState};
 
-use super::super::{App, FailedModelSet, RetryKey};
 use super::super::models::vendor_tag;
+use super::super::{App, FailedModelSet, RetryKey};
 
 impl App {
     pub(crate) fn rebuild_failed_models(state: &SessionState) -> HashMap<RetryKey, FailedModelSet> {

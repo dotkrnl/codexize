@@ -13,11 +13,12 @@ use crate::{
 };
 
 use super::super::{
-    App, AppStartupOrigin, models_area, palette, status_line,
+    App, AppStartupOrigin,
     models::spawn_refresh,
+    models_area, palette, startup_cache_has_expired_section,
     state::ModelRefreshState,
+    status_line,
     tree::{build_tree, current_node_index, node_key_at_path},
-    startup_cache_has_expired_section,
 };
 
 impl App {

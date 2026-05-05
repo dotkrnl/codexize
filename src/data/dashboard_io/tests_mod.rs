@@ -152,10 +152,8 @@ fn glm46_preserves_pinned_nonzero_build_score() {
     for model in &mut models {
         stamp_selection_provenance(model);
     }
-    let actual: std::collections::BTreeSet<&str> =
-        models.iter().map(|m| m.name.as_str()).collect();
-    let expected: std::collections::BTreeSet<&str> =
-        filtered_model_set.iter().copied().collect();
+    let actual: std::collections::BTreeSet<&str> = models.iter().map(|m| m.name.as_str()).collect();
+    let expected: std::collections::BTreeSet<&str> = filtered_model_set.iter().copied().collect();
     assert_eq!(actual, expected, "filtered fixture model set drifted");
     let version_index = build_version_index(&models);
     let anchor = models
@@ -186,11 +184,10 @@ fn glm46_post_change_substantially_improved() {
     // AC #4a-bis: the unfiltered fixture still includes glm-4.7, so
     // this asserts the pinned lift while leaving the version penalty
     // unchanged as required by spec §4.2 / §8.
-    let prechange: BTreeMap<String, BTreeMap<String, f64>> =
-        serde_json::from_str(include_str!(
-            "../../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
-        ))
-        .unwrap();
+    let prechange: BTreeMap<String, BTreeMap<String, f64>> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+    ))
+    .unwrap();
     let postchange = fixture_postchange_snapshot();
     let pre = prechange["glm-4.6"]["build"];
     let post = postchange["glm-4.6"]["build"];
@@ -248,11 +245,10 @@ fn ranking_order_among_healthy_models_unchanged() {
     // Unhealthy (have zero axes): glm-4.6, glm-4.7
     let healthy: &[&str] = &["claude-sonnet-4.6", "gemini-2.5-pro", "gpt-5.4"];
 
-    let prechange: BTreeMap<String, BTreeMap<String, f64>> =
-        serde_json::from_str(include_str!(
-            "../../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
-        ))
-        .unwrap();
+    let prechange: BTreeMap<String, BTreeMap<String, f64>> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/aistupidlevel_2026-04-26_prechange_selection_probabilities.json"
+    ))
+    .unwrap();
     let postchange = fixture_postchange_snapshot();
 
     for phase_name in ["build", "idea", "planning", "review"] {

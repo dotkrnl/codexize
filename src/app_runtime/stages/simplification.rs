@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
+use crate::app::{App, guard};
 use crate::runner::launch_noninteractive_with_policy;
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;

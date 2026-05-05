@@ -1,12 +1,10 @@
 use anyhow::Result;
 
 use super::OperatorTerminationMarker;
-use crate::app::{App, guard};
 use crate::app::prompts::{read_review_scope_base_sha, validate_stage_toml_writes};
+use crate::app::{App, guard};
 use crate::artifacts::{RecoveryArtifact, ReviewStatus as RecoveryStatus};
-use crate::state::{
-    self as session_state, MessageKind, PendingGuardDecision, PipelineItemStatus,
-};
+use crate::state::{self as session_state, MessageKind, PendingGuardDecision, PipelineItemStatus};
 use crate::{coder_summary, final_validation, review, tasks};
 
 impl App {
@@ -482,4 +480,3 @@ impl App {
         }
     }
 }
-

@@ -410,6 +410,5 @@ fn effort_to_str(effort: crate::adapters::EffortLevel) -> &'static str {
     }
 }
 
-
 #[cfg(test)]
 mod tests_mod;

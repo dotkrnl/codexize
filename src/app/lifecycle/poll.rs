@@ -120,5 +120,4 @@ impl App {
         }
         self.rebuild_tree_view(None);
     }
-
 }

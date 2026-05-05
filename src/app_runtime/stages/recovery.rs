@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::recovery_prompt;
+use crate::app::{App, guard};
 use crate::runner::{launch_interactive, launch_noninteractive};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, PipelineItemStatus};
@@ -180,10 +180,7 @@ impl App {
                 } else {
                     // Insert the recovery-mode plan review pipeline item before
                     // transitioning so the UI shows it as the next pending stage.
-                    session_state::transitions::queue_recovery_plan_review(
-                        &mut self.state,
-                        round,
-                    );
+                    session_state::transitions::queue_recovery_plan_review(&mut self.state, round);
                     self.transition_to_phase(Phase::BuilderRecoveryPlanReview(round))?;
                 }
             }

@@ -288,6 +288,5 @@ fn atomic_write(dir: &Path, file: &CacheFile) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests_mod;

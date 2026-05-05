@@ -1,11 +1,11 @@
 use anyhow::Result;
 
 use crate::adapters::{AgentRun, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::{
     ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope, reviewer_prompt,
     rewrite_tasks_for_revise, task_effort_for,
 };
+use crate::app::{App, guard};
 use crate::review;
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;

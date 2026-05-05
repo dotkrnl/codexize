@@ -1,10 +1,10 @@
 use anyhow::Result;
 
 use crate::adapters::{AgentRun, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::{
     coder_prompt, read_review_scope, task_effort_for, task_toml_for, write_review_scope_artifact,
 };
+use crate::app::{App, guard};
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
@@ -14,10 +14,7 @@ impl App {
         let _ = self.launch_coder_with_model(None);
     }
 
-    pub(crate) fn launch_coder_with_model(
-        &mut self,
-        override_model: Option<CachedModel>,
-    ) -> bool {
+    pub(crate) fn launch_coder_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.clear_agent_error();
         if self.models.is_empty() {
             self.record_agent_error(

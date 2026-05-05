@@ -2,8 +2,8 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::{App, guard};
 use crate::app::prompts::plan_review_prompt;
+use crate::app::{App, guard};
 use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, Phase, RunStatus};

@@ -142,10 +142,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
         .join("artifacts/live_summary.final-validation-r1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: super::super::AcpLaunchPolicy::final_validation(
-            &verdict_path,
-            &live_summary_path,
-        ),
+        policy: super::super::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
         ..sample_request(VendorKind::Codex)
     };
 
@@ -225,10 +222,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
         .join("artifacts/live_summary.simplifier-stage-r1-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: super::super::AcpLaunchPolicy::simplifier(
-            &simplification_path,
-            &live_summary_path,
-        ),
+        policy: super::super::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
         ..sample_request(VendorKind::Codex)
     };
 

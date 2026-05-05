@@ -3,11 +3,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::state::Phase;
 
 use super::super::App;
-use super::super::split::SplitTarget;
 use super::super::CommandReturnTarget;
+use super::super::split::SplitTarget;
 
 impl App {
-
     /// Resolve the currently selected visible row to a split target, if any.
     ///
     /// Run rows (including collapsed parents that absorbed a leaf run id)

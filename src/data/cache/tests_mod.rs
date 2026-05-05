@@ -305,8 +305,7 @@ fn version_mismatch_drops_dashboard_only() {
     save_dashboard_at(dir.path(), &sample_entries()).unwrap();
     save_quotas_at(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
-    let mut file: CacheFile =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     file.version = 999;
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
@@ -327,8 +326,7 @@ fn v2_cache_file_drops_dashboard_only() {
     save_dashboard_at(dir.path(), &sample_entries()).unwrap();
     save_quotas_at(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
-    let mut file: CacheFile =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     file.version = 2;
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
@@ -369,8 +367,7 @@ fn ttl_expiry_dashboard() {
     let dir = TempDir::new().unwrap();
     save_dashboard_at(dir.path(), &sample_entries()).unwrap();
     let path = dir.path().join("models.json");
-    let mut file: CacheFile =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     if let Some(ref mut s) = file.dashboard {
         s.fetched_at = now_secs() - DASHBOARD_TTL.as_secs() - 1;
     }
@@ -385,8 +382,7 @@ fn ttl_expiry_quotas() {
     let dir = TempDir::new().unwrap();
     save_quotas_at(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
-    let mut file: CacheFile =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     if let Some(ref mut s) = file.quotas {
         s.fetched_at = now_secs() - QUOTA_TTL.as_secs() - 1;
     }

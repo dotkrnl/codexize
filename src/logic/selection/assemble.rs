@@ -95,17 +95,13 @@ pub fn assemble_universe(
                 .and_then(|by_model| by_model.get(&m.name))
                 .copied()
                 .flatten()
-                .or_else(|| {
-                    quota::find_quota_by_heuristic(&m.name, vendor, &parsed_quotas)
-                });
+                .or_else(|| quota::find_quota_by_heuristic(&m.name, vendor, &parsed_quotas));
             let quota_resets_at = parsed_resets
                 .get(&vendor)
                 .and_then(|by_model| by_model.get(&m.name))
                 .copied()
                 .flatten()
-                .or_else(|| {
-                    quota::find_reset_by_heuristic(&m.name, vendor, &parsed_resets)
-                });
+                .or_else(|| quota::find_reset_by_heuristic(&m.name, vendor, &parsed_resets));
 
             Some(CachedModel {
                 vendor,

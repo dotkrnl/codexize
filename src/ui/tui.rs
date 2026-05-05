@@ -7,7 +7,12 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    style::Style,
+    text::{Line, Span},
+};
 use std::io;
 use std::time::Duration;
 
@@ -173,6 +178,49 @@ pub fn strip_ansi(s: &str) -> String {
         }
     }
     result
+}
+
+/// Build a sequence of [`Line`]s for "<prefix><body>" where `body` is wrapped
+/// to fit and continuation lines indent to align under the body's first
+/// column. The single point that every transcript-shaped renderer (chat
+/// messages, final-validation reports, status surfaces) routes through, so a
+/// missing wrap call now shows up as a search hit on this function rather
+/// than as a silent overflow on a forgotten code path.
+///
+/// `prefix_visible_width` is the printable column count of `first_line_prefix`
+/// — the caller knows it (it computes the prefix), and we use it both to
+/// derive the wrap budget and to align continuation lines.
+///
+/// If `body` produces no wrapped chunks (empty input or `body_width == 0`),
+/// the function still emits a single line carrying just the prefix so a
+/// labelled-but-empty field stays visible. Callers that want to skip the
+/// prefix entry on empty body should check before calling.
+pub fn wrap_lines_with_prefix(
+    first_line_prefix: Vec<Span<'static>>,
+    prefix_visible_width: usize,
+    body: &str,
+    body_style: Style,
+    available_width: usize,
+) -> Vec<Line<'static>> {
+    let body_width = available_width.saturating_sub(prefix_visible_width).max(1);
+    let wrapped = wrap_text(body, body_width);
+    if wrapped.is_empty() {
+        return vec![Line::from(first_line_prefix)];
+    }
+    let cont_indent: String = " ".repeat(prefix_visible_width);
+    let mut lines = Vec::with_capacity(wrapped.len());
+    let mut iter = wrapped.into_iter();
+    let first = iter.next().expect("non-empty wrapped");
+    let mut first_spans = first_line_prefix;
+    first_spans.push(Span::styled(first, body_style));
+    lines.push(Line::from(first_spans));
+    for chunk in iter {
+        lines.push(Line::from(vec![
+            Span::raw(cont_indent.clone()),
+            Span::styled(chunk, body_style),
+        ]));
+    }
+    lines
 }
 
 /// Hard-wrap `text` into lines of at most `width` printable chars, preferring

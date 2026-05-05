@@ -1,7 +1,7 @@
 use crate::app::tree::VisibleNodeRow;
 use crate::app::{ModalKind, StageId};
 use crate::state::{NodeStatus, PendingGuardDecision};
-use crate::tui::{strip_ansi, wrap_text};
+use crate::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -46,9 +46,10 @@ pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
 ///
 /// `width` is the available terminal column count. Body text — summary,
 /// findings, gap descriptions, citations, follow-up task titles — is wrapped
-/// through the shared [`wrap_text`] helper so long fields don't overflow the
-/// viewport. Continuation lines indent to match the visual prefix on the
-/// first line so wrapped bullets stay column-aligned with their first row.
+/// through the shared [`wrap_lines_with_prefix`] helper, the same one chat
+/// messages route through, so long fields don't overflow the viewport.
+/// Continuation lines indent to match the visual prefix on the first line so
+/// wrapped bullets stay column-aligned with their first row.
 pub fn final_validation_report_lines(
     verdict: &crate::final_validation::ValidationVerdict,
     indent: &str,
@@ -166,11 +167,11 @@ pub fn final_validation_report_lines(
     lines
 }
 
-/// Push a "<prefix><body>" entry where `body` is wrapped to fit `width` and
-/// continuation lines indent to align under `body`'s first column. Used by
-/// every text-bearing field in the validation report so wrap behavior stays
-/// consistent across summary, findings, gaps, citations, and follow-up
-/// tasks.
+/// Push a "<indent><prefix><body>" entry through the shared
+/// [`wrap_lines_with_prefix`] helper so the validation report's wrap behavior
+/// matches every other transcript-shaped surface (chat messages, status
+/// surfaces). Continuation lines indent to align under the body's first
+/// column.
 #[allow(clippy::too_many_arguments)]
 fn push_wrapped_field(
     lines: &mut Vec<Line<'static>>,
@@ -182,32 +183,19 @@ fn push_wrapped_field(
     body_style: Style,
     width: usize,
 ) {
-    let prefix_width = prefix.chars().count();
-    let content_width = width
-        .saturating_sub(indent_width + prefix_width)
-        .max(1);
-    let cont_indent: String = " ".repeat(indent_width + prefix_width);
-    let wrapped = wrap_text(body, content_width);
-    if wrapped.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled(indent.to_string(), Style::default().fg(Color::DarkGray)),
-            Span::styled(prefix.to_string(), prefix_style),
-        ]));
-        return;
-    }
-    let mut iter = wrapped.into_iter();
-    let first = iter.next().expect("wrapped non-empty");
-    lines.push(Line::from(vec![
-        Span::styled(indent.to_string(), Style::default().fg(Color::DarkGray)),
+    let dim = Style::default().fg(Color::DarkGray);
+    let prefix_visible_width = indent_width + prefix.chars().count();
+    let prefix_spans = vec![
+        Span::styled(indent.to_string(), dim),
         Span::styled(prefix.to_string(), prefix_style),
-        Span::styled(first, body_style),
-    ]));
-    for chunk in iter {
-        lines.push(Line::from(vec![
-            Span::raw(cont_indent.clone()),
-            Span::styled(chunk, body_style),
-        ]));
-    }
+    ];
+    lines.extend(wrap_lines_with_prefix(
+        prefix_spans,
+        prefix_visible_width,
+        body,
+        body_style,
+        width,
+    ));
 }
 
 /// Banner shown when `BlockedNeedsUser` was entered with

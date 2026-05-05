@@ -11,7 +11,7 @@ const GRADIENT_STOPS: &[(u8, u8, u8)] = &[
 ];
 const GRADIENT_STEP: usize = 4;
 
-pub(super) fn capitalize_first(s: &str) -> String {
+pub(crate) fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),

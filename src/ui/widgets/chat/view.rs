@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::app::chat_widget_view_model::chat_scroll_window;
-use crate::app::footer::{HistoricalStyleHints, format_historical_message};
+use crate::app::footer::{HistoricalStyleHints, capitalize_first, format_historical_message};
 use crate::app::render_view_model::spinner_frame;
 use crate::state::{Message, MessageKind, RunRecord, RunStatus};
 
@@ -161,7 +161,7 @@ fn format_timestamp(
     }
 }
 
-use crate::tui::{strip_ansi, wrap_text};
+use crate::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
 
 fn push_wrapped_span_line(
     lines: &mut Vec<Vec<Span<'static>>>,
@@ -352,16 +352,12 @@ fn render_agent_markdown(
     }
 }
 
-struct RenderedLine {
-    spans: Vec<Span<'static>>,
-}
-
-fn push_blank_line_if_needed(lines: &mut Vec<RenderedLine>) {
+fn push_blank_line_if_needed(lines: &mut Vec<Line<'static>>) {
     if lines
         .last()
         .is_some_and(|line| !line.spans.iter().all(|span| span.content.is_empty()))
     {
-        lines.push(RenderedLine { spans: Vec::new() });
+        lines.push(Line::from(Vec::<Span<'static>>::new()));
     }
 }
 
@@ -397,17 +393,14 @@ pub fn message_lines(
     spinner_tick: usize,
     animate_started: bool,
 ) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = render_messages(
+    let mut lines = render_messages(
         messages,
         run,
         local_offset,
         available_width,
         spinner_tick,
         animate_started,
-    )
-    .into_iter()
-    .map(|rendered| Line::from(rendered.spans))
-    .collect();
+    );
     let has_end = messages.iter().any(|m| m.kind == MessageKind::End);
     if run.status == RunStatus::Running
         && !has_end
@@ -425,168 +418,133 @@ fn render_messages(
     available_width: usize,
     spinner_tick: usize,
     animate_started: bool,
-) -> Vec<RenderedLine> {
+) -> Vec<Line<'static>> {
     let now_local = local_offset.from_utc_datetime(&Utc::now().naive_utc());
     let today_local = now_local.date_naive();
-    let mut lines = Vec::new();
+    let mut lines: Vec<Line<'static>> = Vec::new();
 
     for msg in messages {
         let ts_str = format_timestamp(&msg.ts, local_offset, today_local);
         let ts_w = ts_str.chars().count();
         let sym = message_symbol(msg.kind, run.status, animate_started, spinner_tick);
         let prefix_width = ts_w + 3; // " ○ "
-        let content_width = available_width.saturating_sub(prefix_width);
-
-        let indent = " ".repeat(prefix_width);
+        let ts_sym_prefix = || -> Vec<Span<'static>> {
+            vec![
+                Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
+                Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
+            ]
+        };
+        let indent_prefix = || -> Vec<Span<'static>> { vec![Span::raw(" ".repeat(prefix_width))] };
 
         if msg.kind == MessageKind::Brief {
             let (title, details) = match msg.text.split_once('|') {
                 Some((t, d)) => (t.trim().to_string(), d.trim().to_string()),
                 None => (msg.text.trim().to_string(), String::new()),
             };
-            let title_wrapped = wrap_text(&title, content_width);
-            for (i, chunk) in title_wrapped.iter().enumerate() {
-                let title_span =
-                    Span::styled(chunk.clone(), Style::default().add_modifier(Modifier::BOLD));
-                if i == 0 {
-                    lines.push(RenderedLine {
-                        spans: vec![
-                            Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                            Span::styled(
-                                format!("{} ", sym.symbol),
-                                Style::default().fg(sym.color),
-                            ),
-                            title_span,
-                        ],
-                    });
-                } else {
-                    lines.push(RenderedLine {
-                        spans: vec![Span::raw(indent.clone()), title_span],
-                    });
-                }
-            }
-            if title_wrapped.is_empty() {
-                lines.push(RenderedLine {
-                    spans: vec![
-                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-                    ],
-                });
-            }
+            lines.extend(wrap_lines_with_prefix(
+                ts_sym_prefix(),
+                prefix_width,
+                &title,
+                Style::default().add_modifier(Modifier::BOLD),
+                available_width,
+            ));
             if !details.is_empty() {
-                for chunk in wrap_text(&details, content_width) {
-                    lines.push(RenderedLine {
-                        spans: vec![
-                            Span::raw(indent.clone()),
-                            Span::styled(chunk, Style::default().fg(Color::White)),
-                        ],
-                    });
-                }
+                lines.extend(wrap_lines_with_prefix(
+                    indent_prefix(),
+                    prefix_width,
+                    &details,
+                    Style::default().fg(Color::White),
+                    available_width,
+                ));
             }
             continue;
         }
 
         if msg.kind == MessageKind::UserInput {
-            let wrapped = wrap_text(&msg.text, content_width);
-            let body_style = Style::default().fg(Color::Magenta);
-            if let Some((first, rest)) = wrapped.split_first() {
-                lines.push(RenderedLine {
-                    spans: vec![
-                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-                        Span::styled(first.clone(), body_style),
-                    ],
-                });
-                for chunk in rest {
-                    lines.push(RenderedLine {
-                        spans: vec![
-                            Span::raw(indent.clone()),
-                            Span::styled(chunk.clone(), body_style),
-                        ],
-                    });
-                }
-            } else {
-                lines.push(RenderedLine {
-                    spans: vec![
-                        Span::styled(format!("{} ", ts_str), Style::default().fg(sym.color)),
-                        Span::styled(format!("{} ", sym.symbol), Style::default().fg(sym.color)),
-                    ],
-                });
-            }
+            lines.extend(wrap_lines_with_prefix(
+                ts_sym_prefix(),
+                prefix_width,
+                &msg.text,
+                Style::default().fg(Color::Magenta),
+                available_width,
+            ));
             push_blank_line_if_needed(&mut lines);
             continue;
         }
 
         let hints = kind_to_hints(msg.kind, run.status);
+        let body_style = body_style_from_hints(hints);
+        let renders_markdown =
+            matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
+
+        if !renders_markdown {
+            // Plain (non-markdown) historical messages route through the
+            // shared wrap helper so prefix/wrap behavior matches every
+            // other transcript surface. Capitalize the first character to
+            // preserve `format_historical_message`'s look.
+            let capitalized = capitalize_first(&msg.text);
+            lines.extend(wrap_lines_with_prefix(
+                ts_sym_prefix(),
+                prefix_width,
+                &capitalized,
+                body_style,
+                available_width,
+            ));
+            continue;
+        }
+
+        // Markdown-aware path keeps its own renderer because each rendered
+        // line carries multiple styled spans (code blocks, emphasis,
+        // inline code) that the single-style wrap helper cannot reproduce.
+        let content_width = available_width.saturating_sub(prefix_width).max(1);
+        let indent = " ".repeat(prefix_width);
         let markdown_style = if hints.is_dim {
             Style::default().fg(Color::DarkGray)
         } else {
             Style::default().fg(Color::White)
         };
-        let renders_markdown =
-            matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
-        if renders_markdown {
-            push_blank_line_if_needed(&mut lines);
-        }
-        let markdown_lines = if renders_markdown {
-            render_agent_markdown(&msg.text, content_width, markdown_style)
-        } else {
-            wrap_text(&msg.text, content_width)
-                .into_iter()
-                .map(|line| vec![Span::raw(line)])
-                .collect()
-        };
-
+        push_blank_line_if_needed(&mut lines);
+        let markdown_lines = render_agent_markdown(&msg.text, content_width, markdown_style);
         if let Some((first, rest)) = markdown_lines.split_first() {
-            let first_text: String = first.iter().map(|span| span.content.to_string()).collect();
-            let first_line =
-                format_historical_message(&ts_str, sym.symbol, &first_text, sym.color, hints);
-            let mut first_spans = first_line.spans;
-            if renders_markdown && first_spans.len() >= 2 {
-                first_spans.truncate(2);
-                if msg.kind == MessageKind::AgentThought {
-                    first_spans.extend(capitalize_first_span(first));
-                } else {
-                    first_spans.extend(first.iter().cloned());
-                }
-            }
-            lines.push(RenderedLine { spans: first_spans });
-
-            let body_style = if hints.is_error {
-                Style::default().fg(Color::Red)
-            } else if hints.is_warning {
-                Style::default().fg(Color::Yellow)
-            } else if hints.is_summary {
-                Style::default().fg(Color::Green)
-            } else if hints.is_dim {
-                Style::default().fg(Color::DarkGray)
+            let mut first_spans = ts_sym_prefix();
+            if msg.kind == MessageKind::AgentThought {
+                first_spans.extend(capitalize_first_span(first));
             } else {
-                Style::default().fg(Color::White)
-            };
+                first_spans.extend(first.iter().cloned());
+            }
+            lines.push(Line::from(first_spans));
             for chunk in rest {
-                if renders_markdown {
-                    let mut spans = vec![Span::raw(indent.clone())];
-                    spans.extend(chunk.iter().cloned());
-                    lines.push(RenderedLine { spans });
-                    continue;
-                }
-                let text: String = chunk.iter().map(|span| span.content.to_string()).collect();
-                lines.push(RenderedLine {
-                    spans: vec![Span::styled(format!("{}{}", indent, text), body_style)],
-                });
+                let mut spans = vec![Span::raw(indent.clone())];
+                spans.extend(chunk.iter().cloned());
+                lines.push(Line::from(spans));
             }
         } else {
-            let first_line = format_historical_message(&ts_str, sym.symbol, "", sym.color, hints);
-            lines.push(RenderedLine {
-                spans: first_line.spans,
-            });
+            lines.push(format_historical_message(
+                &ts_str,
+                sym.symbol,
+                "",
+                sym.color,
+                hints,
+            ));
         }
-        if renders_markdown {
-            push_blank_line_if_needed(&mut lines);
-        }
+        push_blank_line_if_needed(&mut lines);
     }
 
     lines
+}
+
+fn body_style_from_hints(hints: HistoricalStyleHints) -> Style {
+    if hints.is_error {
+        Style::default().fg(Color::Red)
+    } else if hints.is_warning {
+        Style::default().fg(Color::Yellow)
+    } else if hints.is_summary {
+        Style::default().fg(Color::Green)
+    } else if hints.is_dim {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    }
 }
 
 impl Widget for ChatWidget<'_> {

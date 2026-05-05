@@ -303,7 +303,9 @@ dependencies = [
  "crossterm",
  "dashmap",
  "derive_more",
+ "indoc",
  "insta",
+ "itertools",
  "nix 0.28.0",
  "notify",
  "parking_lot",
@@ -316,6 +318,7 @@ dependencies = [
  "serial_test",
  "strip-ansi-escapes",
  "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2971,6 +2974,7 @@ version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
+ "chrono",
  "matchers",
  "nu-ansi-term",
  "once_cell",

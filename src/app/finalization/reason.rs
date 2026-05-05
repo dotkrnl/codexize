@@ -2,75 +2,78 @@
 //!
 //! Every variant preserves the exact wire string that the legacy code
 //! produced, so `RunRecord.error` (and any test assertions against it)
-//! remain compatible.  The enum centralises construction so reason-code
+//! remain compatible. The enum centralises construction so reason-code
 //! strings are no longer scattered as literals across the codebase.
 
-use thiserror::Error;
-
 /// A finalization reason that may be persisted in `RunRecord.error`.
-#[derive(Debug, Clone, Error, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, strum::Display, strum::EnumString)]
 pub enum Reason {
-    #[error("base_missing")]
+    #[strum(serialize = "base_missing")]
     BaseMissing,
 
-    #[error("artifact_missing")]
+    #[strum(serialize = "artifact_missing")]
     ArtifactMissing,
 
-    #[error("coder_partial")]
+    #[strum(serialize = "coder_partial")]
     CoderPartial,
 
-    #[error("missing_coder_summary")]
+    #[strum(serialize = "missing_coder_summary")]
     MissingCoderSummary,
 
-    #[error("invalid_coder_summary")]
+    #[strum(serialize = "invalid_coder_summary")]
     InvalidCoderSummary,
 
-    #[error("failed_unverified: {detail} at {path}")]
+    // REVIEWER: payload-bearing variants preserve legacy wire formatting but stay
+    // display-only because there is no stable parse contract for free-form detail.
+    #[strum(disabled, to_string = "failed_unverified: {detail} at {path}")]
     FailedUnverified { detail: String, path: String },
 
-    #[error("exit({0})")]
+    #[strum(disabled, to_string = "exit({0})")]
     ExitCode(i32),
 
-    #[error("killed({signal_num}) [{detail}]")]
+    #[strum(disabled, to_string = "killed({signal_num}) [{detail}]")]
     Killed { signal_num: i32, detail: String },
 
-    #[error("artifact_invalid: {0}")]
+    #[strum(disabled, to_string = "artifact_invalid: {0}")]
     ArtifactInvalid(String),
 
-    #[error("Operator Killed")]
+    #[strum(serialize = "Operator Killed")]
     OperatorKilled,
 
-    #[error("user_forced_retry")]
+    #[strum(serialize = "user_forced_retry")]
     UserForcedRetry,
 
-    #[error("forbidden_head_advance")]
+    #[strum(serialize = "forbidden_head_advance")]
     ForbiddenHeadAdvance,
 
-    #[error("reviewer_modified_working_tree")]
+    #[strum(serialize = "reviewer_modified_working_tree")]
     ReviewerModifiedWorkingTree,
 
-    #[error("forbidden_control_edit: {0}")]
+    #[strum(disabled, to_string = "forbidden_control_edit: {0}")]
     ForbiddenControlEdit(String),
 
-    #[error("recovery_requested_revise: {0}")]
+    #[strum(disabled, to_string = "recovery_requested_revise: {0}")]
     RecoveryRequestedRevise(String),
 
-    #[error("recovery_requested_human_blocked: {0}")]
+    #[strum(disabled, to_string = "recovery_requested_human_blocked: {0}")]
     RecoveryRequestedHumanBlocked(String),
 
-    #[error("recovery_requested_agent_pivot: {0}")]
+    #[strum(disabled, to_string = "recovery_requested_agent_pivot: {0}")]
     RecoveryRequestedAgentPivot(String),
 
-    #[error("recovery_plan_review_failed: {0}")]
+    #[strum(disabled, to_string = "recovery_plan_review_failed: {0}")]
     RecoveryPlanReviewFailed(String),
 
-    #[error("recovery_sharding_failed: {0}")]
+    #[strum(disabled, to_string = "recovery_sharding_failed: {0}")]
     RecoveryShardingFailed(String),
 
-    #[error("artifact_invalid: recovery summary is empty")]
+    #[strum(serialize = "artifact_invalid: recovery summary is empty")]
     RecoverySummaryEmpty,
 
-    #[error("artifact_invalid: recovery status={0} requires at least one feedback item")]
+    #[strum(
+        disabled,
+        to_string = "artifact_invalid: recovery status={0} requires at least one feedback item"
+    )]
     RecoveryMissingFeedback(String),
 }
 
@@ -104,6 +107,22 @@ mod tests {
         assert_eq!(
             Reason::RecoverySummaryEmpty.to_string(),
             "artifact_invalid: recovery summary is empty"
+        );
+    }
+
+    #[test]
+    fn static_reason_wire_values_round_trip() {
+        assert_eq!(
+            "base_missing".parse::<Reason>().unwrap(),
+            Reason::BaseMissing
+        );
+        assert_eq!(
+            "artifact_missing".parse::<Reason>().unwrap(),
+            Reason::ArtifactMissing
+        );
+        assert_eq!(
+            "missing_coder_summary".parse::<Reason>().unwrap(),
+            Reason::MissingCoderSummary
         );
     }
 

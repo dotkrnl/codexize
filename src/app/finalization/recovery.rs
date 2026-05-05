@@ -8,6 +8,10 @@ use crate::state::{
 };
 use crate::{review, tasks};
 
+fn recovery_error_detail(err: &anyhow::Error) -> String {
+    format!("{err:#}")
+}
+
 impl App {
     pub(crate) fn enter_builder_recovery(
         &mut self,
@@ -132,7 +136,7 @@ impl App {
             .iter()
             .filter_map(|item| item.round)
             .max()
-            .or_else(|| match self.state.current_phase {
+            .or(match self.state.current_phase {
                 Phase::ImplementationRound(r)
                 | Phase::ReviewRound(r)
                 | Phase::Simplification(r)
@@ -418,7 +422,8 @@ impl App {
                 }
             }
             Err(err) => {
-                let reason = Reason::RecoveryPlanReviewFailed(err.to_string()).to_string();
+                let reason =
+                    Reason::RecoveryPlanReviewFailed(recovery_error_detail(&err)).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
                 let failed_run = self
                     .state
@@ -548,7 +553,8 @@ impl App {
                 self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
             }
             Err(err) => {
-                let reason = Reason::RecoveryShardingFailed(err.to_string()).to_string();
+                let reason =
+                    Reason::RecoveryShardingFailed(recovery_error_detail(&err)).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
                 let failed_run = self
                     .state
@@ -563,5 +569,14 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn recovery_error_detail_preserves_anyhow_chain() {
+        let err = anyhow::anyhow!("outer").context("inner");
+        assert_eq!(super::recovery_error_detail(&err), "inner: outer");
     }
 }

@@ -1574,3 +1574,22 @@ current_phase = "IdeaInput"
     let state: crate::state::SessionState = toml::from_str(toml).expect("deserialize");
     assert_eq!(state.builder.next_iteration_for_recovery, None);
 }
+
+#[test]
+fn section_part_roundtrips_through_toml() {
+    use crate::state::SectionPart;
+    let parts = vec![
+        SectionPart::Iteration(2),
+        SectionPart::Loop,
+        SectionPart::Task(4),
+        SectionPart::Round { n: 9, attempt: 2 },
+        SectionPart::Stage("coder".to_string()),
+    ];
+    #[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq, Debug)]
+    struct Wrap {
+        path: Vec<SectionPart>,
+    }
+    let serialized = toml::to_string(&Wrap { path: parts.clone() }).expect("serialize");
+    let back: Wrap = toml::from_str(&serialized).expect("deserialize");
+    assert_eq!(back.path, parts);
+}

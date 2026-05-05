@@ -16,7 +16,7 @@ pub use resume::{ResumeError, can_resume};
 pub use state::{
     BlockOrigin, Event, LaunchModes, Message, MessageKind, MessageSender, Modes, Node, NodeKind,
     NodeStatus, PendingGuardDecision, PipelineItem, PipelineItemStatus, RunRecord, RunStatus,
-    SessionState, codexize_root, session_dir,
+    SectionPart, SessionState, codexize_root, session_dir,
 };
 pub use transitions::{
     BRAINSTORM_IO, CODER_IO, FinishedRunRecord, PLAN_REVIEWER_IO, PLANNER_IO, RECOVERY_IO,

@@ -172,6 +172,30 @@ impl MessageKind {
     }
 }
 
+/// Captured path for a `RunRecord` describing where in the pipeline tree
+/// the run logically lives. Frozen at run-creation time so the renderer
+/// can group adjacent runs by identity without trusting session-level
+/// counters at read time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum SectionPart {
+    Idea,
+    Brainstorm,
+    SpecReview,
+    Planning,
+    PlanReview,
+    Sharding,
+    Iteration(u32),
+    Loop,
+    Simplification,
+    FinalValidation,
+    Recovery { round: u32 },
+    RecoveryPlanReview { round: u32 },
+    RecoverySharding { round: u32 },
+    Task(u32),
+    Round { n: u32, attempt: u32 },
+    Stage(String),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageSender {
     System,

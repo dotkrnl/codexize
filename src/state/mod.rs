@@ -14,8 +14,8 @@ pub use crate::logic::pipeline::{
     Message, MessageKind, MessageSender, Modes, Node, NodeKind, NodeStatus, PLAN_REVIEWER_IO,
     PLANNER_IO, PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RECOVERY_IO,
     RECOVERY_PLAN_REVIEWER_IO, RECOVERY_SHARDER_IO, REVIEWER_IO, ResumeError, RunRecord, RunStatus,
-    SHARDER_IO, SIMPLIFIER_IO, SPEC_REVIEWER_IO, SessionState, StageIO, TransitionError,
-    can_resume, codexize_root, session_dir,
+    SHARDER_IO, SIMPLIFIER_IO, SPEC_REVIEWER_IO, SectionPart, SessionState, StageIO,
+    TransitionError, can_resume, codexize_root, session_dir,
 };
 
 pub use crate::data::persistence::resume_session;

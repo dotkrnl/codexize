@@ -27,6 +27,12 @@ Hard requirements:
   - Read the triggering feedback first to identify the human decision needed.
   - Present the proposed correction to the operator and wait for explicit
     confirmation BEFORE editing spec or plan.
+  - Ask operator questions one at a time. Send exactly one question per
+    message, wait for the operator's answer, then send the next. Never
+    batch multiple questions (numbered lists, sub-questions, "while we're
+    here"-style asides) into a single message — the operator answers them
+    one by one anyway, and bundling forces them to scroll back to
+    disambiguate which answer maps to which prompt.
   - Keep `tasks.toml` valid; include unfinished work only. Never include
     completed ids.
   - If you supersede or remove a started-but-unfinished task id, add a

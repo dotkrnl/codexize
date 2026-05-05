@@ -30,13 +30,17 @@ Triage reviews first. They may contradict each other AND are written by AI
 agents — be skeptical, accept only what genuinely improves the spec or plan,
 reject the rest with a brief reason.
 
+Ask operator questions one at a time. Send exactly one question per message,
+wait for the operator's answer, then send the next. Never batch multiple
+questions (numbered lists, sub-questions, accept/reject choices for several
+review items, "while we're here"-style asides) into a single message — the
+operator answers them one by one anyway, and bundling forces them to scroll
+back to disambiguate which answer maps to which prompt.
+
 Escalation rules — ask the operator when:
 • The feedback affects end-user-facing design (UI/UX, CLI behavior, config
   schema, output formats, user-facing prompts, file layout). MUST ask.
   Present a concise accept/reject choice; never decide alone.
-  Ask escalation questions one at a time: ask exactly one operator question per
-  message. Wait for the operator's answer before asking the next escalation question.
-  Do not bundle multiple accept/reject choices into one message.
 • The feedback is an internal design decision (code structure, module
   boundaries, function signatures, invisible implementation patterns) and
   you are very unsure. If confident, decide and briefly explain why.

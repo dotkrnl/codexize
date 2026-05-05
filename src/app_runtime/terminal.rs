@@ -80,8 +80,17 @@ impl TerminalRuntime {
                 self.modal_override = Some(ModalKind::QuitRunningAgent);
                 TerminalCommandOutcome::HandledContinue
             }
+            // Quit confirmation must converge whether the modal was opened
+            // by the runtime (`AppCommand::Quit`) or the legacy App-owned
+            // `:quit` command path (which sets only `view.modal`). Both
+            // emit `ConfirmModal` from the UI; the runtime owns the
+            // termination dispatch in either case so App never has to
+            // round-trip back through the runtime.
             AppCommand::ConfirmModal
-                if matches!(self.modal_override, Some(ModalKind::QuitRunningAgent)) =>
+                if matches!(
+                    self.modal_override.or(view.modal),
+                    Some(ModalKind::QuitRunningAgent)
+                ) =>
             {
                 for run in view
                     .agent_runs
@@ -147,6 +156,7 @@ mod tests {
     use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
     use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
     use crate::logic::pipeline::RunStatus;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use std::sync::Arc;
     use std::sync::mpsc;
 
@@ -182,6 +192,37 @@ mod tests {
                 requests.push(request);
                 DataOutcome::Terminated(true)
             });
+
+        assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
+        assert_eq!(
+            requests,
+            vec![DataRequest::TerminateRun {
+                window_name: "codexize-run-7-planning".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn confirm_app_owned_quit_modal_routes_termination_through_runtime() {
+        // Regression: production `:quit` opens the legacy App-owned modal
+        // (sets only `view.modal`), so a subsequent Enter must still route
+        // termination through the runtime even when `modal_override` is
+        // None. Drives the production command path via `command_from_event`
+        // + `route_command_with_dispatch` rather than `App::handle_key`.
+        let mut runtime = TerminalRuntime::default();
+        let mut view = running_view();
+        view.modal = Some(ModalKind::QuitRunningAgent);
+        let command = crate::ui::tui::command_from_event(
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            &view,
+        )
+        .expect("enter confirms quit modal");
+
+        let mut requests = Vec::new();
+        let confirm = runtime.route_command_with_dispatch(command, &view, |request| {
+            requests.push(request);
+            DataOutcome::Terminated(true)
+        });
 
         assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
         assert_eq!(

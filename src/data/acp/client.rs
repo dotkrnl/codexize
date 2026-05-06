@@ -10,7 +10,12 @@ use super::handshake::{
 use super::tool_call::ToolCallMap;
 use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate};
 use serde_json::{Value, json};
-use std::{collections::VecDeque, io::Write, path::{Path, PathBuf}, sync::Arc};
+use std::{
+    collections::VecDeque,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::{process::Child, runtime::Runtime, sync::oneshot};
 
 pub trait AcpSession: Send {
@@ -34,9 +39,14 @@ impl AcpConnector for SubprocessConnector {
         let (mut rpc, child) = runtime.block_on(spawn_actor(&runtime, launch))?;
         let session = match runtime.block_on(handshake(&mut rpc, launch)) {
             Ok(s) => s,
-            Err(err) => { rpc.shutdown_blocking(child); return Err(err); }
+            Err(err) => {
+                rpc.shutdown_blocking(child);
+                return Err(err);
+            }
         };
-        Ok(Box::new(SubprocessSession::new(session, rpc, child, runtime, launch)))
+        Ok(Box::new(SubprocessSession::new(
+            session, rpc, child, runtime, launch,
+        )))
     }
 }
 
@@ -57,17 +67,31 @@ struct SubprocessSession {
 }
 
 impl SubprocessSession {
-    fn new(h: HandshakeOutput, rpc: RpcClient, child: Child, runtime: Arc<Runtime>, launch: &AcpResolvedLaunch) -> Self {
+    fn new(
+        h: HandshakeOutput,
+        rpc: RpcClient,
+        child: Child,
+        runtime: Arc<Runtime>,
+        launch: &AcpResolvedLaunch,
+    ) -> Self {
         Self {
-            session_id: h.session_id, rpc, child: Some(child), runtime,
+            session_id: h.session_id,
+            rpc,
+            child: Some(child),
+            runtime,
             supports_close: h.supports_close,
             prompt_response: Some(h.prompt_response),
-            prompt_finished: false, closed: false,
+            prompt_finished: false,
+            closed: false,
             cwd: launch.session.cwd.clone(),
             tool_calls: ToolCallMap::new(),
             boundary_state: AcpBoundaryState::new(),
             pending_updates: VecDeque::new(),
-            acp_trace_path: launch.session.metadata.get("codexize.acp_trace_path").map(PathBuf::from),
+            acp_trace_path: launch
+                .session
+                .metadata
+                .get("codexize.acp_trace_path")
+                .map(PathBuf::from),
         }
     }
 
@@ -84,62 +108,93 @@ impl SubprocessSession {
 }
 
 impl AcpSession for SubprocessSession {
-    fn session_id(&self) -> &str { &self.session_id }
+    fn session_id(&self) -> &str {
+        &self.session_id
+    }
 
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
-        if let Some(q) = self.pending_updates.pop_front() { return Ok(Some(q)); }
+        if let Some(q) = self.pending_updates.pop_front() {
+            return Ok(Some(q));
+        }
         loop {
             match self.rpc.try_next_update() {
                 Ok(Some(value)) => {
                     append_raw_acp_update_trace(self.acp_trace_path.as_deref(), &value);
-                    dispatch_update(&value, &self.cwd, &mut self.tool_calls, &mut self.boundary_state, &mut self.pending_updates);
-                    if let Some(q) = self.pending_updates.pop_front() { return Ok(Some(q)); }
+                    dispatch_update(
+                        &value,
+                        &self.cwd,
+                        &mut self.tool_calls,
+                        &mut self.boundary_state,
+                        &mut self.pending_updates,
+                    );
+                    if let Some(q) = self.pending_updates.pop_front() {
+                        return Ok(Some(q));
+                    }
                 }
                 Ok(None) => break,
                 Err(err) => return Ok(Some(self.fail_turn(err.to_string()))),
             }
         }
-        if self.prompt_finished { return Ok(None); }
-        let Some(rx) = self.prompt_response.as_mut() else { return Ok(None); };
+        if self.prompt_finished {
+            return Ok(None);
+        }
+        let Some(rx) = self.prompt_response.as_mut() else {
+            return Ok(None);
+        };
         Ok(Some(match rx.try_recv() {
             Ok(Ok(result)) => {
                 self.finish_prompt_turn();
                 match parse_prompt_result(result) {
                     Ok(PromptTurnOutcome::Finished) => ClientUpdate::PromptTurnFinished,
-                    Ok(PromptTurnOutcome::Failed { message }) => ClientUpdate::PromptTurnFailed { message },
-                    Err(err) => ClientUpdate::PromptTurnFailed { message: err.to_string() },
+                    Ok(PromptTurnOutcome::Failed { message }) => {
+                        ClientUpdate::PromptTurnFailed { message }
+                    }
+                    Err(err) => ClientUpdate::PromptTurnFailed {
+                        message: err.to_string(),
+                    },
                 }
             }
             Ok(Err(err)) => self.fail_turn(err.to_string()),
             Err(oneshot::error::TryRecvError::Empty) => return Ok(None),
-            Err(oneshot::error::TryRecvError::Closed) =>
-                self.fail_turn("ACP prompt turn channel disconnected".to_string()),
+            Err(oneshot::error::TryRecvError::Closed) => {
+                self.fail_turn("ACP prompt turn channel disconnected".to_string())
+            }
         }))
     }
 
     fn submit_prompt(&mut self, text: &str) -> AcpResult<()> {
         if !self.prompt_finished {
-            return Err(AcpError::protocol("ACP prompt turn is still running".to_string()));
+            return Err(AcpError::protocol(
+                "ACP prompt turn is still running".to_string(),
+            ));
         }
         self.boundary_state.reset_for_prompt_turn();
-        let params = prompt_request_params(&self.session_id, &super::PromptPayload::Text(text.to_string()))?;
+        let params = prompt_request_params(
+            &self.session_id,
+            &super::PromptPayload::Text(text.to_string()),
+        )?;
         self.prompt_response = Some(self.rpc.start_request("session/prompt", params)?);
         self.prompt_finished = false;
         Ok(())
     }
 
     fn cancel_prompt(&mut self) -> AcpResult<()> {
-        self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id }))
+        self.rpc
+            .notify("session/cancel", json!({ "sessionId": self.session_id }))
     }
 
     fn close(&mut self) -> AcpResult<()> {
-        if self.closed { return Ok(()); }
+        if self.closed {
+            return Ok(());
+        }
         self.closed = true;
         self.pending_updates.clear();
         self.tool_calls = ToolCallMap::new();
         self.prompt_response = None;
         if self.supports_close {
-            let _ = self.rpc.start_request("session/close", json!({ "sessionId": self.session_id }));
+            let _ = self
+                .rpc
+                .start_request("session/close", json!({ "sessionId": self.session_id }));
         }
         let Some(mut child) = self.child.take() else {
             self.rpc.shutdown_blocking_no_child();
@@ -155,27 +210,45 @@ impl AcpSession for SubprocessSession {
                 });
                 Ok(())
             }
-            Err(err) => Err(AcpError::io(format!("failed to inspect ACP child process: {err}"))),
+            Err(err) => Err(AcpError::io(format!(
+                "failed to inspect ACP child process: {err}"
+            ))),
         }
     }
 }
 
 impl Drop for SubprocessSession {
-    fn drop(&mut self) { let _ = self.close(); }
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
 }
 
 fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
-    let Some(path) = path else { return; };
-    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-    let record = json!({ "type": "raw_update", "ts": chrono::Utc::now().to_rfc3339(), "update": update });
-    let Ok(line) = serde_json::to_string(&record) else { return; };
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    let Some(path) = path else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let record =
+        json!({ "type": "raw_update", "ts": chrono::Utc::now().to_rfc3339(), "update": update });
+    let Ok(line) = serde_json::to_string(&record) else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = writeln!(file, "{line}");
     }
 }
 
 #[cfg(test)]
-pub fn client_updates_from_session_updates_for_test(values: impl IntoIterator<Item = Value>, cwd: &Path) -> Vec<ClientUpdate> {
+pub fn client_updates_from_session_updates_for_test(
+    values: impl IntoIterator<Item = Value>,
+    cwd: &Path,
+) -> Vec<ClientUpdate> {
     let mut map = ToolCallMap::new();
     let mut boundary = AcpBoundaryState::new();
     let mut out = VecDeque::new();

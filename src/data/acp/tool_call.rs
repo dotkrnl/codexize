@@ -29,35 +29,62 @@ pub(in crate::data) struct ToolCallDisplayState {
 impl ToolCallDisplayState {
     pub(in crate::data) fn from_value(value: &Value) -> Self {
         let s = |k: &str| {
-            value.get(k).and_then(Value::as_str).map(str::to_string).filter(|t| !t.is_empty())
+            value
+                .get(k)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .filter(|t| !t.is_empty())
         };
         Self {
             tool_call_id: s("toolCallId"),
             title: s("title"),
             kind: s("kind"),
             status: s("status"),
-            locations: value.get("locations").and_then(Value::as_array).map(|items| {
-                items.iter()
-                    .filter_map(|i| i.get("path").and_then(Value::as_str))
-                    .filter(|p| !p.is_empty())
-                    .map(PathBuf::from)
-                    .collect()
-            }).unwrap_or_default(),
+            locations: value
+                .get("locations")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|i| i.get("path").and_then(Value::as_str))
+                        .filter(|p| !p.is_empty())
+                        .map(PathBuf::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
             raw_input: value.get("rawInput").cloned().unwrap_or(Value::Null),
             raw_output: value.get("rawOutput").cloned().unwrap_or(Value::Null),
-            content: value.get("content").and_then(Value::as_array).cloned().unwrap_or_default(),
+            content: value
+                .get("content")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
         }
     }
 
     /// Merge non-empty fields; absent / null values never erase known state.
     pub(in crate::data) fn merge(&mut self, p: &ToolCallDisplayState) {
-        if p.title.is_some() { self.title = p.title.clone(); }
-        if p.kind.is_some() { self.kind = p.kind.clone(); }
-        if p.status.is_some() { self.status = p.status.clone(); }
-        if !p.locations.is_empty() { self.locations = p.locations.clone(); }
-        if !p.raw_input.is_null() { self.raw_input = p.raw_input.clone(); }
-        if !p.raw_output.is_null() { self.raw_output = p.raw_output.clone(); }
-        if !p.content.is_empty() { self.content = p.content.clone(); }
+        if p.title.is_some() {
+            self.title = p.title.clone();
+        }
+        if p.kind.is_some() {
+            self.kind = p.kind.clone();
+        }
+        if p.status.is_some() {
+            self.status = p.status.clone();
+        }
+        if !p.locations.is_empty() {
+            self.locations = p.locations.clone();
+        }
+        if !p.raw_input.is_null() {
+            self.raw_input = p.raw_input.clone();
+        }
+        if !p.raw_output.is_null() {
+            self.raw_output = p.raw_output.clone();
+        }
+        if !p.content.is_empty() {
+            self.content = p.content.clone();
+        }
     }
 }
 
@@ -71,28 +98,42 @@ pub(in crate::data) struct ToolCallMap {
 }
 
 impl ToolCallMap {
-    pub(in crate::data) fn new() -> Self { Self::default() }
+    pub(in crate::data) fn new() -> Self {
+        Self::default()
+    }
 
     #[cfg(test)]
-    pub(in crate::data) fn len(&self) -> usize { self.entries.len() }
+    pub(in crate::data) fn len(&self) -> usize {
+        self.entries.len()
+    }
     #[cfg(test)]
-    pub(in crate::data) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> { self.entries.get(id) }
+    pub(in crate::data) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
+        self.entries.get(id)
+    }
     #[cfg(test)]
-    pub(in crate::data) fn contains(&self, id: &str) -> bool { self.entries.contains_key(id) }
+    pub(in crate::data) fn contains(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
 
     pub(in crate::data) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() {
             self.order.retain(|x| x != &id);
         }
         while self.order.len() >= TOOL_CALL_MAP_CAP {
-            let Some(oldest) = self.order.pop_front() else { break };
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
             self.entries.remove(&oldest);
         }
         self.order.push_back(id.clone());
         self.entries.insert(id, state);
     }
 
-    pub(in crate::data) fn merge(&mut self, id: &str, payload: &ToolCallDisplayState) -> Option<&ToolCallDisplayState> {
+    pub(in crate::data) fn merge(
+        &mut self,
+        id: &str,
+        payload: &ToolCallDisplayState,
+    ) -> Option<&ToolCallDisplayState> {
         let entry = self.entries.get_mut(id)?;
         entry.merge(payload);
         Some(entry)
@@ -111,17 +152,28 @@ impl ToolCallMap {
         self.emitted.contains(&(id.to_string(), terminal))
     }
     #[cfg(test)]
-    pub(in crate::data) fn mark_start_emitted(&mut self, id: &str) { self.mark_emitted(id, false); }
+    pub(in crate::data) fn mark_start_emitted(&mut self, id: &str) {
+        self.mark_emitted(id, false);
+    }
     #[cfg(test)]
-    pub(in crate::data) fn start_emitted(&self, id: &str) -> bool { self.was_emitted(id, false) }
+    pub(in crate::data) fn start_emitted(&self, id: &str) -> bool {
+        self.was_emitted(id, false)
+    }
     #[cfg(test)]
-    pub(in crate::data) fn mark_terminal_emitted(&mut self, id: &str) { self.mark_emitted(id, true); }
+    pub(in crate::data) fn mark_terminal_emitted(&mut self, id: &str) {
+        self.mark_emitted(id, true);
+    }
     #[cfg(test)]
-    pub(in crate::data) fn terminal_emitted(&self, id: &str) -> bool { self.was_emitted(id, true) }
+    pub(in crate::data) fn terminal_emitted(&self, id: &str) -> bool {
+        self.was_emitted(id, true)
+    }
 }
 
 pub(in crate::data) fn is_terminal_status(s: &str) -> bool {
-    matches!(s, "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error")
+    matches!(
+        s,
+        "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error"
+    )
 }
 
 fn is_success_status(s: &str) -> bool {
@@ -135,7 +187,9 @@ pub(in crate::data) fn sanitize_snippet(input: &str) -> String {
         let code = c as u32;
         let is_ctrl = (code <= 0x1F && c != '\t' && c != '\n' && c != '\r') || code == 0x7F;
         if c.is_ascii_whitespace() || is_ctrl {
-            if !out.ends_with(' ') { out.push(' '); }
+            if !out.ends_with(' ') {
+                out.push(' ');
+            }
         } else {
             out.push(c);
         }
@@ -145,24 +199,45 @@ pub(in crate::data) fn sanitize_snippet(input: &str) -> String {
 
 /// Truncate to `max` chars, appending `...` if any chars dropped.
 pub(in crate::data) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
-    if text.chars().count() <= max { return text.to_string(); }
-    let cutoff = text.char_indices().nth(max.saturating_sub(3)).map(|(i, _)| i).unwrap_or(text.len());
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cutoff = text
+        .char_indices()
+        .nth(max.saturating_sub(3))
+        .map(|(i, _)| i)
+        .unwrap_or(text.len());
     format!("{}...", &text[..cutoff])
 }
 
-fn collapse_ws(text: &str) -> String { text.split_whitespace().collect::<Vec<_>>().join(" ") }
+fn collapse_ws(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::data) enum SnippetKind { Output, Stderr }
+pub(in crate::data) enum SnippetKind {
+    Output,
+    Stderr,
+}
 
 fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)> {
-    let success = state.status.as_deref().map(is_success_status).unwrap_or(true);
-    let cleaned = |t: &str| { let s = sanitize_snippet(t); (!s.is_empty()).then_some(s) };
+    let success = state
+        .status
+        .as_deref()
+        .map(is_success_status)
+        .unwrap_or(true);
+    let cleaned = |t: &str| {
+        let s = sanitize_snippet(t);
+        (!s.is_empty()).then_some(s)
+    };
     let pick = |k, t: Option<&str>| t.and_then(cleaned).map(|s| (k, s));
 
     if let Some(map) = state.raw_output.as_object() {
         if !success
-            && let Some(hit) = pick(SnippetKind::Stderr, map.get("stderr").and_then(Value::as_str))
+            && let Some(hit) = pick(
+                SnippetKind::Stderr,
+                map.get("stderr").and_then(Value::as_str),
+            )
         {
             return Some(hit);
         }
@@ -176,7 +251,10 @@ fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)>
     }
     for block in &state.content {
         for ptr in ["/text", "/content/text"] {
-            if let Some(hit) = pick(SnippetKind::Output, block.pointer(ptr).and_then(Value::as_str)) {
+            if let Some(hit) = pick(
+                SnippetKind::Output,
+                block.pointer(ptr).and_then(Value::as_str),
+            ) {
                 return Some(hit);
             }
         }
@@ -190,7 +268,8 @@ fn shorten_path(path: &Path, cwd: &Path) -> String {
     {
         return rel.to_string_lossy().into_owned();
     }
-    path.file_name().map(|n| n.to_string_lossy().into_owned())
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
@@ -205,7 +284,14 @@ fn extract_command(raw: &Value) -> Option<String> {
             return Some(parts.join(" "));
         }
     }
-    for path in ["/parsed_cmd/0/cmd", "/arguments/cmd", "/arguments/command", "/cmd", "/command", "/script"] {
+    for path in [
+        "/parsed_cmd/0/cmd",
+        "/arguments/cmd",
+        "/arguments/command",
+        "/cmd",
+        "/command",
+        "/script",
+    ] {
         if let Some(t) = raw.pointer(path).and_then(Value::as_str)
             && !t.is_empty()
         {
@@ -220,7 +306,11 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
     if kind == Some("read") && !state.locations.is_empty() {
         let head = shorten_path(&state.locations[0], cwd);
         let rest = state.locations.len() - 1;
-        return Some(if rest == 0 { format!("read({head})") } else { format!("read({head}, +{rest} more)") });
+        return Some(if rest == 0 {
+            format!("read({head})")
+        } else {
+            format!("read({head}, +{rest} more)")
+        });
     }
     if let Some(cmd) = extract_command(&state.raw_input) {
         return Some(format!("exec({cmd})"));
@@ -236,20 +326,33 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
 
 pub(in crate::data) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {
     let body = invocation_label(state, cwd).unwrap_or_else(|| "tool".to_string());
-    truncate_with_ellipsis(&collapse_ws(&format!("{INVOCATION_PREFIX}{body}")), INVOCATION_LINE_MAX)
+    truncate_with_ellipsis(
+        &collapse_ws(&format!("{INVOCATION_PREFIX}{body}")),
+        INVOCATION_LINE_MAX,
+    )
 }
 
 pub(in crate::data) fn format_result_line(state: &ToolCallDisplayState) -> String {
-    let status = state.status.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("unknown");
+    let status = state
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
     let mut line = format!("{RESULT_PREFIX}{status}");
-    if let Some(exit) = state.raw_output.get("exit_code")
+    if let Some(exit) = state
+        .raw_output
+        .get("exit_code")
         .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64)))
     {
         line.push_str(&format!(", exit {exit}"));
     }
     if let Some((kind, text)) = select_snippet(state) {
         let snippet = truncate_with_ellipsis(&text, SNIPPET_MAX_CHARS);
-        let label = match kind { SnippetKind::Stderr => "stderr", SnippetKind::Output => "output" };
+        let label = match kind {
+            SnippetKind::Stderr => "stderr",
+            SnippetKind::Output => "output",
+        };
         line.push_str(&format!(", {label}: {snippet}"));
     }
     truncate_with_ellipsis(&collapse_ws(&line), RESULT_LINE_MAX)

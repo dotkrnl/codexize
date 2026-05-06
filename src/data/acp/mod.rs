@@ -16,8 +16,8 @@ pub use config::{
     should_offer_codex_acp_install,
 };
 pub use events::{
-    AcpCompletionEvent, AcpLifecycleEvent, AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary,
-    AcpTextEvent, ClientUpdate, ToolCallActivityKind, translate_update,
+    AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientUpdate,
+    ToolCallActivityKind, translate_update,
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};
@@ -27,19 +27,30 @@ pub type AcpResult<T> = Result<T, AcpError>;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum AcpError {
-    #[error("{0}")] HumanBlock(String),
-    #[error("{0}")] Io(String),
-    #[error("{0}")] Protocol(String),
+    #[error("{0}")]
+    HumanBlock(String),
+    #[error("{0}")]
+    Io(String),
+    #[error("{0}")]
+    Protocol(String),
 }
 
 impl AcpError {
-    pub fn human_block(m: impl Into<String>) -> Self { Self::HumanBlock(m.into()) }
-    pub fn protocol(m: impl Into<String>) -> Self { Self::Protocol(m.into()) }
-    pub fn io(m: impl Into<String>) -> Self { Self::Io(m.into()) }
+    pub fn human_block(m: impl Into<String>) -> Self {
+        Self::HumanBlock(m.into())
+    }
+    pub fn protocol(m: impl Into<String>) -> Self {
+        Self::Protocol(m.into())
+    }
+    pub fn io(m: impl Into<String>) -> Self {
+        Self::Io(m.into())
+    }
 }
 
 impl From<std::io::Error> for AcpError {
-    fn from(value: std::io::Error) -> Self { Self::io(value.to_string()) }
+    fn from(value: std::io::Error) -> Self {
+        Self::io(value.to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,20 +61,26 @@ pub enum PromptPayload {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpReasoningEffort {
-    #[strum(to_string = "low")] Low,
-    #[strum(to_string = "medium")] Medium,
-    #[strum(to_string = "high")] High,
+    #[strum(to_string = "low")]
+    Low,
+    #[strum(to_string = "medium")]
+    Medium,
+    #[strum(to_string = "high")]
+    High,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpPermissionMode {
-    #[strum(to_string = "ask")] Ask,
-    #[strum(to_string = "code")] Code,
+    #[strum(to_string = "ask")]
+    Ask,
+    #[strum(to_string = "code")]
+    Code,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AcpShellCommandPolicy {
-    #[default] FullAccess,
+    #[default]
+    FullAccess,
     Allowlist(Vec<String>),
 }
 
@@ -75,19 +92,37 @@ pub struct AcpLaunchPolicy {
 }
 
 impl AcpLaunchPolicy {
-    pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
+    pub fn final_validation(
+        verdict_path: impl Into<PathBuf>,
+        live_summary_path: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
             shell_policy: AcpShellCommandPolicy::Allowlist(
-                ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"]
-                    .map(String::from).to_vec()
+                [
+                    "git status",
+                    "git log",
+                    "ls",
+                    "cat",
+                    "head",
+                    "tail",
+                    "wc",
+                    "file",
+                    "find",
+                    "pwd",
+                ]
+                .map(String::from)
+                .to_vec(),
             ),
             enforce_readonly_workspace: true,
         }
     }
 
     /// Simplifier writes/commits repo files; workspace not read-only, shell unrestricted.
-    pub fn simplifier(simplification_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
+    pub fn simplifier(
+        simplification_path: impl Into<PathBuf>,
+        live_summary_path: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             allowed_write_paths: vec![simplification_path.into(), live_summary_path.into()],
             shell_policy: AcpShellCommandPolicy::FullAccess,

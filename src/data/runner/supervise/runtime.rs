@@ -1,6 +1,4 @@
-use crate::acp::{
-    AcpCompletionEvent, AcpConnector, AcpRuntimeEvent, SubprocessConnector, translate_update,
-};
+use crate::acp::{AcpConnector, AcpRuntimeEvent, SubprocessConnector, translate_update};
 use crate::state::MessageKind;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
@@ -127,7 +125,7 @@ fn run_managed_acp_loop(
             .and_then(|update| translate_update(update, launch.resolved.interactive));
 
         match event {
-            Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
+            Some(AcpRuntimeEvent::PromptTurnFinished) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
                 agent_text.finish_turn(launch, MessageKind::AgentText);
                 if launch.resolved.interactive {
@@ -156,7 +154,7 @@ fn run_managed_acp_loop(
                     signal_received: String::new(),
                 };
             }
-            Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
+            Some(AcpRuntimeEvent::PromptTurnFailed { .. }) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
                 agent_text.finish_turn(launch, MessageKind::AgentText);
                 if launch.resolved.interactive && interrupting_turn {
@@ -203,7 +201,7 @@ fn run_managed_acp_loop(
                 poll_park();
             }
             Some(AcpRuntimeEvent::ToolCallActivity { .. })
-            | Some(AcpRuntimeEvent::Lifecycle(_))
+            | Some(AcpRuntimeEvent::SessionTitleUpdated { .. })
             | None => poll_park(),
         }
     };

@@ -241,7 +241,9 @@ pub fn run_child_with_timeout(
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        tokio::task::block_in_place(|| handle.block_on(run_child_with_timeout_async(launch, timeout)))
+        tokio::task::block_in_place(|| {
+            handle.block_on(run_child_with_timeout_async(launch, timeout))
+        })
     } else {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()

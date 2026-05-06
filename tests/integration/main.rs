@@ -18,8 +18,8 @@ use codexize::app_runtime::{
     headless_runtime_for_live_summary, run_harness_until_exit, run_headless_until_exit,
 };
 use codexize::logic::pipeline::Phase;
-use tempfile::tempdir;
 use support::drain_views;
+use tempfile::tempdir;
 
 #[test]
 fn full_pipeline_run_via_stubbed_ui() {

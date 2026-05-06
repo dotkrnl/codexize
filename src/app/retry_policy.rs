@@ -56,6 +56,43 @@ impl App {
         }
         lines.join("\n")
     }
+    fn handle_retry_exhausted(
+        &mut self,
+        failed_run: &crate::state::RunRecord,
+        summary: String,
+        log_safety_cap: bool,
+    ) -> bool {
+        if matches!(failed_run.stage.as_str(), "coder" | "reviewer") {
+            return self.enter_builder_recovery(
+                failed_run.round,
+                failed_run.task_id,
+                Some(summary),
+                "agent_pivot",
+            );
+        }
+        let summary = if failed_run.stage == "recovery" {
+            format!("builder recovery retry exhausted\n{summary}")
+        } else {
+            summary
+        };
+        self.record_agent_error(summary.clone());
+        let origin = crate::state::BlockOrigin::for_stage(&failed_run.stage)
+            .unwrap_or(crate::state::BlockOrigin::Implementation);
+        let origin = if failed_run.stage == "recovery" {
+            crate::state::BlockOrigin::BuilderRecovery
+        } else {
+            origin
+        };
+        let _ = self.transition_to_blocked(origin);
+        self.append_system_message(failed_run.id, MessageKind::End, summary);
+        if log_safety_cap {
+            let _ = self.state.log_event(format!(
+                "auto-retry safety cap hit for {} round {} attempt {}",
+                failed_run.stage, failed_run.round, failed_run.attempt
+            ));
+        }
+        true
+    }
     pub(crate) fn maybe_auto_retry(&mut self, failed_run: &crate::state::RunRecord) -> bool {
         if failed_run.status == RunStatus::FailedUnverified {
             let _ = self.state.log_event(format!(
@@ -78,31 +115,7 @@ impl App {
         let max_attempts = self.models.len() as u32 + 2;
         if failed_run.attempt >= max_attempts {
             let summary = self.retry_exhausted_summary(failed_run);
-            if matches!(failed_run.stage.as_str(), "coder" | "reviewer") {
-                return self.enter_builder_recovery(
-                    failed_run.round,
-                    failed_run.task_id,
-                    Some(summary),
-                    "agent_pivot",
-                );
-            }
-            if failed_run.stage == "recovery" {
-                let summary = format!("builder recovery retry exhausted\n{summary}");
-                self.record_agent_error(summary.clone());
-                let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
-                self.append_system_message(failed_run.id, MessageKind::End, summary);
-                return true;
-            }
-            self.record_agent_error(summary.clone());
-            let origin = crate::state::BlockOrigin::for_stage(&failed_run.stage)
-                .unwrap_or(crate::state::BlockOrigin::Implementation);
-            let _ = self.transition_to_blocked(origin);
-            self.append_system_message(failed_run.id, MessageKind::End, summary);
-            let _ = self.state.log_event(format!(
-                "auto-retry safety cap hit for {} round {} attempt {}",
-                failed_run.stage, failed_run.round, failed_run.attempt
-            ));
-            return true;
+            return self.handle_retry_exhausted(failed_run, summary, true);
         }
         let excluded: Vec<(VendorKind, String)> = self
             .failed_models
@@ -130,26 +143,6 @@ impl App {
             return self.launch_retry_for_stage(failed_run, next_model);
         }
         let summary = self.retry_exhausted_summary(failed_run);
-        if matches!(failed_run.stage.as_str(), "coder" | "reviewer") {
-            return self.enter_builder_recovery(
-                failed_run.round,
-                failed_run.task_id,
-                Some(summary),
-                "agent_pivot",
-            );
-        }
-        if failed_run.stage == "recovery" {
-            let summary = format!("builder recovery retry exhausted\n{summary}");
-            self.record_agent_error(summary.clone());
-            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
-            self.append_system_message(failed_run.id, MessageKind::End, summary);
-            return true;
-        }
-        self.record_agent_error(summary.clone());
-        let origin = crate::state::BlockOrigin::for_stage(&failed_run.stage)
-            .unwrap_or(crate::state::BlockOrigin::Implementation);
-        let _ = self.transition_to_blocked(origin);
-        self.append_system_message(failed_run.id, MessageKind::End, summary);
-        true
+        self.handle_retry_exhausted(failed_run, summary, false)
     }
 }

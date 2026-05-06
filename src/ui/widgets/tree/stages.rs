@@ -539,96 +539,56 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
 }
 
 pub(super) fn build_simplification_stage(state: &SessionState, iteration: u32) -> Node {
-    let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
-    let runs: Vec<&RunRecord> = state
-        .agent_runs
-        .iter()
-        .filter(|r| r.stage == "simplifier" && in_iteration_round(r.round))
-        .collect();
-    let latest = latest_attempts(&runs);
-    let status = if iteration <= 1 {
-        stage_status_from_runs(&latest, state, "simplifier")
-    } else {
-        per_iteration_terminal_status(&latest)
-    };
-    let summary = if iteration <= 1 {
-        stage_summary(state, "simplifier", "Simplification", &latest)
-    } else {
-        String::new()
-    };
-    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
-    for run in &runs {
-        rounds.entry(run.round).or_default().push(*run);
-    }
-    let mut children = Vec::new();
-    for (round_num, round_runs) in rounds {
-        let mut round_children = Vec::new();
-        for run in &round_runs {
-            round_children.push(agent_run_node(run));
-        }
-        let round_status = rollup_status(&round_runs);
-        children.push(Node {
-            label: format!("Round {}", round_num),
-            kind: NodeKind::Round,
-            status: round_status,
-            summary: String::new(),
-            children: round_children,
-            run_id: None,
-            leaf_run_id: None,
-        });
-    }
-    Node {
-        label: iteration_label("Simplification", iteration),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children,
-        run_id: None,
-        leaf_run_id: None,
-    }
+    build_per_iteration_stage(state, iteration, "simplifier", "Simplification")
 }
 
 pub(super) fn build_final_validation_stage(state: &SessionState, iteration: u32) -> Node {
+    build_per_iteration_stage(state, iteration, "final-validation", "Final Validation")
+}
+
+/// Shared scaffolding for the iteration-scoped trio's tail two stages.
+/// Filters runs to this iteration, derives stage status/summary (delegating
+/// to the global phase machinery only for iteration 1, since later trios
+/// must report from their own runs), and groups the runs into Round nodes.
+fn build_per_iteration_stage(
+    state: &SessionState,
+    iteration: u32,
+    stage_key: &str,
+    label: &str,
+) -> Node {
     let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
     let runs: Vec<&RunRecord> = state
         .agent_runs
         .iter()
-        .filter(|r| r.stage == "final-validation" && in_iteration_round(r.round))
+        .filter(|r| r.stage == stage_key && in_iteration_round(r.round))
         .collect();
     let latest = latest_attempts(&runs);
-    let status = if iteration <= 1 {
-        stage_status_from_runs(&latest, state, "final-validation")
+    let (status, summary) = if iteration <= 1 {
+        (
+            stage_status_from_runs(&latest, state, stage_key),
+            stage_summary(state, stage_key, label, &latest),
+        )
     } else {
-        per_iteration_terminal_status(&latest)
-    };
-    let summary = if iteration <= 1 {
-        stage_summary(state, "final-validation", "Final Validation", &latest)
-    } else {
-        String::new()
+        (per_iteration_terminal_status(&latest), String::new())
     };
     let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
     for run in &runs {
         rounds.entry(run.round).or_default().push(*run);
     }
-    let mut children = Vec::new();
-    for (round_num, round_runs) in rounds {
-        let mut round_children = Vec::new();
-        for run in &round_runs {
-            round_children.push(agent_run_node(run));
-        }
-        let round_status = rollup_status(&round_runs);
-        children.push(Node {
+    let children = rounds
+        .into_iter()
+        .map(|(round_num, round_runs)| Node {
             label: format!("Round {}", round_num),
             kind: NodeKind::Round,
-            status: round_status,
+            status: rollup_status(&round_runs),
             summary: String::new(),
-            children: round_children,
+            children: round_runs.iter().map(|r| agent_run_node(r)).collect(),
             run_id: None,
             leaf_run_id: None,
-        });
-    }
+        })
+        .collect();
     Node {
-        label: iteration_label("Final Validation", iteration),
+        label: iteration_label(label, iteration),
         kind: NodeKind::Stage,
         status,
         summary,

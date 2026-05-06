@@ -1,19 +1,13 @@
-// Documented MVP deferral (per spec Risks-and-mitigations + Goal #3).
-//
-// This file intertwines the JSON-RPC transport (subprocess spawn, stdio
-// framing, request/response correlation, lifecycle/cancel plumbing) with
-// the `session/update` interpretation that drives transcripts and tool-call
-// state. A clean transport-vs-policy split would either invent a stable
-// internal trait boundary that doesn't yet exist or carve large mutable
-// state across two modules — both options carry meaningful behavioural
-// risk for an MVP whose acceptance gate is a manual dogfood run.
-//
-// The deferred follow-up is to factor the JSON-RPC subprocess connector and
-// the prompt/text/tool-call interpretation into peer modules under
-// `data/acp/`, with the tool-call lifecycle rules (already partly extracted
-// into `tool_call.rs`) eventually moving to `logic/`. Until that work
-// lands, this file is permitted to exceed the 800-line cap that the spec
-// applies to every other production module.
+//! ACP JSON-RPC stdio client.
+//!
+//! Wire transport is a tokio actor: one task owns the spawned child's stdio,
+//! the framed line reader, the outstanding-request map, and notification
+//! dispatch. The synchronous [`AcpSession`] facade ([`SubprocessSession`])
+//! keeps the existing trait shape so callers that have not yet been ported to
+//! async can drive prompt turns by polling — internally the polls hit
+//! non-blocking `try_recv` on tokio channels and `block_on` on tokio
+//! `oneshot::Receiver`s rather than the previous reader thread and sync
+//! request-correlation map.
 
 use super::{
     AcpError, AcpResolvedLaunch, AcpResult, AcpTextBoundary, ClientUpdate, PromptPayload,
@@ -27,19 +21,22 @@ use crate::selection::vendor::vendor_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, VecDeque},
-    io::{BufRead, BufReader, ErrorKind, Write},
+    collections::{HashMap, VecDeque},
+    io::Write,
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        Arc,
+        atomic::{AtomicU64, Ordering},
     },
-    thread::{self, JoinHandle},
 };
-
-type PendingRequests = Arc<Mutex<BTreeMap<u64, Sender<AcpResult<Value>>>>>;
-type SharedWriter = Arc<Mutex<Option<ChildStdin>>>;
+use tokio::{
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    process::{Child, Command},
+    runtime::Runtime,
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 pub trait AcpSession: Send {
     fn session_id(&self) -> &str;
@@ -53,6 +50,12 @@ pub trait AcpConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>>;
 }
 
+/// Blocking RPC seam used by the legacy `apply_session_config` test stub.
+/// Production callers reach the same wire protocol through `RpcClient`'s
+/// async `call_async`; the synchronous trait survives only so the existing
+/// table-driven test for `apply_session_config` can replace the transport
+/// without standing up a tokio runtime.
+#[allow(dead_code)]
 trait RpcCaller {
     fn call(&mut self, method: &str, params: Value) -> AcpResult<Value>;
 }
@@ -62,35 +65,70 @@ pub struct SubprocessConnector;
 
 impl AcpConnector for SubprocessConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>> {
-        let mut command = Command::new(&launch.spawn.program);
-        command
-            .args(&launch.spawn.args)
-            .envs(&launch.spawn.env)
-            .current_dir(&launch.session.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // Keep stderr from backing up an unread pipe; protocol diagnostics
-            // flow through ACP updates and request failures.
-            .stderr(Stdio::null());
+        let runtime = Arc::new(build_session_runtime()?);
+        let (mut rpc, child) = runtime.block_on(spawn_actor(&runtime, launch))?;
+        let session = match runtime.block_on(handshake(&mut rpc, launch)) {
+            Ok(session) => session,
+            Err(err) => {
+                rpc.shutdown_blocking(child);
+                return Err(err);
+            }
+        };
+        Ok(Box::new(SubprocessSession::new(
+            session, rpc, child, runtime, launch,
+        )))
+    }
+}
 
-        let mut child = command.spawn().map_err(|err| {
-            AcpError::human_block(format!(
-                "ACP agent for vendor {} failed to start ({}): {err}",
-                vendor_kind_to_str(launch.vendor),
-                launch.spawn.program
-            ))
-        })?;
+fn build_session_runtime() -> AcpResult<Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .thread_name("codexize-acp")
+        .build()
+        .map_err(|err| AcpError::io(format!("failed to build ACP tokio runtime: {err}")))
+}
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| AcpError::protocol("ACP child stdout was not captured"))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
-        let mut rpc = RpcPeer::new(stdin, stdout);
-        let initialize = match rpc.call(
+async fn spawn_actor(
+    runtime: &Arc<Runtime>,
+    launch: &AcpResolvedLaunch,
+) -> AcpResult<(RpcClient, Child)> {
+    let mut command = Command::new(&launch.spawn.program);
+    command
+        .args(&launch.spawn.args)
+        .envs(&launch.spawn.env)
+        .current_dir(&launch.session.cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        // Keep stderr from backing up an unread pipe; protocol diagnostics
+        // flow through ACP updates and request failures.
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+
+    let mut child = command.spawn().map_err(|err| {
+        AcpError::human_block(format!(
+            "ACP agent for vendor {} failed to start ({}): {err}",
+            vendor_kind_to_str(launch.vendor),
+            launch.spawn.program
+        ))
+    })?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AcpError::protocol("ACP child stdout was not captured"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
+
+    let rpc = RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin);
+    Ok((rpc, child))
+}
+
+async fn handshake(rpc: &mut RpcClient, launch: &AcpResolvedLaunch) -> AcpResult<HandshakeOutput> {
+    let initialize = rpc
+        .call_async(
             "initialize",
             json!({
                 "protocolVersion": 1,
@@ -107,63 +145,80 @@ impl AcpConnector for SubprocessConnector {
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }),
-        ) {
-            Ok(value) => value,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
-        let init = match parse_initialize_result(initialize) {
-            Ok(init) => init,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
-        if init.protocol_version != 1 {
-            return cleanup_failed_connect(
-                child,
-                rpc,
-                AcpError::human_block(format!(
-                    "ACP agent negotiated unsupported protocol version {}",
-                    init.protocol_version
-                )),
-            );
-        }
+        )
+        .await?;
+    let init = parse_initialize_result(initialize)?;
+    if init.protocol_version != 1 {
+        return Err(AcpError::human_block(format!(
+            "ACP agent negotiated unsupported protocol version {}",
+            init.protocol_version
+        )));
+    }
 
-        let new_session = match rpc.call(
+    let new_session = rpc
+        .call_async(
             "session/new",
             json!({
                 "cwd": launch.session.cwd,
                 "mcpServers": []
             }),
-        ) {
-            Ok(value) => value,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
-        let mut session = match parse_new_session_result(new_session) {
-            Ok(session) => session,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
-        if let Err(err) = apply_session_config(
-            &mut rpc,
-            &session.session_id,
-            &launch.session,
-            &mut session.config_options,
-        ) {
-            return cleanup_failed_connect(child, rpc, err);
-        }
-        let prompt_params = match prompt_request_params(&session.session_id, &launch.session.prompt)
-        {
-            Ok(params) => params,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
-        let prompt_response = match rpc.start_request("session/prompt", prompt_params) {
-            Ok(response) => response,
-            Err(err) => return cleanup_failed_connect(child, rpc, err),
-        };
+        )
+        .await?;
+    let mut session = parse_new_session_result(new_session)?;
+    apply_session_config_async(
+        rpc,
+        &session.session_id,
+        &launch.session,
+        &mut session.config_options,
+    )
+    .await?;
+    let prompt_params = prompt_request_params(&session.session_id, &launch.session.prompt)?;
+    let prompt_response = rpc.start_request("session/prompt", prompt_params)?;
 
-        Ok(Box::new(SubprocessSession {
-            session_id: session.session_id,
+    Ok(HandshakeOutput {
+        session_id: session.session_id,
+        supports_close: init.supports_close,
+        prompt_response,
+    })
+}
+
+struct HandshakeOutput {
+    session_id: String,
+    supports_close: bool,
+    prompt_response: oneshot::Receiver<AcpResult<Value>>,
+}
+
+struct SubprocessSession {
+    session_id: String,
+    rpc: RpcClient,
+    child: Option<Child>,
+    runtime: Arc<Runtime>,
+    supports_close: bool,
+    prompt_response: Option<oneshot::Receiver<AcpResult<Value>>>,
+    prompt_finished: bool,
+    closed: bool,
+    cwd: PathBuf,
+    tool_calls: ToolCallMap,
+    boundary_state: AcpBoundaryState,
+    pending_updates: VecDeque<ClientUpdate>,
+    acp_trace_path: Option<PathBuf>,
+}
+
+impl SubprocessSession {
+    fn new(
+        handshake: HandshakeOutput,
+        rpc: RpcClient,
+        child: Child,
+        runtime: Arc<Runtime>,
+        launch: &AcpResolvedLaunch,
+    ) -> Self {
+        Self {
+            session_id: handshake.session_id,
             rpc,
             child: Some(child),
-            supports_close: init.supports_close,
-            prompt_response: Some(prompt_response),
+            runtime,
+            supports_close: handshake.supports_close,
+            prompt_response: Some(handshake.prompt_response),
             prompt_finished: false,
             closed: false,
             cwd: launch.session.cwd.clone(),
@@ -175,34 +230,14 @@ impl AcpConnector for SubprocessConnector {
                 .metadata
                 .get("codexize.acp_trace_path")
                 .map(PathBuf::from),
-        }))
+        }
     }
-}
 
-fn cleanup_failed_connect(
-    mut child: Child,
-    mut rpc: RpcPeer,
-    err: AcpError,
-) -> AcpResult<Box<dyn AcpSession>> {
-    let _ = child.kill();
-    let _ = child.wait();
-    rpc.shutdown();
-    Err(err)
-}
-
-struct SubprocessSession {
-    session_id: String,
-    rpc: RpcPeer,
-    child: Option<Child>,
-    supports_close: bool,
-    prompt_response: Option<Receiver<AcpResult<Value>>>,
-    prompt_finished: bool,
-    closed: bool,
-    cwd: PathBuf,
-    tool_calls: ToolCallMap,
-    boundary_state: AcpBoundaryState,
-    pending_updates: VecDeque<ClientUpdate>,
-    acp_trace_path: Option<PathBuf>,
+    fn finish_prompt_turn(&mut self) {
+        self.prompt_finished = true;
+        self.prompt_response = None;
+        self.boundary_state.reset_for_prompt_turn();
+    }
 }
 
 /// Per-stream identity + restart-flag tracking used to classify text chunks
@@ -269,14 +304,6 @@ impl AcpBoundaryState {
     }
 }
 
-impl SubprocessSession {
-    fn finish_prompt_turn(&mut self) {
-        self.prompt_finished = true;
-        self.prompt_response = None;
-        self.boundary_state.reset_for_prompt_turn();
-    }
-}
-
 impl AcpSession for SubprocessSession {
     fn session_id(&self) -> &str {
         &self.session_id
@@ -322,7 +349,7 @@ impl AcpSession for SubprocessSession {
             return Ok(None);
         }
 
-        let Some(prompt_response) = self.prompt_response.as_ref() else {
+        let Some(prompt_response) = self.prompt_response.as_mut() else {
             return Ok(None);
         };
 
@@ -346,8 +373,8 @@ impl AcpSession for SubprocessSession {
                     message: err.to_string(),
                 }))
             }
-            Err(TryRecvError::Empty) => Ok(None),
-            Err(TryRecvError::Disconnected) => {
+            Err(oneshot::error::TryRecvError::Empty) => Ok(None),
+            Err(oneshot::error::TryRecvError::Closed) => {
                 self.finish_prompt_turn();
                 Ok(Some(ClientUpdate::PromptTurnFailed {
                     message: "ACP prompt turn channel disconnected".to_string(),
@@ -390,29 +417,46 @@ impl AcpSession for SubprocessSession {
         self.closed = true;
         self.pending_updates.clear();
         self.tool_calls = ToolCallMap::new();
+        self.prompt_response = None;
 
         if self.supports_close {
+            // Best-effort graceful close — ignore the receiver so we never
+            // block the sync caller waiting on a server that has already
+            // disconnected.
             let _ = self
                 .rpc
                 .start_request("session/close", json!({ "sessionId": self.session_id }));
         }
 
-        if let Some(child) = self.child.as_mut() {
-            match child.try_wait() {
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                Err(err) => {
-                    return Err(AcpError::io(format!(
-                        "failed to inspect ACP child process: {err}"
-                    )));
-                }
+        let mut child = match self.child.take() {
+            Some(child) => child,
+            None => {
+                self.rpc.shutdown_blocking_no_child();
+                return Ok(());
+            }
+        };
+
+        // Close the writer half so the actor sees a clean shutdown via
+        // command-channel drop, then wait for the actor to drain.
+        self.rpc.shutdown_async(&self.runtime);
+
+        // Reap the child after the actor has released stdin. `try_wait` is a
+        // sync syscall on tokio's `Child`; only `kill`/`wait` need the
+        // executor.
+        match child.try_wait() {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                let _ = self.runtime.block_on(async {
+                    let _ = child.kill().await;
+                    child.wait().await
+                });
+            }
+            Err(err) => {
+                return Err(AcpError::io(format!(
+                    "failed to inspect ACP child process: {err}"
+                )));
             }
         }
-
-        self.rpc.shutdown();
         Ok(())
     }
 }
@@ -423,248 +467,494 @@ impl Drop for SubprocessSession {
     }
 }
 
-struct RpcPeer {
-    writer: SharedWriter,
-    pending: PendingRequests,
-    updates_rx: Receiver<AcpResult<Value>>,
-    reader_handle: Option<JoinHandle<()>>,
-    next_request_id: u64,
+#[derive(Debug)]
+enum RpcCommand {
+    Request {
+        id: u64,
+        method: String,
+        params: Value,
+        respond: oneshot::Sender<AcpResult<Value>>,
+    },
+    Notify {
+        method: String,
+        params: Value,
+    },
+    Shutdown,
 }
 
-impl RpcPeer {
-    fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
-        let writer = Arc::new(Mutex::new(Some(stdin)));
-        let pending = Arc::new(Mutex::new(BTreeMap::<u64, Sender<AcpResult<Value>>>::new()));
-        let (updates_tx, updates_rx) = mpsc::channel();
-        let reader_writer = Arc::clone(&writer);
-        let reader_pending = Arc::clone(&pending);
-        let reader_handle =
-            thread::spawn(move || read_loop(stdout, reader_writer, reader_pending, updates_tx));
-        Self {
+/// Synchronous handle wrapping the tokio actor task. Threads through the
+/// per-session runtime so that legacy sync callers (`AcpSession`) can keep
+/// driving prompt turns by polling without yielding into an executor.
+struct RpcClient {
+    runtime: Arc<Runtime>,
+    cancel: CancellationToken,
+    next_request_id: AtomicU64,
+    commands: mpsc::UnboundedSender<RpcCommand>,
+    updates: mpsc::UnboundedReceiver<AcpResult<Value>>,
+    actor: Option<JoinHandle<()>>,
+}
+
+impl RpcClient {
+    fn start<R, W>(runtime: Arc<Runtime>, reader: R, writer: W) -> Self
+    where
+        R: AsyncBufRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        let (commands_tx, commands_rx) = mpsc::unbounded_channel::<RpcCommand>();
+        let (updates_tx, updates_rx) = mpsc::unbounded_channel::<AcpResult<Value>>();
+        let cancel = CancellationToken::new();
+        let actor = runtime.spawn(actor_loop(
+            reader,
             writer,
-            pending,
-            updates_rx,
-            reader_handle: Some(reader_handle),
-            next_request_id: 0,
+            commands_rx,
+            updates_tx,
+            cancel.clone(),
+        ));
+        Self {
+            runtime,
+            cancel,
+            next_request_id: AtomicU64::new(0),
+            commands: commands_tx,
+            updates: updates_rx,
+            actor: Some(actor),
         }
+    }
+
+    fn allocate_id(&self) -> u64 {
+        self.next_request_id.fetch_add(1, Ordering::Relaxed)
     }
 
     fn start_request(
-        &mut self,
+        &self,
         method: &str,
         params: Value,
-    ) -> AcpResult<Receiver<AcpResult<Value>>> {
-        let id = self.next_request_id;
-        self.next_request_id += 1;
-
-        let (tx, rx) = mpsc::channel();
-        self.pending
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(id, tx);
-
-        let message = json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params
-        });
-        let write_result = write_json_rpc_line(&self.writer, &message);
-        if let Err(err) = write_result {
-            self.pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&id);
-            return Err(AcpError::io(format!(
-                "failed to write ACP request {method}: {err}"
-            )));
-        }
+    ) -> AcpResult<oneshot::Receiver<AcpResult<Value>>> {
+        let id = self.allocate_id();
+        let (respond, rx) = oneshot::channel();
+        self.commands
+            .send(RpcCommand::Request {
+                id,
+                method: method.to_string(),
+                params,
+                respond,
+            })
+            .map_err(|_| {
+                AcpError::io(format!(
+                    "failed to enqueue ACP request {method}: actor stopped"
+                ))
+            })?;
         Ok(rx)
     }
 
-    fn notify(&mut self, method: &str, params: Value) -> AcpResult<()> {
-        let message = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params
-        });
-        write_json_rpc_line(&self.writer, &message).map_err(|err| {
-            AcpError::io(format!("failed to write ACP notification {method}: {err}"))
-        })
+    fn notify(&self, method: &str, params: Value) -> AcpResult<()> {
+        self.commands
+            .send(RpcCommand::Notify {
+                method: method.to_string(),
+                params,
+            })
+            .map_err(|_| {
+                AcpError::io(format!(
+                    "failed to enqueue ACP notification {method}: actor stopped"
+                ))
+            })
+    }
+
+    async fn call_async(&mut self, method: &str, params: Value) -> AcpResult<Value> {
+        let rx = self.start_request(method, params)?;
+        rx.await
+            .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<Value>> {
-        match self.updates_rx.try_recv() {
+        match self.updates.try_recv() {
             Ok(Ok(value)) => Ok(Some(value)),
             Ok(Err(err)) => Err(err),
-            Err(TryRecvError::Empty) => Ok(None),
-            Err(TryRecvError::Disconnected) => Ok(None),
+            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::error::TryRecvError::Disconnected) => Ok(None),
         }
     }
 
-    fn shutdown(&mut self) {
-        self.writer
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
-        if let Some(handle) = self.reader_handle.take() {
-            let _ = handle.join();
+    /// Cooperative shutdown when a child process has already been reaped or
+    /// was never spawned. Cancels the actor and waits for it to exit.
+    fn shutdown_blocking_no_child(&mut self) {
+        self.cancel.cancel();
+        if let Some(actor) = self.actor.take() {
+            let _ = self.runtime.block_on(actor);
         }
-        self.pending
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
+    }
+
+    /// Cooperative shutdown when the caller already owns the `Child`. Queue a
+    /// shutdown command after any best-effort close request so prior commands
+    /// can flush before the actor exits; the runtime is needed to await the
+    /// join handle on a sync stack.
+    fn shutdown_async(&mut self, runtime: &Runtime) {
+        // Intentional FIFO shutdown: cancellation is for aggressive teardown,
+        // while graceful close should let queued `session/close` reach stdin.
+        let _ = self.commands.send(RpcCommand::Shutdown);
+        if let Some(actor) = self.actor.take() {
+            let _ = runtime.block_on(actor);
+        }
+    }
+
+    /// Aggressive shutdown used during connect-time failures: kill the actor
+    /// and reap the child immediately. The caller is on the connector's
+    /// hot path; protocol diagnostics already surfaced as the returned
+    /// error, so we drop the child silently.
+    fn shutdown_blocking(&mut self, mut child: Child) {
+        self.cancel.cancel();
+        if let Some(actor) = self.actor.take() {
+            let _ = self.runtime.block_on(actor);
+        }
+        let _ = self.runtime.block_on(async {
+            let _ = child.kill().await;
+            child.wait().await
+        });
     }
 }
 
-impl RpcCaller for RpcPeer {
+#[cfg(test)]
+impl RpcCaller for RpcClient {
     fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
-        let receiver = self.start_request(method, params)?;
-        receiver
-            .recv()
-            .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
+        let runtime = self.runtime.clone();
+        runtime.block_on(self.call_async(method, params))
     }
 }
 
-fn write_json_rpc_line(writer: &SharedWriter, message: &Value) -> std::io::Result<()> {
-    let encoded = serde_json::to_string(message)
-        .map_err(|err| std::io::Error::new(ErrorKind::InvalidData, err))?;
-    let mut guard = writer
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let writer = guard
-        .as_mut()
-        .ok_or_else(|| std::io::Error::new(ErrorKind::BrokenPipe, "ACP writer already closed"))?;
-    writer
-        .write_all(encoded.as_bytes())
-        .and_then(|_| writer.write_all(b"\n"))
-        .and_then(|_| writer.flush())
-}
-
-fn read_loop(
-    stdout: ChildStdout,
-    writer: SharedWriter,
-    pending: PendingRequests,
-    updates_tx: Sender<AcpResult<Value>>,
-) {
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(line) if !line.trim().is_empty() => line,
-            Ok(_) => continue,
-            Err(err) => {
-                broadcast_transport_error(
-                    &pending,
-                    &updates_tx,
-                    format!("failed to read ACP stdout: {err}"),
-                );
-                return;
+async fn actor_loop<R, W>(
+    mut reader: R,
+    mut writer: W,
+    mut commands: mpsc::UnboundedReceiver<RpcCommand>,
+    updates: mpsc::UnboundedSender<AcpResult<Value>>,
+    cancel: CancellationToken,
+) where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut pending: HashMap<u64, oneshot::Sender<AcpResult<Value>>> = HashMap::new();
+    let mut line_buf = Vec::new();
+    let mut writer_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                break;
             }
-        };
-
-        let value: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(err) => {
-                broadcast_transport_error(
-                    &pending,
-                    &updates_tx,
-                    format!("invalid ACP JSON message: {err}"),
-                );
-                return;
-            }
-        };
-
-        if let Some(method) = value.get("method").and_then(Value::as_str) {
-            if method == "session/update" {
-                // Forward the inner `update` field unchanged; the consumer
-                // owns the per-session state needed to translate it. Null
-                // signals "session/update without an update field" so the
-                // dispatcher can emit Unknown { kind: "session/update" }.
-                let update_value = value
-                    .get("params")
-                    .and_then(|params| params.get("update"))
-                    .cloned()
-                    .unwrap_or(Value::Null);
-                let _ = updates_tx.send(Ok(update_value));
-                continue;
-            }
-
-            if let Some(id) = value.get("id") {
-                let response = value
-                    .get("params")
-                    .and_then(|params| client_request_response(method, params))
-                    .map(|result| {
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id.clone(),
-                            "result": result,
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id.clone(),
-                            "error": {
-                                "code": -32601,
-                                "message": format!("codexize client does not implement method {method}"),
-                            }
-                        })
-                    });
-                let _ = write_json_rpc_line(&writer, &response);
-            }
-            continue;
-        }
-
-        if let Some(id) = value.get("id").and_then(Value::as_u64) {
-            let sender = pending
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&id);
-            if let Some(sender) = sender {
-                if let Some(error) = value.get("error") {
-                    let message = error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("ACP request failed")
-                        .to_string();
-                    let _ = sender.send(Err(AcpError::protocol(message)));
-                } else if let Some(result) = value.get("result") {
-                    let _ = sender.send(Ok(result.clone()));
-                } else {
-                    let _ = sender.send(Err(AcpError::protocol(
-                        "ACP response was missing both result and error".to_string(),
-                    )));
+            cmd = commands.recv() => {
+                let Some(cmd) = cmd else {
+                    // No further commands will arrive; keep draining inbound
+                    // messages until the server side closes stdout so any
+                    // late notifications still reach the consumer. The cancel
+                    // token is the explicit termination signal.
+                    drain_until_eof(&mut reader, &mut writer, &mut pending, &updates, &cancel).await;
+                    break;
+                };
+                if matches!(cmd, RpcCommand::Shutdown) {
+                    break;
+                }
+                if let Err(err) = handle_command(cmd, &mut writer, &mut pending, &mut writer_open).await {
+                    // Writer error: surface as transport failure to all
+                    // outstanding requests and exit. The reader is dropped on
+                    // function return.
+                    broadcast_transport_error(&mut pending, &updates, err);
+                    break;
                 }
             }
-            continue;
+            result = read_line(&mut reader, &mut line_buf) => {
+                match result {
+                    ReadOutcome::Eof => {
+                        broadcast_transport_error(
+                            &mut pending,
+                            &updates,
+                            AcpError::protocol(
+                                "ACP agent closed stdout before the prompt turn finished",
+                            ),
+                        );
+                        break;
+                    }
+                    ReadOutcome::Empty => {
+                        line_buf.clear();
+                        continue;
+                    }
+                    ReadOutcome::Line => {
+                        match decode_line(&line_buf) {
+                            Ok(line) => {
+                                if let Err(err) = handle_inbound_line(
+                                    line,
+                                    &mut writer,
+                                    &mut pending,
+                                    &updates,
+                                    &mut writer_open,
+                                )
+                                .await
+                                {
+                                    broadcast_transport_error(&mut pending, &updates, err);
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                line_buf.clear();
+                                broadcast_transport_error(&mut pending, &updates, err);
+                                break;
+                            }
+                        }
+                        line_buf.clear();
+                    }
+                    ReadOutcome::Error(err) => {
+                        line_buf.clear();
+                        broadcast_transport_error(&mut pending, &updates, err);
+                        break;
+                    }
+                }
+            }
         }
     }
+    // Best-effort writer flush before exit — we want any in-flight responses
+    // to client-side requests (e.g. session/request_permission) to make it
+    // back to the agent before stdin closes.
+    if writer_open {
+        let _ = writer.flush().await;
+        let _ = writer.shutdown().await;
+    }
+}
 
-    broadcast_transport_error(
-        &pending,
-        &updates_tx,
-        "ACP agent closed stdout before the prompt turn finished".to_string(),
-    );
+enum ReadOutcome {
+    Eof,
+    Empty,
+    Line,
+    Error(AcpError),
+}
+
+async fn read_line<R>(reader: &mut R, buf: &mut Vec<u8>) -> ReadOutcome
+where
+    R: AsyncBufRead + Unpin,
+{
+    // `read_until` is cancellation-safe under `tokio::select!`; `read_line`
+    // can drop partial JSON if an outbound command wins the select branch.
+    match reader.read_until(b'\n', buf).await {
+        Ok(0) => ReadOutcome::Eof,
+        Ok(_) if buf.iter().all(|byte| byte.is_ascii_whitespace()) => ReadOutcome::Empty,
+        Ok(_) => ReadOutcome::Line,
+        Err(err) => ReadOutcome::Error(AcpError::io(format!("failed to read ACP stdout: {err}"))),
+    }
+}
+
+fn decode_line(buf: &[u8]) -> AcpResult<&str> {
+    std::str::from_utf8(buf)
+        .map_err(|err| AcpError::protocol(format!("invalid ACP UTF-8 message: {err}")))
+}
+
+async fn drain_until_eof<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
+    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
+    cancel: &CancellationToken,
+) where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut writer_open = true;
+    let mut buf = Vec::new();
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return,
+            outcome = read_line(reader, &mut buf) => match outcome {
+                ReadOutcome::Eof => return,
+                ReadOutcome::Empty => {
+                    buf.clear();
+                    continue;
+                }
+                ReadOutcome::Line => {
+                    match decode_line(&buf) {
+                        Ok(line) => {
+                            if let Err(err) =
+                                handle_inbound_line(line, writer, pending, updates, &mut writer_open).await
+                            {
+                                broadcast_transport_error(pending, updates, err);
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            buf.clear();
+                            broadcast_transport_error(pending, updates, err);
+                            return;
+                        }
+                    }
+                    buf.clear();
+                }
+                ReadOutcome::Error(err) => {
+                    buf.clear();
+                    broadcast_transport_error(pending, updates, err);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn handle_command<W>(
+    cmd: RpcCommand,
+    writer: &mut W,
+    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
+    writer_open: &mut bool,
+) -> AcpResult<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    match cmd {
+        RpcCommand::Request {
+            id,
+            method,
+            params,
+            respond,
+        } => {
+            let message = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": params
+            });
+            if !*writer_open {
+                let _ = respond.send(Err(AcpError::io(format!(
+                    "failed to write ACP request {method}: writer closed"
+                ))));
+                return Ok(());
+            }
+            if let Err(err) = write_json_rpc_line(writer, &message).await {
+                *writer_open = false;
+                let _ = respond.send(Err(AcpError::io(format!(
+                    "failed to write ACP request {method}: {err}"
+                ))));
+                return Ok(());
+            }
+            pending.insert(id, respond);
+            Ok(())
+        }
+        RpcCommand::Notify { method, params } => {
+            if !*writer_open {
+                return Err(AcpError::io(format!(
+                    "failed to write ACP notification {method}: writer closed"
+                )));
+            }
+            let message = json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params
+            });
+            if let Err(err) = write_json_rpc_line(writer, &message).await {
+                *writer_open = false;
+                return Err(AcpError::io(format!(
+                    "failed to write ACP notification {method}: {err}"
+                )));
+            }
+            Ok(())
+        }
+        RpcCommand::Shutdown => Ok(()),
+    }
+}
+
+async fn handle_inbound_line<W>(
+    line: &str,
+    writer: &mut W,
+    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
+    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
+    writer_open: &mut bool,
+) -> AcpResult<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let value: Value = serde_json::from_str(line.trim_end_matches(['\r', '\n']))
+        .map_err(|err| AcpError::protocol(format!("invalid ACP JSON message: {err}")))?;
+
+    if let Some(method) = value.get("method").and_then(Value::as_str) {
+        if method == "session/update" {
+            // Forward the inner `update` field unchanged; the consumer owns
+            // the per-session state needed to translate it. Null signals
+            // "session/update without an update field" so the dispatcher can
+            // emit Unknown { kind: "session/update" }.
+            let update_value = value
+                .get("params")
+                .and_then(|params| params.get("update"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let _ = updates.send(Ok(update_value));
+            return Ok(());
+        }
+
+        if let Some(id) = value.get("id") {
+            let response = value
+                .get("params")
+                .and_then(|params| client_request_response(method, params))
+                .map(|result| {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id.clone(),
+                        "result": result,
+                    })
+                })
+                .unwrap_or_else(|| {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id.clone(),
+                        "error": {
+                            "code": -32601,
+                            "message": format!("codexize client does not implement method {method}"),
+                        }
+                    })
+                });
+            if *writer_open && let Err(err) = write_json_rpc_line(writer, &response).await {
+                *writer_open = false;
+                return Err(AcpError::io(format!(
+                    "failed to write ACP response for {method}: {err}"
+                )));
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(id) = value.get("id").and_then(Value::as_u64)
+        && let Some(sender) = pending.remove(&id)
+    {
+        if let Some(error) = value.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP request failed")
+                .to_string();
+            let _ = sender.send(Err(AcpError::protocol(message)));
+        } else if let Some(result) = value.get("result") {
+            let _ = sender.send(Ok(result.clone()));
+        } else {
+            let _ = sender.send(Err(AcpError::protocol(
+                "ACP response was missing both result and error".to_string(),
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn broadcast_transport_error(
-    pending: &PendingRequests,
-    updates_tx: &Sender<AcpResult<Value>>,
-    message: String,
+    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
+    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
+    err: AcpError,
 ) {
-    let err = AcpError::protocol(message);
-    let pending_senders = {
-        let mut guard = pending
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *guard)
-            .into_values()
-            .collect::<Vec<_>>()
-    };
-    for sender in pending_senders {
+    for (_, sender) in pending.drain() {
         let _ = sender.send(Err(err.clone()));
     }
-    let _ = updates_tx.send(Err(err));
+    let _ = updates.send(Err(err));
+}
+
+async fn write_json_rpc_line<W>(writer: &mut W, message: &Value) -> std::io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let encoded = serde_json::to_string(message)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+    writer.write_all(encoded.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
+    Ok(())
 }
 
 fn client_request_response(method: &str, params: &Value) -> Option<Value> {
@@ -1137,68 +1427,105 @@ fn debug_protocol(message: impl AsRef<str>) {
     eprintln!("[codexize][acp][debug] {}", message.as_ref());
 }
 
+async fn apply_session_config_async(
+    rpc: &mut RpcClient,
+    session_id: &str,
+    session: &super::AcpSessionSpec,
+    config_options: &mut Vec<ConfigOption>,
+) -> AcpResult<()> {
+    for (category, option, value) in selected_config_updates(session, config_options) {
+        let response = rpc
+            .call_async(
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": option.id,
+                    "value": value,
+                }),
+            )
+            .await;
+        absorb_config_response(category, &option, &value, response, config_options);
+    }
+    Ok(())
+}
+
+/// Synchronous entry preserved for the `RpcCaller`-based unit tests; production
+/// code drives `apply_session_config_async` directly inside the actor's runtime.
+#[cfg(test)]
 fn apply_session_config(
     rpc: &mut impl RpcCaller,
     session_id: &str,
     session: &super::AcpSessionSpec,
     config_options: &mut Vec<ConfigOption>,
 ) -> AcpResult<()> {
-    // ACP standardizes categories, not concrete option values. The first seam
-    // uses the common ask/code convention and falls back to the codexize env
-    // contract whenever an agent exposes different labels.
-    let desired = [
-        ("mode", session.permission_mode.to_string()),
-        ("model", session.model.clone()),
-        ("thought_level", session.reasoning_effort.to_string()),
-    ];
-    let baseline_options = config_options.clone();
-
-    for (category, value) in desired {
-        let Some(option) = baseline_options
-            .iter()
-            .find(|option| option.category.as_deref() == Some(category) || option.id == category)
-            .cloned()
-        else {
-            continue;
-        };
-
-        if option.current_value.as_deref() == Some(value.as_str()) {
-            continue;
-        }
-        if !option.options.is_empty() && !option.options.iter().any(|choice| choice.value == value)
-        {
-            continue;
-        }
-
-        let response = match rpc.call(
+    for (category, option, value) in selected_config_updates(session, config_options) {
+        let response = rpc.call(
             "session/set_config_option",
             json!({
                 "sessionId": session_id,
                 "configId": option.id,
                 "value": value,
             }),
-        ) {
-            Ok(response) => response,
-            Err(err) => {
-                debug_protocol(format!(
-                    "session/set_config_option failed for category={category} id={} value={value}: {err}",
-                    option.id
-                ));
-                continue;
-            }
-        };
-        match parse_config_options_response(response) {
-            Ok(updated) => *config_options = updated,
-            Err(err) => {
-                debug_protocol(format!(
-                    "session/set_config_option response parse failed for category={category} id={}: {err}",
-                    option.id
-                ));
-            }
-        }
+        );
+        absorb_config_response(category, &option, &value, response, config_options);
     }
-
     Ok(())
+}
+
+/// Pure planner: pick the (category, option, desired value) tuples to apply
+/// against `config_options` for `session`. ACP standardizes categories, not
+/// concrete option values, so this mirrors the legacy ask/code convention and
+/// falls back to the codexize env contract when an agent exposes different
+/// labels.
+fn selected_config_updates(
+    session: &super::AcpSessionSpec,
+    config_options: &[ConfigOption],
+) -> Vec<(&'static str, ConfigOption, String)> {
+    let desired = [
+        ("mode", session.permission_mode.to_string()),
+        ("model", session.model.clone()),
+        ("thought_level", session.reasoning_effort.to_string()),
+    ];
+    let baseline = config_options.to_vec();
+    desired
+        .into_iter()
+        .filter_map(|(category, value)| {
+            let option = baseline.iter().find(|option| {
+                option.category.as_deref() == Some(category) || option.id == category
+            })?;
+            if option.current_value.as_deref() == Some(value.as_str()) {
+                return None;
+            }
+            if !option.options.is_empty()
+                && !option.options.iter().any(|choice| choice.value == value)
+            {
+                return None;
+            }
+            Some((category, option.clone(), value))
+        })
+        .collect()
+}
+
+fn absorb_config_response(
+    category: &'static str,
+    option: &ConfigOption,
+    value: &str,
+    response: AcpResult<Value>,
+    config_options: &mut Vec<ConfigOption>,
+) {
+    match response {
+        Ok(response) => match parse_config_options_response(response) {
+            Ok(updated) => *config_options = updated,
+            Err(err) => debug_protocol(format!(
+                "session/set_config_option response parse failed for category={category} id={}: {err}",
+                option.id
+            )),
+        },
+        Err(err) => debug_protocol(format!(
+            "session/set_config_option failed for category={category} id={} value={value}: {err}",
+            option.id
+        )),
+    }
 }
 
 fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
@@ -1217,1429 +1544,4 @@ fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::tool_call::TOOL_CALL_MAP_CAP;
-    use super::*;
-    use crate::{adapters::EffortLevel, state::LaunchModes};
-    use std::{collections::BTreeMap, path::PathBuf};
-
-    #[derive(Default)]
-    struct StubRpcCaller {
-        calls: Vec<(String, Value)>,
-        responses: Vec<AcpResult<Value>>,
-    }
-
-    impl RpcCaller for StubRpcCaller {
-        fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
-            self.calls.push((method.to_string(), params));
-            if self.responses.is_empty() {
-                return Err(AcpError::protocol(
-                    "stub RPC missing response for session/set_config_option",
-                ));
-            }
-            self.responses.remove(0)
-        }
-    }
-
-    fn sample_session() -> super::super::AcpSessionSpec {
-        super::super::AcpSessionSpec {
-            cwd: PathBuf::from("/tmp/project"),
-            prompt: PromptPayload::Text("ship it".to_string()),
-            model: "model-next".to_string(),
-            requested_effort: EffortLevel::Normal,
-            effective_effort: EffortLevel::Normal,
-            reasoning_effort: super::super::AcpReasoningEffort::High,
-            permission_mode: super::super::AcpPermissionMode::Code,
-            interactive: false,
-            modes: LaunchModes::default(),
-            required_artifacts: Vec::new(),
-            policy: super::super::AcpLaunchPolicy::default(),
-            metadata: BTreeMap::new(),
-        }
-    }
-
-    fn configurable_option(
-        id: &str,
-        category: &str,
-        current: &str,
-        choices: &[&str],
-    ) -> ConfigOption {
-        ConfigOption {
-            id: id.to_string(),
-            category: Some(category.to_string()),
-            current_value: Some(current.to_string()),
-            options: choices
-                .iter()
-                .map(|choice| ConfigChoice {
-                    value: (*choice).to_string(),
-                })
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn parse_prompt_result_marks_failure_stop_reasons() {
-        let result = parse_prompt_result(json!({ "stopReason": "interrupted" }))
-            .expect("stop reason should parse");
-        assert!(matches!(
-            result,
-            PromptTurnOutcome::Failed { message } if message.contains("interrupted")
-        ));
-    }
-
-    #[test]
-    fn parse_prompt_result_accepts_success_stop_reasons() {
-        let result =
-            parse_prompt_result(json!({ "stopReason": "end_turn" })).expect("stop reason parsed");
-        assert_eq!(result, PromptTurnOutcome::Finished);
-    }
-
-    #[test]
-    fn prompt_request_params_include_uuid_message_id() {
-        let params = prompt_request_params("sess-1", &PromptPayload::Text("hello".to_string()))
-            .expect("prompt params");
-        let message_id = params
-            .get("messageId")
-            .and_then(Value::as_str)
-            .expect("messageId");
-
-        assert_eq!(message_id.len(), 36);
-        assert_eq!(message_id.chars().filter(|ch| *ch == '-').count(), 4);
-        assert_eq!(
-            params.get("sessionId").and_then(Value::as_str),
-            Some("sess-1")
-        );
-        assert_eq!(
-            params.pointer("/prompt/0/text").and_then(Value::as_str),
-            Some("hello")
-        );
-    }
-
-    #[test]
-    fn raw_acp_update_trace_records_payload() {
-        let temp = tempfile::TempDir::new().expect("temp dir");
-        let trace_path = temp.path().join("run.acp.jsonl");
-        let update = json!({
-            "sessionUpdate": "agent_message_chunk",
-            "content": { "text": "Proposed correction" }
-        });
-
-        append_raw_acp_update_trace(Some(&trace_path), &update);
-
-        let trace = std::fs::read_to_string(trace_path).expect("trace file");
-        assert!(trace.contains(r#""type":"raw_update""#));
-        assert!(trace.contains(r#""sessionUpdate":"agent_message_chunk""#));
-        assert!(trace.contains(r#""text":"Proposed correction""#));
-    }
-
-    fn drain(value: Value, cwd: &Path, map: &mut ToolCallMap) -> Vec<ClientUpdate> {
-        let mut state = AcpBoundaryState::new();
-        let mut out = VecDeque::new();
-        dispatch_update(&value, cwd, map, &mut state, &mut out);
-        out.into_iter().collect()
-    }
-
-    fn drain_with_state(
-        value: Value,
-        cwd: &Path,
-        map: &mut ToolCallMap,
-        state: &mut AcpBoundaryState,
-    ) -> Vec<ClientUpdate> {
-        let mut out = VecDeque::new();
-        dispatch_update(&value, cwd, map, state, &mut out);
-        out.into_iter().collect()
-    }
-
-    fn tool_call_block(text: &str) -> ClientUpdate {
-        ClientUpdate::ToolCallText {
-            text: text.to_string(),
-            boundary: AcpTextBoundary::StartNewMessage,
-            identity: None,
-        }
-    }
-
-    fn activity(id: &str, kind: ToolCallActivityKind) -> ClientUpdate {
-        ClientUpdate::ToolCallActivity {
-            tool_call_id: id.to_string(),
-            kind,
-        }
-    }
-
-    #[test]
-    fn dispatch_renders_invocation_from_observed_codex_read_payload() {
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "title": "Read Cargo.toml",
-                "kind": "read",
-                "status": "in_progress",
-                "locations": [{ "path": "/work/project/Cargo.toml" }],
-                "rawInput": {
-                    "command": ["/bin/zsh", "-lc", "sed -n '1,120p' Cargo.toml"]
-                }
-            }),
-            Path::new("/work/project"),
-            &mut map,
-        );
-
-        assert_eq!(
-            updates,
-            vec![
-                tool_call_block("tool: read(Cargo.toml)"),
-                activity("call_1", ToolCallActivityKind::Start),
-            ]
-        );
-        assert_eq!(map.len(), 1);
-    }
-
-    #[test]
-    fn dispatch_emits_invocation_then_result_when_terminal_arrives_in_two_payloads() {
-        // Spec §Behavior: the invocation block is emitted on `tool_call`, and
-        // a separate result block is emitted on the terminal `tool_call_update`.
-        let mut map = ToolCallMap::new();
-        let invocation = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "title": "Read Cargo.toml",
-                "kind": "read",
-                "status": "in_progress",
-                "locations": [{ "path": "/work/project/Cargo.toml" }],
-            }),
-            Path::new("/work/project"),
-            &mut map,
-        );
-        assert_eq!(
-            invocation,
-            vec![
-                tool_call_block("tool: read(Cargo.toml)"),
-                activity("call_1", ToolCallActivityKind::Start),
-            ]
-        );
-        assert!(map.contains("call_1"));
-
-        let result = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "[package] name = \"codexize\"" }
-            }),
-            Path::new("/work/project"),
-            &mut map,
-        );
-        assert_eq!(
-            result,
-            vec![
-                tool_call_block("result: completed, exit 0, output: [package] name = \"codexize\""),
-                activity("call_1", ToolCallActivityKind::Finish),
-            ]
-        );
-        // After eviction the entry must be gone.
-        assert!(!map.contains("call_1"));
-    }
-
-    #[test]
-    fn dispatch_emits_invocation_and_result_when_tool_call_payload_is_already_terminal() {
-        // Spec §Behavior rule 1: a `tool_call` carrying terminal status emits
-        // the invocation followed by the result, then evicts.
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_q",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["echo", "ok"] },
-                "rawOutput": { "exit_code": 0, "stdout": "ok" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            updates,
-            vec![
-                tool_call_block("tool: exec(echo ok)"),
-                tool_call_block("result: completed, exit 0, output: ok"),
-                activity("call_q", ToolCallActivityKind::Finish),
-            ]
-        );
-        assert!(!map.contains("call_q"));
-    }
-
-    #[test]
-    fn dispatch_silently_merges_non_terminal_update_into_existing_state() {
-        // Spec §Behavior rule 5: non-terminal `tool_call_update` events
-        // produce no transcript output but still merge into the merge state,
-        // so a later terminal update can use the merged status snapshot.
-        let mut map = ToolCallMap::new();
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "kind": "execute",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let progress = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "in_progress",
-                "rawOutput": { "stdout": "still working" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert!(
-            progress.is_empty(),
-            "non-terminal updates must produce no visible blocks"
-        );
-        let merged = map.get("call_1").expect("entry preserved");
-        assert_eq!(merged.status.as_deref(), Some("in_progress"));
-    }
-
-    #[test]
-    fn dispatch_terminal_update_without_prior_state_emits_best_effort_result_only() {
-        // Spec §Behavior rule 4: terminal update with no prior state renders
-        // a result block from the payload alone, with no synthesized
-        // invocation and no map entry retained.
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "stale_id",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "ok" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            updates,
-            vec![
-                tool_call_block("result: completed, exit 0, output: ok"),
-                activity("stale_id", ToolCallActivityKind::Finish),
-            ]
-        );
-        assert!(
-            !map.contains("stale_id"),
-            "best-effort updates must never insert state"
-        );
-    }
-
-    #[test]
-    fn dispatch_second_terminal_update_for_evicted_id_is_suppressed() {
-        // Once a terminal result has been emitted for an id, later terminal
-        // updates for that same id are ignored unless a new `tool_call`
-        // reuses the id and starts a fresh lifecycle.
-        let mut map = ToolCallMap::new();
-        let _invocation = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "hi"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let first_result = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "hi" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        // Result block + watchdog Finish transition.
-        assert_eq!(
-            first_result,
-            vec![
-                tool_call_block("result: completed, exit 0, output: hi"),
-                activity("call_1", ToolCallActivityKind::Finish),
-            ]
-        );
-        assert!(!map.contains("call_1"));
-
-        // Duplicate terminal update for the now-evicted id must be ignored.
-        let second_result = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "stale" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert!(second_result.is_empty());
-        assert!(!map.contains("call_1"));
-
-        // A non-terminal stale update produces nothing.
-        let stale = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "in_progress"
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert!(stale.is_empty());
-    }
-
-    #[test]
-    fn dispatch_id_reuse_after_terminal_renders_text_without_repeating_activity() {
-        // Id reuse is permitted for the *display* contract (a fresh
-        // invocation block + a fresh result block render under the reused
-        // id), but the watchdog activity stream is one-shot per id within a
-        // session: a previously-completed tool_call_id must not be allowed
-        // to resurrect Start or Finish — doing so would let the App's idle
-        // clock pause/resume on a phantom call.
-        let mut map = ToolCallMap::new();
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "first"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "completed",
-                "rawOutput": { "stdout": "first" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-
-        let reused_invocation = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_1",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "second"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            reused_invocation,
-            vec![tool_call_block("tool: exec(echo second)")],
-            "reused id must not re-emit Start"
-        );
-        let reused_result = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_1",
-                "status": "completed",
-                "rawOutput": { "stdout": "second" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            reused_result,
-            vec![tool_call_block("result: completed, output: second")],
-            "reused id must not re-emit Finish"
-        );
-    }
-
-    #[test]
-    fn dispatch_renders_exec_invocation_from_command_array() {
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "rawInput": { "command": ["cargo", "test", "--workspace"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            updates,
-            vec![tool_call_block("tool: exec(cargo test --workspace)")]
-        );
-        // Missing toolCallId must never be stored.
-        assert_eq!(map.len(), 0);
-    }
-
-    #[test]
-    fn dispatch_falls_back_to_literal_tool_when_payload_is_empty() {
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({ "sessionUpdate": "tool_call" }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(updates, vec![tool_call_block("tool: tool")]);
-    }
-
-    fn activity_only(updates: Vec<ClientUpdate>) -> Vec<ClientUpdate> {
-        updates
-            .into_iter()
-            .filter(|update| matches!(update, ClientUpdate::ToolCallActivity { .. }))
-            .collect()
-    }
-
-    #[test]
-    fn activity_dedup_repeated_pending_in_progress_emits_single_start() {
-        // The same id may surface across `tool_call` (pending) and one or
-        // more non-terminal `tool_call_update`s (in_progress) before any
-        // terminal status arrives. Exactly one Start must be emitted.
-        let mut map = ToolCallMap::new();
-        let initial = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_dup",
-                "kind": "execute",
-                "status": "pending",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert_eq!(
-            initial,
-            vec![activity("call_dup", ToolCallActivityKind::Start)]
-        );
-
-        let progress = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_dup",
-                "status": "in_progress"
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            progress.is_empty(),
-            "second non-terminal status must not re-emit Start"
-        );
-
-        let still_progress = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_dup",
-                "status": "in_progress",
-                "rawOutput": { "stdout": "tick" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            still_progress.is_empty(),
-            "third non-terminal status must not re-emit Start"
-        );
-    }
-
-    #[test]
-    fn activity_dedup_terminal_then_terminal_emits_single_finish() {
-        // A runner can plausibly observe `failed` followed by a `cancelled`
-        // (or any second terminal) for the same id. The second terminal
-        // must be suppressed: the Finish contract is one-shot per id.
-        let mut map = ToolCallMap::new();
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_t",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let first_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_t",
-                "status": "failed",
-                "rawOutput": { "exit_code": 1, "stderr": "boom" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert_eq!(
-            first_terminal,
-            vec![activity("call_t", ToolCallActivityKind::Finish)]
-        );
-
-        let second_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_t",
-                "status": "cancelled"
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            second_terminal.is_empty(),
-            "second terminal status for the same id must not re-emit Finish"
-        );
-
-        let third_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_t",
-                "status": "errored"
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            third_terminal.is_empty(),
-            "later terminal statuses must remain suppressed"
-        );
-    }
-
-    #[test]
-    fn activity_dedup_repeated_tool_call_payload_emits_single_start() {
-        // Some agents resend a `tool_call` (not `tool_call_update`) for the
-        // same id — e.g. as part of a status refresh. The display map is
-        // allowed to overwrite on id reuse, but the watchdog Start contract
-        // is one-shot per id for the lifetime of the session.
-        let mut map = ToolCallMap::new();
-        let initial = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_repeat",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert_eq!(
-            initial,
-            vec![activity("call_repeat", ToolCallActivityKind::Start)]
-        );
-
-        let resent = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_repeat",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            resent.is_empty(),
-            "repeated tool_call payload must not re-emit Start"
-        );
-
-        // Even if the resent payload bears `pending` (a different non-
-        // terminal status), the contract still suppresses re-emission.
-        let resent_pending = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_repeat",
-                "kind": "execute",
-                "status": "pending",
-                "rawInput": { "command": ["sleep", "1"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            resent_pending.is_empty(),
-            "second non-terminal tool_call payload must not re-emit Start"
-        );
-    }
-
-    #[test]
-    fn activity_dedup_repeated_terminal_tool_call_payload_emits_single_finish() {
-        // After a tool call has completed, an agent may resend a `tool_call`
-        // for the same id with terminal status — e.g. duplicated transport
-        // or a retry layer above the runner. The Finish contract is also
-        // one-shot per id for the lifetime of the session.
-        let mut map = ToolCallMap::new();
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_dt",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["echo", "x"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let first_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_dt",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["echo", "x"] },
-                "rawOutput": { "exit_code": 0, "stdout": "x" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert_eq!(
-            first_terminal,
-            vec![activity("call_dt", ToolCallActivityKind::Finish)]
-        );
-
-        let second_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_dt",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["echo", "x"] },
-                "rawOutput": { "exit_code": 0, "stdout": "x" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            second_terminal.is_empty(),
-            "repeated terminal tool_call payload must not re-emit Finish"
-        );
-
-        // A final mixed-flavor cross-check: if a `tool_call_update` arrives
-        // with another terminal status after the duplicate-terminal stream,
-        // it must also remain suppressed.
-        let third_terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_dt",
-                "status": "errored"
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            third_terminal.is_empty(),
-            "tool_call_update terminal after duplicate-terminal tool_call must remain suppressed"
-        );
-    }
-
-    #[test]
-    fn activity_dedup_terminal_tool_call_after_completion_does_not_resurrect_finish() {
-        // Specifically exercises the bug fix: a terminal `tool_call_update`
-        // completes the lifecycle and evicts the display entry, then a fresh
-        // `tool_call` payload arrives with terminal status for the same id
-        // (a re-acknowledgement or transport echo). Display is best-effort,
-        // but Finish must not re-emit.
-        let mut map = ToolCallMap::new();
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_echo",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["echo", "y"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        let _ = drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_echo",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "y" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        // Display-side entry is now evicted; markers must remain.
-        let resurrected = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_echo",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["echo", "y"] },
-                "rawOutput": { "exit_code": 0, "stdout": "y" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            resurrected.is_empty(),
-            "terminal tool_call payload for an already-finished id must not re-emit Finish"
-        );
-    }
-
-    #[test]
-    fn activity_dedup_survives_more_than_cap_distinct_ids_for_full_session() {
-        // Regression: activity dedup must hold for the full session, not just
-        // the most recent `TOOL_CALL_MAP_CAP` ids. The display-side `entries`
-        // map evicts old display state under FIFO pressure, but the
-        // Start/Finish markers must be unbounded so an early id whose display
-        // state has aged out can never re-emit either transition.
-        let mut map = ToolCallMap::new();
-
-        for i in 0..(TOOL_CALL_MAP_CAP + 5) {
-            let id = format!("call_{i}");
-            let _ = drain(
-                json!({
-                    "sessionUpdate": "tool_call",
-                    "toolCallId": id,
-                    "kind": "execute",
-                    "status": "in_progress",
-                    "rawInput": { "command": ["echo", id] }
-                }),
-                Path::new("/tmp"),
-                &mut map,
-            );
-            let _ = drain(
-                json!({
-                    "sessionUpdate": "tool_call_update",
-                    "toolCallId": id,
-                    "status": "completed",
-                    "rawOutput": { "exit_code": 0, "stdout": id }
-                }),
-                Path::new("/tmp"),
-                &mut map,
-            );
-        }
-
-        // Display-state entries for early ids are gone — confirming we have
-        // exceeded what the FIFO would track for activity dedup if it shared
-        // that cap.
-        assert!(!map.contains("call_0"));
-
-        // Re-send Start and Finish for the very first id. Both must be
-        // suppressed despite call_0's display entry having long since been
-        // evicted, because activity dedup is monotonic per-session.
-        let resent_start = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_0",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["echo", "call_0"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            resent_start.is_empty(),
-            "Start must not re-emit for id whose marker was set before the FIFO cap was exceeded"
-        );
-
-        let resent_finish = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_0",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "call_0" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(
-            resent_finish.is_empty(),
-            "Finish must not re-emit for id whose marker was set before the FIFO cap was exceeded"
-        );
-    }
-
-    #[test]
-    fn activity_distinct_ids_are_tracked_independently_with_correct_ordering() {
-        // Two overlapping tool calls must each yield their own Start and
-        // their own Finish, in arrival order. The order of dispatch through
-        // `dispatch_update` is the order the App sees the activity stream.
-        let mut map = ToolCallMap::new();
-
-        let start_a = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_a",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["echo", "a"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        let start_b = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_b",
-                "kind": "execute",
-                "status": "in_progress",
-                "rawInput": { "command": ["echo", "b"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        let finish_a = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_a",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "a" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        let finish_b = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "call_b",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "b" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-
-        assert_eq!(
-            start_a,
-            vec![activity("call_a", ToolCallActivityKind::Start)]
-        );
-        assert_eq!(
-            start_b,
-            vec![activity("call_b", ToolCallActivityKind::Start)]
-        );
-        assert_eq!(
-            finish_a,
-            vec![activity("call_a", ToolCallActivityKind::Finish)]
-        );
-        assert_eq!(
-            finish_b,
-            vec![activity("call_b", ToolCallActivityKind::Finish)]
-        );
-    }
-
-    #[test]
-    fn activity_terminal_directly_emits_only_finish_no_start() {
-        // A `tool_call` payload that arrives already terminal had no
-        // observable in-flight window from the runner's perspective. Spec
-        // §3.6: Start fires only on first observation of a non-terminal
-        // status. Finish still fires once.
-        let mut map = ToolCallMap::new();
-        let updates = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "fast_call",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["true"] },
-                "rawOutput": { "exit_code": 0 }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert_eq!(
-            updates,
-            vec![activity("fast_call", ToolCallActivityKind::Finish)]
-        );
-    }
-
-    #[test]
-    fn activity_missing_tool_call_id_emits_no_transitions() {
-        // Dedup requires a stable id. Best-effort visible blocks may still
-        // be produced, but no activity transitions are emitted because there
-        // is nothing to attribute pause/resume to.
-        let mut map = ToolCallMap::new();
-        let initial = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "ghost"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(initial.is_empty());
-
-        let terminal = activity_only(drain(
-            json!({
-                "sessionUpdate": "tool_call_update",
-                "status": "completed",
-                "rawOutput": { "exit_code": 0, "stdout": "ghost" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        ));
-        assert!(terminal.is_empty());
-    }
-
-    #[test]
-    fn dispatch_routes_unrelated_kinds_containing_tool_to_unknown() {
-        // Spec §Interfaces: only exact "tool_call" / "tool_call_update" route
-        // through the new pipeline. Other kinds remain Unknown.
-        let mut map = ToolCallMap::new();
-        let updates = drain(
-            json!({ "sessionUpdate": "tool_progress_chunk" }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            updates,
-            vec![ClientUpdate::Unknown {
-                kind: "tool_progress_chunk".to_string()
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_emits_session_update_unknown_when_payload_is_null() {
-        let mut map = ToolCallMap::new();
-        let updates = drain(Value::Null, Path::new("/tmp"), &mut map);
-        assert_eq!(
-            updates,
-            vec![ClientUpdate::Unknown {
-                kind: "session/update".to_string()
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_passes_through_agent_message_and_thought_chunks() {
-        let mut map = ToolCallMap::new();
-        let messages = drain(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "hello" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        // No stable identity in the payload, so the conservative fallback
-        // tags the chunk as `StartNewMessage` (see spec §Design — over-split
-        // rather than risk merging unrelated logical messages).
-        assert_eq!(
-            messages,
-            vec![ClientUpdate::AgentMessageText {
-                text: "hello".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-            }]
-        );
-
-        let thoughts = drain(
-            json!({
-                "sessionUpdate": "agent_thought_chunk",
-                "content": { "text": "thinking" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-        );
-        assert_eq!(
-            thoughts,
-            vec![ClientUpdate::AgentThoughtText {
-                text: "thinking".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_continues_no_identity_chunks_until_explicit_boundary() {
-        // Real ACP servers emit `agent_message_chunk` events without any
-        // stable message id; treating each chunk as a fresh logical message
-        // would over-split a single streamed response into one persisted
-        // block per chunk. The first chunk on a fresh stream is
-        // StartNewMessage (initial restart_pending), but subsequent
-        // no-identity chunks default to Continue. Explicit boundaries —
-        // tool-call interleave or prompt-turn reset — are still honored by
-        // the dedicated tests in this module.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let first = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "first " }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        let second = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "second" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            first,
-            vec![ClientUpdate::AgentMessageText {
-                text: "first ".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-            }]
-        );
-        assert_eq!(
-            second,
-            vec![ClientUpdate::AgentMessageText {
-                text: "second".to_string(),
-                boundary: AcpTextBoundary::Continue,
-                identity: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_restarts_no_identity_chunk_after_tool_call_interleave() {
-        // Without identity, mid-stream chunks default to Continue, but a
-        // tool-call interleave is still a hard boundary: the first chunk
-        // after a tool_call (or tool_call_update) must reset to
-        // StartNewMessage so the runner finalizes the pre-tool live buffer
-        // before appending post-tool free-form text.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "before" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_x",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "x"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        let after = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "after" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            after,
-            vec![ClientUpdate::AgentMessageText {
-                text: "after".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_restarts_no_identity_chunk_across_prompt_turns() {
-        // Prompt-turn resets must restart no-identity continuity too:
-        // there is no live block left to continue from the prior turn, so
-        // the first chunk of a new turn is StartNewMessage even when no
-        // tool-call interleaved.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "turn one" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        state.reset_for_prompt_turn();
-        let next_turn = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "content": { "text": "turn two" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            next_turn,
-            vec![ClientUpdate::AgentMessageText {
-                text: "turn two".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_emits_continue_when_message_identity_persists() {
-        // When the ACP payload exposes a stable message identity that
-        // matches the previous chunk on the same stream, dispatch must emit
-        // `Continue` so the runner can append to the live block. The first
-        // chunk on a stream is still `StartNewMessage` because there is no
-        // prior live block to continue.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let first = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "hel" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        let second = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "lo" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            first,
-            vec![ClientUpdate::AgentMessageText {
-                text: "hel".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: Some("msg-7".to_string()),
-            }]
-        );
-        assert_eq!(
-            second,
-            vec![ClientUpdate::AgentMessageText {
-                text: "lo".to_string(),
-                boundary: AcpTextBoundary::Continue,
-                identity: Some("msg-7".to_string()),
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_resets_continuation_after_tool_call_interleave() {
-        // A tool_call (or tool_call_update) interleave is a hard boundary:
-        // even when the next agent chunk carries the same message identity
-        // as the pre-tool chunk, dispatch must emit StartNewMessage so the
-        // runner finalizes the pre-tool live buffer instead of gluing
-        // synthetic tool text and post-tool free-form text together.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        // Establish a continuation token for msg-7.
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "before" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        // Tool call interleaves the visible stream.
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_x",
-                "kind": "execute",
-                "rawInput": { "command": ["echo", "x"] }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        let after = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "after" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            after,
-            vec![ClientUpdate::AgentMessageText {
-                text: "after".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: Some("msg-7".to_string()),
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_resets_continuation_across_prompt_turns() {
-        // Prompt-turn boundaries also clear live logical-message continuity:
-        // even if a later turn reuses the same messageId, its first chunk
-        // must restart at StartNewMessage because there is no current live
-        // block left to continue from the prior turn.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let _ = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "turn one" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        state.reset_for_prompt_turn();
-        let next_turn = drain_with_state(
-            json!({
-                "sessionUpdate": "agent_message_chunk",
-                "messageId": "msg-7",
-                "content": { "text": "turn two" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        assert_eq!(
-            next_turn,
-            vec![ClientUpdate::AgentMessageText {
-                text: "turn two".to_string(),
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: Some("msg-7".to_string()),
-            }]
-        );
-    }
-
-    #[test]
-    fn dispatch_tool_call_text_is_always_start_new_message() {
-        // Tool-call invocation/result text carries StartNewMessage so the
-        // runner can finalize the thought stream's current live buffer
-        // before appending the synthetic paragraph. This is the same
-        // contract whether the tool_call payload arrives terminal or as a
-        // separate tool_call_update.
-        let mut map = ToolCallMap::new();
-        let mut state = AcpBoundaryState::new();
-        let updates = drain_with_state(
-            json!({
-                "sessionUpdate": "tool_call",
-                "toolCallId": "call_y",
-                "kind": "execute",
-                "status": "completed",
-                "rawInput": { "command": ["echo", "ok"] },
-                "rawOutput": { "exit_code": 0, "stdout": "ok" }
-            }),
-            Path::new("/tmp"),
-            &mut map,
-            &mut state,
-        );
-        // Only the visible (text) updates are constrained to StartNewMessage;
-        // ToolCallActivity carries no boundary metadata and is intentionally
-        // excluded from the assertion below.
-        assert!(updates.iter().all(|update| matches!(
-            update,
-            ClientUpdate::ToolCallText {
-                boundary: AcpTextBoundary::StartNewMessage,
-                identity: None,
-                ..
-            } | ClientUpdate::ToolCallActivity { .. }
-        )));
-        assert!(
-            updates
-                .iter()
-                .any(|update| matches!(update, ClientUpdate::ToolCallText { .. })),
-            "tool call should have produced at least one text block"
-        );
-    }
-
-    #[test]
-    fn permission_request_selects_approve_option() {
-        let response = client_request_response(
-            "session/request_permission",
-            &json!({
-                "options": [
-                    { "optionId": "approve", "kind": "allow_once" },
-                    { "optionId": "reject", "kind": "reject_once" }
-                ]
-            }),
-        )
-        .expect("permission request should be handled");
-
-        assert_eq!(
-            response,
-            json!({
-                "outcome": {
-                    "outcome": "selected",
-                    "optionId": "approve"
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn apply_session_config_uses_baseline_option_snapshot() {
-        let mut rpc = StubRpcCaller {
-            responses: vec![
-                Ok(json!({
-                    "configOptions": [{
-                        "id": "mode",
-                        "category": "mode",
-                        "currentValue": "code"
-                    }]
-                })),
-                Ok(json!({
-                    "configOptions": [{
-                        "id": "model",
-                        "category": "model",
-                        "currentValue": "model-next"
-                    }]
-                })),
-                Ok(json!({
-                    "configOptions": [{
-                        "id": "thought_level",
-                        "category": "thought_level",
-                        "currentValue": "high"
-                    }]
-                })),
-            ],
-            ..Default::default()
-        };
-        let session = sample_session();
-        let mut config_options = vec![
-            configurable_option("mode", "mode", "ask", &["ask", "code"]),
-            configurable_option("model", "model", "model-old", &["model-old", "model-next"]),
-            configurable_option(
-                "thought_level",
-                "thought_level",
-                "medium",
-                &["medium", "high"],
-            ),
-        ];
-
-        apply_session_config(&mut rpc, "sess-test", &session, &mut config_options)
-            .expect("session config applies");
-
-        assert_eq!(rpc.calls.len(), 3);
-        let config_ids = rpc
-            .calls
-            .iter()
-            .map(|(_, params)| {
-                params
-                    .get("configId")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(config_ids, vec!["mode", "model", "thought_level"]);
-    }
-}
+mod tests;

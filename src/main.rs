@@ -1,13 +1,15 @@
 use anyhow::{Result, bail};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use codexize::{
-    app, app_runtime, picker, preflight,
+    app, app_runtime,
+    data::notifications,
+    picker, preflight,
     state::{self},
     tui,
 };
 use std::process::ExitCode;
 use tracing::{warn, warn_span};
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(name = "codexize")]
 #[command(about = "Agentic development orchestrator", long_about = None)]
 struct Cli {
@@ -22,6 +24,18 @@ struct Cli {
     /// newlines are preserved verbatim. Blank-after-trim is rejected.
     #[arg(short = 'm', long = "message")]
     message: Option<String>,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+#[derive(Debug, Subcommand)]
+enum Command {
+    Ntfy(NtfyCommand),
+}
+#[derive(Debug, Parser)]
+struct NtfyCommand {
+    /// Generate and persist a new ntfy topic.
+    #[arg(long)]
+    reset: bool,
 }
 /// Result of validating CLI flags for the top-level (no-subcommand) path.
 ///
@@ -33,6 +47,9 @@ enum LaunchPlan {
     Picker { create_modes: state::Modes },
 }
 fn plan_launch(cli: &Cli) -> Result<LaunchPlan> {
+    if cli.command.is_some() {
+        bail!("error: subcommand cannot be used as a launch plan");
+    }
     let create_modes = state::Modes {
         yolo: cli.yolo,
         cheap: cli.cheap,
@@ -68,15 +85,34 @@ fn main() -> ExitCode {
     }
 }
 fn try_main() -> Result<()> {
+    let cli = Cli::parse();
+    if cli.command.is_some() {
+        return run_cli_command(&cli);
+    }
+    let plan = plan_launch(&cli)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("codexize-runtime")
         .build()?;
-    runtime.block_on(try_main_async())
+    runtime.block_on(try_main_async(plan))
 }
-async fn try_main_async() -> Result<()> {
-    let cli = Cli::parse();
-    let plan = plan_launch(&cli)?;
+fn run_cli_command(cli: &Cli) -> Result<()> {
+    if cli.yolo || cli.cheap || cli.message.is_some() {
+        bail!("error: ntfy subcommand does not accept launch flags");
+    }
+    match cli.command.as_ref().expect("command checked by caller") {
+        Command::Ntfy(command) => {
+            let config = notifications::ensure_ntfy_config(command.reset)?;
+            print_ntfy_config(&config);
+            Ok(())
+        }
+    }
+}
+fn print_ntfy_config(config: &notifications::NtfyConfig) {
+    println!("ntfy topic: {}", config.topic);
+    println!("subscribe: {}", config.subscribe_url());
+}
+async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     struct TerminalGuard {
         terminal: Option<tui::AppTerminal>,
     }

@@ -89,6 +89,62 @@ fn cli(args: &[&str]) -> Cli {
 }
 
 #[test]
+fn ntfy_subcommand_parses_without_launch_flags() {
+    let cli = Cli::try_parse_from(["codexize", "ntfy"]).expect("parse ntfy");
+    assert!(matches!(
+        cli.command,
+        Some(Command::Ntfy(NtfyCommand { reset: false }))
+    ));
+    assert!(cli.message.is_none());
+    assert!(!cli.yolo);
+    assert!(!cli.cheap);
+}
+
+#[test]
+fn ntfy_reset_subcommand_parses() {
+    let cli = Cli::try_parse_from(["codexize", "ntfy", "--reset"]).expect("parse ntfy --reset");
+    assert!(matches!(
+        cli.command,
+        Some(Command::Ntfy(NtfyCommand { reset: true }))
+    ));
+}
+
+#[test]
+fn ntfy_subcommand_rejects_unknown_flags() {
+    let err = Cli::try_parse_from(["codexize", "ntfy", "--bogus"])
+        .expect_err("ntfy rejects unknown flags");
+    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+}
+
+#[test]
+fn ntfy_subcommand_rejects_extra_positionals() {
+    let err = Cli::try_parse_from(["codexize", "ntfy", "extra"])
+        .expect_err("ntfy rejects extra positionals");
+    assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+}
+
+#[test]
+fn ntfy_command_rejects_launch_flags() {
+    let cli = cli(&["codexize", "--yolo", "ntfy"]);
+
+    let err = run_cli_command(&cli).expect_err("ntfy rejects launch flags");
+
+    assert!(
+        err.to_string().contains("launch flags"),
+        "error mentions launch flags: {err}"
+    );
+}
+
+#[test]
+fn plan_launch_rejects_subcommands() {
+    let err = plan_launch(&cli(&["codexize", "ntfy"])).expect_err("subcommand is not a launch");
+    assert!(
+        err.to_string().contains("subcommand"),
+        "error mentions subcommand path: {err}"
+    );
+}
+
+#[test]
 fn plan_launch_yolo_message_returns_direct_create() {
     let plan = plan_launch(&cli(&["codexize", "--yolo", "-m", "  ship it  "]))
         .expect("plan accepts trimmed message");

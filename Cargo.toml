@@ -10,6 +10,7 @@ clap = { version = "4.5.28", features = ["derive"] }
 crossterm = "0.29.0"
 dashmap = "6.1"
 derive_more = { version = "2.0", features = ["display", "from", "deref", "as_ref"] }
+getrandom = "0.3"
 indoc = "2.0"
 itertools = "0.14"
 nix = { version = "0.28.0", features = ["signal", "process"] }

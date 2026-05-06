@@ -10,6 +10,7 @@ pub mod cache_lock;
 pub mod dashboard_io;
 pub(crate) mod dashboard_model;
 pub mod events;
+pub mod notifications;
 pub mod observation;
 pub mod persistence;
 pub mod picker_io;

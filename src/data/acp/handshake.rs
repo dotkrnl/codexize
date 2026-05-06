@@ -7,12 +7,7 @@ use crate::selection::vendor::vendor_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use tokio::{
-    io::BufReader,
-    process::{Child, Command},
-    runtime::Runtime,
-    sync::oneshot,
-};
+use tokio::{io::BufReader, process::{Child, Command}, runtime::Runtime, sync::oneshot};
 
 pub(super) fn build_session_runtime() -> AcpResult<Runtime> {
     tokio::runtime::Builder::new_multi_thread()
@@ -23,10 +18,7 @@ pub(super) fn build_session_runtime() -> AcpResult<Runtime> {
         .map_err(|err| AcpError::io(format!("failed to build ACP tokio runtime: {err}")))
 }
 
-pub(super) async fn spawn_actor(
-    runtime: &Arc<Runtime>,
-    launch: &AcpResolvedLaunch,
-) -> AcpResult<(RpcClient, Child)> {
+pub(super) async fn spawn_actor(runtime: &Arc<Runtime>, launch: &AcpResolvedLaunch) -> AcpResult<(RpcClient, Child)> {
     let mut child = Command::new(&launch.spawn.program)
         .args(&launch.spawn.args)
         .envs(&launch.spawn.env)
@@ -36,25 +28,13 @@ pub(super) async fn spawn_actor(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|err| {
-            AcpError::human_block(format!(
-                "ACP agent for vendor {} failed to start ({}): {err}",
-                vendor_kind_to_str(launch.vendor),
-                launch.spawn.program
-            ))
-        })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AcpError::protocol("ACP child stdout was not captured"))?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
-    Ok((
-        RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin),
-        child,
-    ))
+        .map_err(|err| AcpError::human_block(format!(
+            "ACP agent for vendor {} failed to start ({}): {err}",
+            vendor_kind_to_str(launch.vendor), launch.spawn.program
+        )))?;
+    let stdout = child.stdout.take().ok_or_else(|| AcpError::protocol("ACP child stdout was not captured"))?;
+    let stdin = child.stdin.take().ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
+    Ok((RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin), child))
 }
 
 pub(super) struct HandshakeOutput {
@@ -63,85 +43,42 @@ pub(super) struct HandshakeOutput {
     pub(super) prompt_response: oneshot::Receiver<AcpResult<Value>>,
 }
 
-pub(super) async fn handshake(
-    rpc: &mut RpcClient,
-    launch: &AcpResolvedLaunch,
-) -> AcpResult<HandshakeOutput> {
-    let init = parse_initialize_result(
-        rpc.call_async(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {
-                    "fs": { "readTextFile": false, "writeTextFile": false },
-                    "terminal": false
-                },
-                "clientInfo": {
-                    "name": "codexize",
-                    "title": "codexize",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            }),
-        )
-        .await?,
-    )?;
+pub(super) async fn handshake(rpc: &mut RpcClient, launch: &AcpResolvedLaunch) -> AcpResult<HandshakeOutput> {
+    let init = parse_initialize_result(rpc.call_async("initialize", json!({
+        "protocolVersion": 1,
+        "clientCapabilities": { "fs": { "readTextFile": false, "writeTextFile": false }, "terminal": false },
+        "clientInfo": { "name": "codexize", "title": "codexize", "version": env!("CARGO_PKG_VERSION") }
+    })).await?)?;
     if init.protocol_version != 1 {
         return Err(AcpError::human_block(format!(
-            "ACP agent negotiated unsupported protocol version {}",
-            init.protocol_version
+            "ACP agent negotiated unsupported protocol version {}", init.protocol_version
         )));
     }
     let mut session: NewSessionResult = serde_json::from_value(
-        rpc.call_async(
-            "session/new",
-            json!({ "cwd": launch.session.cwd, "mcpServers": [] }),
-        )
-        .await?,
-    )
-    .map_err(|err| {
-        AcpError::protocol(format!("failed to parse ACP session/new response: {err}"))
-    })?;
-    apply_session_config(
-        rpc,
-        &session.session_id,
-        &launch.session,
-        &mut session.config_options,
-    )
-    .await;
-    let prompt_response = rpc.start_request(
-        "session/prompt",
-        prompt_request_params(&session.session_id, &launch.session.prompt)?,
-    )?;
-    Ok(HandshakeOutput {
-        session_id: session.session_id,
-        supports_close: init.supports_close,
-        prompt_response,
-    })
+        rpc.call_async("session/new", json!({ "cwd": launch.session.cwd, "mcpServers": [] })).await?
+    ).map_err(|err| AcpError::protocol(format!("failed to parse ACP session/new response: {err}")))?;
+    apply_session_config(rpc, &session.session_id, &launch.session, &mut session.config_options).await;
+    let prompt_response = rpc.start_request("session/prompt",
+        prompt_request_params(&session.session_id, &launch.session.prompt)?)?;
+    Ok(HandshakeOutput { session_id: session.session_id, supports_close: init.supports_close, prompt_response })
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct NewSessionResult {
-    #[serde(rename = "sessionId")]
-    pub(super) session_id: String,
-    #[serde(rename = "configOptions", default)]
-    pub(super) config_options: Vec<ConfigOption>,
+    #[serde(rename = "sessionId")] pub(super) session_id: String,
+    #[serde(rename = "configOptions", default)] pub(super) config_options: Vec<ConfigOption>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct ConfigOption {
     pub(super) id: String,
-    #[serde(default)]
-    pub(super) category: Option<String>,
-    #[serde(rename = "currentValue", default)]
-    pub(super) current_value: Option<String>,
-    #[serde(default)]
-    pub(super) options: Vec<ConfigChoice>,
+    #[serde(default)] pub(super) category: Option<String>,
+    #[serde(rename = "currentValue", default)] pub(super) current_value: Option<String>,
+    #[serde(default)] pub(super) options: Vec<ConfigChoice>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(super) struct ConfigChoice {
-    pub(super) value: String,
-}
+pub(super) struct ConfigChoice { pub(super) value: String }
 
 #[derive(Debug)]
 pub(super) struct InitializeOutcome {
@@ -151,14 +88,10 @@ pub(super) struct InitializeOutcome {
 
 pub(super) fn parse_initialize_result(value: Value) -> AcpResult<InitializeOutcome> {
     Ok(InitializeOutcome {
-        protocol_version: value
-            .get("protocolVersion")
-            .and_then(Value::as_u64)
+        protocol_version: value.get("protocolVersion").and_then(Value::as_u64)
             .ok_or_else(|| AcpError::protocol("ACP initialize response missing protocolVersion"))?,
-        supports_close: value
-            .pointer("/agentCapabilities/sessionCapabilities/close")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        supports_close: value.pointer("/agentCapabilities/sessionCapabilities/close")
+            .and_then(Value::as_bool).unwrap_or(false),
     })
 }
 
@@ -169,15 +102,11 @@ pub(super) enum PromptTurnOutcome {
 }
 
 pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> {
-    let stop = value
-        .get("stopReason")
-        .and_then(Value::as_str)
+    let stop = value.get("stopReason").and_then(Value::as_str)
         .ok_or_else(|| AcpError::protocol("ACP prompt response missing stopReason"))?;
     Ok(match stop {
-        "cancelled" | "canceled" | "interrupted" | "error" | "errored" | "failed" | "timeout"
-        | "timed_out" => PromptTurnOutcome::Failed {
-            message: format!("ACP prompt turn failed with stopReason={stop}"),
-        },
+        "cancelled" | "canceled" | "interrupted" | "error" | "errored" | "failed" | "timeout" | "timed_out" =>
+            PromptTurnOutcome::Failed { message: format!("ACP prompt turn failed with stopReason={stop}") },
         _ => PromptTurnOutcome::Finished,
     })
 }
@@ -185,12 +114,8 @@ pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> 
 pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
     let text = match prompt {
         PromptPayload::Text(text) => text.clone(),
-        PromptPayload::File(path) => std::fs::read_to_string(path).map_err(|err| {
-            AcpError::io(format!(
-                "failed to read ACP prompt payload {}: {err}",
-                path.display()
-            ))
-        })?,
+        PromptPayload::File(path) => std::fs::read_to_string(path).map_err(|err|
+            AcpError::io(format!("failed to read ACP prompt payload {}: {err}", path.display())))?,
     };
     Ok(json!({
         "sessionId": session_id,
@@ -199,54 +124,31 @@ pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) ->
     }))
 }
 
-async fn apply_session_config(
-    rpc: &mut RpcClient,
-    session_id: &str,
-    session: &AcpSessionSpec,
-    options: &mut Vec<ConfigOption>,
-) {
+async fn apply_session_config(rpc: &mut RpcClient, session_id: &str, session: &AcpSessionSpec, options: &mut Vec<ConfigOption>) {
     let desired = [
         ("mode", session.permission_mode.to_string()),
         ("model", session.model.clone()),
         ("thought_level", session.reasoning_effort.to_string()),
     ];
     for (category, value) in desired {
-        let Some(option) = options
-            .iter()
-            .find(|o| o.category.as_deref() == Some(category) || o.id == category)
-            .cloned()
-        else {
-            continue;
-        };
+        let Some(option) = options.iter()
+            .find(|o| o.category.as_deref() == Some(category) || o.id == category).cloned()
+        else { continue };
         if option.current_value.as_deref() == Some(value.as_str())
             || (!option.options.is_empty() && !option.options.iter().any(|c| c.value == value))
-        {
-            continue;
-        }
-        match rpc
-            .call_async(
-                "session/set_config_option",
-                json!({ "sessionId": session_id, "configId": option.id, "value": value }),
-            )
-            .await
-            .and_then(|v| {
-                serde_json::from_value::<NewSessionResult>(json!({
-                    "sessionId": session_id,
-                    "configOptions": v.get("configOptions").cloned().unwrap_or(json!([])),
-                }))
-                .map(|w| w.config_options)
-                .map_err(|err| {
-                    AcpError::protocol(format!(
-                        "failed to parse ACP session/set_config_option response: {err}"
-                    ))
-                })
-            }) {
+        { continue }
+        match rpc.call_async("session/set_config_option",
+            json!({ "sessionId": session_id, "configId": option.id, "value": value })
+        ).await.and_then(|v| {
+            serde_json::from_value::<NewSessionResult>(json!({
+                "sessionId": session_id,
+                "configOptions": v.get("configOptions").cloned().unwrap_or(json!([])),
+            })).map(|w| w.config_options)
+            .map_err(|err| AcpError::protocol(format!("failed to parse ACP session/set_config_option response: {err}")))
+        }) {
             Ok(updated) => *options = updated,
-            Err(err) => tracing::debug!(
-                target: "codexize::acp",
-                "session/set_config_option failed for category={category} id={} value={value}: {err}",
-                option.id
-            ),
+            Err(err) => tracing::debug!(target: "codexize::acp",
+                "session/set_config_option failed for category={category} id={} value={value}: {err}", option.id),
         }
     }
 }

@@ -87,18 +87,12 @@ impl BuilderState {
     }
 
     pub fn current_task_id(&self) -> Option<u32> {
-        if self.pipeline_items.is_empty() {
-            return self.current_task;
-        }
         self.pipeline_task_items()
             .find(|item| item.status == PipelineItemStatus::Running)
             .and_then(|item| item.task_id)
     }
 
     pub fn done_task_ids(&self) -> Vec<u32> {
-        if self.pipeline_items.is_empty() {
-            return self.done.clone();
-        }
         self.pipeline_task_items()
             .filter(|item| {
                 matches!(
@@ -111,9 +105,6 @@ impl BuilderState {
     }
 
     pub fn pending_task_ids(&self) -> Vec<u32> {
-        if self.pipeline_items.is_empty() {
-            return self.pending.clone();
-        }
         self.pipeline_task_items()
             .filter(|item| Self::is_selectable_task_item(item))
             .filter_map(|item| item.task_id)
@@ -121,9 +112,6 @@ impl BuilderState {
     }
 
     pub fn has_unfinished_tasks(&self) -> bool {
-        if self.pipeline_items.is_empty() {
-            return self.current_task.is_some() || !self.pending.is_empty();
-        }
         self.pipeline_task_items().any(|item| {
             item.status == PipelineItemStatus::Running
                 || item.status == PipelineItemStatus::HumanBlocked
@@ -133,21 +121,6 @@ impl BuilderState {
     }
 
     pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
-        if self.pipeline_items.is_empty() {
-            // Compatibility fallback for old tests and restored pre-pipeline
-            // sessions; normal initialization now populates pipeline_items.
-            if self.current_task.is_none() {
-                if let Some(id) = self.pending.first().copied() {
-                    self.pending.remove(0);
-                    self.current_task = Some(id);
-                } else {
-                    return None;
-                }
-            }
-            self.iteration = round;
-            return self.current_task;
-        }
-
         if let Some(index) = self.pipeline_items.iter().position(|item| {
             item.stage == "coder"
                 && item.task_id.is_some()
@@ -179,41 +152,7 @@ impl BuilderState {
         status: PipelineItemStatus,
         round: Option<u32>,
     ) -> bool {
-        if self.pipeline_items.is_empty() {
-            match status {
-                PipelineItemStatus::Pending => {
-                    if self.current_task == Some(task_id) {
-                        self.current_task = None;
-                    }
-                    true
-                }
-                PipelineItemStatus::Approved => {
-                    if self.current_task == Some(task_id) {
-                        self.current_task = None;
-                    }
-                    if !self.done.contains(&task_id) {
-                        self.done.push(task_id);
-                    }
-                    self.pending.retain(|id| *id != task_id);
-                    self.last_verdict = Some("approved".to_string());
-                    true
-                }
-                PipelineItemStatus::Revise => {
-                    self.current_task = Some(task_id);
-                    self.last_verdict = Some("revise".to_string());
-                    true
-                }
-                PipelineItemStatus::HumanBlocked => {
-                    self.last_verdict = Some("human_blocked".to_string());
-                    true
-                }
-                PipelineItemStatus::AgentPivot => {
-                    self.last_verdict = Some("agent_pivot".to_string());
-                    true
-                }
-                _ => false,
-            }
-        } else if let Some(index) = self
+        if let Some(index) = self
             .pipeline_items
             .iter()
             .position(|item| item.stage == "coder" && item.task_id == Some(task_id))

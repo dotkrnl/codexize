@@ -12,14 +12,6 @@ impl BuilderState {
             .filter_map(|i| i.task_id)
             .max()
             .unwrap_or(0);
-        let from_legacy = self
-            .done
-            .iter()
-            .chain(self.pending.iter())
-            .chain(self.current_task.iter())
-            .copied()
-            .max()
-            .unwrap_or(0);
         let from_titles = self.task_titles.keys().copied().max().unwrap_or(0);
         let from_recovery = self
             .recovery_prev_task_ids
@@ -28,10 +20,7 @@ impl BuilderState {
             .max()
             .unwrap_or(0)
             .max(self.recovery_prev_max_task_id.unwrap_or(0));
-        from_pipeline
-            .max(from_legacy)
-            .max(from_titles)
-            .max(from_recovery)
+        from_pipeline.max(from_titles).max(from_recovery)
     }
 
     /// Handle a `revise` verdict that carries `new_tasks`: mark the current

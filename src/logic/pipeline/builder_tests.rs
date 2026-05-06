@@ -91,9 +91,8 @@ iteration = 1
 }
 
 #[test]
-fn max_task_id_scans_all_compatibility_sources() {
+fn max_task_id_scans_pipeline_titles_and_recovery_sources() {
     let mut builder = make_builder_with_tasks(&[3]);
-    builder.done = vec![1, 2];
     builder.task_titles.insert(7, "t7".to_string());
     builder.recovery_prev_max_task_id = Some(5);
     assert_eq!(builder.max_task_id(), 7);

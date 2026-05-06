@@ -18,17 +18,15 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+type Pending = HashMap<u64, oneshot::Sender<AcpResult<Value>>>;
+type Updates = mpsc::UnboundedSender<AcpResult<Value>>;
+
 #[derive(Debug)]
 pub(super) enum RpcCommand {
-    Request {
-        id: u64,
+    Send {
         method: String,
         params: Value,
-        respond: oneshot::Sender<AcpResult<Value>>,
-    },
-    Notify {
-        method: String,
-        params: Value,
+        respond: Option<(u64, oneshot::Sender<AcpResult<Value>>)>,
     },
     Shutdown,
 }
@@ -68,39 +66,43 @@ impl RpcClient {
         }
     }
 
-    pub(super) fn start_request(
+    fn enqueue(
         &self,
         method: &str,
         params: Value,
-    ) -> AcpResult<oneshot::Receiver<AcpResult<Value>>> {
-        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
-        let (respond, rx) = oneshot::channel();
+        respond: Option<(u64, oneshot::Sender<AcpResult<Value>>)>,
+    ) -> AcpResult<()> {
+        let kind = if respond.is_some() {
+            "request"
+        } else {
+            "notification"
+        };
         self.commands
-            .send(RpcCommand::Request {
-                id,
+            .send(RpcCommand::Send {
                 method: method.to_string(),
                 params,
                 respond,
             })
             .map_err(|_| {
                 AcpError::io(format!(
-                    "failed to enqueue ACP request {method}: actor stopped"
+                    "failed to enqueue ACP {kind} {method}: actor stopped"
                 ))
-            })?;
+            })
+    }
+
+    pub(super) fn start_request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> AcpResult<oneshot::Receiver<AcpResult<Value>>> {
+        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.enqueue(method, params, Some((id, tx)))?;
         Ok(rx)
     }
 
     pub(super) fn notify(&self, method: &str, params: Value) -> AcpResult<()> {
-        self.commands
-            .send(RpcCommand::Notify {
-                method: method.to_string(),
-                params,
-            })
-            .map_err(|_| {
-                AcpError::io(format!(
-                    "failed to enqueue ACP notification {method}: actor stopped"
-                ))
-            })
+        self.enqueue(method, params, None)
     }
 
     pub(super) async fn call_async(&mut self, method: &str, params: Value) -> AcpResult<Value> {
@@ -150,14 +152,14 @@ async fn actor_loop<R, W>(
     mut reader: R,
     mut writer: W,
     mut commands: mpsc::UnboundedReceiver<RpcCommand>,
-    updates: mpsc::UnboundedSender<AcpResult<Value>>,
+    updates: Updates,
     cancel: CancellationToken,
 ) where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut pending: HashMap<u64, oneshot::Sender<AcpResult<Value>>> = HashMap::new();
-    let mut line_buf = Vec::new();
+    let mut pending: Pending = HashMap::new();
+    let mut buf = Vec::new();
     let mut writer_open = true;
     let mut commands_closed = false;
     'outer: loop {
@@ -172,8 +174,8 @@ async fn actor_loop<R, W>(
                     break;
                 }
             }
-            res = reader.read_until(b'\n', &mut line_buf) => {
-                let res = match res {
+            res = reader.read_until(b'\n', &mut buf) => {
+                let outcome = match res {
                     Ok(0) => {
                         if !commands_closed {
                             broadcast_error(&mut pending, &updates,
@@ -181,15 +183,15 @@ async fn actor_loop<R, W>(
                         }
                         break 'outer;
                     }
-                    Ok(_) if line_buf.iter().all(u8::is_ascii_whitespace) => Ok(()),
-                    Ok(_) => match std::str::from_utf8(&line_buf) {
+                    Ok(_) if buf.iter().all(u8::is_ascii_whitespace) => Ok(()),
+                    Ok(_) => match std::str::from_utf8(&buf) {
                         Ok(line) => handle_inbound_line(line, &mut writer, &mut pending, &updates, &mut writer_open).await,
                         Err(err) => Err(AcpError::protocol(format!("invalid ACP UTF-8 message: {err}"))),
                     },
                     Err(err) => Err(AcpError::io(format!("failed to read ACP stdout: {err}"))),
                 };
-                line_buf.clear();
-                if let Err(err) = res {
+                buf.clear();
+                if let Err(err) = outcome {
                     broadcast_error(&mut pending, &updates, err);
                     break 'outer;
                 }
@@ -205,50 +207,54 @@ async fn actor_loop<R, W>(
 async fn handle_command<W>(
     cmd: RpcCommand,
     writer: &mut W,
-    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
+    pending: &mut Pending,
     writer_open: &mut bool,
 ) -> AcpResult<()>
 where
     W: AsyncWrite + Unpin,
 {
-    let (kind, id, method, params, respond) = match cmd {
-        RpcCommand::Request {
-            id,
-            method,
-            params,
-            respond,
-        } => ("request", Some(id), method, params, Some(respond)),
-        RpcCommand::Notify { method, params } => ("notification", None, method, params, None),
-        RpcCommand::Shutdown => return Ok(()),
+    let RpcCommand::Send {
+        method,
+        params,
+        mut respond,
+    } = cmd
+    else {
+        return Ok(());
     };
-    let report = |err: AcpError, respond: Option<oneshot::Sender<AcpResult<Value>>>| match respond {
-        Some(r) => {
-            let _ = r.send(Err(err));
-            Ok(())
-        }
-        None => Err(err),
+    let kind = if respond.is_some() {
+        "request"
+    } else {
+        "notification"
     };
+    let report =
+        |respond: Option<(u64, oneshot::Sender<AcpResult<Value>>)>, err: AcpError| match respond {
+            Some((_, tx)) => {
+                let _ = tx.send(Err(err));
+                Ok(())
+            }
+            None => Err(err),
+        };
     if !*writer_open {
         return report(
+            respond,
             AcpError::io(format!(
                 "failed to write ACP {kind} {method}: writer closed"
             )),
-            respond,
         );
     }
     let mut message = json!({ "jsonrpc": "2.0", "method": method, "params": params });
-    if let Some(id) = id {
+    if let Some((id, _)) = respond.as_ref() {
         message["id"] = json!(id);
     }
     if let Err(err) = write_line(writer, &message).await {
         *writer_open = false;
         return report(
-            AcpError::io(format!("failed to write ACP {kind} {method}: {err}")),
             respond,
+            AcpError::io(format!("failed to write ACP {kind} {method}: {err}")),
         );
     }
-    if let (Some(id), Some(respond)) = (id, respond) {
-        pending.insert(id, respond);
+    if let Some((id, tx)) = respond.take() {
+        pending.insert(id, tx);
     }
     Ok(())
 }
@@ -256,8 +262,8 @@ where
 async fn handle_inbound_line<W>(
     line: &str,
     writer: &mut W,
-    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
-    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
+    pending: &mut Pending,
+    updates: &Updates,
     writer_open: &mut bool,
 ) -> AcpResult<()>
 where
@@ -278,7 +284,7 @@ where
                 .get("params")
                 .and_then(|p| client_request_response(method, p))
             {
-                Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                Some(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
                 None => json!({
                     "jsonrpc": "2.0", "id": id,
                     "error": { "code": -32601,
@@ -297,32 +303,26 @@ where
     if let Some(id) = value.get("id").and_then(Value::as_u64)
         && let Some(sender) = pending.remove(&id)
     {
-        let result = if let Some(err) = value.get("error") {
-            Err(AcpError::protocol(
+        let result = match (value.get("error"), value.get("result")) {
+            (Some(err), _) => Err(AcpError::protocol(
                 err.get("message")
                     .and_then(Value::as_str)
                     .unwrap_or("ACP request failed")
                     .to_string(),
-            ))
-        } else if let Some(r) = value.get("result") {
-            Ok(r.clone())
-        } else {
-            Err(AcpError::protocol(
+            )),
+            (None, Some(r)) => Ok(r.clone()),
+            (None, None) => Err(AcpError::protocol(
                 "ACP response was missing both result and error".to_string(),
-            ))
+            )),
         };
         let _ = sender.send(result);
     }
     Ok(())
 }
 
-fn broadcast_error(
-    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
-    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
-    err: AcpError,
-) {
-    for (_, sender) in pending.drain() {
-        let _ = sender.send(Err(err.clone()));
+fn broadcast_error(pending: &mut Pending, updates: &Updates, err: AcpError) {
+    for (_, tx) in pending.drain() {
+        let _ = tx.send(Err(err.clone()));
     }
     let _ = updates.send(Err(err));
 }
@@ -344,18 +344,13 @@ pub(super) fn client_request_response(method: &str, params: &Value) -> Option<Va
         return None;
     }
     let options = params.get("options").and_then(Value::as_array)?;
-    let pick = |kind: &str| {
-        options
-            .iter()
-            .find(|o| o.get("kind").and_then(Value::as_str) == Some(kind))
-    };
-    let approve = options.iter().find(|o| {
-        o.get("kind").and_then(Value::as_str) == Some("allow_once")
-            || o.get("optionId").and_then(Value::as_str) == Some("approve")
-    });
-    let option_id = approve
-        .or_else(|| pick("allow_always"))?
-        .get("optionId")
-        .and_then(Value::as_str)?;
+    let kind_eq = |o: &&Value, k: &str| o.get("kind").and_then(Value::as_str) == Some(k);
+    let approve = options
+        .iter()
+        .find(|o| {
+            kind_eq(o, "allow_once") || o.get("optionId").and_then(Value::as_str) == Some("approve")
+        })
+        .or_else(|| options.iter().find(|o| kind_eq(o, "allow_always")))?;
+    let option_id = approve.get("optionId").and_then(Value::as_str)?;
     Some(json!({ "outcome": { "outcome": "selected", "optionId": option_id } }))
 }

@@ -175,4 +175,93 @@ mod tests {
             "artifact_invalid: recovery status=Revise requires at least one feedback item"
         );
     }
+
+    #[test]
+    fn reason_matrix_snapshot() {
+        // One representative value per variant — the snapshot is the
+        // wire-format contract, since these strings are persisted in
+        // RunRecord.error and parsed back out across restarts.
+        let matrix: Vec<(&str, String)> = vec![
+            ("BaseMissing", Reason::BaseMissing.to_string()),
+            ("ArtifactMissing", Reason::ArtifactMissing.to_string()),
+            ("CoderPartial", Reason::CoderPartial.to_string()),
+            (
+                "MissingCoderSummary",
+                Reason::MissingCoderSummary.to_string(),
+            ),
+            (
+                "InvalidCoderSummary",
+                Reason::InvalidCoderSummary.to_string(),
+            ),
+            (
+                "FailedUnverified",
+                Reason::FailedUnverified {
+                    detail: "missing finish stamp".to_string(),
+                    path: "/tmp/stamp.toml".to_string(),
+                }
+                .to_string(),
+            ),
+            ("ExitCode", Reason::ExitCode(1).to_string()),
+            (
+                "Killed",
+                Reason::Killed {
+                    signal_num: 15,
+                    detail: "agent exited 143".to_string(),
+                }
+                .to_string(),
+            ),
+            (
+                "ArtifactInvalid",
+                Reason::ArtifactInvalid("bad toml".to_string()).to_string(),
+            ),
+            ("OperatorKilled", Reason::OperatorKilled.to_string()),
+            ("UserForcedRetry", Reason::UserForcedRetry.to_string()),
+            (
+                "ForbiddenHeadAdvance",
+                Reason::ForbiddenHeadAdvance.to_string(),
+            ),
+            (
+                "ReviewerModifiedWorkingTree",
+                Reason::ReviewerModifiedWorkingTree.to_string(),
+            ),
+            (
+                "ForbiddenControlEdit",
+                Reason::ForbiddenControlEdit("a.rs, b.rs".to_string()).to_string(),
+            ),
+            (
+                "RecoveryRequestedRevise",
+                Reason::RecoveryRequestedRevise("summary".to_string()).to_string(),
+            ),
+            (
+                "RecoveryRequestedHumanBlocked",
+                Reason::RecoveryRequestedHumanBlocked("summary".to_string()).to_string(),
+            ),
+            (
+                "RecoveryRequestedAgentPivot",
+                Reason::RecoveryRequestedAgentPivot("summary".to_string()).to_string(),
+            ),
+            (
+                "RecoveryPlanReviewFailed",
+                Reason::RecoveryPlanReviewFailed("oops".to_string()).to_string(),
+            ),
+            (
+                "RecoveryShardingFailed",
+                Reason::RecoveryShardingFailed("oops".to_string()).to_string(),
+            ),
+            (
+                "RecoverySummaryEmpty",
+                Reason::RecoverySummaryEmpty.to_string(),
+            ),
+            (
+                "RecoveryMissingFeedback",
+                Reason::RecoveryMissingFeedback("Revise".to_string()).to_string(),
+            ),
+        ];
+        let rendered = matrix
+            .into_iter()
+            .map(|(variant, wire)| format!("{variant} => {wire}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!("finalization_reason_matrix", rendered);
+    }
 }

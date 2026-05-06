@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn write_summary(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {

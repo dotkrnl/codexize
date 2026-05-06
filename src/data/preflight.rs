@@ -229,100 +229,65 @@ pub fn install_codex_acp() -> Result<()> {
     Ok(())
 }
 
-fn detect_project_type() -> Vec<&'static str> {
-    let mut types = Vec::new();
-
-    if Path::new("Cargo.toml").exists() {
-        types.push("rust");
-    }
-    if Path::new("package.json").exists() {
-        types.push("node");
-    }
-    if Path::new("requirements.txt").exists()
-        || Path::new("pyproject.toml").exists()
-        || Path::new("setup.py").exists()
-    {
-        types.push("python");
-    }
-    if Path::new("go.mod").exists() {
-        types.push("go");
-    }
-    if Path::new("pom.xml").exists() || Path::new("build.gradle").exists() {
-        types.push("java");
-    }
-    if Path::new("Gemfile").exists() {
-        types.push("ruby");
-    }
-
-    types
+struct ProjectType {
+    label: &'static str,
+    markers: &'static [&'static str],
+    lines: &'static [&'static str],
 }
 
+const PROJECT_TYPES: &[ProjectType] = &[
+    ProjectType {
+        label: "Rust",
+        markers: &["Cargo.toml"],
+        lines: &["target/", "Cargo.lock"],
+    },
+    ProjectType {
+        label: "Node",
+        markers: &["package.json"],
+        lines: &["node_modules/", "dist/", ".npm/"],
+    },
+    ProjectType {
+        label: "Python",
+        markers: &["requirements.txt", "pyproject.toml", "setup.py"],
+        lines: &["__pycache__/", "*.pyc", ".venv/", "venv/", ".env"],
+    },
+    ProjectType {
+        label: "Go",
+        markers: &["go.mod"],
+        lines: &["bin/"],
+    },
+    ProjectType {
+        label: "Java",
+        markers: &["pom.xml", "build.gradle"],
+        lines: &["target/", "build/", "*.class"],
+    },
+    ProjectType {
+        label: "Ruby",
+        markers: &["Gemfile"],
+        lines: &[".bundle/", "vendor/bundle/"],
+    },
+];
+
 pub fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
-    let project_types = detect_project_type();
-    let mut lines = vec![
-        "# OS files",
-        ".DS_Store",
-        "Thumbs.db",
-        "",
-        "# Editor/IDE files",
-        ".idea/",
-        ".vscode/",
-        "*.swp",
-        "*.swo",
-        "",
-    ];
-
-    for pt in &project_types {
-        match *pt {
-            "rust" => {
-                lines.push("# Rust");
-                lines.push("target/");
-                lines.push("Cargo.lock");
-                lines.push("");
-            }
-            "node" => {
-                lines.push("# Node");
-                lines.push("node_modules/");
-                lines.push("dist/");
-                lines.push(".npm/");
-                lines.push("");
-            }
-            "python" => {
-                lines.push("# Python");
-                lines.push("__pycache__/");
-                lines.push("*.pyc");
-                lines.push(".venv/");
-                lines.push("venv/");
-                lines.push(".env");
-                lines.push("");
-            }
-            "go" => {
-                lines.push("# Go");
-                lines.push("bin/");
-                lines.push("");
-            }
-            "java" => {
-                lines.push("# Java");
-                lines.push("target/");
-                lines.push("build/");
-                lines.push("*.class");
-                lines.push("");
-            }
-            "ruby" => {
-                lines.push("# Ruby");
-                lines.push(".bundle/");
-                lines.push("vendor/bundle/");
-                lines.push("");
-            }
-            _ => {}
+    let mut out = String::from(
+        "# OS files\n.DS_Store\nThumbs.db\n\n\
+         # Editor/IDE files\n.idea/\n.vscode/\n*.swp\n*.swo\n\n",
+    );
+    for pt in PROJECT_TYPES {
+        if !pt.markers.iter().any(|m| Path::new(m).exists()) {
+            continue;
         }
+        out.push_str(&format!("# {}\n", pt.label));
+        for line in pt.lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push('\n');
     }
-
-    lines.push("# Codexize");
-    lines.push(codexize_entry);
-    lines.push("");
-
-    lines.join("\n")
+    out.push_str("# Codexize\n");
+    out.push_str(codexize_entry);
+    out.push('\n');
+    out
 }
 
 pub fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::PathBuf> {

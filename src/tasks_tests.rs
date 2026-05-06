@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn write_tasks(body: &str) -> (tempfile::TempDir, std::path::PathBuf) {

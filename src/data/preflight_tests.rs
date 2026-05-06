@@ -20,8 +20,9 @@ fn with_temp_dir<T>(f: impl FnOnce() -> T) -> T {
 fn test_detect_project_type_rust() {
     with_temp_dir(|| {
         fs::write("Cargo.toml", "[package]\nname = \"test\"").unwrap();
-        let types = detect_project_type();
-        assert!(types.contains(&"rust"));
+        let content = generate_heuristic_gitignore(".codexize/");
+        assert!(content.contains("# Rust"));
+        assert!(content.contains("target/"));
     });
 }
 

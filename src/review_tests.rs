@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn write_review(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {

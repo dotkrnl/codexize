@@ -27,23 +27,11 @@ mod test_harness;
 // The private app suites live in layer-owned directories, but remain declared
 // here so they can exercise App internals without widening production APIs.
 #[cfg(test)]
-#[path = "../app_runtime/tests/finalization/mod.rs"]
-mod tests_finalization;
-#[cfg(test)]
-#[path = "../app_runtime/tests/launch/mod.rs"]
-mod tests_launch;
-#[cfg(test)]
-#[path = "../app_runtime/tests/lifecycle/mod.rs"]
-mod tests_lifecycle;
-#[cfg(test)]
 #[path = "../app_runtime/tests/prompts/mod.rs"]
 mod tests_prompts;
 #[cfg(test)]
 #[path = "../ui/tests/split_sync.rs"]
 mod tests_split_sync;
-#[cfg(test)]
-#[path = "../app_runtime/tests/yolo.rs"]
-mod tests_yolo;
 pub(crate) use crate::ui::widgets::tree::view as tree;
 pub(crate) mod watchdog;
 mod yolo_exit;

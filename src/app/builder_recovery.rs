@@ -163,8 +163,7 @@ impl App {
         }
         for id in superseded_ids {
             let needle = id.to_string();
-            let mut found = false;
-            for (idx, _) in text.match_indices(&needle) {
+            let found = text.match_indices(&needle).any(|(idx, _)| {
                 let prev = idx
                     .checked_sub(1)
                     .and_then(|p| text.as_bytes().get(p).copied())
@@ -174,13 +173,9 @@ impl App {
                     .get(idx + needle.len())
                     .copied()
                     .map(char::from);
-                let prev_digit = prev.is_some_and(|ch| ch.is_ascii_digit());
-                let next_digit = next.is_some_and(|ch| ch.is_ascii_digit());
-                if !prev_digit && !next_digit {
-                    found = true;
-                    break;
-                }
-            }
+                !prev.is_some_and(|ch| ch.is_ascii_digit())
+                    && !next.is_some_and(|ch| ch.is_ascii_digit())
+            });
             if !found {
                 anyhow::bail!("`Recovery Notes` missing superseded started task id {id}");
             }
@@ -229,55 +224,125 @@ impl App {
             .chain(done_ids.iter().copied())
             .chain(started_ids.iter().copied())
             .collect::<BTreeSet<_>>();
-        for id in &recovered_ids {
-            if !historical_ids.contains(id) && *id <= historical_max {
-                anyhow::bail!(
-                    "new recovery task id {id} must be greater than prior max id {historical_max}"
-                );
+        if let Some(id) = recovered_ids.iter().find(|id| !historical_ids.contains(id) && **id <= historical_max) {
+            anyhow::bail!(
+                "new recovery task id {id} must be greater than prior max id {historical_max}"
+            );
+        }
+        let superseded_started: BTreeSet<_> = started_ids
+            .difference(&done_ids)
+            .filter(|id| !recovered_set.contains(id))
+            .copied()
+            .collect();
+        if !superseded_started.is_empty() {
+            for path in [&spec_path, &plan_path] {
+                let text = std::fs::read_to_string(path)
+                    .with_context(|| format!("cannot read {}", path.display()))?;
+                Self::recovery_notes_document_started_supersession(&text, &superseded_started)
+                    .with_context(|| format!("invalid {}", path.display()))?;
             }
         }
-        let superseded_started = started_ids
-            .difference(&done_ids)
-            .copied()
-            .collect::<BTreeSet<_>>()
-            .difference(&recovered_set)
-            .copied()
-            .collect::<BTreeSet<_>>();
-        if !superseded_started.is_empty() {
-            let spec_text = std::fs::read_to_string(&spec_path)
-                .with_context(|| format!("cannot read {}", spec_path.display()))?;
-            Self::recovery_notes_document_started_supersession(&spec_text, &superseded_started)
-                .with_context(|| format!("invalid {}", spec_path.display()))?;
-            let plan_text = std::fs::read_to_string(&plan_path)
-                .with_context(|| format!("cannot read {}", plan_path.display()))?;
-            Self::recovery_notes_document_started_supersession(&plan_text, &superseded_started)
-                .with_context(|| format!("invalid {}", plan_path.display()))?;
-        }
-        let completed_ids = self.state.builder.done_task_ids();
-        let completed_set = completed_ids.iter().copied().collect::<BTreeSet<_>>();
         let recovery_iteration = self.recovery_outer_iteration();
-        let mut next_items = self
+        self.replace_pipeline_from_recovery(&parsed, recovery_iteration);
+        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "recovery");
+        session_state::transitions::set_retry_reset_run_id_cutoff(&mut self.state, recovery_run_id);
+        self.clear_builder_recovery_context();
+        Ok(())
+    }
+    pub(crate) fn handle_recovery_plan_review_completed(
+        &mut self,
+        run: &crate::state::RunRecord,
+        round: u32,
+    ) -> Result<()> {
+        let session_dir = session_state::session_dir(&self.state.session_id);
+        let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
+        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
+        let verdict = match review::validate(&plan_review_path) {
+            Ok(v) => v,
+            Err(err) => {
+                let reason = Reason::RecoveryPlanReviewFailed(recovery_error_detail(&err)).to_string();
+                self.finalize_run_record(run.id, false, Some(reason.clone()));
+                let failed_run = self.state.agent_runs.iter().find(|r| r.id == run.id).cloned();
+                let run_ref = failed_run.as_ref().unwrap_or(run);
+                if !self.maybe_auto_retry(run_ref) {
+                    self.record_agent_error(reason);
+                }
+                return Ok(());
+            }
+        };
+        let summary_text = verdict.summary.trim().to_string();
+        if !summary_text.is_empty() {
+            let kind = match verdict.status {
+                review::ReviewStatus::Approved => MessageKind::Summary,
+                _ => MessageKind::SummaryWarn,
+            };
+            let msg = Message {
+                ts: chrono::Utc::now(),
+                run_id: run.id,
+                kind,
+                sender: MessageSender::Agent {
+                    model: run.model.clone(),
+                    vendor: run.vendor.clone(),
+                },
+                text: summary_text,
+            };
+            if let Err(err) = self.state.append_message(&msg) {
+                let _ = self.state.log_event(format!(
+                    "failed to append recovery plan review message: {err}"
+                ));
+            } else {
+                self.messages.push(msg);
+            }
+        }
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        match verdict.status {
+            review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
+                session_state::transitions::reset_recovery_cycle_count(&mut self.state);
+                self.queue_recovery_sharding_pipeline_item(round);
+                self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
+            }
+            review::ReviewStatus::Revise
+            | review::ReviewStatus::HumanBlocked
+            | review::ReviewStatus::AgentPivot => {
+                let trigger_str = if verdict.status == review::ReviewStatus::HumanBlocked {
+                    "human_blocked"
+                } else {
+                    "agent_pivot"
+                };
+                let summary = verdict.feedback.join("\n");
+                let trigger_summary = (!summary.trim().is_empty()).then_some(summary);
+                self.enter_builder_recovery(round, None, trigger_summary, trigger_str);
+            }
+        }
+        Ok(())
+    }
+    fn replace_pipeline_from_recovery(
+        &mut self,
+        parsed: &tasks::TasksFile,
+        recovery_iteration: u32,
+    ) {
+        let done_ids: BTreeSet<_> = self.state.builder.done_task_ids().into_iter().collect();
+        let mut next_items: Vec<PipelineItem> = self
             .state
             .builder
             .pipeline_items
             .iter()
             .filter(|item| {
                 item.stage == "coder"
-                    && item
-                        .task_id
-                        .is_some_and(|task_id| completed_set.contains(&task_id))
+                    && item.task_id.is_some_and(|id| done_ids.contains(&id))
             })
             .cloned()
-            .collect::<Vec<_>>();
+            .collect();
         if next_items.is_empty() {
-            for task_id in &completed_ids {
+            for &tid in &done_ids {
                 next_items.push(PipelineItem {
                     id: 0,
                     stage: "coder".to_string(),
-                    task_id: Some(*task_id),
+                    task_id: Some(tid),
                     round: None,
                     status: PipelineItemStatus::Approved,
-                    title: self.state.builder.task_titles.get(task_id).cloned(),
+                    title: self.state.builder.task_titles.get(&tid).cloned(),
                     mode: None,
                     trigger: None,
                     interactive: None,
@@ -291,7 +356,7 @@ impl App {
             .map(|task| (task.id, task.title.clone()))
             .collect::<Vec<_>>();
         for task in &parsed.tasks {
-            if !completed_set.contains(&task.id) {
+            if !done_ids.contains(&task.id) {
                 next_items.push(PipelineItem {
                     id: 0,
                     stage: "coder".to_string(),
@@ -311,85 +376,8 @@ impl App {
             next_items,
             recovered_titles,
         );
-        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "recovery");
-        session_state::transitions::set_retry_reset_run_id_cutoff(&mut self.state, recovery_run_id);
-        self.clear_builder_recovery_context();
-        Ok(())
     }
-    pub(crate) fn handle_recovery_plan_review_completed(
-        &mut self,
-        run: &crate::state::RunRecord,
-        round: u32,
-    ) -> Result<()> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
-        let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
-        session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
-        match review::validate(&plan_review_path) {
-            Ok(verdict) => {
-                let summary_text = verdict.summary.trim().to_string();
-                if !summary_text.is_empty() {
-                    let kind = match verdict.status {
-                        review::ReviewStatus::Approved => MessageKind::Summary,
-                        _ => MessageKind::SummaryWarn,
-                    };
-                    let msg = Message {
-                        ts: chrono::Utc::now(),
-                        run_id: run.id,
-                        kind,
-                        sender: MessageSender::Agent {
-                            model: run.model.clone(),
-                            vendor: run.vendor.clone(),
-                        },
-                        text: summary_text,
-                    };
-                    if let Err(err) = self.state.append_message(&msg) {
-                        let _ = self.state.log_event(format!(
-                            "failed to append recovery plan review message: {err}"
-                        ));
-                    } else {
-                        self.messages.push(msg);
-                    }
-                }
-                self.finalize_run_record(run.id, true, None);
-                self.clear_agent_error();
-                match verdict.status {
-                    review::ReviewStatus::Approved | review::ReviewStatus::Refine => {
-                        session_state::transitions::reset_recovery_cycle_count(&mut self.state);
-                        self.queue_recovery_sharding_pipeline_item(round);
-                        self.transition_to_phase(Phase::BuilderRecoverySharding(round))?;
-                    }
-                    review::ReviewStatus::Revise
-                    | review::ReviewStatus::HumanBlocked
-                    | review::ReviewStatus::AgentPivot => {
-                        let trigger_str = match verdict.status {
-                            review::ReviewStatus::HumanBlocked => "human_blocked",
-                            review::ReviewStatus::AgentPivot => "agent_pivot",
-                            _ => "agent_pivot",
-                        };
-                        let summary = verdict.feedback.join("\n");
-                        let trigger_summary = (!summary.trim().is_empty()).then_some(summary);
-                        self.enter_builder_recovery(round, None, trigger_summary, trigger_str);
-                    }
-                }
-            }
-            Err(err) => {
-                let reason =
-                    Reason::RecoveryPlanReviewFailed(recovery_error_detail(&err)).to_string();
-                self.finalize_run_record(run.id, false, Some(reason.clone()));
-                let failed_run = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .find(|r| r.id == run.id)
-                    .cloned()
-                    .unwrap_or_else(|| run.clone());
-                if !self.maybe_auto_retry(&failed_run) {
-                    self.record_agent_error(reason);
-                }
-            }
-        }
-        Ok(())
-    }
+
     pub(crate) fn handle_recovery_sharding_completed(
         &mut self,
         run: &crate::state::RunRecord,
@@ -398,108 +386,41 @@ impl App {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "sharding");
-        match tasks::validate(&tasks_path) {
-            Ok(parsed) => {
-                let done_ids = self
-                    .state
-                    .builder
-                    .done_task_ids()
-                    .into_iter()
-                    .collect::<BTreeSet<_>>();
-                let max_seen = self.state.builder.max_task_id();
-                for task in &parsed.tasks {
-                    if task.id <= max_seen {
-                        let reason = format!(
-                            "recovery sharding produced task id {} but new ids must be > {} (max id ever seen)",
-                            task.id, max_seen
-                        );
-                        self.finalize_run_record(run.id, false, Some(reason.clone()));
-                        self.record_agent_error(reason);
-                        self.clear_builder_recovery_context();
-                        let _ =
-                            self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
-                        return Ok(());
-                    }
-                }
-                self.finalize_run_record(run.id, true, None);
-                self.clear_agent_error();
-                let recovery_iteration = self.recovery_outer_iteration();
-                let mut next_items: Vec<PipelineItem> = self
-                    .state
-                    .builder
-                    .pipeline_items
-                    .iter()
-                    .filter(|item| {
-                        item.stage == "coder"
-                            && item.task_id.is_some_and(|id| done_ids.contains(&id))
-                    })
-                    .cloned()
-                    .collect();
-                if next_items.is_empty() {
-                    for &tid in &done_ids {
-                        next_items.push(PipelineItem {
-                            id: 0,
-                            stage: "coder".to_string(),
-                            task_id: Some(tid),
-                            round: None,
-                            status: PipelineItemStatus::Approved,
-                            title: self.state.builder.task_titles.get(&tid).cloned(),
-                            mode: None,
-                            trigger: None,
-                            interactive: None,
-                            iteration: recovery_iteration,
-                        });
-                    }
-                }
-                let recovered_titles = parsed
-                    .tasks
-                    .iter()
-                    .map(|task| (task.id, task.title.clone()))
-                    .collect::<Vec<_>>();
-                for task in &parsed.tasks {
-                    if !done_ids.contains(&task.id) {
-                        next_items.push(PipelineItem {
-                            id: 0,
-                            stage: "coder".to_string(),
-                            task_id: Some(task.id),
-                            round: None,
-                            status: PipelineItemStatus::Pending,
-                            title: Some(task.title.clone()),
-                            mode: None,
-                            trigger: None,
-                            interactive: None,
-                            iteration: recovery_iteration,
-                        });
-                    }
-                }
-                session_state::transitions::replace_recovery_pipeline(
-                    &mut self.state,
-                    next_items,
-                    recovered_titles,
-                );
-                let pipeline_msg = format!(
-                    "recovery sharding complete: {} pending tasks",
-                    self.state.builder.pending_task_ids().len()
-                );
-                self.append_system_message(run.id, MessageKind::Summary, pipeline_msg);
-                self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
-            }
+        let parsed = match tasks::validate(&tasks_path) {
+            Ok(p) => p,
             Err(err) => {
-                let reason =
-                    Reason::RecoveryShardingFailed(recovery_error_detail(&err)).to_string();
+                let reason = Reason::RecoveryShardingFailed(recovery_error_detail(&err)).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
-                let failed_run = self
-                    .state
-                    .agent_runs
-                    .iter()
-                    .find(|r| r.id == run.id)
-                    .cloned()
-                    .unwrap_or_else(|| run.clone());
-                if !self.maybe_auto_retry(&failed_run) {
+                let failed_run = self.state.agent_runs.iter().find(|r| r.id == run.id).cloned();
+                let run_ref = failed_run.as_ref().unwrap_or(run);
+                if !self.maybe_auto_retry(run_ref) {
                     self.record_agent_error(reason);
                 }
+                return Ok(());
             }
+        };
+        let max_seen = self.state.builder.max_task_id();
+        if let Some(task) = parsed.tasks.iter().find(|t| t.id <= max_seen) {
+            let reason = format!(
+                "recovery sharding produced task id {} but new ids must be > {} (max id ever seen)",
+                task.id, max_seen
+            );
+            self.finalize_run_record(run.id, false, Some(reason.clone()));
+            self.record_agent_error(reason);
+            self.clear_builder_recovery_context();
+            let _ = self.transition_to_blocked(crate::state::BlockOrigin::BuilderRecovery);
+            return Ok(());
         }
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
+        let recovery_iteration = self.recovery_outer_iteration();
+        self.replace_pipeline_from_recovery(&parsed, recovery_iteration);
+        let pipeline_msg = format!(
+            "recovery sharding complete: {} pending tasks",
+            self.state.builder.pending_task_ids().len()
+        );
+        self.append_system_message(run.id, MessageKind::Summary, pipeline_msg);
+        self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
         Ok(())
     }
 }

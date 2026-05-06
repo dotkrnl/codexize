@@ -236,19 +236,7 @@ impl App {
                         self.messages.push(advisory_msg);
                     }
                 }
-                if let Some(task_id) = self.state.builder.current_task_id() {
-                    let _ = session_state::transitions::mark_task_status(
-                        &mut self.state,
-                        task_id,
-                        PipelineItemStatus::Approved,
-                        Some(round),
-                    );
-                }
-                if !self.state.builder.has_unfinished_tasks() {
-                    self.enter_simplification_or_done(round, run.modes.yolo)?;
-                } else {
-                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
-                }
+                self.approve_current_review_task_and_continue(round, run.modes.yolo)?;
             }
             review::ReviewStatus::Refine => {
                 // Approve the current task and stash feedback for
@@ -257,19 +245,7 @@ impl App {
                     &mut self.state,
                     verdict.feedback.iter().cloned(),
                 );
-                if let Some(task_id) = self.state.builder.current_task_id() {
-                    let _ = session_state::transitions::mark_task_status(
-                        &mut self.state,
-                        task_id,
-                        PipelineItemStatus::Approved,
-                        Some(round),
-                    );
-                }
-                if !self.state.builder.has_unfinished_tasks() {
-                    self.enter_simplification_or_done(round, run.modes.yolo)?;
-                } else {
-                    self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
-                }
+                self.approve_current_review_task_and_continue(round, run.modes.yolo)?;
             }
             review::ReviewStatus::Revise => {
                 if let Some(task_id) = self.state.builder.current_task_id() {
@@ -344,6 +320,23 @@ impl App {
                     trigger_str,
                 );
             }
+        }
+        Ok(())
+    }
+
+    fn approve_current_review_task_and_continue(&mut self, round: u32, yolo: bool) -> Result<()> {
+        if let Some(task_id) = self.state.builder.current_task_id() {
+            let _ = session_state::transitions::mark_task_status(
+                &mut self.state,
+                task_id,
+                PipelineItemStatus::Approved,
+                Some(round),
+            );
+        }
+        if self.state.builder.has_unfinished_tasks() {
+            self.transition_to_phase(Phase::ImplementationRound(round + 1))?;
+        } else {
+            self.enter_simplification_or_done(round, yolo)?;
         }
         Ok(())
     }

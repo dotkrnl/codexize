@@ -103,10 +103,17 @@ fn final_validation_edges() {
     assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(2)));
     assert!(!Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(3)));
     assert!(Phase::FinalValidation(1).can_transition_to(&Phase::BlockedNeedsUser));
+    assert!(Phase::FinalValidation(1).can_transition_to(&Phase::DreamingPending));
+    assert!(Phase::DreamingPending.can_transition_to(&Phase::Done));
+    assert!(Phase::DreamingPending.can_transition_to(&Phase::Dreaming(1)));
+    assert!(Phase::Dreaming(1).can_transition_to(&Phase::Done));
+    assert!(!Phase::DreamingPending.can_transition_to(&Phase::FinalValidation(1)));
     assert!(Phase::FinalValidation(2).can_transition_to(&Phase::ReviewRound(2)));
     assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ReviewRound(1)));
     assert!(Phase::FinalValidation(1).can_transition_to(&Phase::ImplementationRound(1)));
     assert!(!Phase::FinalValidation(2).can_transition_to(&Phase::ImplementationRound(2)));
+    assert_eq!(Phase::DreamingPending.label(), "Dreaming");
+    assert_eq!(Phase::Dreaming(2).label(), "Dreaming");
 }
 
 #[test]

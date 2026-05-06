@@ -8,7 +8,9 @@ use super::prompts::*;
 use super::*;
 use crate::{
     artifacts::{ArtifactKind, Spec},
-    state::{self as session_state, BlockOrigin, MessageKind, Phase, RunStatus},
+    state::{
+        self as session_state, BlockOrigin, DreamingDecisionKind, MessageKind, Phase, RunStatus,
+    },
     tasks,
     tui::AppTerminal,
 };
@@ -64,6 +66,8 @@ impl App {
                 StageId::Sharding => RuntimeStageId::Sharding,
                 StageId::Implementation => RuntimeStageId::Implementation,
                 StageId::Review => RuntimeStageId::Review,
+                StageId::FinalValidation => RuntimeStageId::FinalValidation,
+                StageId::Dreaming => RuntimeStageId::Dreaming,
             }
         }
         fn modal_kind(modal: ModalKind) -> RuntimeModalKind {
@@ -76,6 +80,7 @@ impl App {
                 ModalKind::PlanReviewPaused => RuntimeModalKind::PlanReviewPaused,
                 ModalKind::StageError(stage) => RuntimeModalKind::StageError(stage_id(stage)),
                 ModalKind::FinalValidationBlocked => RuntimeModalKind::FinalValidationBlocked,
+                ModalKind::DreamingDecision => RuntimeModalKind::DreamingDecision,
             }
         }
         AppView {
@@ -110,6 +115,15 @@ impl App {
             Phase::GitGuardPending => Some(ModalKind::GitGuard),
             Phase::SpecReviewPaused => Some(ModalKind::SpecReviewPaused),
             Phase::PlanReviewPaused => Some(ModalKind::PlanReviewPaused),
+            Phase::DreamingPending
+                if self
+                    .state
+                    .dreaming_decision
+                    .as_ref()
+                    .is_some_and(|decision| decision.kind == DreamingDecisionKind::Pending) =>
+            {
+                Some(ModalKind::DreamingDecision)
+            }
             Phase::BrainstormRunning if self.state.agent_error.is_some() => {
                 Some(ModalKind::StageError(StageId::Brainstorm))
             }
@@ -323,6 +337,31 @@ impl App {
         self.state.save()?;
         Ok(())
     }
+    pub fn skip_suggested_dreaming(&mut self) -> Result<()> {
+        let mut decision = self
+            .state
+            .dreaming_decision
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("missing pending dreaming decision"))?;
+        decision.kind = DreamingDecisionKind::OperatorSkipped;
+        self.state.dreaming_decision = Some(decision);
+        self.state.save()?;
+        self.transition_to_phase(Phase::Done)?;
+        Ok(())
+    }
+    pub fn accept_suggested_dreaming(&mut self) -> Result<()> {
+        let mut decision = self
+            .state
+            .dreaming_decision
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("missing pending dreaming decision"))?;
+        decision.kind = DreamingDecisionKind::OperatorAccepted;
+        let round = decision.round;
+        self.state.dreaming_decision = Some(decision);
+        self.state.save()?;
+        self.transition_to_phase(Phase::Dreaming(round))?;
+        Ok(())
+    }
     pub fn accept_guard_reset(&mut self) -> Result<()> {
         let decision = session_state::transitions::take_pending_guard_decision(
             &mut self.state,
@@ -404,6 +443,8 @@ impl App {
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
             | Phase::FinalValidation(_)
+            | Phase::DreamingPending
+            | Phase::Dreaming(_)
             | Phase::Simplification(_) => {
                 return None;
             }

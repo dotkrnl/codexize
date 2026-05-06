@@ -432,6 +432,63 @@ pub(super) fn build_simplification_stage(state: &SessionState, iteration: u32) -
 pub(super) fn build_final_validation_stage(state: &SessionState, iteration: u32) -> Node {
     build_per_iteration_stage(state, iteration, "final-validation", "Final Validation")
 }
+pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
+    let runs: Vec<&RunRecord> = state
+        .agent_runs
+        .iter()
+        .filter(|run| run.stage == "dreaming")
+        .collect();
+    let latest = latest_attempts(&runs);
+    let status = if latest.iter().any(|run| run.status == RunStatus::Running) {
+        NodeStatus::Running
+    } else {
+        match state.current_phase {
+            Phase::DreamingPending => NodeStatus::WaitingUser,
+            Phase::Dreaming(_) => {
+                if state.agent_error.is_some() {
+                    NodeStatus::Failed
+                } else if latest.is_empty() {
+                    NodeStatus::Pending
+                } else {
+                    rollup_status(&latest)
+                }
+            }
+            _ => match state
+                .dreaming_decision
+                .as_ref()
+                .map(|decision| decision.kind)
+            {
+                Some(
+                    crate::state::DreamingDecisionKind::ValidatorSkipped
+                    | crate::state::DreamingDecisionKind::OperatorSkipped,
+                ) => NodeStatus::Skipped,
+                Some(crate::state::DreamingDecisionKind::OperatorAccepted) => {
+                    per_iteration_terminal_status(&latest)
+                }
+                Some(crate::state::DreamingDecisionKind::Pending) => NodeStatus::WaitingUser,
+                None if state.current_phase == Phase::Done => NodeStatus::Skipped,
+                None => NodeStatus::Pending,
+            },
+        }
+    };
+    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
+    for run in &runs {
+        rounds.entry(run.round).or_default().push(*run);
+    }
+    let children = rounds
+        .into_iter()
+        .map(|(round_num, round_runs)| {
+            node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&round_runs),
+                "",
+                round_runs.iter().map(|run| agent_run_node(run)).collect(),
+            )
+        })
+        .collect();
+    node("Dreaming", NodeKind::Stage, status, "", children)
+}
 /// Shared scaffolding for the iteration-scoped trio's tail two stages.
 /// Filters runs to this iteration, derives stage status/summary (delegating
 /// to the global phase machinery only for iteration 1, since later trios

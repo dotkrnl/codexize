@@ -469,6 +469,8 @@ pub(super) fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::SkipToImplPending => ("skip confirm".to_string(), Color::Yellow, "!"),
         Phase::GitGuardPending => ("guard decision".to_string(), Color::Yellow, "!"),
         Phase::FinalValidation(n) => (format!("final validation r{}", n), Color::Cyan, "●"),
+        Phase::DreamingPending => ("dreaming decision".to_string(), Color::Yellow, "!"),
+        Phase::Dreaming(n) => (format!("dreaming r{}", n), Color::Cyan, "●"),
         Phase::Simplification(n) => (format!("simplification r{}", n), Color::Cyan, "●"),
     }
 }

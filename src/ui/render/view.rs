@@ -35,8 +35,8 @@ use super::{
     models_area,
     sheet::bottom_sheet_without_rule,
     state::{
-        guard_content, is_last_sibling, modal_accent_color, modal_title, skip_to_impl_content,
-        spinner_frame, stage_error_content, status_highlight_bg,
+        dreaming_decision_content, guard_content, is_last_sibling, modal_accent_color, modal_title,
+        skip_to_impl_content, spinner_frame, stage_error_content, status_highlight_bg,
     },
 };
 use crate::app_runtime::AppView;
@@ -52,6 +52,8 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
             crate::app_runtime::StageId::Sharding => crate::app::StageId::Sharding,
             crate::app_runtime::StageId::Implementation => crate::app::StageId::Implementation,
             crate::app_runtime::StageId::Review => crate::app::StageId::Review,
+            crate::app_runtime::StageId::FinalValidation => crate::app::StageId::FinalValidation,
+            crate::app_runtime::StageId::Dreaming => crate::app::StageId::Dreaming,
         }
     }
     match modal {
@@ -65,6 +67,7 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
             ModalKind::StageError(stage_from_runtime(stage))
         }
         crate::app_runtime::ModalKind::FinalValidationBlocked => ModalKind::FinalValidationBlocked,
+        crate::app_runtime::ModalKind::DreamingDecision => ModalKind::DreamingDecision,
     }
 }
 impl App {
@@ -520,6 +523,9 @@ impl App {
                     ),
                 ]),
             ],
+            ModalKind::DreamingDecision => {
+                dreaming_decision_content(self.state.dreaming_decision.as_ref(), width)
+            }
         }
     }
 }

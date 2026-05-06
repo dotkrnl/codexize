@@ -167,6 +167,10 @@ fn compute_section_path(
             SectionPart::FinalValidation,
             SectionPart::Round { n: round, attempt },
         ],
+        "dreaming" => vec![
+            SectionPart::Dreaming,
+            SectionPart::Round { n: round, attempt },
+        ],
         "coder" | "reviewer" => {
             let iteration = task_id
                 .and_then(|tid| {

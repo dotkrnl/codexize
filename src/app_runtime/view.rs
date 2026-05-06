@@ -45,6 +45,8 @@ pub enum StageId {
     Sharding,
     Implementation,
     Review,
+    FinalValidation,
+    Dreaming,
 }
 /// Modal kinds the runtime asks the UI to render. The UI decides the
 /// rendering, but cannot invent modals — only the runtime can transition
@@ -60,6 +62,7 @@ pub enum ModalKind {
     PlanReviewPaused,
     StageError(StageId),
     FinalValidationBlocked,
+    DreamingDecision,
 }
 /// Compact run summary for tree rows. The full [`RunRecord`] is also
 /// available in [`AppView::agent_runs`]; this projection exists so a

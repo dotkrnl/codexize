@@ -145,6 +145,23 @@ fn validation_report_renders_goal_met_summary_and_findings() {
 }
 
 #[test]
+fn validation_report_renders_dream_recommendation() {
+    use crate::final_validation::{DreamRecommendation, ValidationStatus, ValidationVerdict};
+    let verdict = ValidationVerdict {
+        status: ValidationStatus::GoalMet,
+        summary: "All goals achieved".to_string(),
+        findings: Vec::new(),
+        gaps: Vec::new(),
+        new_tasks: Vec::new(),
+        dream_recommendation: Some(DreamRecommendation::Suggest),
+        dream_reason: Some("Memory lessons should be consolidated.".to_string()),
+    };
+    let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
+    assert!(text.contains("Dreaming: suggest"));
+    assert!(text.contains("Dream reason: Memory lessons should be consolidated."));
+}
+
+#[test]
 fn validation_report_renders_goal_gap_with_citations_and_tasks() {
     use crate::final_validation::{Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask};
     let verdict = ValidationVerdict {

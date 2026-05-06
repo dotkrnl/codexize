@@ -33,6 +33,8 @@ impl App {
             | Phase::BlockedNeedsUser
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
+            | Phase::DreamingPending
+            | Phase::Dreaming(_)
             | Phase::Done => {}
         }
         Ok(())

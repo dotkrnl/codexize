@@ -69,6 +69,14 @@ pub enum Phase {
     /// The stored round is the coder round whose work is being validated.
     #[strum(to_string = "Final Validation Round {0}")]
     FinalValidation(u32),
+    /// Operator decision point after a successful final validation suggests
+    /// Dreaming. Persisted separately from the validator verdict so resume
+    /// shows the same decision instead of re-running final validation.
+    #[strum(to_string = "Dreaming Pending")]
+    DreamingPending,
+    /// Future noninteractive memory consolidation pass.
+    #[strum(to_string = "Dreaming Round {0}")]
+    Dreaming(u32),
     /// Behavior-preserving cleanup pass between loop convergence and FinalValidation.
     /// The stored round matches the coder round whose work is being simplified.
     #[strum(to_string = "Simplification Round {0}")]
@@ -87,6 +95,7 @@ impl Phase {
             | Phase::BuilderRecoveryPlanReview(round)
             | Phase::BuilderRecoverySharding(round)
             | Phase::FinalValidation(round)
+            | Phase::Dreaming(round)
             | Phase::Simplification(round) => Some(round),
             _ => None,
         }
@@ -117,6 +126,7 @@ impl Phase {
             Phase::SkipToImplPending => "Skip Confirmation".to_string(),
             Phase::GitGuardPending => "Guard Decision".to_string(),
             Phase::FinalValidation(_) => "Final Validation".to_string(),
+            Phase::DreamingPending | Phase::Dreaming(_) => "Dreaming".to_string(),
             Phase::Simplification(_) => "Simplification".to_string(),
         }
     }

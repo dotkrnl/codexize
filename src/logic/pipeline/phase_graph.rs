@@ -144,6 +144,10 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
     TransitionEdge::new(P::GitGuardPending, P::PlanReviewRunning),
     TransitionEdge::new(P::GitGuardPending, P::BuilderRecoveryPlanReview),
     TransitionEdge::new(P::FinalValidation, P::Done),
+    TransitionEdge::new(P::FinalValidation, P::DreamingPending),
+    TransitionEdge::new(P::DreamingPending, P::Done),
+    TransitionEdge::new(P::DreamingPending, P::Dreaming),
+    TransitionEdge::new(P::Dreaming, P::Done),
     TransitionEdge::guarded(
         P::FinalValidation,
         P::ImplementationRound,

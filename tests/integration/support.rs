@@ -142,6 +142,8 @@ fn stage_name(stage: StageId) -> &'static str {
         StageId::Sharding => "sharding",
         StageId::Implementation => "implementation",
         StageId::Review => "review",
+        StageId::FinalValidation => "final-validation",
+        StageId::Dreaming => "dreaming",
     }
 }
 

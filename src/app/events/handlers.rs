@@ -269,6 +269,7 @@ impl App {
             ModalKind::FinalValidationBlocked => {
                 self.handle_final_validation_blocked_modal_key(key)
             }
+            ModalKind::DreamingDecision => self.handle_dreaming_decision_modal_key(key),
         }
     }
     pub(crate) fn dismiss_interactive_exit_prompt(&mut self) {
@@ -394,6 +395,23 @@ impl App {
                     .state
                     .log_event("palette_invoked: command=recover-from-fv-block".to_string());
                 self.enter_builder_recovery_from_block();
+                false
+            }
+            _ => false,
+        }
+    }
+    pub(crate) fn handle_dreaming_decision_modal_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Esc => {
+                if let Err(err) = self.skip_suggested_dreaming() {
+                    self.record_agent_error(format!("skip dreaming failed: {err:#}"));
+                }
+                false
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') | KeyCode::Enter => {
+                if let Err(err) = self.accept_suggested_dreaming() {
+                    self.record_agent_error(format!("run dreaming failed: {err:#}"));
+                }
                 false
             }
             _ => false,

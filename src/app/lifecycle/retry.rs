@@ -368,6 +368,14 @@ impl App {
                 // Operator handlers are the legitimate exit path; go_back is
                 // a no-op while the decision is pending.
             }
+            Phase::DreamingPending => {
+                // The decision is persisted specifically so resume cannot
+                // re-run final validation and re-offer Dreaming; leave the
+                // modal as the only exit from this phase.
+            }
+            Phase::Dreaming(_) => {
+                self.cancel_run_label("[Dreaming]");
+            }
             Phase::FinalValidation(_) => {
                 // Validator is non-mutating and can be rewound. Route back to
                 // ReviewRound(r) for any round; round-1 sessions on the

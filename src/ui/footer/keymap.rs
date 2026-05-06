@@ -110,6 +110,12 @@ fn final_validation_blocked_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
         system_bindings(),
     )
 }
+fn dreaming_decision_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
+    (
+        vec![primary_key("Enter", "run dreaming"), key("s", "skip")],
+        vec![key("Esc", "skip")],
+    )
+}
 /// Skip-to-impl modal: actions + system.
 fn skip_to_impl_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
@@ -318,6 +324,7 @@ pub fn keymap(
             ModalKind::InteractiveExitPrompt => interactive_exit_prompt_bindings(),
             ModalKind::StageError(stage_id) => stage_error_bindings(stage_id),
             ModalKind::FinalValidationBlocked => final_validation_blocked_bindings(),
+            ModalKind::DreamingDecision => dreaming_decision_bindings(),
         };
         return render_keymap_line(&[&actions, &system], &caps_fn, width);
     }

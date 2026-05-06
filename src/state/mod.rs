@@ -21,9 +21,10 @@ pub use stage_io::{
 #[cfg(test)]
 pub(crate) use types_logic::test_fs_lock;
 pub use types_logic::{
-    BlockOrigin, Event, LaunchModes, Message, MessageKind, MessageSender, Modes, Node, NodeKind,
-    NodeStatus, PendingGuardDecision, PipelineItem, PipelineItemStatus, RunRecord, RunStatus,
-    SectionPart, SessionState, codexize_root, session_dir,
+    BlockOrigin, DreamingDecision, DreamingDecisionKind, Event, LaunchModes, Message, MessageKind,
+    MessageSender, Modes, Node, NodeKind, NodeStatus, PendingGuardDecision, PipelineItem,
+    PipelineItemStatus, RunRecord, RunStatus, SectionPart, SessionState, codexize_root,
+    session_dir,
 };
 pub(crate) use types_logic::{EventsFile, MessagesFile};
 /// Compatibility module mirroring the pre-refactor `crate::state::transitions`

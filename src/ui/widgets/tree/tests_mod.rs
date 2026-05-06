@@ -88,7 +88,7 @@ fn test_build_tree_single_stage() {
     let mut state = SessionState::new("test".to_string());
     state.agent_runs.push(run(1, "brainstorm", RunStatus::Done));
     let nodes = build_tree(&state);
-    assert_eq!(nodes.len(), 9); // Idea + 6 stages + Simplification + Final Validation
+    assert_eq!(nodes.len(), 10); // Idea + 6 stages + Simplification + Final Validation + Dreaming
     let brainstorm = nodes.iter().find(|n| n.label == "Brainstorm").unwrap();
     assert_eq!(brainstorm.kind, NodeKind::Stage);
     assert_eq!(brainstorm.status, NodeStatus::Done);
@@ -1355,6 +1355,24 @@ fn simplification_precedes_final_validation_in_tree_order() {
         "Simplification must appear before Final Validation in the tree, got simpl={} final={}",
         simpl_index,
         final_index
+    );
+}
+
+#[test]
+fn dreaming_renders_after_final_validation_as_global_stage() {
+    let state = SessionState::new("test".to_string());
+    let nodes = build_tree(&state);
+    let final_index = nodes
+        .iter()
+        .position(|n| n.label == "Final Validation")
+        .expect("final validation stage missing");
+    let dreaming_index = nodes
+        .iter()
+        .position(|n| n.label == "Dreaming")
+        .expect("dreaming stage missing");
+    assert!(
+        final_index < dreaming_index,
+        "Dreaming must render after the global final validation stage"
     );
 }
 

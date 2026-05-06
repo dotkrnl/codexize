@@ -222,6 +222,7 @@ fn phase_round(phase: Phase) -> Option<u32> {
         | Phase::BuilderRecoveryPlanReview(round)
         | Phase::BuilderRecoverySharding(round)
         | Phase::FinalValidation(round)
+        | Phase::Dreaming(round)
         | Phase::Simplification(round) => Some(round),
         _ => None,
     }

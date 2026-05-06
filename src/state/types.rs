@@ -175,12 +175,33 @@ pub enum SectionPart {
     Loop,
     Simplification,
     FinalValidation,
+    Dreaming,
     Recovery { round: u32 },
     RecoveryPlanReview { round: u32 },
     RecoverySharding { round: u32 },
     Task(u32),
     Round { n: u32, attempt: u32 },
     Stage(String),
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DreamingDecisionKind {
+    /// Final validation explicitly recommended no Dreaming pass.
+    ValidatorSkipped,
+    /// Final validation suggested Dreaming and the operator has not chosen.
+    Pending,
+    /// Operator declined the suggested Dreaming pass.
+    OperatorSkipped,
+    /// Operator chose to run Dreaming; the run phase is intentionally future
+    /// work in this version, but the choice is persisted for resume safety.
+    OperatorAccepted,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DreamingDecision {
+    pub kind: DreamingDecisionKind,
+    pub round: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageSender {
@@ -357,6 +378,8 @@ pub struct SessionState {
     /// this field to decide whether `BlockedNeedsUser -> Done` is allowed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_origin: Option<BlockOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dreaming_decision: Option<DreamingDecision>,
 }
 impl SessionState {
     pub fn new(session_id: String) -> Self {
@@ -380,6 +403,7 @@ impl SessionState {
             validation_attempts: 0,
             simplification_attempts: BTreeMap::new(),
             block_origin: None,
+            dreaming_decision: None,
         }
     }
     /// Return the next available agent_run_id (monotonic within session).

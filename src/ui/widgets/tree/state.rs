@@ -4,8 +4,8 @@ use crate::state::{
 #[path = "stages.rs"]
 mod stages;
 use self::stages::{
-    build_builder_stage, build_final_validation_stage, build_idea_node, build_review_stage,
-    build_simple_stage, build_simplification_stage, total_iterations,
+    build_builder_stage, build_dreaming_stage, build_final_validation_stage, build_idea_node,
+    build_review_stage, build_simple_stage, build_simplification_stage, total_iterations,
 };
 use std::collections::{BTreeMap, BTreeSet};
 pub type NodePath = Vec<usize>;
@@ -28,6 +28,7 @@ pub enum StageKey {
     BuilderLoop(u32),
     Simplification(u32),
     FinalValidation(u32),
+    Dreaming,
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskKey {
@@ -103,6 +104,7 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
         nodes.push(build_simplification_stage(state, iteration));
         nodes.push(build_final_validation_stage(state, iteration));
     }
+    nodes.push(build_dreaming_stage(state));
     for node in &mut nodes {
         collapse_tree(node);
     }
@@ -314,6 +316,7 @@ fn stage_key_for(node: &Node, path: &[usize]) -> Option<StageKey> {
         "Loop" => Some(StageKey::BuilderLoop(1)),
         "Simplification" => Some(StageKey::Simplification(1)),
         "Final Validation" => Some(StageKey::FinalValidation(1)),
+        "Dreaming" => Some(StageKey::Dreaming),
         other => parse_iteration_label(other),
     }
 }
@@ -389,6 +392,7 @@ fn role_label(stage: &str) -> &str {
         "reviewer" => "Reviewer",
         "simplifier" => "Simplifier",
         "final-validation" => "Final Validation",
+        "dreaming" => "Dreaming",
         _ => stage,
     }
 }
@@ -591,7 +595,11 @@ fn builder_status(
         // the open iteration's builder work is complete. Mark it Done so the
         // row is expandable (NodeStatus::Pending blocks expansion in
         // `is_expandable`, which would hide the loop's prior messages).
-        Phase::Simplification(_) | Phase::FinalValidation(_) | Phase::Done => NodeStatus::Done,
+        Phase::Simplification(_)
+        | Phase::FinalValidation(_)
+        | Phase::DreamingPending
+        | Phase::Dreaming(_)
+        | Phase::Done => NodeStatus::Done,
         _ => NodeStatus::Pending,
     }
 }

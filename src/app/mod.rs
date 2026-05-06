@@ -32,7 +32,7 @@ mod state;
 pub use crate::ui::status_line;
 #[cfg(test)]
 #[path = "tests_support.rs"]
-mod test_support;
+pub(crate) mod test_support;
 // The private app suites live in layer-owned directories, but remain declared
 // here so they can exercise App internals without widening production APIs.
 #[cfg(test)]
@@ -100,6 +100,8 @@ pub(crate) enum StageId {
     Sharding,
     Implementation,
     Review,
+    FinalValidation,
+    Dreaming,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModalKind {
@@ -111,6 +113,7 @@ pub(crate) enum ModalKind {
     PlanReviewPaused,
     StageError(StageId),
     FinalValidationBlocked,
+    DreamingDecision,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RetryLaunch {
@@ -124,6 +127,8 @@ pub(crate) enum RetryLaunch {
     RecoverySharding,
     Coder,
     Reviewer,
+    FinalValidation,
+    Dreaming,
 }
 impl RetryLaunch {
     fn for_run(run: &crate::state::RunRecord) -> Option<Self> {
@@ -144,6 +149,8 @@ impl RetryLaunch {
             "recovery" => Some(Self::Recovery),
             "coder" => Some(Self::Coder),
             "reviewer" => Some(Self::Reviewer),
+            "final-validation" => Some(Self::FinalValidation),
+            "dreaming" => Some(Self::Dreaming),
             _ => None,
         }
     }

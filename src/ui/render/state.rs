@@ -108,6 +108,34 @@ pub fn final_validation_report_lines(
             );
         }
     }
+    if let Some(recommendation) = &verdict.dream_recommendation {
+        let recommendation = match recommendation {
+            crate::final_validation::DreamRecommendation::Suggest => "suggest",
+            crate::final_validation::DreamRecommendation::Skip => "skip",
+        };
+        push_wrapped_field(
+            &mut lines,
+            indent,
+            indent_width,
+            "Dreaming: ",
+            bold,
+            recommendation,
+            Style::default(),
+            width,
+        );
+        if let Some(reason) = verdict.dream_reason.as_deref() {
+            push_wrapped_field(
+                &mut lines,
+                indent,
+                indent_width,
+                "Dream reason: ",
+                bold,
+                reason,
+                Style::default(),
+                width,
+            );
+        }
+    }
     if !verdict.gaps.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(indent.to_string(), dim),
@@ -249,6 +277,39 @@ pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line
         ]),
     ]
 }
+pub(crate) fn dreaming_decision_content(
+    decision: Option<&crate::state::DreamingDecision>,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let reason = decision
+        .and_then(|decision| decision.reason.as_deref())
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("(no reason provided)");
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "The final-validation agent suggested Dreaming for this session.".to_string(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Reason:".to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+    for line in wrap_text(reason, width.max(1) as usize) {
+        lines.push(Line::from(Span::styled(
+            line,
+            Style::default().fg(Color::White),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Enter/r run Dreaming · s/Esc skip and finish".to_string(),
+        Style::default().fg(Color::White),
+    )));
+    lines
+}
 pub(crate) fn stage_error_title(stage_id: StageId) -> &'static str {
     match stage_id {
         StageId::Brainstorm => "Brainstorm failed",
@@ -258,6 +319,8 @@ pub(crate) fn stage_error_title(stage_id: StageId) -> &'static str {
         StageId::Sharding => "Sharding failed",
         StageId::Implementation => "Implementation failed",
         StageId::Review => "Review failed",
+        StageId::FinalValidation => "Final validation failed",
+        StageId::Dreaming => "Dreaming failed",
     }
 }
 /// Semantic accent for a modal dialog: Red = error/failure, Yellow =
@@ -270,7 +333,8 @@ pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
         ModalKind::SkipToImpl
         | ModalKind::GitGuard
         | ModalKind::QuitRunningAgent
-        | ModalKind::InteractiveExitPrompt => Color::Yellow,
+        | ModalKind::InteractiveExitPrompt
+        | ModalKind::DreamingDecision => Color::Yellow,
         ModalKind::SpecReviewPaused | ModalKind::PlanReviewPaused => Color::Cyan,
         ModalKind::FinalValidationBlocked => Color::Red,
     }
@@ -285,6 +349,7 @@ pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
         ModalKind::PlanReviewPaused => Some("Plan review complete"),
         ModalKind::StageError(stage_id) => Some(stage_error_title(stage_id)),
         ModalKind::FinalValidationBlocked => Some("Final Validation Blocked"),
+        ModalKind::DreamingDecision => Some("Run Dreaming?"),
     }
 }
 pub(crate) fn stage_error_content(

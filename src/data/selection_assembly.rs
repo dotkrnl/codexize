@@ -7,9 +7,9 @@
 use crate::acp::AcpConfig;
 use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
+use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
-use crate::data::selection_quota as quota;
 use std::collections::BTreeSet;
 
 /// Load and merge dashboard + quota data into the canonical model universe.

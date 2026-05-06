@@ -132,13 +132,8 @@ impl App {
             ));
         }
 
-        let outcome = select_for_review_with_effort(
-            &self.models,
-            used_vendors,
-            used_models,
-            effort,
-            cheap,
-        )?;
+        let outcome =
+            select_for_review_with_effort(&self.models, used_vendors, used_models, effort, cheap)?;
         let picked = (
             outcome.model.name.clone(),
             outcome.model.vendor,

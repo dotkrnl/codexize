@@ -165,10 +165,8 @@ fn glm46_preserves_pinned_nonzero_build_score() {
         "{COMPARISON_ANCHOR_MODEL} Build anchor drifted"
     );
     let glm46 = models.iter().find(|m| m.name == "glm-4.6").unwrap();
-    let glm46_prob = rounded_probability(phase_score_for_legacy_callers(
-        glm46,
-        SelectionPhase::Build,
-    ));
+    let glm46_prob =
+        rounded_probability(phase_score_for_legacy_callers(glm46, SelectionPhase::Build));
     assert_eq!(glm46_prob, GLM46_BUILD, "glm-4.6 Build score drifted");
     assert!(glm46_prob > 0.0, "glm-4.6 Build should remain scored");
 }
@@ -208,12 +206,7 @@ fn prechange_selectable_models_remain_above_gate() {
     ] {
         let probs: Vec<(&str, f64)> = models
             .iter()
-            .map(|m| {
-                (
-                    m.name.as_str(),
-                    phase_score_for_legacy_callers(m, phase),
-                )
-            })
+            .map(|m| (m.name.as_str(), phase_score_for_legacy_callers(m, phase)))
             .collect();
         let max_prob = probs.iter().map(|(_, p)| *p).fold(0.0_f64, f64::max);
         let cutoff = max_prob * ratio;

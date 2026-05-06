@@ -534,7 +534,8 @@ mod tests {
         use crate::final_validation::{ValidationStatus, ValidationVerdict};
         const WIDTH: usize = 30;
         let summary =
-            "This is an intentionally long summary that should be wrapped across several rows".to_string();
+            "This is an intentionally long summary that should be wrapped across several rows"
+                .to_string();
         let verdict = ValidationVerdict {
             status: ValidationStatus::GoalMet,
             summary: summary.clone(),
@@ -593,5 +594,4 @@ mod tests {
             assert!(text.contains(word), "missing gap word {word:?}");
         }
     }
-
 }

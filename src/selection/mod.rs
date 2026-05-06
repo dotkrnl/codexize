@@ -16,8 +16,8 @@ pub use config::*;
 #[allow(clippy::module_inception)]
 pub mod selection {
     use crate::adapters::EffortLevel;
-    use crate::logic::selection::{SelectionPhase, selection as pure};
     use crate::logic::selection::types::{CachedModel, VendorKind};
+    use crate::logic::selection::{SelectionPhase, selection as pure};
 
     fn sample_seed() -> u64 {
         chrono::Utc::now().timestamp_subsec_nanos() as u64
@@ -81,13 +81,7 @@ pub mod selection {
         excluded: &[(VendorKind, String)],
         last_failed_vendor: Option<VendorKind>,
     ) -> Option<&'a CachedModel> {
-        pure::select_excluding_with_seed(
-            models,
-            phase,
-            excluded,
-            last_failed_vendor,
-            sample_seed(),
-        )
+        pure::select_excluding_with_seed(models, phase, excluded, last_failed_vendor, sample_seed())
     }
 
     pub use pure::{SelectionOutcome, SelectionWarning};

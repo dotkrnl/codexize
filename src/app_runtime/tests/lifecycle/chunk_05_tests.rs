@@ -669,30 +669,31 @@ fn active_modal_persists_across_serialization_roundtrip() {
         let serialized = toml::to_string(&state).expect("serialize");
         let deserialized: SessionState = toml::from_str(&serialized).expect("deserialize");
         let resumed = mk_app(deserialized);
-        assert_eq!(resumed.active_modal(), Some(ModalKind::FinalValidationBlocked));
+        assert_eq!(
+            resumed.active_modal(),
+            Some(ModalKind::FinalValidationBlocked)
+        );
     });
 }
 
 #[test]
 fn force_ship_key_transitions_blocked_to_done() {
-    use crate::state::{BlockOrigin, Phase};
     use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    use crate::state::{BlockOrigin, Phase};
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-key-f".to_string());
         state.current_phase = Phase::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::FinalValidation);
         state.validation_attempts = VALIDATION_ATTEMPT_CAP;
         let mut app = mk_app(state);
-        let consumed = app.handle_final_validation_blocked_modal_key(
-            crossterm::event::KeyEvent::new(
+        let consumed =
+            app.handle_final_validation_blocked_modal_key(crossterm::event::KeyEvent::new(
                 crossterm::event::KeyCode::Char('f'),
                 crossterm::event::KeyModifiers::empty(),
-            ),
-        );
+            ));
         assert!(!consumed, "modal handler must not signal app exit");
         assert_eq!(app.state.current_phase, Phase::Done);
-        let events_path =
-            session_state::session_dir(&app.state.session_id).join("events.toml");
+        let events_path = session_state::session_dir(&app.state.session_id).join("events.toml");
         let log = std::fs::read_to_string(events_path).expect("events.toml exists");
         assert!(
             log.contains("force-ship"),
@@ -703,28 +704,26 @@ fn force_ship_key_transitions_blocked_to_done() {
 
 #[test]
 fn enter_key_in_modal_also_force_ships() {
-    use crate::state::{BlockOrigin, Phase};
     use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    use crate::state::{BlockOrigin, Phase};
     with_temp_root(|| {
         let mut state = SessionState::new("force-ship-key-enter".to_string());
         state.current_phase = Phase::BlockedNeedsUser;
         state.block_origin = Some(BlockOrigin::FinalValidation);
         state.validation_attempts = VALIDATION_ATTEMPT_CAP;
         let mut app = mk_app(state);
-        app.handle_final_validation_blocked_modal_key(
-            crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::empty(),
-            ),
-        );
+        app.handle_final_validation_blocked_modal_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::empty(),
+        ));
         assert_eq!(app.state.current_phase, Phase::Done);
     });
 }
 
 #[test]
 fn r_key_in_modal_triggers_recovery_with_iteration_bump() {
-    use crate::state::{BlockOrigin, Phase};
     use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    use crate::state::{BlockOrigin, Phase};
     with_temp_root(|| {
         let session_id = "r-key-modal-recovery";
         let session_dir = session_state::session_dir(session_id);
@@ -757,12 +756,11 @@ fn r_key_in_modal_triggers_recovery_with_iteration_bump() {
         });
 
         let mut app = mk_app(state);
-        let consumed = app.handle_final_validation_blocked_modal_key(
-            crossterm::event::KeyEvent::new(
+        let consumed =
+            app.handle_final_validation_blocked_modal_key(crossterm::event::KeyEvent::new(
                 crossterm::event::KeyCode::Char('r'),
                 crossterm::event::KeyModifiers::empty(),
-            ),
-        );
+            ));
         assert!(!consumed, "modal handler must not signal app exit");
         assert!(
             matches!(app.state.current_phase, Phase::BuilderRecovery(_)),
@@ -781,8 +779,8 @@ fn r_key_in_modal_triggers_recovery_with_iteration_bump() {
 
 #[test]
 fn capital_r_key_in_modal_also_triggers_recovery() {
-    use crate::state::{BlockOrigin, Phase};
     use crate::state::transitions::VALIDATION_ATTEMPT_CAP;
+    use crate::state::{BlockOrigin, Phase};
     with_temp_root(|| {
         let session_id = "capital-r-key-modal-recovery";
         let session_dir = session_state::session_dir(session_id);
@@ -812,12 +810,10 @@ fn capital_r_key_in_modal_also_triggers_recovery() {
         });
 
         let mut app = mk_app(state);
-        app.handle_final_validation_blocked_modal_key(
-            crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Char('R'),
-                crossterm::event::KeyModifiers::empty(),
-            ),
-        );
+        app.handle_final_validation_blocked_modal_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('R'),
+            crossterm::event::KeyModifiers::empty(),
+        ));
         assert!(
             matches!(app.state.current_phase, Phase::BuilderRecovery(_)),
             "phase is {:?}",

@@ -553,11 +553,15 @@ impl App {
                 Line::from(vec![
                     Span::styled(
                         "  [ F ] Force ship to Done       ".to_string(),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         "[ R ] Recover".to_string(),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ),
                 ]),
             ],

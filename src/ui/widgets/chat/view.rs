@@ -520,11 +520,7 @@ fn render_messages(
             }
         } else {
             lines.push(format_historical_message(
-                &ts_str,
-                sym.symbol,
-                "",
-                sym.color,
-                hints,
+                &ts_str, sym.symbol, "", sym.color, hints,
             ));
         }
         push_blank_line_if_needed(&mut lines);

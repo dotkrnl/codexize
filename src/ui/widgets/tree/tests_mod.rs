@@ -701,7 +701,10 @@ fn final_validation_gap_tasks_render_under_new_iteration_trio() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(2);
     state.builder.task_titles.insert(1, "original".to_string());
-    state.builder.task_titles.insert(2, "validator gap".to_string());
+    state
+        .builder
+        .task_titles
+        .insert(2, "validator gap".to_string());
     state.builder.pipeline_items.push(PipelineItem {
         id: 1,
         stage: "coder".to_string(),
@@ -1364,8 +1367,8 @@ fn count_round_nodes_under_task(node: &Node, task_label: &str, round_label: &str
 
 #[test]
 fn non_contiguous_same_round_runs_emit_sibling_round_nodes() {
-    use crate::state::PipelineItem;
     use super::stages::build_builder_stage;
+    use crate::state::PipelineItem;
     let mut state = SessionState::new("non-contig".to_string());
     state.current_phase = Phase::ImplementationRound(1);
     state.builder.task_titles.insert(1, "alpha".to_string());
@@ -1422,8 +1425,8 @@ fn non_contiguous_same_round_runs_emit_sibling_round_nodes() {
 
 #[test]
 fn contiguous_same_round_attempts_nest_under_one_round_node() {
-    use crate::state::PipelineItem;
     use super::stages::build_builder_stage;
+    use crate::state::PipelineItem;
     let mut state = SessionState::new("contig".to_string());
     state.current_phase = Phase::ImplementationRound(1);
     state.builder.task_titles.insert(1, "alpha".to_string());

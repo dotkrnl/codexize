@@ -384,7 +384,6 @@ impl Phase {
             }
         }
     }
-
 }
 
 #[cfg(test)]

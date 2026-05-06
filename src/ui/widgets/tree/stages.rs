@@ -21,10 +21,7 @@ fn iteration_boundaries(state: &SessionState) -> Vec<u32> {
 /// iteration. End is `None` while the iteration's closing FV hasn't run,
 /// which means the "open" iteration absorbs every round from `start`
 /// onward.
-pub(super) fn iteration_round_range(
-    state: &SessionState,
-    iteration: u32,
-) -> (u32, Option<u32>) {
+pub(super) fn iteration_round_range(state: &SessionState, iteration: u32) -> (u32, Option<u32>) {
     let bounds = iteration_boundaries(state);
     let start = if iteration <= 1 {
         1
@@ -227,10 +224,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             || reviewer_runs.iter().any(|r| r.status == RunStatus::Running)
         {
             NodeStatus::Running
-        } else if coder_runs.is_empty()
-            && reviewer_runs.is_empty()
-            && recovery_runs.is_empty()
-        {
+        } else if coder_runs.is_empty() && reviewer_runs.is_empty() && recovery_runs.is_empty() {
             NodeStatus::Pending
         } else if coder_runs
             .iter()
@@ -255,7 +249,10 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         String::new()
     };
     let task_ids_in_iteration = task_ids_for_iteration(state, iteration);
-    let task_id_set = task_ids_in_iteration.iter().copied().collect::<BTreeSet<_>>();
+    let task_id_set = task_ids_in_iteration
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     let mut ordered_task_ids = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     if state.builder.pipeline_items.is_empty() && iteration == 1 {
@@ -312,10 +309,8 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         let task_id = run.task_id.expect("filtered above");
         let key = (task_id, run.round);
         let task_segments = segments_by_task.entry(task_id).or_default();
-        let same_streak = last_key == Some(key)
-            && task_segments
-                .last()
-                .is_some_and(|seg| seg.0 == run.round);
+        let same_streak =
+            last_key == Some(key) && task_segments.last().is_some_and(|seg| seg.0 == run.round);
         if !same_streak {
             task_segments.push((run.round, Vec::new(), Vec::new()));
         }

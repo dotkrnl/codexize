@@ -654,8 +654,7 @@ fn recovery_outer_iteration_consumes_one_shot_override() {
         let iter = app.recovery_outer_iteration();
         assert_eq!(iter, 5, "must read the override");
         assert_eq!(
-            app.state.builder.next_iteration_for_recovery,
-            None,
+            app.state.builder.next_iteration_for_recovery, None,
             "override is consumed once"
         );
     });

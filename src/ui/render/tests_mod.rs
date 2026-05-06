@@ -3275,9 +3275,18 @@ fn final_validation_blocked_modal_body_lists_actions() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(text.contains("Final validation blocked"), "missing header: {text}");
-    assert!(text.contains("Operator action required"), "missing operator message: {text}");
-    assert!(text.contains("Force ship"), "missing Force ship hint: {text}");
+    assert!(
+        text.contains("Final validation blocked"),
+        "missing header: {text}"
+    );
+    assert!(
+        text.contains("Operator action required"),
+        "missing operator message: {text}"
+    );
+    assert!(
+        text.contains("Force ship"),
+        "missing Force ship hint: {text}"
+    );
     assert!(text.contains("Recover"), "missing Recover hint: {text}");
     assert!(text.contains("F"), "missing F key hint: {text}");
     assert!(text.contains("R"), "missing R key hint: {text}");

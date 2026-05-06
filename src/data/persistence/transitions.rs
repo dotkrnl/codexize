@@ -7,7 +7,9 @@
 
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
+use crate::logic::pipeline::state::{
+    BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState,
+};
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
@@ -152,8 +154,14 @@ fn compute_section_path(
     attempt: u32,
 ) -> Vec<SectionPart> {
     match stage {
-        "brainstorm" => vec![SectionPart::Brainstorm, SectionPart::Stage(stage.to_string())],
-        "spec-review" => vec![SectionPart::SpecReview, SectionPart::Stage(stage.to_string())],
+        "brainstorm" => vec![
+            SectionPart::Brainstorm,
+            SectionPart::Stage(stage.to_string()),
+        ],
+        "spec-review" => vec![
+            SectionPart::SpecReview,
+            SectionPart::Stage(stage.to_string()),
+        ],
         "planning" => vec![SectionPart::Planning, SectionPart::Stage(stage.to_string())],
         "plan-review" if matches!(state.current_phase, Phase::BuilderRecoveryPlanReview(_)) => {
             vec![
@@ -162,7 +170,10 @@ fn compute_section_path(
                 SectionPart::Stage(stage.to_string()),
             ]
         }
-        "plan-review" => vec![SectionPart::PlanReview, SectionPart::Stage(stage.to_string())],
+        "plan-review" => vec![
+            SectionPart::PlanReview,
+            SectionPart::Stage(stage.to_string()),
+        ],
         "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => {
             vec![
                 SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),

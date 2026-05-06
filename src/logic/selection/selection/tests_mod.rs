@@ -53,8 +53,8 @@ fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
         sample_model(VendorKind::Codex, "low", 1),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
-        .expect("should pick high-quota model");
+    let chosen =
+        pick_for_phase(&models, SelectionPhase::Build, None).expect("should pick high-quota model");
     assert_eq!(chosen.name, "high");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -83,8 +83,8 @@ fn pick_for_phase_excludes_models_missing_phase_score() {
     // poison the pool.
     models[1].ipbr_phase_scores.build = None;
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
-        .expect("ranked candidate exists");
+    let chosen =
+        pick_for_phase(&models, SelectionPhase::Build, None).expect("ranked candidate exists");
     assert_eq!(chosen.name, "ranked");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -125,12 +125,8 @@ fn pick_for_phase_respects_vendor_filter() {
         sample_model(VendorKind::Codex, "codex-model", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(
-        &models,
-        SelectionPhase::Build,
-        Some(VendorKind::Claude),
-    )
-    .expect("should pick claude");
+    let chosen = pick_for_phase(&models, SelectionPhase::Build, Some(VendorKind::Claude))
+        .expect("should pick claude");
     assert_eq!(chosen.vendor, VendorKind::Claude);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -145,8 +141,8 @@ fn select_for_review_prefers_fresh_vendor() {
     let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review(&models, &used_vendors, &used_models)
-        .expect("should pick fresh vendor");
+    let chosen =
+        select_for_review(&models, &used_vendors, &used_models).expect("should pick fresh vendor");
     assert_eq!(chosen.vendor, VendorKind::Codex);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -161,8 +157,8 @@ fn select_for_review_falls_back_to_unused_model_same_vendor() {
     let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review(&models, &used_vendors, &used_models)
-        .expect("should pick unused model");
+    let chosen =
+        select_for_review(&models, &used_vendors, &used_models).expect("should pick unused model");
     assert_eq!(chosen.name, "claude-2");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -333,14 +329,9 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
         sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase_with_effort(
-        &models,
-        SelectionPhase::Build,
-        None,
-        EffortLevel::Low,
-        true,
-    )
-    .expect("full-pool fallback must yield a candidate");
+    let chosen =
+        pick_for_phase_with_effort(&models, SelectionPhase::Build, None, EffortLevel::Low, true)
+            .expect("full-pool fallback must yield a candidate");
     assert_eq!(chosen.model.name, "claude-opus-4-7");
     assert_eq!(
         chosen.warning,
@@ -472,14 +463,9 @@ fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
     let used_models = vec![(VendorKind::Claude, "claude-sonnet-4-6".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = select_for_review_with_effort(
-        &models,
-        &used_vendors,
-        &used_models,
-        EffortLevel::Low,
-        true,
-    )
-    .expect("cheap reviewer should reuse the only eligible model");
+    let chosen =
+        select_for_review_with_effort(&models, &used_vendors, &used_models, EffortLevel::Low, true)
+            .expect("cheap reviewer should reuse the only eligible model");
     assert_eq!(chosen.warning, None);
     assert_eq!(chosen.model.name, "claude-sonnet-4-6");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -537,9 +523,8 @@ fn select_for_review_tough_degrades_when_no_eligible_remain() {
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen =
-        select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
-            .expect("degraded fallback must yield a candidate");
+    let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
+        .expect("degraded fallback must yield a candidate");
     assert!(matches!(
         chosen.vendor,
         VendorKind::Kimi | VendorKind::Gemini
@@ -556,9 +541,8 @@ fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
         sample_model(VendorKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen =
-        select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
-            .expect("degraded fallback must yield an available candidate");
+    let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
+        .expect("degraded fallback must yield an available candidate");
     assert!(
         matches!(chosen.vendor, VendorKind::Kimi | VendorKind::Gemini),
         "exhausted tough-eligible model was selected: {:?} {}",

@@ -124,20 +124,11 @@ pub(crate) fn merge_with_warnings(
                 Some(sc.name.clone()),
             ));
         } else {
-            models.push(DashboardModel {
-                name: inv.name,
-                vendor: inv.vendor,
-                overall_score: 0.0,
-                current_score: 0.0,
-                standard_error: 0.0,
-                axes: Vec::new(),
-                axis_provenance: BTreeMap::new(),
-                ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-                score_source: crate::selection::ScoreSource::None,
-                ipbr_row_matched: false,
-                display_order: inv.display_order + 10_000,
-                fallback_from: None,
-            });
+            models.push(empty_inventory_model(
+                inv.name,
+                inv.vendor,
+                inv.display_order + 10_000,
+            ));
         }
     }
 
@@ -184,21 +175,25 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
 pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
     inventory
         .into_iter()
-        .map(|inv| DashboardModel {
-            name: inv.name,
-            vendor: inv.vendor,
-            overall_score: 0.0,
-            current_score: 0.0,
-            standard_error: 0.0,
-            axes: Vec::new(),
-            axis_provenance: BTreeMap::new(),
-            ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-            score_source: crate::selection::ScoreSource::None,
-            ipbr_row_matched: false,
-            display_order: inv.display_order,
-            fallback_from: None,
-        })
+        .map(|inv| empty_inventory_model(inv.name, inv.vendor, inv.display_order))
         .collect()
+}
+
+fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> DashboardModel {
+    DashboardModel {
+        name,
+        vendor,
+        overall_score: 0.0,
+        current_score: 0.0,
+        standard_error: 0.0,
+        axes: Vec::new(),
+        axis_provenance: BTreeMap::new(),
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        score_source: crate::selection::ScoreSource::None,
+        ipbr_row_matched: false,
+        display_order,
+        fallback_from: None,
+    }
 }
 
 pub fn synthesize_sibling(

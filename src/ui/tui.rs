@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -141,18 +141,10 @@ impl CrosstermInputAdapter {
         timeout: Duration,
         view: &AppView,
     ) -> Result<Option<AppCommand>> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            match self.rx.try_recv() {
-                Ok(event) => return Ok(command_from_event(event, view)),
-                Err(mpsc::error::TryRecvError::Disconnected) => return Ok(None),
-                Err(mpsc::error::TryRecvError::Empty) if Instant::now() >= deadline => {
-                    return Ok(None);
-                }
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    crate::data::async_bridge::sleep_blocking(Duration::from_millis(10));
-                }
-            }
+        match crate::data::async_bridge::block_on_io(tokio::time::timeout(timeout, self.rx.recv()))
+        {
+            Ok(Some(event)) => Ok(command_from_event(event, view)),
+            Ok(None) | Err(_) => Ok(None),
         }
     }
 }

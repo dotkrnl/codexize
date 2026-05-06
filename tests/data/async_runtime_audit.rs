@@ -54,8 +54,30 @@ fn visit_rs_files(path: &Path, f: &mut impl FnMut(&Path)) {
 }
 
 fn is_test_path(path: &Path) -> bool {
-    path.components().any(|component| {
+    if path.components().any(|component| {
         let text = component.as_os_str().to_string_lossy();
-        text == "tests" || text.starts_with("tests") || text.ends_with("tests.rs")
-    })
+        text == "tests"
+    }) {
+        return true;
+    }
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    file_name == "tests_mod.rs"
+        || file_name.ends_with("_tests.rs")
+        || (file_name.starts_with("chunk_") && file_name.ends_with("tests.rs"))
+}
+
+#[test]
+fn test_path_filter_only_excludes_known_test_shapes() {
+    assert!(is_test_path(Path::new("src/app/tests_mod.rs")));
+    assert!(is_test_path(Path::new(
+        "src/app_runtime/tests/lifecycle/mod.rs"
+    )));
+    assert!(is_test_path(Path::new(
+        "src/app_runtime/tests/lifecycle/chunk_00_tests.rs"
+    )));
+    assert!(is_test_path(Path::new("src/ui/footer/keymap_tests.rs")));
+    assert!(!is_test_path(Path::new("src/testsupport/runtime.rs")));
+    assert!(!is_test_path(Path::new("src/app/tests_helpers.rs")));
 }

@@ -33,9 +33,6 @@ pub(super) enum RpcCommand {
     Shutdown,
 }
 
-/// Synchronous handle wrapping the tokio actor task. Threads through the
-/// per-session runtime so legacy sync callers can drive prompt turns by
-/// polling without yielding into an executor.
 pub(super) struct RpcClient {
     runtime: Arc<Runtime>,
     cancel: CancellationToken,
@@ -122,8 +119,6 @@ impl RpcClient {
         }
     }
 
-    /// Cooperative shutdown when no `Child` is owned. Cancels the actor and
-    /// waits for it to exit.
     pub(super) fn shutdown_blocking_no_child(&mut self) {
         self.cancel.cancel();
         if let Some(actor) = self.actor.take() {
@@ -131,8 +126,7 @@ impl RpcClient {
         }
     }
 
-    /// Graceful shutdown: queue a `Shutdown` after any pending close request,
-    /// then await the actor on `runtime`.
+    /// Graceful shutdown: queue Shutdown after any pending close, then await.
     pub(super) fn shutdown_async(&mut self, runtime: &Runtime) {
         let _ = self.commands.send(RpcCommand::Shutdown);
         if let Some(actor) = self.actor.take() {
@@ -140,8 +134,7 @@ impl RpcClient {
         }
     }
 
-    /// Aggressive shutdown for connect-time failures: kill the actor and
-    /// reap the child immediately.
+    /// Aggressive shutdown: kill the actor and reap the child immediately.
     pub(super) fn shutdown_blocking(&mut self, mut child: Child) {
         self.cancel.cancel();
         if let Some(actor) = self.actor.take() {

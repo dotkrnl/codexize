@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use super::{AppCommand, AppView, ModalKind, StageId, StatusMessage, StatusSeverity};
-use crate::data::events::{DataOutcome, DataRequest, dispatch};
+use crate::data::events::{DataOutcome, DataRequest, dispatch_observation};
 use crate::logic::rules::retry_phase_for_stage;
 
 /// UI side of the runtime seam. The UI sends operator intent and reads
@@ -149,13 +149,13 @@ impl HeadlessRuntime {
     }
 
     fn apply_live_summary_status(&mut self, fallback: &str) {
-        let supervisor = crate::runner::Supervisor::new();
-        let outcome = dispatch(
-            DataRequest::ReadLiveSummary {
-                path: self.live_summary_path.clone(),
-            },
-            &supervisor,
-        );
+        // The live-summary read is observation-only; routing it through
+        // `dispatch_observation` keeps the headless runtime free of an unused
+        // `Supervisor` argument that future readers might assume is load-bearing.
+        let outcome = dispatch_observation(&DataRequest::ReadLiveSummary {
+            path: self.live_summary_path.clone(),
+        })
+        .expect("ReadLiveSummary is an observation-only variant");
         let DataOutcome::LiveSummaryRead(snapshot) = outcome else {
             // Keep this explicit so future DataRequest rewrites cannot
             // silently publish a status for the wrong side-effect outcome.

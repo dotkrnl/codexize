@@ -115,26 +115,45 @@ pub fn dispatch(
     request: DataRequest,
     runner_supervisor: &crate::runner::Supervisor,
 ) -> DataOutcome {
+    if let Some(outcome) = dispatch_observation(&request) {
+        return outcome;
+    }
     match request {
-        DataRequest::ProbeLiveSummary { path } => {
-            DataOutcome::LiveSummaryProbed(crate::data::observation::probe_live_summary(&path))
-        }
-        DataRequest::ReadLiveSummary { path } => {
-            DataOutcome::LiveSummaryRead(crate::data::observation::read_live_summary(&path))
-        }
-        DataRequest::DrainLiveSummary { path } => DataOutcome::LiveSummaryDrained(
-            crate::data::observation::drain_live_summary_file(&path),
-        ),
-        DataRequest::ReadPromptBody { path } => {
-            DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(&path))
-        }
         DataRequest::InterruptRun { run_id, text } => {
             DataOutcome::Interrupted(runner_supervisor.force_interrupt_run(run_id, text))
         }
         DataRequest::TerminateRun { run_id } => {
             DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
         }
+        // Observation variants are handled by `dispatch_observation`.
+        DataRequest::ProbeLiveSummary { .. }
+        | DataRequest::ReadLiveSummary { .. }
+        | DataRequest::DrainLiveSummary { .. }
+        | DataRequest::ReadPromptBody { .. } => unreachable!(),
     }
+}
+
+/// Dispatch the observation-only subset of [`DataRequest`] without consulting
+/// the runner registry. Returns `None` for variants that need a `Supervisor`
+/// (interrupt/terminate); callers that never issue those variants — e.g. the
+/// headless runtime's live-summary status path — can use this directly and
+/// skip the supervisor argument entirely.
+pub fn dispatch_observation(request: &DataRequest) -> Option<DataOutcome> {
+    Some(match request {
+        DataRequest::ProbeLiveSummary { path } => {
+            DataOutcome::LiveSummaryProbed(crate::data::observation::probe_live_summary(path))
+        }
+        DataRequest::ReadLiveSummary { path } => {
+            DataOutcome::LiveSummaryRead(crate::data::observation::read_live_summary(path))
+        }
+        DataRequest::DrainLiveSummary { path } => DataOutcome::LiveSummaryDrained(
+            crate::data::observation::drain_live_summary_file(path),
+        ),
+        DataRequest::ReadPromptBody { path } => {
+            DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(path))
+        }
+        DataRequest::InterruptRun { .. } | DataRequest::TerminateRun { .. } => return None,
+    })
 }
 
 #[cfg(test)]

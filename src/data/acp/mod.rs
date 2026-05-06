@@ -21,18 +21,17 @@ pub use events::{
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 pub type AcpResult<T> = Result<T, AcpError>;
 
+#[rustfmt::skip]
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum AcpError {
-    #[error("{0}")]
-    HumanBlock(String),
-    #[error("{0}")]
-    Io(String),
-    #[error("{0}")]
-    Protocol(String),
+    #[error("{0}")] HumanBlock(String),
+    #[error("{0}")] Io(String),
+    #[error("{0}")] Protocol(String),
 }
 
 impl AcpError {
@@ -59,22 +58,19 @@ pub enum PromptPayload {
     File(PathBuf),
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpReasoningEffort {
-    #[strum(to_string = "low")]
-    Low,
-    #[strum(to_string = "medium")]
-    Medium,
-    #[strum(to_string = "high")]
-    High,
+    #[strum(to_string = "low")] Low,
+    #[strum(to_string = "medium")] Medium,
+    #[strum(to_string = "high")] High,
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpPermissionMode {
-    #[strum(to_string = "ask")]
-    Ask,
-    #[strum(to_string = "code")]
-    Code,
+    #[strum(to_string = "ask")] Ask,
+    #[strum(to_string = "code")] Code,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -92,27 +88,13 @@ pub struct AcpLaunchPolicy {
 }
 
 impl AcpLaunchPolicy {
-    pub fn final_validation(
-        verdict_path: impl Into<PathBuf>,
-        live_summary_path: impl Into<PathBuf>,
-    ) -> Self {
+    #[rustfmt::skip]
+    pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
             shell_policy: AcpShellCommandPolicy::Allowlist(
-                [
-                    "git status",
-                    "git log",
-                    "ls",
-                    "cat",
-                    "head",
-                    "tail",
-                    "wc",
-                    "file",
-                    "find",
-                    "pwd",
-                ]
-                .map(String::from)
-                .to_vec(),
+                ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"]
+                    .map(String::from).to_vec()
             ),
             enforce_readonly_workspace: true,
         }

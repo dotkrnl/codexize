@@ -29,7 +29,7 @@ Sizing & scope (same as initial sharding):
 Required fields per task: id / title (≤60 chars, imperative) / description
 (outcome-oriented, NOT a patch recipe) / test (concrete steps, OR
 `"not testable — <reason>"` for scaffolding) / estimated_tokens /
-spec_refs / plan_refs (`{ path, lines }`).
+spec_refs / plan_refs (`{{ path, lines }}`).
 
 Difficulty:
   - Mark `tough = true` on tasks that need deep reasoning: algorithmic
@@ -55,6 +55,6 @@ cause rejection.
     Concrete verification steps.
     """
     estimated_tokens = 90000
-    spec_refs = [{ path = "artifacts/spec.md", lines = "10-45" }]
-    plan_refs = [{ path = "artifacts/plan.md", lines = "22-60" }]
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-45" }}]
+    plan_refs = [{{ path = "artifacts/plan.md", lines = "22-60" }}]
 {instr}

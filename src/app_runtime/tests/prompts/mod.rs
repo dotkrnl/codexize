@@ -36,6 +36,10 @@ fn prompt_builders_stay_thin_and_formatdoc_based() {
         "prompt builders should use formatdoc! instead of the bespoke replacement macro"
     );
     assert!(
+        !builders.contains("macro_rules! prompt") && !builders.contains("prompt!("),
+        "prompt_builders.rs should not keep a bespoke placeholder replacement macro"
+    );
+    assert!(
         builders.contains("live_summary_instruction") && builders.contains("formatdoc!"),
         "at least one prompt builder should render through formatdoc!"
     );

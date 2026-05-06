@@ -2,18 +2,8 @@
 // live in `src/app/prompts/*.md`; this file stays focused on path binding and
 // prompt-specific dynamic blocks.
 use indoc::formatdoc;
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-
-macro_rules! prompt {
-    ($template:expr $(, $name:ident = $value:expr )* $(,)?) => {
-        {
-            // External prompt files include literal TOML examples with braces, so only declared tokens are substituted.
-            let mut rendered = $template.to_owned();
-            $(rendered = rendered.replace(concat!("{", stringify!($name), "}"), &$value.to_string());)*
-            rendered
-        }
-    };
-}
 
 struct PromptCtx {
     project_doc_instr: String,
@@ -83,6 +73,16 @@ fn join_ids(ids: &[u32], empty: &str) -> String {
     }
 }
 
+fn render_template(template: &str, bindings: &[(&str, String)]) -> String {
+    let vars = bindings
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), value.clone()))
+        .collect::<HashMap<_, _>>();
+    // `formatdoc!` requires literal templates, so file-backed prompt bodies use
+    // a maintained formatter while inline helper snippets still use formatdoc.
+    strfmt::strfmt(template, &vars).expect("prompt template placeholders should match bindings")
+}
+
 /// Prepended to every agent prompt. Surfaces project-specific guidance
 /// (CLAUDE.md / AGENTS.md) before the agent acts. Returns an empty string
 /// if neither file is present in the cwd, to avoid wasting prompt context
@@ -119,12 +119,14 @@ pub(crate) fn spec_review_prompt(
     live_summary_path: &str,
 ) -> String {
     let ctx = PromptCtx::new();
-    prompt!(
+    render_template(
         include_str!("prompts/spec_review.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec_path = ctx.path(spec_path),
-        review_path = ctx.path(review_path),
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec_path", ctx.path(spec_path)),
+            ("review_path", ctx.path(review_path)),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -152,14 +154,16 @@ pub(crate) fn plan_review_prompt(
     } else {
         String::new()
     };
-    prompt!(
+    render_template(
         include_str!("prompts/plan_review.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec_path = ctx.path(spec_path),
-        plan_path = ctx.path(plan_path),
-        review_path = review_path,
-        prior_block = prior_block,
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec_path", ctx.path(spec_path)),
+            ("plan_path", ctx.path(plan_path)),
+            ("review_path", review_path),
+            ("prior_block", prior_block),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -183,18 +187,20 @@ pub(crate) fn brainstorm_prompt(
     } else {
         ctx.live_summary_instruction_interactive(live_summary_path)
     };
-    prompt!(
+    render_template(
         if yolo {
             include_str!("prompts/brainstorm_yolo.md")
         } else {
             include_str!("prompts/brainstorm_interactive.md")
         },
-        project_doc_instr = ctx.project_doc_instr,
-        idea = idea,
-        spec_path = ctx.path(spec_path),
-        summary_path = summary_path,
-        skip_proposal_path = ctx.path(skip_proposal_path),
-        instr = instr,
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("idea", idea.to_string()),
+            ("spec_path", ctx.path(spec_path)),
+            ("summary_path", summary_path),
+            ("skip_proposal_path", ctx.path(skip_proposal_path)),
+            ("instr", instr),
+        ],
     )
 }
 
@@ -221,17 +227,19 @@ pub(crate) fn planning_prompt(
     } else {
         ctx.live_summary_instruction_interactive(live_summary_path)
     };
-    prompt!(
+    render_template(
         if yolo {
             include_str!("prompts/planning_yolo.md")
         } else {
             include_str!("prompts/planning_interactive.md")
         },
-        project_doc_instr = ctx.project_doc_instr,
-        spec = ctx.path(spec_path),
-        reviews = reviews_block,
-        plan = ctx.path(plan_path),
-        instr = instr,
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec", ctx.path(spec_path)),
+            ("reviews", reviews_block),
+            ("plan", ctx.path(plan_path)),
+            ("instr", instr),
+        ],
     )
 }
 
@@ -242,13 +250,15 @@ pub(crate) fn sharding_prompt(
     live_summary_path: &Path,
 ) -> String {
     let ctx = PromptCtx::new();
-    prompt!(
+    render_template(
         include_str!("prompts/sharding.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec = ctx.path(spec_path),
-        plan = ctx.path(plan_path),
-        tasks = ctx.path(tasks_path),
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec", ctx.path(spec_path)),
+            ("plan", ctx.path(plan_path)),
+            ("tasks", ctx.path(tasks_path)),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -269,15 +279,17 @@ pub(crate) fn final_validation_prompt(
         ),
         _ => String::new(),
     };
-    prompt!(
+    render_template(
         include_str!("prompts/final_validation.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        idea_text = idea_text,
-        spec_text = spec_text,
-        verdict = ctx.path(verdict_path),
-        live_summary = ctx.path(live_summary_path),
-        simplification_block = simplification_block,
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("idea_text", idea_text.to_string()),
+            ("spec_text", spec_text.to_string()),
+            ("verdict", ctx.path(verdict_path)),
+            ("live_summary", ctx.path(live_summary_path)),
+            ("simplification_block", simplification_block),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -300,24 +312,32 @@ pub(crate) fn recovery_prompt(
     } else {
         ctx.live_summary_instruction(live_summary_path)
     };
-    prompt!(
+    render_template(
         if interactive {
             include_str!("prompts/recovery_interactive.md")
         } else {
             include_str!("prompts/recovery_noninteractive.md")
         },
-        project_doc_instr = ctx.project_doc_instr,
-        spec = ctx.path(spec_path),
-        plan = ctx.path(plan_path),
-        tasks = ctx.path(tasks_path),
-        recovery = ctx.path(recovery_path),
-        trigger_task = trigger_task_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "(none)".to_string()),
-        trigger_summary = trigger_summary.unwrap_or("(none recorded)"),
-        completed = join_ids(completed_task_ids, "(none)"),
-        started = join_ids(started_task_ids, "(none)"),
-        instr = instr,
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec", ctx.path(spec_path)),
+            ("plan", ctx.path(plan_path)),
+            ("tasks", ctx.path(tasks_path)),
+            ("recovery", ctx.path(recovery_path)),
+            (
+                "trigger_task",
+                trigger_task_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "(none)".to_string()),
+            ),
+            (
+                "trigger_summary",
+                trigger_summary.unwrap_or("(none recorded)").to_string(),
+            ),
+            ("completed", join_ids(completed_task_ids, "(none)")),
+            ("started", join_ids(started_task_ids, "(none)")),
+            ("instr", instr),
+        ],
     )
 }
 
@@ -330,15 +350,17 @@ pub(crate) fn recovery_plan_review_prompt(
     plan_review_output_path: &Path,
 ) -> String {
     let ctx = PromptCtx::new();
-    prompt!(
+    render_template(
         include_str!("prompts/recovery_plan_review.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec = ctx.path(spec_path),
-        plan = ctx.path(plan_path),
-        review = ctx.path(triggering_review_path),
-        recovery = ctx.path(recovery_path),
-        output = ctx.path(plan_review_output_path),
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec", ctx.path(spec_path)),
+            ("plan", ctx.path(plan_path)),
+            ("review", ctx.path(triggering_review_path)),
+            ("recovery", ctx.path(recovery_path)),
+            ("output", ctx.path(plan_review_output_path)),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -351,15 +373,17 @@ pub(crate) fn recovery_sharding_prompt(
     id_floor: u32,
 ) -> String {
     let ctx = PromptCtx::new();
-    prompt!(
+    render_template(
         include_str!("prompts/recovery_sharding.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec = ctx.path(spec_path),
-        plan = ctx.path(plan_path),
-        completed = join_ids(completed_ids, "none"),
-        id_floor = id_floor,
-        output = ctx.path(tasks_output_path),
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec", ctx.path(spec_path)),
+            ("plan", ctx.path(plan_path)),
+            ("completed", join_ids(completed_ids, "none")),
+            ("id_floor", id_floor.to_string()),
+            ("output", ctx.path(tasks_output_path)),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -402,28 +426,36 @@ pub(crate) fn coder_prompt(
                 .join("\n")
         )
     };
-    prompt!(
+    render_template(
         include_str!("prompts/coder.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        task_id = task_id,
-        round = round,
-        task = ctx.path(task_file),
-        spec = ctx.path(session_dir.join("artifacts/spec.md")),
-        plan = ctx.path(session_dir.join("artifacts/plan.md")),
-        coder_summary = ctx.path(
-            session_dir
-                .join("rounds")
-                .join(format!("{round:03}"))
-                .join("coder_summary.toml")
-        ),
-        prev_review = prev_review,
-        refine_block = refine_block,
-        resume_hint = if resume {
-            "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n"
-        } else {
-            ""
-        },
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("task_id", task_id.to_string()),
+            ("round", round.to_string()),
+            ("task", ctx.path(task_file)),
+            ("spec", ctx.path(session_dir.join("artifacts/spec.md"))),
+            ("plan", ctx.path(session_dir.join("artifacts/plan.md"))),
+            (
+                "coder_summary",
+                ctx.path(
+                    session_dir
+                        .join("rounds")
+                        .join(format!("{round:03}"))
+                        .join("coder_summary.toml"),
+                ),
+            ),
+            ("prev_review", prev_review),
+            ("refine_block", refine_block),
+            (
+                "resume_hint",
+                if resume {
+                    "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n".to_string()
+                } else {
+                    String::new()
+                },
+            ),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }
 
@@ -467,20 +499,25 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
             inputs.round
         )
     });
-    prompt!(
+    render_template(
         include_str!("prompts/reviewer.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        task_id = inputs.task_id,
-        round = inputs.round,
-        task = ctx.path(inputs.task_file),
-        spec = ctx.path(inputs.session_dir.join("artifacts/spec.md")),
-        plan = ctx.path(inputs.session_dir.join("artifacts/plan.md")),
-        review_scope = ctx.path(inputs.review_scope_file),
-        prior_reviews = prior_reviews,
-        coder_summary_section = coder_summary_section,
-        review_scope_text = "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n",
-        review = ctx.path(inputs.review_file),
-        instr = ctx.live_summary_instruction(inputs.live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("task_id", inputs.task_id.to_string()),
+            ("round", inputs.round.to_string()),
+            ("task", ctx.path(inputs.task_file)),
+            ("spec", ctx.path(inputs.session_dir.join("artifacts/spec.md"))),
+            ("plan", ctx.path(inputs.session_dir.join("artifacts/plan.md"))),
+            ("review_scope", ctx.path(inputs.review_scope_file)),
+            ("prior_reviews", prior_reviews),
+            ("coder_summary_section", coder_summary_section),
+            (
+                "review_scope_text",
+                "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n".to_string(),
+            ),
+            ("review", ctx.path(inputs.review_file)),
+            ("instr", ctx.live_summary_instruction(inputs.live_summary_path)),
+        ],
     )
 }
 
@@ -491,13 +528,15 @@ pub(crate) fn simplifier_prompt(
     live_summary_path: &Path,
 ) -> String {
     let ctx = PromptCtx::new();
-    prompt!(
+    render_template(
         include_str!("prompts/simplifier.md"),
-        project_doc_instr = ctx.project_doc_instr,
-        spec_path = ctx.path(session_dir.join("artifacts/spec.md")),
-        plan_path = ctx.path(session_dir.join("artifacts/plan.md")),
-        review_scope_path = ctx.path(review_scope_file),
-        simplification_path = ctx.path(simplification_path),
-        instr = ctx.live_summary_instruction(live_summary_path),
+        &[
+            ("project_doc_instr", ctx.project_doc_instr.clone()),
+            ("spec_path", ctx.path(session_dir.join("artifacts/spec.md"))),
+            ("plan_path", ctx.path(session_dir.join("artifacts/plan.md"))),
+            ("review_scope_path", ctx.path(review_scope_file)),
+            ("simplification_path", ctx.path(simplification_path)),
+            ("instr", ctx.live_summary_instruction(live_summary_path)),
+        ],
     )
 }

@@ -35,8 +35,8 @@ Required fields per task:
                      skips test-pass check, still requires the build to be
                      clean).
   - estimated_tokens integer (target ~100k)
-  - spec_refs        array of { path, lines } into the spec
-  - plan_refs        array of { path, lines } into the plan, pointing at
+  - spec_refs        array of {{ path, lines }} into the spec
+  - plan_refs        array of {{ path, lines }} into the plan, pointing at
                      goals/sequencing/interface commitments — not at
                      recipe-style detail
   `lines` is a range like "12-45" or a single number.
@@ -64,9 +64,9 @@ missing/empty fields cause rejection.
     Run `cargo test pool::` — the new tests must pass.
     """
     estimated_tokens = 90000
-    spec_refs = [{ path = "artifacts/spec.md", lines = "10-45" }]
+    spec_refs = [{{ path = "artifacts/spec.md", lines = "10-45" }}]
     plan_refs = [
-      { path = "artifacts/plan.md", lines = "22-60" },
-      { path = "artifacts/plan.md", lines = "110-125" },
+      {{ path = "artifacts/plan.md", lines = "22-60" }},
+      {{ path = "artifacts/plan.md", lines = "110-125" }},
     ]
 {instr}

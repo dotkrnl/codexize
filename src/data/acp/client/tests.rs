@@ -1,4 +1,11 @@
 use super::super::tool_call::TOOL_CALL_MAP_CAP;
+use super::super::{AcpTextBoundary, PromptPayload, ToolCallActivityKind};
+use super::actor::{RpcClient, client_request_response};
+use super::dispatch::{AcpBoundaryState, dispatch_update};
+use super::handshake::{
+    ConfigChoice, ConfigOption, PromptTurnOutcome, apply_session_config, parse_initialize_result,
+    parse_prompt_result, prompt_request_params,
+};
 use super::*;
 use crate::{adapters::EffortLevel, state::LaunchModes};
 use std::{collections::BTreeMap, path::PathBuf};

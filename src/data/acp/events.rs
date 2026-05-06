@@ -1,18 +1,10 @@
 use crate::selection::VendorKind;
 use std::collections::VecDeque;
 
-/// Logical-message boundary signal carried alongside ACP text payloads.
-///
-/// `Continue` means the runner may append the chunk to the current live block
-/// on the matching stream. `StartNewMessage` means the runner must finalize
-/// any current live block before pushing this chunk through its accumulator.
-///
-/// The dispatcher only emits `StartNewMessage` at explicit boundaries —
-/// session start, prompt-turn reset, tool-call interleave, or a stable
-/// identity change. No-identity mid-stream chunks default to `Continue` so
-/// one streamed response is not over-split into one persisted message per
-/// chunk. Intra-message paragraph splits are still handled downstream by
-/// `AcpTextAccumulator`'s blank-line splitter.
+/// Logical-message boundary signal: `Continue` appends to the current live
+/// block; `StartNewMessage` finalizes the live block first. The dispatcher
+/// only emits `StartNewMessage` at explicit boundaries (session start,
+/// prompt-turn reset, tool-call interleave, identity change).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpTextBoundary {
     Continue,
@@ -36,13 +28,9 @@ pub enum ClientUpdate {
         boundary: AcpTextBoundary,
         identity: Option<String>,
     },
-    /// Lifecycle transition for a single `tool_call_id`. The dispatcher
-    /// emits at most one `Start` (the first time the id is observed in a
-    /// non-terminal status) and at most one `Finish` (the first time it
-    /// is observed in a terminal status). The runner timestamps each
-    /// transition when it receives the `AcpRuntimeEvent` that this
-    /// update produces, so consumers see arrival-ordered events even for
-    /// short tool calls that start and finish between poll cycles.
+    /// At most one `Start` (first non-terminal observation) and one `Finish`
+    /// (first terminal observation) per `tool_call_id`. Runner stamps the
+    /// time on receipt so consumers see arrival-ordered events.
     ToolCallActivity {
         tool_call_id: String,
         kind: ToolCallActivityKind,
@@ -70,11 +58,9 @@ pub enum AcpRuntimeEvent {
     Lifecycle(AcpLifecycleEvent),
     Text(AcpTextEvent),
     Completion(AcpCompletionEvent),
-    /// Runner-observable lifecycle transition for a single `tool_call_id`.
-    /// Emitted at most once per id per kind. Carries no timestamp itself;
-    /// the runner stamps `Instant::now()` as it consumes the event so the
-    /// idle-adjusted clock pauses at the moment the runner saw the
-    /// transition rather than at the App's next poll.
+    /// Runner-observable transition: at most once per id per kind. Runner
+    /// stamps `Instant::now()` on consumption so the idle clock pauses at
+    /// arrival, not at the App's next poll.
     ToolCallActivity {
         tool_call_id: String,
         kind: ToolCallActivityKind,
@@ -181,40 +167,31 @@ impl Default for AcpTextAccumulator {
 }
 
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
+    let text_event = |text: String, thought: bool, boundary, identity| {
+        AcpRuntimeEvent::Text(AcpTextEvent {
+            text,
+            interactive,
+            thought,
+            boundary,
+            identity,
+        })
+    };
     match update {
         ClientUpdate::AgentMessageText {
             text,
             boundary,
             identity,
-        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text,
-            interactive,
-            thought: false,
-            boundary,
-            identity,
-        })),
+        } => Some(text_event(text, false, boundary, identity)),
         ClientUpdate::AgentThoughtText {
             text,
             boundary,
             identity,
-        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text,
-            interactive,
-            thought: true,
-            boundary,
-            identity,
-        })),
+        } => Some(text_event(text, true, boundary, identity)),
         ClientUpdate::ToolCallText {
             text,
             boundary,
             identity,
-        } => Some(AcpRuntimeEvent::Text(AcpTextEvent {
-            text: format!("{text}\n\n"),
-            interactive,
-            thought: true,
-            boundary,
-            identity,
-        })),
+        } => Some(text_event(format!("{text}\n\n"), true, boundary, identity)),
         ClientUpdate::ToolCallActivity { tool_call_id, kind } => {
             Some(AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind })
         }

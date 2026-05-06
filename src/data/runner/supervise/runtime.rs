@@ -1,6 +1,9 @@
 use super::launch::write_launch_cause;
 use super::{CancelSignal, ManagedAcpOutcome};
-use crate::acp::{AcpConnector, AcpRuntimeEvent, SubprocessConnector, translate_update};
+use crate::acp::{AcpConnector, AcpRuntimeEvent, AcpSession, SubprocessConnector, translate_update};
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod tests;
 use crate::runner::exit::{
     enforce_readonly_workspace_policy, git_rev_parse_head, git_status_porcelain,
     validate_toml_artifacts, write_finish_stamp_for_outcome,
@@ -56,9 +59,21 @@ fn run_managed_acp_loop(
     waiting_for_input: &watch::Sender<bool>,
 ) -> Result<ManagedAcpOutcome> {
     let connector = SubprocessConnector;
-    let mut session = connector
+    let session = connector
         .connect(&launch.resolved)
         .map_err(|err| anyhow!("{err}"))?;
+    drive_acp_session(session, launch, cancel, input_rx, waiting_for_input)
+}
+/// Drive a connected ACP session through its prompt-turn lifecycle. Extracted
+/// so tests can inject a fake `AcpSession` and exercise the cancel/interrupt
+/// paths without spinning up a real subprocess connector.
+fn drive_acp_session(
+    mut session: Box<dyn AcpSession>,
+    launch: &ManagedAcpLaunch,
+    cancel: &CancelSignal,
+    input_rx: &mut mpsc::UnboundedReceiver<AcpInput>,
+    waiting_for_input: &watch::Sender<bool>,
+) -> Result<ManagedAcpOutcome> {
     let mut agent_text = AcpTextStream::new();
     let mut thought_text = AcpTextStream::new();
     let mut pending_input = VecDeque::new();
@@ -146,19 +161,29 @@ fn run_managed_acp_loop(
             Some(AcpRuntimeEvent::PromptTurnFailed { .. }) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
                 agent_text.finish_turn(launch, MessageKind::AgentText);
-                if launch.resolved.interactive && interrupting_turn {
-                    if let Some(text) = pending_input.pop_front() {
-                        let _ = waiting_for_input.send_replace(false);
-                        session
-                            .submit_prompt(&text)
-                            .map_err(|err| anyhow!("{err}"))?;
+                // Watchdog warnings (and any other interrupt-with-text)
+                // cancel the in-flight ACP turn and leave the resumption text
+                // queued in pending_input. If we got here from such an
+                // interrupt — interactive or not — resubmit the queued text
+                // as the next prompt so the agent can act on the warning and
+                // run to natural completion. Without this, non-interactive
+                // runs just exit(1) and the warning text is silently lost.
+                if interrupting_turn && let Some(text) = pending_input.pop_front() {
+                    let _ = waiting_for_input.send_replace(false);
+                    session
+                        .submit_prompt(&text)
+                        .map_err(|err| anyhow!("{err}"))?;
+                    interrupting_turn = false;
+                    if launch.resolved.interactive {
                         waiting_for_interactive_prompt = false;
-                        interrupting_turn = false;
-                    } else {
-                        waiting_for_interactive_prompt = true;
-                        interrupting_turn = false;
-                        let _ = waiting_for_input.send_replace(true);
                     }
+                    poll_park();
+                    continue;
+                }
+                if launch.resolved.interactive && interrupting_turn {
+                    waiting_for_interactive_prompt = true;
+                    interrupting_turn = false;
+                    let _ = waiting_for_input.send_replace(true);
                     poll_park();
                     continue;
                 }

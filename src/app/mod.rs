@@ -14,6 +14,8 @@ pub(crate) mod models;
 pub use crate::ui::widgets::models_area::view as models_area;
 mod observation;
 pub(crate) use crate::ui::palette;
+mod prompt_builders;
+mod prompt_support;
 pub(crate) mod prompts;
 mod review_banner;
 pub(crate) use crate::ui::render::state as render_view_model;

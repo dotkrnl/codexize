@@ -37,7 +37,8 @@ use std::path::PathBuf;
 pub type AcpResult<T> = Result<T, AcpError>;
 
 #[rustfmt::skip]
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpError {
     #[error("{0}")] HumanBlock(String),
     #[error("{0}")] Io(String),

@@ -14,8 +14,6 @@ pub(in crate::data) const INVOCATION_PREFIX: &str = "tool: ";
 pub(in crate::data) const RESULT_PREFIX: &str = "result: ";
 pub(in crate::data) const TOOL_CALL_MAP_CAP: usize = 256;
 
-const TRUNCATE_SUFFIX: &str = "...";
-
 #[derive(Debug, Default, Clone)]
 pub(in crate::data) struct ToolCallDisplayState {
     pub(in crate::data) tool_call_id: Option<String>,
@@ -30,78 +28,74 @@ pub(in crate::data) struct ToolCallDisplayState {
 
 impl ToolCallDisplayState {
     pub(in crate::data) fn from_value(value: &Value) -> Self {
-        let non_empty_string = |key: &str| {
+        let s = |key: &str| {
             value
                 .get(key)
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .filter(|text| !text.is_empty())
+                .filter(|t| !t.is_empty())
         };
-        let locations = value
-            .get("locations")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.get("path").and_then(Value::as_str))
-                    .filter(|path| !path.is_empty())
-                    .map(PathBuf::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let content = value
-            .get("content")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
         Self {
-            tool_call_id: non_empty_string("toolCallId"),
-            title: non_empty_string("title"),
-            kind: non_empty_string("kind"),
-            status: non_empty_string("status"),
-            locations,
+            tool_call_id: s("toolCallId"),
+            title: s("title"),
+            kind: s("kind"),
+            status: s("status"),
+            locations: value
+                .get("locations")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|i| i.get("path").and_then(Value::as_str))
+                        .filter(|p| !p.is_empty())
+                        .map(PathBuf::from)
+                        .collect()
+                })
+                .unwrap_or_default(),
             raw_input: value.get("rawInput").cloned().unwrap_or(Value::Null),
             raw_output: value.get("rawOutput").cloned().unwrap_or(Value::Null),
-            content,
+            content: value
+                .get("content")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
         }
     }
 
     /// Merge non-empty fields from `payload`. Absent / null values never erase
     /// previously-known state.
-    pub(in crate::data) fn merge(&mut self, payload: &ToolCallDisplayState) {
-        if payload.title.is_some() {
-            self.title = payload.title.clone();
+    pub(in crate::data) fn merge(&mut self, p: &ToolCallDisplayState) {
+        if p.title.is_some() {
+            self.title = p.title.clone();
         }
-        if payload.kind.is_some() {
-            self.kind = payload.kind.clone();
+        if p.kind.is_some() {
+            self.kind = p.kind.clone();
         }
-        if payload.status.is_some() {
-            self.status = payload.status.clone();
+        if p.status.is_some() {
+            self.status = p.status.clone();
         }
-        if !payload.locations.is_empty() {
-            self.locations = payload.locations.clone();
+        if !p.locations.is_empty() {
+            self.locations = p.locations.clone();
         }
-        if !payload.raw_input.is_null() {
-            self.raw_input = payload.raw_input.clone();
+        if !p.raw_input.is_null() {
+            self.raw_input = p.raw_input.clone();
         }
-        if !payload.raw_output.is_null() {
-            self.raw_output = payload.raw_output.clone();
+        if !p.raw_output.is_null() {
+            self.raw_output = p.raw_output.clone();
         }
-        if !payload.content.is_empty() {
-            self.content = payload.content.clone();
+        if !p.content.is_empty() {
+            self.content = p.content.clone();
         }
     }
 }
 
 /// `toolCallId` → merged display state. `entries` is FIFO-bounded with
-/// overwrite-on-id-reuse for display; `*_emitted` sets are monotonic for the
-/// session lifetime so the watchdog never sees duplicate Start/Finish.
+/// overwrite-on-id-reuse; `emitted` records (id, start|finish) monotonically.
 #[derive(Debug, Default)]
 pub(in crate::data) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,
-    insertion_order: VecDeque<String>,
-    start_emitted: BTreeSet<String>,
-    terminal_emitted: BTreeSet<String>,
+    order: VecDeque<String>,
+    emitted: BTreeSet<(String, bool)>,
 }
 
 impl ToolCallMap {
@@ -113,23 +107,27 @@ impl ToolCallMap {
     pub(in crate::data) fn len(&self) -> usize {
         self.entries.len()
     }
-
     #[cfg(test)]
     pub(in crate::data) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
         self.entries.get(id)
     }
+    #[cfg(test)]
+    pub(in crate::data) fn contains(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
 
     pub(in crate::data) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() {
-            self.insertion_order.retain(|existing| existing != &id);
+            self.order.retain(|x| x != &id);
         }
-        while self.insertion_order.len() >= TOOL_CALL_MAP_CAP {
-            let Some(oldest) = self.insertion_order.pop_front() else {
+        while self.order.len() >= TOOL_CALL_MAP_CAP {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            } else {
                 break;
-            };
-            self.entries.remove(&oldest);
+            }
         }
-        self.insertion_order.push_back(id.clone());
+        self.order.push_back(id.clone());
         self.entries.insert(id, state);
     }
 
@@ -145,29 +143,21 @@ impl ToolCallMap {
 
     pub(in crate::data) fn evict(&mut self, id: &str) {
         if self.entries.remove(id).is_some() {
-            self.insertion_order.retain(|existing| existing != id);
+            self.order.retain(|x| x != id);
         }
     }
 
     pub(in crate::data) fn mark_start_emitted(&mut self, id: &str) {
-        self.start_emitted.insert(id.to_string());
+        self.emitted.insert((id.to_string(), false));
     }
-
     pub(in crate::data) fn start_emitted(&self, id: &str) -> bool {
-        self.start_emitted.contains(id)
+        self.emitted.contains(&(id.to_string(), false))
     }
-
     pub(in crate::data) fn mark_terminal_emitted(&mut self, id: &str) {
-        self.terminal_emitted.insert(id.to_string());
+        self.emitted.insert((id.to_string(), true));
     }
-
     pub(in crate::data) fn terminal_emitted(&self, id: &str) -> bool {
-        self.terminal_emitted.contains(id)
-    }
-
-    #[cfg(test)]
-    pub(in crate::data) fn contains(&self, id: &str) -> bool {
-        self.entries.contains_key(id)
+        self.emitted.contains(&(id.to_string(), true))
     }
 }
 
@@ -182,18 +172,13 @@ fn is_success_status(status: &str) -> bool {
     matches!(status, "completed" | "success" | "succeeded" | "ok")
 }
 
-/// Sanitize a raw output snippet: strip ANSI / OSC escapes via `vte`,
-/// replace control chars and tabs/newlines with single spaces, then trim.
-/// Truncation is applied separately.
+/// Strip ANSI escapes; replace control chars and whitespace runs with one space.
 pub(in crate::data) fn sanitize_snippet(input: &str) -> String {
-    let stripped = strip_ansi_escapes::strip_str(input);
-    let mut out = String::with_capacity(stripped.len());
-    for c in stripped.chars() {
+    let mut out = String::with_capacity(input.len());
+    for c in strip_ansi_escapes::strip_str(input).chars() {
         let code = c as u32;
-        let is_replaced_control =
-            (code <= 0x1F && c != '\t' && c != '\n' && c != '\r') || code == 0x7F;
-        let is_whitespace_run = matches!(c, ' ' | '\t' | '\n' | '\r') || is_replaced_control;
-        if is_whitespace_run {
+        let is_ctrl = (code <= 0x1F && c != '\t' && c != '\n' && c != '\r') || code == 0x7F;
+        if c.is_ascii_whitespace() || is_ctrl {
             if !out.ends_with(' ') {
                 out.push(' ');
             }
@@ -204,40 +189,21 @@ pub(in crate::data) fn sanitize_snippet(input: &str) -> String {
     out.trim().to_string()
 }
 
-/// Truncate `text` to `max` chars, appending `...` if any chars dropped. Never
-/// splits a UTF-8 code point.
+/// Truncate `text` to `max` chars, appending `...` if any chars dropped.
 pub(in crate::data) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }
-    let suffix_len = TRUNCATE_SUFFIX.chars().count();
-    let target = max.saturating_sub(suffix_len);
     let cutoff = text
         .char_indices()
-        .nth(target)
-        .map(|(idx, _)| idx)
+        .nth(max.saturating_sub(3))
+        .map(|(i, _)| i)
         .unwrap_or(text.len());
-    let mut out = String::with_capacity(cutoff + TRUNCATE_SUFFIX.len());
-    out.push_str(&text[..cutoff]);
-    out.push_str(TRUNCATE_SUFFIX);
-    out
+    format!("{}...", &text[..cutoff])
 }
 
 fn collapse_line_whitespace(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut prev_space = false;
-    for c in text.chars() {
-        if c.is_whitespace() {
-            if !prev_space {
-                out.push(' ');
-                prev_space = true;
-            }
-        } else {
-            out.push(c);
-            prev_space = false;
-        }
-    }
-    out.trim().to_string()
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,40 +213,41 @@ pub(in crate::data) enum SnippetKind {
 }
 
 fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)> {
-    let status = state.status.as_deref();
-    let success = status.map(is_success_status).unwrap_or(true);
-
-    let cleaned_non_empty = |text: &str| {
-        let cleaned = sanitize_snippet(text);
-        (!cleaned.is_empty()).then_some(cleaned)
+    let success = state
+        .status
+        .as_deref()
+        .map(is_success_status)
+        .unwrap_or(true);
+    let cleaned = |text: &str| {
+        let s = sanitize_snippet(text);
+        (!s.is_empty()).then_some(s)
     };
+    let pick = |k: SnippetKind, text: Option<&str>| text.and_then(cleaned).map(|t| (k, t));
 
     if let Some(map) = state.raw_output.as_object() {
         if !success
-            && let Some(text) = map.get("stderr").and_then(Value::as_str)
-            && let Some(cleaned) = cleaned_non_empty(text)
+            && let Some(hit) = pick(
+                SnippetKind::Stderr,
+                map.get("stderr").and_then(Value::as_str),
+            )
         {
-            return Some((SnippetKind::Stderr, cleaned));
+            return Some(hit);
         }
         for key in ["formatted_output", "aggregated_output", "stdout"] {
-            if let Some(text) = map.get(key).and_then(Value::as_str)
-                && let Some(cleaned) = cleaned_non_empty(text)
-            {
-                return Some((SnippetKind::Output, cleaned));
+            if let Some(hit) = pick(SnippetKind::Output, map.get(key).and_then(Value::as_str)) {
+                return Some(hit);
             }
         }
-    } else if let Some(text) = state.raw_output.as_str()
-        && let Some(cleaned) = cleaned_non_empty(text)
-    {
-        return Some((SnippetKind::Output, cleaned));
+    } else if let Some(hit) = pick(SnippetKind::Output, state.raw_output.as_str()) {
+        return Some(hit);
     }
-
     for block in &state.content {
-        for pointer in ["/text", "/content/text"] {
-            if let Some(text) = block.pointer(pointer).and_then(Value::as_str)
-                && let Some(cleaned) = cleaned_non_empty(text)
-            {
-                return Some((SnippetKind::Output, cleaned));
+        for ptr in ["/text", "/content/text"] {
+            if let Some(hit) = pick(
+                SnippetKind::Output,
+                block.pointer(ptr).and_then(Value::as_str),
+            ) {
+                return Some(hit);
             }
         }
     }
@@ -288,37 +255,29 @@ fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)>
 }
 
 fn shorten_path(path: &Path, cwd: &Path) -> String {
-    if let Ok(rel) = path.strip_prefix(cwd) {
-        let rendered = rel.to_string_lossy();
-        if !rendered.is_empty() {
-            return rendered.into_owned();
-        }
+    if let Ok(rel) = path.strip_prefix(cwd)
+        && !rel.as_os_str().is_empty()
+    {
+        return rel.to_string_lossy().into_owned();
     }
-    if let Some(name) = path.file_name() {
-        return name.to_string_lossy().into_owned();
-    }
-    path.to_string_lossy().into_owned()
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
 fn extract_command(raw_input: &Value) -> Option<String> {
     if let Some(items) = raw_input.get("command").and_then(Value::as_array) {
         let parts: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
         if !parts.is_empty() {
-            // `["/bin/zsh", "-lc", "<script>"]`: the script is the meaningful payload.
+            // `["/bin/zsh", "-lc", "<script>"]`: keep the script payload only.
             if parts.len() >= 2 && parts[parts.len() - 2] == "-lc" {
                 return Some(parts[parts.len() - 1].to_string());
             }
             return Some(parts.join(" "));
         }
     }
-    if let Some(text) = raw_input
-        .pointer("/parsed_cmd/0/cmd")
-        .and_then(Value::as_str)
-        && !text.is_empty()
-    {
-        return Some(text.to_string());
-    }
     for path in [
+        "/parsed_cmd/0/cmd",
         "/arguments/cmd",
         "/arguments/command",
         "/cmd",
@@ -338,28 +297,23 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
     let kind = state.kind.as_deref();
     if kind == Some("read") && !state.locations.is_empty() {
         let head = shorten_path(&state.locations[0], cwd);
-        return Some(if state.locations.len() == 1 {
+        let rest = state.locations.len() - 1;
+        return Some(if rest == 0 {
             format!("read({head})")
         } else {
-            format!("read({head}, +{} more)", state.locations.len() - 1)
+            format!("read({head}, +{rest} more)")
         });
     }
     if let Some(cmd) = extract_command(&state.raw_input) {
         return Some(format!("exec({cmd})"));
     }
     if let (Some(kind), Some(loc)) = (kind, state.locations.first())
-        && kind != "read"
-        && kind != "execute"
+        && !matches!(kind, "read" | "execute")
     {
         return Some(format!("{kind}({})", shorten_path(loc, cwd)));
     }
-    if let Some(title) = state.title.as_deref() {
-        let cleaned = sanitize_snippet(title);
-        if !cleaned.is_empty() {
-            return Some(cleaned);
-        }
-    }
-    None
+    let title = sanitize_snippet(state.title.as_deref()?);
+    (!title.is_empty()).then_some(title)
 }
 
 pub(in crate::data) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {

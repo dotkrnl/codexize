@@ -236,7 +236,20 @@ fn prompt_insta_snapshots_match_fixtures() {
         );
         assert_prompt_insta_snapshot(
             "simplifier",
-            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live),
+            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live, &[]),
+        );
+        assert_prompt_insta_snapshot(
+            "simplifier_with_refine",
+            &simplifier_prompt(
+                &session_dir,
+                &review_scope_r1,
+                &simplification,
+                &live,
+                &[
+                    "rename internal `foo` helper to `parse_foo`".to_string(),
+                    "tighten error message in load path".to_string(),
+                ],
+            ),
         );
     });
 }

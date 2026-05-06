@@ -83,11 +83,25 @@ impl App {
         };
         let attempt = self.attempt_for("simplifier", None, round);
         let live_summary_path = self.live_summary_path_for_run("simplifier", None, round, attempt);
+        // Drain refine feedback the reviewer stashed when approving the final
+        // task with a Refine verdict. Without this, that feedback is lost — no
+        // later coder runs to consume it, and the validator stays unaware.
+        let resume = self
+            .state
+            .agent_runs
+            .iter()
+            .any(|run| run.stage == "simplifier" && run.round == round);
+        let refine_carryover: Vec<String> = if resume {
+            Vec::new()
+        } else {
+            session_state::transitions::take_pending_refine_feedback(&mut self.state)
+        };
         let prompt = simplifier_prompt(
             &session_dir,
             &review_scope_file,
             &simplification_path,
             &live_summary_path,
+            &refine_carryover,
         );
         let prompt_path = session_dir
             .join("prompts")

@@ -310,12 +310,29 @@ pub(crate) fn simplifier_prompt(
     review_scope_file: &Path,
     simplification_path: &Path,
     live_summary_path: &Path,
+    refine_carryover: &[String],
 ) -> String {
+    let refine_block = if refine_carryover.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nRefine carryover from prior task's reviewer (apply opportunistically while you simplify — these are nice-to-haves, not blockers, and only if they preserve behavior):\n{}\n",
+            refine_carryover
+                .iter()
+                .map(|item| format!("  - {}", item.trim()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
     let mut ctx = PromptCtx::new();
     ctx.path_arg("spec_path", session_dir.join("artifacts/spec.md"))
         .path_arg("plan_path", session_dir.join("artifacts/plan.md"))
         .path_arg("review_scope_path", review_scope_file)
         .path_arg("simplification_path", simplification_path)
+        .set("refine_block", refine_block)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/simplifier.md"))
 }
+#[cfg(test)]
+#[path = "prompt_builders_tests.rs"]
+mod tests;

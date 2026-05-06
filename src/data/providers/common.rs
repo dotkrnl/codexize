@@ -1,6 +1,6 @@
 use crate::data::warmup;
 use anyhow::{Context, Result};
-use reqwest::blocking::{Client, RequestBuilder, Response};
+use reqwest::{Client, RequestBuilder, Response};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -18,23 +18,25 @@ pub fn build_http_client(timeout_secs: u64) -> Result<Client> {
 }
 
 /// Send a request and return the response, checking for HTTP errors.
-pub fn send_request(request: RequestBuilder, provider: &str) -> Result<Response> {
+pub async fn send_request(request: RequestBuilder, provider: &str) -> Result<Response> {
     request
         .send()
+        .await
         .and_then(|r| r.error_for_status())
         .with_context(|| format!("{provider} request failed"))
 }
 
 /// Parse a JSON response body, returning a descriptive error on failure.
-pub fn parse_json_response(response: Response, provider: &str) -> Result<Value> {
+pub async fn parse_json_response(response: Response, provider: &str) -> Result<Value> {
     response
         .json::<Value>()
+        .await
         .with_context(|| format!("{provider} response was not valid JSON"))
 }
 
 /// Send a request and parse the JSON response with provider-specific context.
-pub(crate) fn fetch_json_response(request: RequestBuilder, provider: &str) -> Result<Value> {
-    parse_json_response(send_request(request, provider)?, provider)
+pub(crate) async fn fetch_json_response(request: RequestBuilder, provider: &str) -> Result<Value> {
+    parse_json_response(send_request(request, provider).await?, provider).await
 }
 
 /// Run a provider CLI briefly so later quota/status calls hit a warmed-up auth state.
@@ -140,12 +142,12 @@ mod tests {
         assert!(msg.contains("HOME is not set"), "missing context: {msg}");
     }
 
-    #[test]
-    fn send_request_returns_provider_context_on_connection_refused() {
+    #[tokio::test]
+    async fn send_request_returns_provider_context_on_connection_refused() {
         let client = build_http_client(2).unwrap();
         // 127.0.0.1:1 is virtually always closed.
         let request = client.get("http://127.0.0.1:1/never");
-        let result = send_request(request, "test-provider");
+        let result = send_request(request, "test-provider").await;
         let err = result.expect_err("connection refused expected");
         let msg = format!("{err:#}");
         assert!(
@@ -154,43 +156,43 @@ mod tests {
         );
     }
 
-    fn spawn_one_shot_http_responder(body: &'static str) -> std::net::SocketAddr {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
+    async fn spawn_one_shot_http_responder(body: &'static str) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
+                let _ = stream.read(&mut buf).await;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 );
-                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(response.as_bytes()).await;
             }
         });
         addr
     }
 
-    #[test]
-    fn parse_json_response_returns_value_for_valid_json() {
-        let addr = spawn_one_shot_http_responder(r#"{"hello":"world"}"#);
+    #[tokio::test]
+    async fn parse_json_response_returns_value_for_valid_json() {
+        let addr = spawn_one_shot_http_responder(r#"{"hello":"world"}"#).await;
         let client = build_http_client(5).unwrap();
         let req = client.get(format!("http://{addr}/"));
-        let resp = send_request(req, "json-test").unwrap();
-        let value = parse_json_response(resp, "json-test").unwrap();
+        let resp = send_request(req, "json-test").await.unwrap();
+        let value = parse_json_response(resp, "json-test").await.unwrap();
         assert_eq!(value["hello"].as_str(), Some("world"));
     }
 
-    #[test]
-    fn fetch_json_response_returns_provider_context_on_malformed_body() {
-        let addr = spawn_one_shot_http_responder("not-json-at-all");
+    #[tokio::test]
+    async fn fetch_json_response_returns_provider_context_on_malformed_body() {
+        let addr = spawn_one_shot_http_responder("not-json-at-all").await;
         let client = build_http_client(5).unwrap();
         let req = client.get(format!("http://{addr}/"));
-        let result = fetch_json_response(req, "malformed-test");
+        let result = fetch_json_response(req, "malformed-test").await;
         let err = result.expect_err("malformed JSON must error");
         let msg = format!("{err:#}");
         assert!(

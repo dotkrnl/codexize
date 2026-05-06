@@ -7,8 +7,6 @@ use crate::logic::selection::types::{QuotaError, VendorKind};
 use crate::model_names;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
-use std::sync::mpsc;
-use std::thread;
 
 pub use crate::logic::selection::quota::{find_quota_by_heuristic, find_reset_by_heuristic};
 
@@ -25,44 +23,61 @@ pub fn load_quota_maps() -> QuotaLoadResult {
 }
 
 pub fn load_quota_maps_for(vendors: impl IntoIterator<Item = VendorKind>) -> QuotaLoadResult {
-    let (tx, rx) = mpsc::channel();
-    let vendors = vendors.into_iter().collect::<Vec<_>>();
-    thread::scope(|scope| {
-        for vendor in vendors {
-            let tx = tx.clone();
-            scope.spawn(move || {
-                let _ = tx.send((vendor, load_quota_map_for_vendor(vendor)));
-            });
-        }
-        drop(tx);
-        let mut maps = BTreeMap::new();
-        let mut reset_maps = BTreeMap::new();
-        let mut errors = Vec::new();
-        for (vendor, result) in rx {
-            match result {
-                Ok((map, reset_map)) => {
-                    maps.insert(vendor, map);
-                    reset_maps.insert(vendor, reset_map);
-                }
-                Err(e) => errors.push(QuotaError { vendor, message: e }),
-            }
-        }
-        (maps, reset_maps, errors)
-    })
+    crate::data::async_bridge::block_on_io(load_quota_maps_for_async(vendors))
 }
 
-fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndResetMaps, String> {
+pub async fn load_quota_maps_for_async(
+    vendors: impl IntoIterator<Item = VendorKind>,
+) -> QuotaLoadResult {
+    let vendors = vendors.into_iter().collect::<Vec<_>>();
+    let tasks = vendors
+        .into_iter()
+        .map(|vendor| {
+            (
+                vendor,
+                tokio::spawn(async move { load_quota_map_for_vendor(vendor).await }),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut maps = BTreeMap::new();
+    let mut reset_maps = BTreeMap::new();
+    let mut errors = Vec::new();
+    for (vendor, task) in tasks {
+        let Ok(result) = task.await else {
+            errors.push(QuotaError {
+                vendor,
+                message: "quota worker task failed".to_string(),
+            });
+            continue;
+        };
+        match result {
+            Ok((map, reset_map)) => {
+                maps.insert(vendor, map);
+                reset_maps.insert(vendor, reset_map);
+            }
+            Err(e) => errors.push(QuotaError { vendor, message: e }),
+        }
+    }
+    (maps, reset_maps, errors)
+}
+
+async fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndResetMaps, String> {
     match vendor {
-        VendorKind::Codex => providers::codex::load_live_models()
+        VendorKind::Codex => providers::codex::load_live_models_async()
+            .await
             .map(live_map_codex)
             .map_err(|e| e.to_string()),
-        VendorKind::Claude => providers::claude::load_live_models()
+        VendorKind::Claude => providers::claude::load_live_models_async()
+            .await
             .map(live_map_claude)
             .map_err(|e| e.to_string()),
-        VendorKind::Gemini => providers::gemini::load_live_models()
+        VendorKind::Gemini => providers::gemini::load_live_models_async()
+            .await
             .map(live_map_direct)
             .map_err(|e| e.to_string()),
-        VendorKind::Kimi => providers::kimi::load_live_models()
+        VendorKind::Kimi => providers::kimi::load_live_models_async()
+            .await
             .map(live_map_kimi)
             .map_err(|e| e.to_string()),
     }
@@ -209,9 +224,9 @@ fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
 mod tests {
     use super::*;
 
-    #[test]
-    fn load_quota_maps_for_empty_vendor_set_skips_all_probes() {
-        let (maps, reset_maps, errors) = load_quota_maps_for([]);
+    #[tokio::test]
+    async fn load_quota_maps_for_empty_vendor_set_skips_all_probes() {
+        let (maps, reset_maps, errors) = load_quota_maps_for_async([]).await;
 
         assert!(maps.is_empty());
         assert!(reset_maps.is_empty());

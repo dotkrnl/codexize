@@ -10,10 +10,14 @@ const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const BETA_HEADER: &str = "oauth-2025-04-20";
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
+    crate::data::async_bridge::block_on_io(load_live_models_async())
+}
+
+pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
     let token = resolve_access_token()?;
     let org_id = resolve_org_id()?;
-    let payload = fetch_usage_payload(&token, &org_id)?;
+    let payload = fetch_usage_payload(&token, &org_id).await?;
     live_models_from_payload(&payload)
 }
 
@@ -107,7 +111,7 @@ fn resolve_org_id() -> Result<String> {
         .context("Claude auth status did not include orgId")
 }
 
-fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
+async fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
     let client = build_http_client(5)?;
 
     let request = client
@@ -119,7 +123,7 @@ fn fetch_usage_payload(token: &str, org_id: &str) -> Result<Value> {
         .header("anthropic-beta", BETA_HEADER)
         .header("anthropic-version", "2023-06-01");
 
-    fetch_json_response(request, "Claude")
+    fetch_json_response(request, "Claude").await
 }
 
 #[cfg(test)]

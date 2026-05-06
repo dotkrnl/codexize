@@ -12,8 +12,12 @@ use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
+    crate::data::async_bridge::block_on_io(load_live_models_async())
+}
+
+pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
-    let payload = fetch_usage_payload(&api_key)?;
+    let payload = fetch_usage_payload(&api_key).await?;
     let mut models = BTreeMap::<String, Option<u8>>::new();
 
     if let Some(usage) = payload.get("usage").and_then(Value::as_object) {
@@ -120,7 +124,7 @@ fn kimi_credential_refresh_launch() -> ChildLaunch {
         .stderr_null()
 }
 
-fn fetch_usage_payload(api_key: &str) -> Result<Value> {
+async fn fetch_usage_payload(api_key: &str) -> Result<Value> {
     let base_url =
         env::var("KIMI_CODE_BASE_URL").unwrap_or_else(|_| DEFAULT_USAGE_BASE_URL.to_string());
     let usage_url = format!("{}/usages", base_url.trim_end_matches('/'));
@@ -128,7 +132,7 @@ fn fetch_usage_payload(api_key: &str) -> Result<Value> {
 
     let request = client.get(&usage_url).bearer_auth(api_key);
 
-    fetch_json_response(request, "Kimi")
+    fetch_json_response(request, "Kimi").await
 }
 
 fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> {

@@ -4,7 +4,6 @@ use std::io::Write;
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::thread;
 use std::time::{Duration, Instant};
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(60);
@@ -48,7 +47,7 @@ fn acquire(path: &Path) -> Result<()> {
                 if Instant::now() >= deadline {
                     anyhow::bail!("timed out waiting for lock at {}", path.display());
                 }
-                thread::sleep(POLL_INTERVAL);
+                crate::data::async_bridge::sleep_blocking(POLL_INTERVAL);
             }
             Err(err) => {
                 return Err(err)
@@ -126,7 +125,7 @@ fn now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Barrier};
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn lock_path(dir: &TempDir) -> std::path::PathBuf {
@@ -163,23 +162,23 @@ mod tests {
         assert_eq!(result, "ok");
     }
 
-    #[test]
-    fn concurrent_lock_serializes_access() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_lock_serializes_access() {
         let dir = TempDir::new().unwrap();
         let path = lock_path(&dir);
         let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let barrier = Arc::new(Barrier::new(2));
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
 
         let handles: Vec<_> = (0..2)
             .map(|_| {
                 let p = path.clone();
                 let c = Arc::clone(&counter);
                 let b = Arc::clone(&barrier);
-                thread::spawn(move || {
-                    b.wait();
+                tokio::task::spawn_blocking(move || {
+                    crate::data::async_bridge::block_on_io(b.wait());
                     with_lock(&p, || {
                         c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(50));
+                        crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
                         Ok(())
                     })
                     .unwrap();
@@ -188,7 +187,7 @@ mod tests {
             .collect();
 
         for h in handles {
-            h.join().unwrap();
+            h.await.unwrap();
         }
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
     }

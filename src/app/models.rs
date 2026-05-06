@@ -3,22 +3,25 @@ use crate::{
     selection::{CachedModel, QuotaError, VendorKind},
 };
 use ratatui::style::Color;
-use std::{
-    sync::mpsc,
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 use super::{App, state::ModelRefreshState, status_line::Severity};
 
 const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub(crate) fn spawn_refresh() -> mpsc::Receiver<(Vec<CachedModel>, Vec<QuotaError>)> {
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = tx.send(crate::data::selection_assembly::assemble_models());
-    });
+pub(crate) fn spawn_refresh() -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::spawn(async move {
+            let _ = tx.send(crate::data::selection_assembly::assemble_models_async().await);
+        });
+    } else {
+        let _ = tx.send(crate::data::async_bridge::block_on_io(
+            crate::data::selection_assembly::assemble_models_async(),
+        ));
+    }
     rx
 }
 
@@ -64,7 +67,7 @@ impl App {
     }
 
     pub(crate) fn refresh_models_if_due(&mut self) {
-        match &self.model_refresh {
+        match &mut self.model_refresh {
             ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
                 Ok((models, errors)) => {
                     if !models.is_empty() {
@@ -80,7 +83,7 @@ impl App {
                     self.quota_errors = errors;
                     self.model_refresh = ModelRefreshState::Idle(Instant::now());
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                Err(mpsc::error::TryRecvError::Empty) => {
                     if started_at.elapsed() >= REFRESH_TIMEOUT {
                         self.push_status(
                             "model refresh timed out — retrying".to_string(),
@@ -91,7 +94,7 @@ impl App {
                         self.model_refresh = ModelRefreshState::Idle(Instant::now());
                     }
                 }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(mpsc::error::TryRecvError::Disconnected) => {
                     self.push_status(
                         "model refresh worker exited unexpectedly".to_string(),
                         Severity::Error,

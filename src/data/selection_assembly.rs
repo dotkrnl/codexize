@@ -17,8 +17,12 @@ use std::collections::BTreeSet;
 /// Refreshes any expired cache section in-process, persisting the fresh
 /// payloads back to the cache before delegating to the pure assembly.
 pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
+    crate::data::async_bridge::block_on_io(assemble_models_async())
+}
+
+pub async fn assemble_models_async() -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load();
-    assemble_with_refresh(loaded, &AcpConfig::default().available_vendors())
+    assemble_with_refresh(loaded, &AcpConfig::default().available_vendors()).await
 }
 
 /// Build the canonical model universe purely from cached data, performing no
@@ -64,7 +68,7 @@ fn assemble_from_loaded_with_available(
     pure::assemble_universe(dashboard, quotas, resets, available_vendors)
 }
 
-fn assemble_with_refresh(
+async fn assemble_with_refresh(
     loaded: LoadedCache,
     available_vendors: &BTreeSet<VendorKind>,
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
@@ -86,7 +90,7 @@ fn assemble_with_refresh(
     // Dashboard refresh (independent of quota refresh).
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
-        match dashboard::load_models() {
+        match dashboard::load_models_async().await {
             Ok(LoadOutcome::Both {
                 models: fresh,
                 warnings,
@@ -133,7 +137,7 @@ fn assemble_with_refresh(
     let reset_payload;
     if quota_expired || resets_expired || reset_missing {
         let (fresh_quotas, fresh_resets, fresh_errors) =
-            quota::load_quota_maps_for(available_vendors.iter().copied());
+            quota::load_quota_maps_for_async(available_vendors.iter().copied()).await;
         quota_errors.extend(fresh_errors);
         quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas);
         reset_payload = pure::merge_reset_payload(&cached_resets, fresh_resets);

@@ -7,7 +7,6 @@ use nix::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::{
     io::{Read, Write},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -61,7 +60,9 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
     let mut reader = master
         .try_clone_reader()
         .context("failed to open warm-up PTY reader")?;
-    thread::spawn(move || {
+    // portable-pty exposes blocking readers; keep that work on tokio's
+    // blocking pool while the supervisor/runtime stays async-owned.
+    let _drain = tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 1024];
         while reader.read(&mut buf).unwrap_or(0) > 0 {}
     });
@@ -93,7 +94,7 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
             return Ok(());
         }
 
-        thread::sleep(Duration::from_millis(50));
+        crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
     }
 }
 
@@ -101,8 +102,8 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn run_returns_ok_when_program_exits_zero() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_returns_ok_when_program_exits_zero() {
         // `true` exits 0 immediately; the success branch returns Ok(()).
         let result = run(WarmupSpec {
             program: "true",
@@ -118,8 +119,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn run_returns_err_when_program_exits_immediately_nonzero() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_returns_err_when_program_exits_immediately_nonzero() {
         // `false` exits 1 within the 300ms grace window, hitting the
         // "warm-up exited immediately" bail.
         let result = run(WarmupSpec {
@@ -137,8 +138,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn run_returns_ok_after_settle_timeout_kills_child() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_returns_ok_after_settle_timeout_kills_child() {
         // `sleep 5` outruns the 200ms settle timeout; the timeout branch
         // SIGKILLs the child and returns Ok(()).
         let result = run(WarmupSpec {
@@ -155,8 +156,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn run_returns_err_when_spawn_fails() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_returns_err_when_spawn_fails() {
         let result = run(WarmupSpec {
             program: "/this/program/definitely/does/not/exist-xyz",
             args: &[],

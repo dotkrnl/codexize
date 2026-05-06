@@ -13,10 +13,14 @@ struct OAuthCreds {
 }
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
+    crate::data::async_bridge::block_on_io(load_live_models_async())
+}
+
+pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
     let token = resolve_access_token()?;
     let project_id = resolve_project_id()?;
-    let payload = fetch_usage_payload(&token, &project_id)?;
+    let payload = fetch_usage_payload(&token, &project_id).await?;
     live_models_from_payload(&payload)
 }
 
@@ -112,7 +116,7 @@ fn resolve_project_id() -> Result<String> {
         .context("no Gemini project id found")
 }
 
-fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
+async fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
     let client = build_http_client(5)?;
 
     let request = client
@@ -120,7 +124,7 @@ fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
         .bearer_auth(token)
         .json(&json!({ "project": project_id }));
 
-    let payload = fetch_json_response(request, "Gemini")?;
+    let payload = fetch_json_response(request, "Gemini").await?;
     if payload.get("error").is_some() {
         bail!("Gemini quota response contained an error");
     }

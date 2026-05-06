@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -130,14 +130,17 @@ pub enum LoadOutcome {
 }
 
 pub fn load_models() -> Result<LoadOutcome> {
+    crate::data::async_bridge::block_on_io(load_models_async())
+}
+
+pub async fn load_models_async() -> Result<LoadOutcome> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .context("failed to build HTTP client")?;
 
     // Load both sources in parallel via two requests
-    let inventory = load_inventory(&client);
-    let scores = load_scores(&client);
+    let (inventory, scores) = tokio::join!(load_inventory(&client), load_scores(&client));
 
     match (inventory, scores) {
         (Ok(inv), Ok(sc)) => {
@@ -165,13 +168,15 @@ pub fn load_models() -> Result<LoadOutcome> {
     }
 }
 
-fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
+async fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
     let payload = client
         .get(MODELS_LIST_URL)
         .send()
+        .await
         .and_then(|r| r.error_for_status())
         .context("models list request failed")?
         .json::<Value>()
+        .await
         .context("models list was not valid JSON")?;
 
     let arr = payload
@@ -206,13 +211,15 @@ fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
     Ok(entries)
 }
 
-fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
+async fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
     let body = client
         .get(IPBR_SCOREBOARD_URL)
         .send()
+        .await
         .and_then(|r| r.error_for_status())
         .context("ipbr scoreboard request failed")?
         .text()
+        .await
         .context("ipbr scoreboard response body unreadable")?;
     parse_ipbr_scoreboard(&body)
 }

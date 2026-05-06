@@ -39,6 +39,10 @@ struct ModelQuota {
 }
 
 pub fn load_live_models() -> Result<Vec<LiveModel>> {
+    crate::data::async_bridge::block_on_io(load_live_models_async())
+}
+
+pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
     let config = read_config().unwrap_or_default();
     let default_model = config
@@ -46,7 +50,7 @@ pub fn load_live_models() -> Result<Vec<LiveModel>> {
         .unwrap_or_else(|| "gpt-5.4".to_string())
         .to_ascii_lowercase();
     let identity = resolve_usage_identity()?;
-    let payload = fetch_usage_payload(&identity)?;
+    let payload = fetch_usage_payload(&identity).await?;
 
     let mut quotas = BTreeMap::<String, ModelQuota>::new();
 
@@ -149,7 +153,7 @@ fn resolve_usage_identity() -> Result<UsageIdentity> {
     })
 }
 
-fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
+async fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
     let base_url = normalize_base_url(
         &env::var("CODEX_BASE_URL")
             .ok()
@@ -179,7 +183,7 @@ fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
         request = request.header("chatgpt-account-id", account_id);
     }
 
-    fetch_json_response(request, "Codex")
+    fetch_json_response(request, "Codex").await
 }
 
 fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate_limit: &Value) {

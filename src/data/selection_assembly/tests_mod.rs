@@ -101,8 +101,9 @@ fn loaded_cache_with_resets(
     }
 }
 
-#[test]
-fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
+#[tokio::test(flavor = "multi_thread")]
+#[serial_test::serial]
+async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     let dashboard = vec![
         make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
         make_entry("claude-opus-4-1", "claude", 84.0, 81.0),
@@ -113,9 +114,6 @@ fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     ]);
     let resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
     let available = BTreeSet::from([VendorKind::Claude]);
-    let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -148,7 +146,8 @@ fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     let (models, errors) = assemble_with_refresh(
         loaded_cache_with_resets(dashboard, quotas, resets),
         &available,
-    );
+    )
+    .await;
 
     unsafe {
         match original_path {

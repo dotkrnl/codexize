@@ -710,4 +710,74 @@ mod tests {
         assert_eq!(value_to_string(&serde_json::json!("abc")), "abc");
         assert_eq!(value_to_string(&serde_json::json!(7)), "7");
     }
+
+    fn render_dashboard_models(models: &[DashboardModel]) -> String {
+        // Hand-rolled rendering keeps the snapshot stable across Rust
+        // versions that may format Debug-derived floats differently. We
+        // also pin the order by name so HashMap-derived merges don't
+        // make the snapshot ordering-sensitive.
+        let mut sorted: Vec<&DashboardModel> = models.iter().collect();
+        sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut out = String::new();
+        for model in sorted {
+            out.push_str(&format!("- name: {}\n", model.name));
+            out.push_str(&format!("  vendor: {}\n", model.vendor));
+            out.push_str(&format!("  overall_score: {:.4}\n", model.overall_score));
+            out.push_str(&format!("  current_score: {:.4}\n", model.current_score));
+            out.push_str(&format!(
+                "  standard_error: {:.4}\n",
+                model.standard_error
+            ));
+            out.push_str(&format!("  display_order: {}\n", model.display_order));
+            out.push_str(&format!("  score_source: {:?}\n", model.score_source));
+            out.push_str(&format!(
+                "  ipbr_row_matched: {}\n",
+                model.ipbr_row_matched
+            ));
+            out.push_str(&format!(
+                "  fallback_from: {}\n",
+                model.fallback_from.as_deref().unwrap_or("-")
+            ));
+            out.push_str("  axes:\n");
+            for (axis, value) in &model.axes {
+                out.push_str(&format!("    - {}: {:.4}\n", axis, value));
+            }
+            out.push_str(&format!(
+                "  ipbr_phase_scores: idea={:?} planning={:?} build={:?} review={:?}\n",
+                model.ipbr_phase_scores.idea,
+                model.ipbr_phase_scores.planning,
+                model.ipbr_phase_scores.build,
+                model.ipbr_phase_scores.review,
+            ));
+        }
+        out
+    }
+
+    #[test]
+    fn dashboard_model_after_representative_merge_snapshot() {
+        // Mirrors a typical refresh: an inventory list with a couple of
+        // model names, an ipbr-sourced score, and a sibling-only entry
+        // that exercises the cosmetic-fallback branch.
+        let models = merge(
+            vec![
+                inventory("anthropic/claude-opus-4", 0),
+                inventory("gpt-5.5", 1),
+                inventory("claude-sonnet-4.5", 2),
+            ],
+            vec![
+                ipbr_score(
+                    "Claude Opus 4",
+                    Some("anthropic/claude-opus-4"),
+                    &[],
+                    88.0,
+                    2,
+                ),
+                score("gpt-5.4", 0.8, 5),
+            ],
+        );
+        insta::assert_snapshot!(
+            "dashboard_model_after_representative_merge",
+            render_dashboard_models(&models)
+        );
+    }
 }

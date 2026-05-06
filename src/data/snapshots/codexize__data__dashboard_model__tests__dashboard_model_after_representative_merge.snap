@@ -1,0 +1,51 @@
+---
+source: src/data/dashboard_model.rs
+expression: render_dashboard_models(&models)
+---
+- name: anthropic/claude-opus-4
+  vendor: vendor
+  overall_score: 88.0000
+  current_score: 88.0000
+  standard_error: 0.0000
+  display_order: 2
+  score_source: Ipbr
+  ipbr_row_matched: true
+  fallback_from: -
+  axes:
+    - correctness: 88.0000
+  ipbr_phase_scores: idea=Some(88.0) planning=Some(89.0) build=Some(90.0) review=Some(91.0)
+- name: claude-sonnet-4.5
+  vendor: 
+  overall_score: 0.0000
+  current_score: 0.0000
+  standard_error: 0.0000
+  display_order: 10002
+  score_source: None
+  ipbr_row_matched: false
+  fallback_from: -
+  axes:
+  ipbr_phase_scores: idea=None planning=None build=None review=None
+- name: gpt-5.4
+  vendor: vendor
+  overall_score: 0.8000
+  current_score: 0.8000
+  standard_error: 0.0000
+  display_order: 5
+  score_source: None
+  ipbr_row_matched: false
+  fallback_from: -
+  axes:
+    - correctness: 0.8000
+  ipbr_phase_scores: idea=None planning=None build=None review=None
+- name: gpt-5.5
+  vendor: vendor
+  overall_score: 0.8000
+  current_score: 0.8000
+  standard_error: 0.0000
+  display_order: 5
+  score_source: None
+  ipbr_row_matched: false
+  fallback_from: gpt-5.4
+  axes:
+    - correctness: 0.8000
+  ipbr_phase_scores: idea=None planning=None build=None review=None

@@ -16,7 +16,7 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::{AppCommand, AppView, ModalKind, StageId, StatusMessage, StatusSeverity};
 use crate::data::events::{DataOutcome, DataRequest, dispatch_observation};
@@ -25,23 +25,23 @@ use crate::logic::rules::retry_phase_for_stage;
 /// UI side of the runtime seam. The UI sends operator intent and reads
 /// derived snapshots; it does not have access to runtime-internal state.
 pub struct UiChannels {
-    pub commands_tx: Sender<AppCommand>,
-    pub views_rx: Receiver<AppView>,
+    pub commands_tx: UnboundedSender<AppCommand>,
+    pub views_rx: UnboundedReceiver<AppView>,
 }
 
 /// Runtime side of the seam. The runtime drains commands and publishes
 /// the next view after applying each command.
 pub struct RuntimeChannels {
-    pub commands_rx: Receiver<AppCommand>,
-    pub views_tx: Sender<AppView>,
+    pub commands_rx: UnboundedReceiver<AppCommand>,
+    pub views_tx: UnboundedSender<AppView>,
 }
 
 /// Build a paired set of channels for the runtime and a stubbed UI. The
 /// pair is the headless equivalent of `ui/runtime` setting up the
 /// terminal — same shape, no IO.
 pub fn channel_pair() -> (UiChannels, RuntimeChannels) {
-    let (commands_tx, commands_rx) = channel();
-    let (views_tx, views_rx) = channel();
+    let (commands_tx, commands_rx) = unbounded_channel();
+    let (views_tx, views_rx) = unbounded_channel();
     (
         UiChannels {
             commands_tx,
@@ -192,7 +192,7 @@ fn stage_name(stage: StageId) -> &'static str {
 /// drained command publishes exactly one subsequent runtime-owned snapshot.
 pub fn run_headless_until_exit(
     runtime: &mut HeadlessRuntime,
-    channels: RuntimeChannels,
+    mut channels: RuntimeChannels,
 ) -> Result<RuntimeControl> {
     channels.views_tx.send(runtime.view.clone())?;
     let mut control = RuntimeControl::Continue;
@@ -220,7 +220,7 @@ pub fn headless_runtime_for_live_summary(
 /// Drive the app-runtime command/view seam without terminal UI.
 pub fn run_harness_until_exit(
     harness: &mut RuntimeHarness,
-    runtime: RuntimeChannels,
+    mut runtime: RuntimeChannels,
 ) -> Result<RuntimeControl> {
     let mut control = RuntimeControl::Continue;
     while let Ok(command) = runtime.commands_rx.try_recv() {
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn channel_pair_exchanges_commands_and_views_without_terminal() {
-        let (ui, runtime) = channel_pair();
+        let (mut ui, mut runtime) = channel_pair();
 
         // Seed an initial view as the runtime would.
         let mut view = AppView::empty("session-stub");
@@ -274,7 +274,10 @@ mod tests {
             .send(view.clone())
             .expect("publish initial view");
 
-        let initial = ui.views_rx.recv().expect("ui receives initial view");
+        let initial = ui
+            .views_rx
+            .blocking_recv()
+            .expect("ui receives initial view");
         assert_eq!(initial.phase, Phase::IdeaInput);
         assert!(initial.modal.is_none());
 
@@ -282,7 +285,10 @@ mod tests {
         ui.commands_tx
             .send(AppCommand::Quit)
             .expect("ui sends quit");
-        let received = runtime.commands_rx.recv().expect("runtime drains command");
+        let received = runtime
+            .commands_rx
+            .blocking_recv()
+            .expect("runtime drains command");
         assert_eq!(received, AppCommand::Quit);
         stub_runtime_step(&mut view, received);
         runtime
@@ -290,13 +296,17 @@ mod tests {
             .send(view.clone())
             .expect("publish updated view");
 
-        let after_quit = ui.views_rx.recv().expect("ui receives updated view");
+        let after_quit = ui
+            .views_rx
+            .blocking_recv()
+            .expect("ui receives updated view");
         assert_eq!(after_quit.modal, Some(ModalKind::QuitRunningAgent));
     }
 
     #[test]
     fn runtime_can_drive_a_full_round_trip_without_ui_state() {
-        let (ui, runtime) = channel_pair();
+        let (ui, mut runtime) = channel_pair();
+        let mut views_rx = ui.views_rx;
         let mut view = AppView::empty("session-stub");
 
         let script = [
@@ -309,10 +319,10 @@ mod tests {
             ui.commands_tx
                 .send(command.clone())
                 .expect("ui sends command");
-            let received = runtime.commands_rx.recv().expect("runtime drains");
+            let received = runtime.commands_rx.blocking_recv().expect("runtime drains");
             stub_runtime_step(&mut view, received);
             runtime.views_tx.send(view.clone()).expect("publish view");
-            let _ = ui.views_rx.recv().expect("ui receives view");
+            let _ = views_rx.blocking_recv().expect("ui receives view");
         }
 
         // After the script the modal returns to None — proves command
@@ -325,7 +335,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let live_summary_path = dir.path().join("live.txt");
         std::fs::write(&live_summary_path, "runtime-owned").expect("seed");
-        let (ui, channels) = channel_pair();
+        let (mut ui, channels) = channel_pair();
         ui.commands_tx
             .send(AppCommand::RetryStage(StageId::Brainstorm))
             .expect("send retry");
@@ -341,7 +351,7 @@ mod tests {
 
         assert_eq!(control, RuntimeControl::Exit);
         assert_eq!(runtime.view().phase, Phase::BrainstormRunning);
-        let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+        let snapshots: Vec<_> = drain_views(&mut ui.views_rx);
         assert_eq!(snapshots.len(), 4);
         assert_eq!(snapshots[1].phase, Phase::BrainstormRunning);
         assert_eq!(
@@ -349,5 +359,9 @@ mod tests {
             "runtime-owned"
         );
         assert_eq!(snapshots[3].modal, Some(ModalKind::QuitRunningAgent));
+    }
+
+    fn drain_views(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppView>) -> Vec<AppView> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
     }
 }

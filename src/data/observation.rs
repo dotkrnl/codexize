@@ -8,8 +8,8 @@
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
 
 use crate::data::events::LiveSummaryEvents;
 
@@ -86,7 +86,7 @@ pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatche
         Err(reason) => return LiveSummaryWatcher::PollOnly { reason },
     };
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::unbounded_channel();
     let watched_file = live_summary_path.to_path_buf();
     let watcher_result = RecommendedWatcher::new(
         move |res: Result<Event, notify::Error>| {

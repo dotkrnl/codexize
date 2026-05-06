@@ -7,8 +7,6 @@
 //! and exercise without `ratatui`/`crossterm`. This test pins those
 //! contracts so subsequent slices cannot quietly break the stubbed-UI path.
 
-use std::time::Duration;
-
 use codexize::app_runtime::{
     AgentRunSummary, AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId,
     StatusSeverity, channel_pair, headless_runtime_for_live_summary, run_harness_until_exit,
@@ -22,7 +20,7 @@ fn channels_carry_a_full_command_view_round_trip() {
     let dir = tempdir().expect("tempdir");
     let live_summary_path = dir.path().join("live.txt");
     std::fs::write(&live_summary_path, "approved").expect("seed");
-    let (ui, runtime) = channel_pair();
+    let (mut ui, runtime) = channel_pair();
 
     let script = [
         AppCommand::ToggleYolo,
@@ -41,7 +39,7 @@ fn channels_carry_a_full_command_view_round_trip() {
     let control = run_headless_until_exit(&mut app_runtime, runtime).expect("run headless runtime");
 
     assert_eq!(control, RuntimeControl::Continue);
-    let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+    let snapshots: Vec<_> = drain_views(&mut ui.views_rx);
     assert_eq!(snapshots[0].session_id.as_ref(), "integration-session");
     assert_eq!(snapshots[0].phase, Phase::IdeaInput);
     assert!(snapshots[0].agent_runs.is_empty());
@@ -96,7 +94,7 @@ fn agent_run_summary_is_constructible_from_public_surface() {
 
 #[test]
 fn runtime_harness_drains_commands_and_publishes_views_until_exit() {
-    let (ui, runtime) = channel_pair();
+    let (mut ui, runtime) = channel_pair();
     ui.commands_tx
         .send(AppCommand::OpenPalette)
         .expect("send palette command");
@@ -113,14 +111,12 @@ fn runtime_harness_drains_commands_and_publishes_views_until_exit() {
         &[AppCommand::OpenPalette, AppCommand::Quit]
     );
 
-    let first = ui
-        .views_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("first view");
-    let second = ui
-        .views_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("second view");
+    let first = ui.views_rx.blocking_recv().expect("first view");
+    let second = ui.views_rx.blocking_recv().expect("second view");
     assert_eq!(first.session_id.as_ref(), "runtime-loop");
     assert_eq!(second.session_id.as_ref(), "runtime-loop");
+}
+
+fn drain_views(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppView>) -> Vec<AppView> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }

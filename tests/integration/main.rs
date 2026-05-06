@@ -12,8 +12,6 @@ mod app_runtime_harness;
 mod layer_boundaries;
 mod smoke_baseline;
 
-use std::time::Duration;
-
 use codexize::app_runtime::{
     AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId, channel_pair,
     headless_runtime_for_live_summary, run_harness_until_exit, run_headless_until_exit,
@@ -30,7 +28,7 @@ fn full_pipeline_run_via_stubbed_ui() {
     std::fs::write(&live_summary_path, "pipeline-progress-line")
         .expect("seed live-summary fixture");
 
-    let (ui, runtime) = channel_pair();
+    let (mut ui, runtime) = channel_pair();
 
     // The UI script: walk a representative command sequence the way a real
     // UI would: surface a stage retry (exercises a real logic decision),
@@ -61,7 +59,7 @@ fn full_pipeline_run_via_stubbed_ui() {
     let control = run_headless_until_exit(&mut app_runtime, runtime).expect("headless runtime");
     assert_eq!(control, RuntimeControl::Exit);
 
-    let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+    let snapshots: Vec<_> = drain_views(&mut ui.views_rx);
     assert_eq!(
         snapshots.len(),
         6,
@@ -108,7 +106,7 @@ fn submit_input_falls_back_when_live_summary_missing() {
     let dir = tempdir().expect("tempdir");
     let absent_path = dir.path().join("never-written.txt");
 
-    let (ui, runtime) = channel_pair();
+    let (mut ui, runtime) = channel_pair();
     ui.commands_tx
         .send(AppCommand::SubmitInput {
             text: "no-data-yet".to_string(),
@@ -119,7 +117,7 @@ fn submit_input_falls_back_when_live_summary_missing() {
     let control = run_headless_until_exit(&mut app_runtime, runtime).expect("headless runtime");
     assert_eq!(control, RuntimeControl::Continue);
 
-    let snapshots: Vec<_> = ui.views_rx.try_iter().collect();
+    let snapshots: Vec<_> = drain_views(&mut ui.views_rx);
     assert_eq!(snapshots.len(), 2);
     let status = snapshots[1]
         .status
@@ -131,7 +129,7 @@ fn submit_input_falls_back_when_live_summary_missing() {
 
 #[test]
 fn runtime_harness_drains_commands_until_quit() {
-    let (ui, runtime) = channel_pair();
+    let (mut ui, runtime) = channel_pair();
     ui.commands_tx
         .send(AppCommand::OpenPalette)
         .expect("send palette command");
@@ -148,14 +146,8 @@ fn runtime_harness_drains_commands_until_quit() {
         &[AppCommand::OpenPalette, AppCommand::Quit]
     );
 
-    let first = ui
-        .views_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("first view");
-    let second = ui
-        .views_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("second view");
+    let first = ui.views_rx.blocking_recv().expect("first view");
+    let second = ui.views_rx.blocking_recv().expect("second view");
     assert_eq!(first.session_id.as_ref(), "integration-quit");
     assert_eq!(second.session_id.as_ref(), "integration-quit");
 }
@@ -171,4 +163,8 @@ fn production_entrypoint_is_app_runtime_run_terminal_app() {
         &mut codexize::app::App,
         &mut codexize::ui::tui::AppTerminal,
     ) -> anyhow::Result<()> = codexize::app_runtime::run_terminal_app;
+}
+
+fn drain_views(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppView>) -> Vec<AppView> {
+    std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }

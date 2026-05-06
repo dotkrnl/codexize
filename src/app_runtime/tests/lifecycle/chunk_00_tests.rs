@@ -326,7 +326,7 @@ fn live_summary_fallback_polls_even_when_watcher_has_no_event() {
         app.live_summary_path = Some(path);
         app.live_summary_cached_text = "old summary".to_string();
         app.live_summary_cached_mtime = Some(std::time::SystemTime::now());
-        let (_tx, rx) = std::sync::mpsc::channel();
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         app.live_summary_change_events = Some(crate::data::events::LiveSummaryEvents::new(rx));
 
         app.poll_live_summary_fallback();

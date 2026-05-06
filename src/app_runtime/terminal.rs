@@ -41,14 +41,14 @@ impl TerminalRuntime {
     }
 
     pub(crate) fn drain_live_summary_data_events(
-        &self,
-        events: Option<&LiveSummaryEvents>,
+        &mut self,
+        events: Option<&mut LiveSummaryEvents>,
     ) -> Vec<DataEvent> {
         events.map(LiveSummaryEvents::drain).unwrap_or_default()
     }
 
     fn drain_app_data_events(&mut self, app: &mut App) {
-        let drained = self.drain_live_summary_data_events(app.live_summary_change_events.as_ref());
+        let drained = self.drain_live_summary_data_events(app.live_summary_change_events.as_mut());
         if drained
             .iter()
             .any(|event| matches!(event, DataEvent::LiveSummaryChanged))
@@ -120,6 +120,7 @@ impl TerminalRuntime {
 /// Run the production terminal app through the app-runtime seam.
 pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()> {
     let mut runtime = TerminalRuntime::default();
+    let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
     loop {
         if app.runtime_tick_before_data_drain(terminal)? {
             return Ok(());
@@ -135,7 +136,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
 
-        if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)? {
+        if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
             let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
                 crate::data::events::dispatch(request, &app.runner_supervisor)
             });
@@ -164,7 +165,7 @@ mod tests {
     use crate::logic::pipeline::RunStatus;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use std::sync::Arc;
-    use std::sync::mpsc;
+    use tokio::sync::mpsc;
 
     fn running_view() -> AppView {
         let mut view = AppView::empty("terminal-runtime-test");
@@ -231,18 +232,17 @@ mod tests {
 
     #[test]
     fn runtime_drains_live_summary_watcher_as_data_events() {
-        let runtime = TerminalRuntime::default();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         tx.send(()).expect("send watcher signal");
         tx.send(()).expect("send watcher signal");
-        let events = LiveSummaryEvents::new(rx);
+        let mut events = LiveSummaryEvents::new(rx);
 
         assert_eq!(
-            runtime.drain_live_summary_data_events(Some(&events)),
+            TerminalRuntime::default().drain_live_summary_data_events(Some(&mut events)),
             vec![DataEvent::LiveSummaryChanged, DataEvent::LiveSummaryChanged]
         );
         assert_eq!(
-            runtime.drain_live_summary_data_events(Some(&events)),
+            TerminalRuntime::default().drain_live_summary_data_events(Some(&mut events)),
             vec![]
         );
     }

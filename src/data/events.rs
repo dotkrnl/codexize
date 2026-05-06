@@ -13,7 +13,7 @@
 //! seam is just the reified version of that surface as enums.
 
 use std::path::PathBuf;
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 
 use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
 
@@ -40,20 +40,20 @@ pub enum DataEvent {
 /// produce multiple `LiveSummaryChanged` events, but they are idempotent —
 /// the runtime re-reads the file once per non-empty drain.
 pub struct LiveSummaryEvents {
-    rx: mpsc::Receiver<()>,
+    rx: mpsc::UnboundedReceiver<()>,
 }
 
 impl LiveSummaryEvents {
     /// Wrap a notify receiver. Constructed by [`crate::data::observation`]
     /// when a watcher is built; not part of the public seam since the rx is
     /// an internal detail.
-    pub(crate) fn new(rx: mpsc::Receiver<()>) -> Self {
+    pub(crate) fn new(rx: mpsc::UnboundedReceiver<()>) -> Self {
         Self { rx }
     }
 
     /// Drain every pending watcher signal as a typed [`DataEvent`]. Returns
     /// an empty vector when nothing is queued. Non-blocking.
-    pub fn drain(&self) -> Vec<DataEvent> {
+    pub fn drain(&mut self) -> Vec<DataEvent> {
         let mut out = Vec::new();
         while self.rx.try_recv().is_ok() {
             out.push(DataEvent::LiveSummaryChanged);
@@ -146,9 +146,9 @@ pub fn dispatch_observation(request: &DataRequest) -> Option<DataOutcome> {
         DataRequest::ReadLiveSummary { path } => {
             DataOutcome::LiveSummaryRead(crate::data::observation::read_live_summary(path))
         }
-        DataRequest::DrainLiveSummary { path } => DataOutcome::LiveSummaryDrained(
-            crate::data::observation::drain_live_summary_file(path),
-        ),
+        DataRequest::DrainLiveSummary { path } => {
+            DataOutcome::LiveSummaryDrained(crate::data::observation::drain_live_summary_file(path))
+        }
         DataRequest::ReadPromptBody { path } => {
             DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(path))
         }

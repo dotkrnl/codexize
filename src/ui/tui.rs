@@ -14,7 +14,9 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::app_runtime::{AppCommand, AppView, ModalKind, UiKey, UiKeyCode};
 
@@ -100,6 +102,65 @@ pub fn poll_command(timeout: Duration, view: &AppView) -> Result<Option<AppComma
         return Ok(None);
     }
     Ok(command_from_event(event::read()?, view))
+}
+
+pub struct CrosstermInputAdapter {
+    rx: mpsc::UnboundedReceiver<Event>,
+    cancel: CancellationToken,
+}
+
+impl CrosstermInputAdapter {
+    pub fn spawn() -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let cancel = CancellationToken::new();
+        let worker_cancel = cancel.clone();
+        // Crossterm's event API is blocking and terminal-global; keep it on
+        // tokio's blocking pool while the synchronous render loop only drains
+        // already-adapted events from an async channel.
+        tokio::task::spawn_blocking(move || {
+            while !worker_cancel.is_cancelled() {
+                match event::poll(Duration::from_millis(50)) {
+                    Ok(true) => {
+                        let Ok(event) = event::read() else {
+                            break;
+                        };
+                        if tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(_) => break,
+                }
+            }
+        });
+        Self { rx, cancel }
+    }
+
+    pub fn next_command(
+        &mut self,
+        timeout: Duration,
+        view: &AppView,
+    ) -> Result<Option<AppCommand>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.rx.try_recv() {
+                Ok(event) => return Ok(command_from_event(event, view)),
+                Err(mpsc::error::TryRecvError::Disconnected) => return Ok(None),
+                Err(mpsc::error::TryRecvError::Empty) if Instant::now() >= deadline => {
+                    return Ok(None);
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    crate::data::async_bridge::sleep_blocking(Duration::from_millis(10));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for CrosstermInputAdapter {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {

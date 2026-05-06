@@ -10,7 +10,7 @@ use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
 #[cfg(test)]
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 impl App {
     pub(crate) fn setup_watcher(&mut self) -> Result<()> {
         let Some(path) = self.live_summary_path.clone() else {
@@ -30,7 +30,7 @@ impl App {
 
         #[cfg(test)]
         if !Self::test_uses_real_live_summary_watcher() {
-            let (_tx, rx) = mpsc::channel();
+            let (_tx, rx) = mpsc::unbounded_channel();
             self.live_summary_watcher = None;
             self.live_summary_change_events = Some(LiveSummaryEvents::new(rx));
             return Ok(());

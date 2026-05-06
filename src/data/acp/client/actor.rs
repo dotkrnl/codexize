@@ -272,9 +272,7 @@ where
             params,
             respond,
         } => ("request", Some(id), method, params, Some(respond)),
-        RpcCommand::Notify { method, params } => {
-            ("notification", None, method, params, None)
-        }
+        RpcCommand::Notify { method, params } => ("notification", None, method, params, None),
         RpcCommand::Shutdown => return Ok(()),
     };
     let report_failure = |err: AcpError, respond: Option<oneshot::Sender<AcpResult<Value>>>| {
@@ -286,7 +284,9 @@ where
         }
     };
     if !*writer_open {
-        let err = AcpError::io(format!("failed to write ACP {kind} {method}: writer closed"));
+        let err = AcpError::io(format!(
+            "failed to write ACP {kind} {method}: writer closed"
+        ));
         return match report_failure(err, respond) {
             Some(err) => Err(err),
             None => Ok(()),

@@ -25,12 +25,6 @@ pub(crate) enum Capability {
     Split,
 }
 
-macro_rules! bindings {
-    ($($binding:expr),* $(,)?) => {
-        vec![$($binding),*]
-    };
-}
-
 const fn key(glyph: &'static str, action: &'static str) -> KeyBinding {
     KeyBinding {
         glyph,
@@ -90,12 +84,12 @@ pub(crate) const SEP_CATEGORY: &str = "  ·  ";
 
 /// Default phase keymap: navigation · actions · system.
 fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
-    let nav = bindings![
+    let nav = vec![
         key("↑↓", "move"),
         gated_key("Space", "expand", Capability::Expand),
         key("PgUp/PgDn", "page"),
     ];
-    let actions = bindings![
+    let actions = vec![
         primary_gated_key("Enter", "show", Capability::Split),
         key(":", "palette"),
     ];
@@ -103,22 +97,22 @@ fn default_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
 }
 
 fn system_bindings() -> Vec<KeyBinding> {
-    bindings![key("Esc", "quit")]
+    vec![key("Esc", "quit")]
 }
 
 /// Pause modal: actions + system.
 fn pause_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("Enter", "continue"), key("n", "new reviewer")],
+        vec![primary_key("Enter", "continue"), key("n", "new reviewer")],
         system_bindings(),
     )
 }
 
 /// Stage error modal: actions + system.
 fn stage_error_bindings(stage_id: StageId) -> (Vec<KeyBinding>, Vec<KeyBinding>) {
-    let mut actions = bindings![primary_key("r", "retry")];
+    let mut actions = vec![primary_key("r", "retry")];
     if stage_id == StageId::Brainstorm {
-        actions.extend(bindings![key("e", "edit idea")]);
+        actions.push(key("e", "edit idea"));
     }
     (actions, system_bindings())
 }
@@ -126,7 +120,7 @@ fn stage_error_bindings(stage_id: StageId) -> (Vec<KeyBinding>, Vec<KeyBinding>)
 /// Final validation blocked modal: actions + system.
 fn final_validation_blocked_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("f", "force ship to done"), key("r", "recover")],
+        vec![primary_key("f", "force ship to done"), key("r", "recover")],
         system_bindings(),
     )
 }
@@ -134,7 +128,7 @@ fn final_validation_blocked_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
 /// Skip-to-impl modal: actions + system.
 fn skip_to_impl_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("y", "accept"), key("n", "decline")],
+        vec![primary_key("y", "accept"), key("n", "decline")],
         system_bindings(),
     )
 }
@@ -142,39 +136,39 @@ fn skip_to_impl_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
 /// Guard modal: actions + system.
 fn guard_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("r", "reset"), key("k", "keep")],
+        vec![primary_key("r", "reset"), key("k", "keep")],
         system_bindings(),
     )
 }
 
 fn quit_running_agent_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("Enter", "confirm"), key("y", "confirm")],
-        bindings![key("Esc", "cancel"), key("n", "cancel")],
+        vec![primary_key("Enter", "confirm"), key("y", "confirm")],
+        vec![key("Esc", "cancel"), key("n", "cancel")],
     )
 }
 
 fn interactive_exit_prompt_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>) {
     (
-        bindings![primary_key("Enter", "no requests")],
-        bindings![key("Esc", "request")],
+        vec![primary_key("Enter", "no requests")],
+        vec![key("Esc", "request")],
     )
 }
 
 /// Input mode bindings.
 fn input_bindings() -> Vec<KeyBinding> {
-    bindings![key("Esc", "cancel"), primary_key("Enter", "submit")]
+    vec![key("Esc", "cancel"), primary_key("Enter", "submit")]
 }
 
 fn split_input_bindings() -> Vec<KeyBinding> {
-    bindings![key("Esc", "close"), primary_key("Enter", "submit")]
+    vec![key("Esc", "close"), primary_key("Enter", "submit")]
 }
 
 /// Split mode bindings (when not in input mode).
 fn split_bindings() -> (Vec<KeyBinding>, Vec<KeyBinding>, Vec<KeyBinding>) {
-    let nav = bindings![key("↑↓", "scroll"), key("PgUp/PgDn", "page")];
-    let actions = bindings![key(":", "palette")];
-    let system = bindings![key("Esc", "close")];
+    let nav = vec![key("↑↓", "scroll"), key("PgUp/PgDn", "page")];
+    let actions = vec![key(":", "palette")];
+    let system = vec![key("Esc", "close")];
     (nav, actions, system)
 }
 

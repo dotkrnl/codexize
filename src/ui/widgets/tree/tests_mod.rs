@@ -1389,6 +1389,60 @@ fn simplification_groups_runs_by_round() {
     assert_eq!(stage.status, NodeStatus::Running);
 }
 
+#[test]
+fn builder_loop_done_during_simplification_phase() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Simplification(1);
+    set_builder_tasks(&mut state, &[1], None, &[]);
+    let mut coder = run(1, "coder", RunStatus::Done);
+    coder.task_id = Some(1);
+    coder.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(coder);
+    let mut reviewer = run(2, "reviewer", RunStatus::Done);
+    reviewer.task_id = Some(1);
+    reviewer.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(reviewer);
+
+    let nodes = build_tree(&state);
+    let loop_node = nodes
+        .iter()
+        .find(|n| n.label == "Loop")
+        .expect("Loop stage missing");
+    assert_eq!(
+        loop_node.status,
+        NodeStatus::Done,
+        "Loop should be Done while simplification runs (was {:?})",
+        loop_node.status,
+    );
+}
+
+#[test]
+fn builder_loop_done_during_final_validation_phase() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::FinalValidation(1);
+    set_builder_tasks(&mut state, &[1], None, &[]);
+    let mut coder = run(1, "coder", RunStatus::Done);
+    coder.task_id = Some(1);
+    coder.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(coder);
+    let mut reviewer = run(2, "reviewer", RunStatus::Done);
+    reviewer.task_id = Some(1);
+    reviewer.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(reviewer);
+
+    let nodes = build_tree(&state);
+    let loop_node = nodes
+        .iter()
+        .find(|n| n.label == "Loop")
+        .expect("Loop stage missing");
+    assert_eq!(
+        loop_node.status,
+        NodeStatus::Done,
+        "Loop should be Done while final validation runs (was {:?})",
+        loop_node.status,
+    );
+}
+
 /// Walk a single subtree and count Round nodes whose ancestor chain
 /// contains a node labelled `task_label` and whose own label equals
 /// `round_label`. Inline helper — defined here rather than as a shared

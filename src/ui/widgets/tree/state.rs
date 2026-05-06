@@ -587,7 +587,11 @@ fn builder_status(
             }
         }
         Phase::BlockedNeedsUser => NodeStatus::WaitingUser,
-        Phase::Done => NodeStatus::Done,
+        // Once we move past the loop into simplification or final validation,
+        // the open iteration's builder work is complete. Mark it Done so the
+        // row is expandable (NodeStatus::Pending blocks expansion in
+        // `is_expandable`, which would hide the loop's prior messages).
+        Phase::Simplification(_) | Phase::FinalValidation(_) | Phase::Done => NodeStatus::Done,
         _ => NodeStatus::Pending,
     }
 }

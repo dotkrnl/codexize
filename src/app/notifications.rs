@@ -3,6 +3,10 @@ use crate::data::notifications::{InteractiveWaitMarker, NotificationContext, pha
 #[cfg(test)]
 use crate::data::notifications::{NotificationEvent, NotificationRuntime};
 use crate::state::{BlockOrigin, MessageKind, Phase, RunRecord, SessionState};
+use std::time::Duration;
+
+const NOTIFICATION_WARNING_TTL: Duration = Duration::from_secs(8);
+const NOTIFICATION_SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
 
 impl App {
     pub(crate) fn maybe_emit_phase_notification(&mut self, phase: Phase) {
@@ -37,6 +41,35 @@ impl App {
         let context = self.notification_context_for_run(&run);
         self.notification_runtime
             .emit_interactive_wait(self.state.current_phase, context, marker);
+    }
+
+    pub(crate) fn poll_notification_reports(&mut self) {
+        for failure in self.notification_runtime.poll_publish_failures() {
+            let log_message = format!("notification_publish_failed: {failure}");
+            let _ = self.state.log_event(log_message);
+            self.push_status(
+                format!("ntfy notification failed: {failure}"),
+                super::status_line::Severity::Warn,
+                NOTIFICATION_WARNING_TTL,
+            );
+        }
+    }
+
+    pub(crate) fn drain_notifications_for_shutdown(&mut self) {
+        let completed = crate::data::async_bridge::block_on_io(
+            self.notification_runtime
+                .drain_pending_sends(NOTIFICATION_SHUTDOWN_DRAIN),
+        );
+        self.poll_notification_reports();
+        if !completed {
+            let message = "notification_publish_drain_timeout".to_string();
+            let _ = self.state.log_event(message.clone());
+            self.push_status(
+                message,
+                super::status_line::Severity::Warn,
+                NOTIFICATION_WARNING_TTL,
+            );
+        }
     }
 
     fn current_interactive_wait_marker(&self) -> Option<InteractiveWaitMarker> {

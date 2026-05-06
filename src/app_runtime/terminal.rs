@@ -113,6 +113,7 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
     let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
     loop {
         if app.runtime_tick_before_data_drain(terminal)? {
+            app.drain_notifications_for_shutdown();
             return Ok(());
         }
         runtime.drain_app_data_events(app);
@@ -132,11 +133,13 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
                 TerminalCommandOutcome::HandledContinue => {}
                 TerminalCommandOutcome::HandledExit => {
                     app.runner_supervisor.shutdown_all_runs();
+                    app.drain_notifications_for_shutdown();
                     return Ok(());
                 }
                 TerminalCommandOutcome::Legacy(command) => {
                     if app.handle_app_command(command) {
                         app.runner_supervisor.shutdown_all_runs();
+                        app.drain_notifications_for_shutdown();
                         return Ok(());
                     }
                 }

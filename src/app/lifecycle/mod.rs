@@ -205,6 +205,7 @@ impl App {
     /// state the watchdog evaluates this tick.
     pub(crate) fn runtime_tick_after_data_drain(&mut self) {
         self.maybe_emit_interactive_wait_notification();
+        self.poll_notification_reports();
         self.tick_watchdog();
         self.synchronize_split_target();
     }

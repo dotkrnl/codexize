@@ -206,3 +206,25 @@ fn stage_starts_retries_and_mid_run_errors_do_not_emit_events() {
 
     assert!(app.notification_events_for_test().is_empty());
 }
+
+#[test]
+fn notification_publish_failures_surface_warning_without_changing_phase() {
+    let mut app = app_in_phase(Phase::SpecReviewPaused);
+    app.notification_runtime
+        .push_publish_failure_for_test("ntfy publish failed after 3 attempts: 503");
+
+    app.poll_notification_reports();
+
+    assert_eq!(app.state.current_phase, Phase::SpecReviewPaused);
+    let events_path = crate::state::session_dir(&app.state.session_id).join("events.toml");
+    let events = std::fs::read_to_string(events_path).expect("events log");
+    assert!(events.contains("notification_publish_failed"));
+    assert!(events.contains("503"));
+    let status = app
+        .status_line
+        .borrow()
+        .render()
+        .expect("warning status")
+        .to_string();
+    assert!(status.contains("ntfy notification failed"));
+}

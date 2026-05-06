@@ -437,9 +437,68 @@ pub fn session_dir(session_id: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-pub(crate) fn test_fs_lock() -> &'static std::sync::Mutex<()> {
-    use std::sync::{Mutex, OnceLock};
+pub(crate) struct TestFsLock {
+    inner: std::sync::Mutex<()>,
+}
 
-    static TEST_FS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    TEST_FS_LOCK.get_or_init(|| Mutex::new(()))
+#[cfg(test)]
+pub(crate) struct TestFsGuard<'a> {
+    _inner: Option<std::sync::MutexGuard<'a, ()>>,
+    reset_owner: bool,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static TEST_FS_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+impl TestFsLock {
+    pub(crate) fn lock(&'static self) -> std::sync::LockResult<TestFsGuard<'static>> {
+        // Tests frequently nest filesystem/cwd helpers (e.g. `with_temp_dir` holding
+        // the lock while guard code probes git state). A plain `Mutex<()>` would
+        // deadlock on re-entry, so we treat "already held on this thread" as a
+        // no-op lock acquisition.
+        if TEST_FS_LOCK_HELD.with(std::cell::Cell::get) {
+            return Ok(TestFsGuard {
+                _inner: None,
+                reset_owner: false,
+            });
+        }
+        match self.inner.lock() {
+            Ok(guard) => {
+                TEST_FS_LOCK_HELD.with(|held| held.set(true));
+                Ok(TestFsGuard {
+                    _inner: Some(guard),
+                    reset_owner: true,
+                })
+            }
+            Err(err) => {
+                TEST_FS_LOCK_HELD.with(|held| held.set(true));
+                Ok(TestFsGuard {
+                    _inner: Some(err.into_inner()),
+                    reset_owner: true,
+                })
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestFsGuard<'_> {
+    fn drop(&mut self) {
+        if self.reset_owner {
+            TEST_FS_LOCK_HELD.with(|held| held.set(false));
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_fs_lock() -> &'static TestFsLock {
+    use std::sync::OnceLock;
+
+    static TEST_FS_LOCK: OnceLock<TestFsLock> = OnceLock::new();
+    TEST_FS_LOCK.get_or_init(|| TestFsLock {
+        inner: std::sync::Mutex::new(()),
+    })
 }

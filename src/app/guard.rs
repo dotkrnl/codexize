@@ -76,6 +76,10 @@ pub enum VerifyResult {
 }
 
 fn git_head() -> Option<String> {
+    #[cfg(test)]
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .output()
@@ -92,6 +96,10 @@ pub fn git_status_dirty() -> bool {
 }
 
 fn git_status() -> Option<String> {
+    #[cfg(test)]
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let output = std::process::Command::new("git")
         .args(["status", "--porcelain"])
         .output()

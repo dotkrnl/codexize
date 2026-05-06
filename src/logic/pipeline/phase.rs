@@ -15,6 +15,7 @@ mod phase_tests;
     Deserialize,
     PartialEq,
     Eq,
+    Hash,
     strum::Display,
     strum::IntoStaticStr,
     strum::EnumDiscriminants,

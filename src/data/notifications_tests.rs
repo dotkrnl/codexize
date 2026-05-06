@@ -135,6 +135,50 @@ fn generated_topics_are_opaque_url_safe_and_unprefixed() {
     assert!(!first.starts_with("codexize"));
 }
 
+#[test]
+fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
+    let context = NotificationContext {
+        session_id: "session-a".to_string(),
+        session_label: "Session A".to_string(),
+        stage: "brainstorm".to_string(),
+        task_id: None,
+        round: Some(1),
+        attempt: Some(1),
+        run_id: Some(7),
+    };
+    let marker = InteractiveWaitMarker {
+        run_id: 7,
+        message_index: 3,
+    };
+    let mut first_runtime = NotificationRuntime::enabled_for_test();
+
+    first_runtime.emit_interactive_wait(
+        crate::state::Phase::BrainstormRunning,
+        context.clone(),
+        marker,
+    );
+    first_runtime.emit_interactive_wait(
+        crate::state::Phase::BrainstormRunning,
+        context.clone(),
+        marker,
+    );
+
+    assert_eq!(first_runtime.events().len(), 1);
+
+    let mut restarted_runtime = NotificationRuntime::enabled_for_test();
+    restarted_runtime.emit_interactive_wait(
+        crate::state::Phase::BrainstormRunning,
+        context,
+        marker,
+    );
+
+    assert_eq!(restarted_runtime.events().len(), 1);
+    assert_eq!(
+        restarted_runtime.events()[0].dedupe_key,
+        first_runtime.events()[0].dedupe_key
+    );
+}
+
 fn assert_topic_shape(topic: &str) {
     assert_eq!(topic.len(), 32, "16 random bytes encoded as hex");
     assert!(

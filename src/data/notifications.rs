@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use crate::state::Phase;
 
 pub const DEFAULT_NTFY_SERVER: &str = "https://ntfy.sh";
 const NTFY_CONFIG_ENV: &str = "CODEXIZE_NTFY_CONFIG";
@@ -26,6 +29,172 @@ pub struct NtfyConfig {
     pub detail_mode: NtfyDetailMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationEventKind {
+    InputNeeded,
+    PipelineDone,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationReason {
+    PhaseWait,
+    InteractiveRunWait,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationContext {
+    pub session_id: String,
+    pub session_label: String,
+    pub stage: String,
+    pub task_id: Option<u32>,
+    pub round: Option<u32>,
+    pub attempt: Option<u32>,
+    pub run_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationEvent {
+    pub kind: NotificationEventKind,
+    pub reason: NotificationReason,
+    pub phase: Phase,
+    pub context: NotificationContext,
+    pub dedupe_key: NotificationDedupeKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NotificationDedupeKey {
+    PhaseWait {
+        session_id: String,
+        stage: String,
+        phase: Phase,
+        occurrence: u64,
+    },
+    InteractiveRunWait {
+        session_id: String,
+        stage: String,
+        run_id: u64,
+        message_index: usize,
+    },
+    PipelineDone {
+        session_id: String,
+        occurrence: u64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InteractiveWaitMarker {
+    pub run_id: u64,
+    pub message_index: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NotificationRuntime {
+    enabled: bool,
+    occurrence: u64,
+    seen: HashSet<NotificationDedupeKey>,
+    events: Vec<NotificationEvent>,
+}
+
+impl NotificationRuntime {
+    pub fn from_config(config: Option<NtfyConfig>) -> Self {
+        Self {
+            enabled: config.is_some(),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enabled_for_test() -> Self {
+        Self {
+            enabled: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn events(&self) -> &[NotificationEvent] {
+        &self.events
+    }
+
+    pub fn emit_phase_wait(&mut self, phase: Phase, context: NotificationContext) {
+        if !self.enabled {
+            return;
+        }
+        self.occurrence = self.occurrence.saturating_add(1);
+        let dedupe_key = NotificationDedupeKey::PhaseWait {
+            session_id: context.session_id.clone(),
+            stage: context.stage.clone(),
+            phase,
+            occurrence: self.occurrence,
+        };
+        self.push(NotificationEvent {
+            kind: NotificationEventKind::InputNeeded,
+            reason: NotificationReason::PhaseWait,
+            phase,
+            context,
+            dedupe_key,
+        });
+    }
+
+    pub fn emit_interactive_wait(
+        &mut self,
+        phase: Phase,
+        context: NotificationContext,
+        marker: InteractiveWaitMarker,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        let dedupe_key = NotificationDedupeKey::InteractiveRunWait {
+            session_id: context.session_id.clone(),
+            stage: context.stage.clone(),
+            run_id: marker.run_id,
+            message_index: marker.message_index,
+        };
+        self.push(NotificationEvent {
+            kind: NotificationEventKind::InputNeeded,
+            reason: NotificationReason::InteractiveRunWait,
+            phase,
+            context,
+            dedupe_key,
+        });
+    }
+
+    pub fn emit_pipeline_done(&mut self, phase: Phase, context: NotificationContext) {
+        if !self.enabled {
+            return;
+        }
+        self.occurrence = self.occurrence.saturating_add(1);
+        let dedupe_key = NotificationDedupeKey::PipelineDone {
+            session_id: context.session_id.clone(),
+            occurrence: self.occurrence,
+        };
+        self.push(NotificationEvent {
+            kind: NotificationEventKind::PipelineDone,
+            reason: NotificationReason::PhaseWait,
+            phase,
+            context,
+            dedupe_key,
+        });
+    }
+
+    fn push(&mut self, event: NotificationEvent) {
+        if self.seen.insert(event.dedupe_key.clone()) {
+            self.events.push(event);
+        }
+    }
+}
+
+pub fn phase_needs_input(phase: Phase) -> bool {
+    matches!(
+        phase,
+        Phase::BlockedNeedsUser
+            | Phase::SpecReviewPaused
+            | Phase::PlanReviewPaused
+            | Phase::SkipToImplPending
+            | Phase::GitGuardPending
+    )
 }
 
 impl NtfyConfig {

@@ -1,6 +1,7 @@
 ---
-source: src/app/finalization/reason.rs
-expression: rendered
+source: src/app/finalization/reason_tests.rs
+assertion_line: 95
+expression: "samples().into_iter().map(|(variant, wire)|\nformat!(\"{variant} => {wire}\")).collect::<Vec<_>>().join(\"\\n\")"
 ---
 BaseMissing => base_missing
 ArtifactMissing => artifact_missing

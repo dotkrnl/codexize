@@ -1,4 +1,119 @@
 use super::*;
+use crate::adapters::EffortLevel;
+use crate::state::{LaunchModes, PipelineItem, PipelineItemStatus, SectionPart};
+
+#[test]
+fn coder_run_captures_iteration_loop_task_round_stage_path() {
+    let mut state = SessionState::new("path-capture".to_string());
+    state.current_phase = Phase::ImplementationRound(9);
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 1,
+        stage: "coder".to_string(),
+        task_id: Some(4),
+        round: Some(9),
+        status: PipelineItemStatus::Running,
+        title: Some("Extract UI".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    let id = start_agent_run(
+        &mut state,
+        "coder".to_string(),
+        Some(4),
+        9,
+        1,
+        "claude-opus-4.7".to_string(),
+        "claude".to_string(),
+        "[Round 9 Coder]".to_string(),
+        EffortLevel::Tough,
+        LaunchModes::default(),
+    );
+    let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+    assert_eq!(
+        run.section_path.as_deref(),
+        Some(
+            &[
+                SectionPart::Iteration(1),
+                SectionPart::Loop,
+                SectionPart::Task(4),
+                SectionPart::Round { n: 9, attempt: 1 },
+                SectionPart::Stage("coder".to_string()),
+            ][..]
+        )
+    );
+}
+
+#[test]
+fn simplifier_run_captures_iteration_simplification_round_stage_path() {
+    let mut state = SessionState::new("simpl-capture".to_string());
+    state.current_phase = Phase::Simplification(9);
+    state.builder.pipeline_items.push(PipelineItem {
+        id: 1,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(9),
+        status: PipelineItemStatus::Approved,
+        title: Some("Some task".to_string()),
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    let id = start_agent_run(
+        &mut state,
+        "simplifier".to_string(),
+        None,
+        9,
+        2,
+        "claude-opus-4-6".to_string(),
+        "claude".to_string(),
+        "[Simplifier]".to_string(),
+        EffortLevel::Normal,
+        LaunchModes::default(),
+    );
+    let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+    assert_eq!(
+        run.section_path.as_deref(),
+        Some(
+            &[
+                SectionPart::Iteration(1),
+                SectionPart::Simplification,
+                SectionPart::Round { n: 9, attempt: 2 },
+                SectionPart::Stage("simplifier".to_string()),
+            ][..]
+        )
+    );
+}
+
+#[test]
+fn brainstorm_run_captures_brainstorm_stage_path() {
+    let mut state = SessionState::new("brainstorm".to_string());
+    state.current_phase = Phase::BrainstormRunning;
+    let id = start_agent_run(
+        &mut state,
+        "brainstorm".to_string(),
+        None,
+        0,
+        1,
+        "x".to_string(),
+        "y".to_string(),
+        "[Brainstorm]".to_string(),
+        EffortLevel::Normal,
+        LaunchModes::default(),
+    );
+    let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
+    assert_eq!(
+        run.section_path.as_deref(),
+        Some(
+            &[
+                SectionPart::Brainstorm,
+                SectionPart::Stage("brainstorm".to_string()),
+            ][..]
+        )
+    );
+}
 
 #[test]
 fn test_try_parse_toml_artifact_missing_file() {

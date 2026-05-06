@@ -317,14 +317,20 @@ fn tool_call_map_evicts_oldest_when_cap_exceeded() {
     for i in 0..TOOL_CALL_MAP_CAP {
         map.insert(format!("id-{i}"), ToolCallDisplayState::default());
     }
-    assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
-    assert!(map.contains("id-0"));
+    assert_eq!(map.entries.len(), TOOL_CALL_MAP_CAP);
+    assert!(map.entries.contains_key("id-0"));
 
     map.insert("id-overflow".to_string(), ToolCallDisplayState::default());
-    assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
-    assert!(!map.contains("id-0"), "oldest entry should be evicted");
-    assert!(map.contains("id-overflow"));
-    assert!(map.contains(&format!("id-{}", TOOL_CALL_MAP_CAP - 1)));
+    assert_eq!(map.entries.len(), TOOL_CALL_MAP_CAP);
+    assert!(
+        !map.entries.contains_key("id-0"),
+        "oldest entry should be evicted"
+    );
+    assert!(map.entries.contains_key("id-overflow"));
+    assert!(
+        map.entries
+            .contains_key(&format!("id-{}", TOOL_CALL_MAP_CAP - 1))
+    );
 }
 
 #[test]
@@ -343,9 +349,12 @@ fn tool_call_map_overwrite_on_id_reuse_replaces_state_and_refreshes_position() {
     };
     map.insert("id-a".to_string(), replacement);
 
-    assert_eq!(map.len(), 2);
+    assert_eq!(map.entries.len(), 2);
     assert_eq!(
-        map.get("id-a").and_then(|s| s.title.clone()).as_deref(),
+        map.entries
+            .get("id-a")
+            .and_then(|s| s.title.clone())
+            .as_deref(),
         Some("second")
     );
 
@@ -354,10 +363,13 @@ fn tool_call_map_overwrite_on_id_reuse_replaces_state_and_refreshes_position() {
     for i in 0..(TOOL_CALL_MAP_CAP - 2) {
         map.insert(format!("id-fill-{i}"), ToolCallDisplayState::default());
     }
-    assert_eq!(map.len(), TOOL_CALL_MAP_CAP);
+    assert_eq!(map.entries.len(), TOOL_CALL_MAP_CAP);
     map.insert("id-overflow".to_string(), ToolCallDisplayState::default());
-    assert!(!map.contains("id-b"), "id-b should be evicted before id-a");
-    assert!(map.contains("id-a"));
+    assert!(
+        !map.entries.contains_key("id-b"),
+        "id-b should be evicted before id-a"
+    );
+    assert!(map.entries.contains_key("id-a"));
 }
 
 #[test]
@@ -392,12 +404,12 @@ fn tool_call_map_evict_removes_entry_and_clears_order() {
     map.insert("id-x".to_string(), ToolCallDisplayState::default());
     map.insert("id-y".to_string(), ToolCallDisplayState::default());
     map.evict("id-x");
-    assert!(!map.contains("id-x"));
-    assert_eq!(map.len(), 1);
+    assert!(!map.entries.contains_key("id-x"));
+    assert_eq!(map.entries.len(), 1);
 
     // Re-inserting the same id should not collide with stale order entries.
     map.insert("id-x".to_string(), ToolCallDisplayState::default());
-    assert_eq!(map.len(), 2);
+    assert_eq!(map.entries.len(), 2);
 }
 
 #[test]

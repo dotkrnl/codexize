@@ -1,21 +1,33 @@
 mod actor;
 mod client;
-mod config;
 mod dispatch;
-mod events;
 mod handshake;
 mod tool_call;
 
 #[cfg(test)]
-pub use client::client_updates_from_session_updates_for_test;
+pub fn client_updates_from_session_updates_for_test(
+    values: impl IntoIterator<Item = serde_json::Value>,
+    cwd: &std::path::Path,
+) -> Vec<crate::acp::ClientUpdate> {
+    let mut map = tool_call::ToolCallMap::new();
+    let mut boundary = dispatch::AcpBoundaryState::new();
+    let mut out = std::collections::VecDeque::new();
+    for value in values {
+        dispatch::dispatch_update(&value, cwd, &mut map, &mut boundary, &mut out);
+    }
+    out.into_iter().collect()
+}
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
-pub use config::{
+// Launch/policy wiring and runtime text adaptation are ACP-specific, but they are
+// orchestration concerns rather than JSON-RPC transport, so they live alongside
+// `data::acp` instead of inflating the transport directory's footprint.
+pub use super::acp_config::{
     AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_local_program,
     program_is_executable, should_offer_claude_acp_install, should_offer_codex_acp_install,
 };
-pub use events::{
-    AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientUpdate,
-    ToolCallActivityKind, translate_update,
+pub use super::acp_events::{
+    AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientTextKind,
+    ClientUpdate, ToolCallActivityKind, translate_update,
 };
 
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};

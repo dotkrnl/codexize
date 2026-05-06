@@ -615,7 +615,8 @@ fn acp_text_stream_tool_call_boundaries_isolate_thought_and_agent_text() {
         crate::acp::AcpTextBoundary::StartNewMessage,
     );
     let tool_event = crate::acp::translate_update(
-        crate::acp::ClientUpdate::ToolCallText {
+        crate::acp::ClientUpdate::Text {
+            kind: crate::acp::ClientTextKind::Tool,
             text: "tool: exec(echo ok)".to_string(),
             boundary: crate::acp::AcpTextBoundary::StartNewMessage,
             identity: None,

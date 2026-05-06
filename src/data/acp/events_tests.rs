@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn message_chunks_become_text_events() {
     let event = translate_update(
-        ClientUpdate::AgentMessageText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "hello".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -27,7 +28,8 @@ fn message_chunks_become_text_events() {
 #[test]
 fn message_chunks_preserve_continue_boundary() {
     let event = translate_update(
-        ClientUpdate::AgentMessageText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: " more".to_string(),
             boundary: AcpTextBoundary::Continue,
             identity: None,
@@ -51,7 +53,8 @@ fn message_chunks_preserve_continue_boundary() {
 #[test]
 fn thought_chunks_are_ignored() {
     let event = translate_update(
-        ClientUpdate::AgentThoughtText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Thought,
             text: "internal".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -74,7 +77,8 @@ fn thought_chunks_are_ignored() {
 #[test]
 fn tool_call_text_becomes_thought_event_with_paragraph_break() {
     let event = translate_update(
-        ClientUpdate::ToolCallText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Tool,
             text: "tool: read(Cargo.toml)".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -97,7 +101,8 @@ fn tool_call_text_becomes_thought_event_with_paragraph_break() {
 #[test]
 fn tool_call_text_translates_unchanged_for_result_blocks() {
     let event = translate_update(
-        ClientUpdate::ToolCallText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Tool,
             text: "result: completed, exit 0, output: ok".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,

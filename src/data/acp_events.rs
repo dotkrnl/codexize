@@ -6,11 +6,13 @@ use std::collections::VecDeque;
 pub enum AcpTextBoundary { Continue, StartNewMessage }
 
 #[rustfmt::skip]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientTextKind { Message, Thought, Tool }
+
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientUpdate {
-    AgentMessageText { text: String, boundary: AcpTextBoundary, identity: Option<String> },
-    AgentThoughtText { text: String, boundary: AcpTextBoundary, identity: Option<String> },
-    ToolCallText { text: String, boundary: AcpTextBoundary, identity: Option<String> },
+    Text { kind: ClientTextKind, text: String, boundary: AcpTextBoundary, identity: Option<String> },
     /// At most one Start/Finish per `tool_call_id`.
     ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
     SessionInfoUpdate { title: Option<String> },
@@ -33,6 +35,7 @@ pub enum AcpRuntimeEvent {
     ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpTextEvent {
     pub text: String,
@@ -78,7 +81,6 @@ impl AcpTextAccumulator {
             .or_else(|| (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer)))
     }
 
-    #[rustfmt::skip]
     fn flush_ready(&mut self) {
         while let Some(at) = self.buffer.find("\n\n") {
             let block = self.buffer[..at].to_string();
@@ -86,7 +88,8 @@ impl AcpTextAccumulator {
             if !block.is_empty() { self.ready.push_back(block); }
         }
         while self.buffer.chars().count() >= self.max_chars {
-            let at = self.buffer.char_indices().nth(self.max_chars).map(|(i, _)| i).unwrap_or(self.buffer.len());
+            let at = self.buffer.char_indices().nth(self.max_chars).map(|(i, _)| i)
+                .unwrap_or(self.buffer.len());
             let block = self.buffer[..at].to_string();
             self.buffer = self.buffer[at..].to_string();
             self.ready.push_back(block);
@@ -95,18 +98,20 @@ impl AcpTextAccumulator {
 }
 
 impl Default for AcpTextAccumulator {
-    #[rustfmt::skip]
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[rustfmt::skip]
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
-    let text = |text: String, thought, boundary, identity|
-        AcpRuntimeEvent::Text(AcpTextEvent { text, interactive, thought, boundary, identity });
     Some(match update {
-        ClientUpdate::AgentMessageText { text: t, boundary, identity } => text(t, false, boundary, identity),
-        ClientUpdate::AgentThoughtText { text: t, boundary, identity } => text(t, true, boundary, identity),
-        ClientUpdate::ToolCallText { text: t, boundary, identity } => text(format!("{t}\n\n"), true, boundary, identity),
+        ClientUpdate::Text { kind, mut text, boundary, identity } => {
+            if matches!(kind, ClientTextKind::Tool) { text.push_str("\n\n"); }
+            AcpRuntimeEvent::Text(AcpTextEvent {
+                text, interactive, thought: !matches!(kind, ClientTextKind::Message), boundary, identity,
+            })
+        }
         ClientUpdate::ToolCallActivity { tool_call_id, kind } =>
             AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind },
         ClientUpdate::SessionInfoUpdate { title } =>
@@ -118,5 +123,5 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
 }
 
 #[cfg(test)]
-#[path = "events_tests.rs"]
+#[path = "acp/events_tests.rs"]
 mod events_tests;

@@ -1,4 +1,4 @@
-use super::{
+use crate::acp::{
     AcpError, AcpLaunchPolicy, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort,
     AcpResolvedLaunch, AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
 };
@@ -182,5 +182,5 @@ fn effort_str(e: crate::adapters::EffortLevel) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "config_tests.rs"]
+#[path = "acp/config_tests.rs"]
 mod tests_mod;

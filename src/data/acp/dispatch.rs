@@ -8,7 +8,7 @@ use super::tool_call::{
     ToolCallDisplayState, ToolCallMap, format_invocation_line, format_result_line,
     is_terminal_status,
 };
-use super::{AcpTextBoundary, ClientUpdate, ToolCallActivityKind};
+use super::{AcpTextBoundary, ClientTextKind, ClientUpdate, ToolCallActivityKind};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::path::Path;
@@ -74,10 +74,11 @@ fn push_text(value: &Value, state: &mut StreamIdentity, thought: bool, out: &mut
     let text = value.pointer("/content/text").and_then(Value::as_str).unwrap_or_default().to_string();
     let identity = extract_identity(value);
     let boundary = classify_boundary(state, identity.as_deref());
-    out.push_back(if thought {
-        ClientUpdate::AgentThoughtText { text, boundary, identity }
-    } else {
-        ClientUpdate::AgentMessageText { text, boundary, identity }
+    out.push_back(ClientUpdate::Text {
+        kind: if thought { ClientTextKind::Thought } else { ClientTextKind::Message },
+        text,
+        boundary,
+        identity,
     });
 }
 
@@ -151,5 +152,10 @@ fn emit_activity_once(id: &str, terminal: bool, map: &mut ToolCallMap, out: &mut
 
 #[rustfmt::skip]
 fn tool_text(text: String) -> ClientUpdate {
-    ClientUpdate::ToolCallText { text, boundary: AcpTextBoundary::StartNewMessage, identity: None }
+    ClientUpdate::Text {
+        kind: ClientTextKind::Tool,
+        text,
+        boundary: AcpTextBoundary::StartNewMessage,
+        identity: None,
+    }
 }

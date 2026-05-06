@@ -190,18 +190,4 @@ fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
 }
 
 #[cfg(test)]
-pub fn client_updates_from_session_updates_for_test(
-    values: impl IntoIterator<Item = Value>,
-    cwd: &Path,
-) -> Vec<ClientUpdate> {
-    let mut map = ToolCallMap::new();
-    let mut boundary = AcpBoundaryState::new();
-    let mut out = VecDeque::new();
-    for value in values {
-        dispatch_update(&value, cwd, &mut map, &mut boundary, &mut out);
-    }
-    out.into_iter().collect()
-}
-
-#[cfg(test)]
 mod tests;

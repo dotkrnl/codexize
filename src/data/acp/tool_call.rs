@@ -74,7 +74,6 @@ pub(super) struct ToolCallMap {
 #[rustfmt::skip]
 impl ToolCallMap {
     pub(super) fn new() -> Self { Self::default() }
-
     #[cfg(test)] pub(super) fn len(&self) -> usize { self.entries.len() }
     #[cfg(test)] pub(super) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> { self.entries.get(id) }
     #[cfg(test)] pub(super) fn contains(&self, id: &str) -> bool { self.entries.contains_key(id) }

@@ -4,7 +4,7 @@ use super::super::handshake::{
     PromptTurnOutcome, parse_initialize_result, parse_prompt_result, prompt_request_params,
 };
 use super::super::tool_call::TOOL_CALL_MAP_CAP;
-use super::super::{AcpTextBoundary, PromptPayload, ToolCallActivityKind};
+use super::super::{AcpTextBoundary, ClientTextKind, PromptPayload, ToolCallActivityKind};
 use super::*;
 
 #[test]
@@ -81,7 +81,8 @@ fn drain_with_state(
 }
 
 fn tool_call_block(text: &str) -> ClientUpdate {
-    ClientUpdate::ToolCallText {
+    ClientUpdate::Text {
+        kind: ClientTextKind::Tool,
         text: text.to_string(),
         boundary: AcpTextBoundary::StartNewMessage,
         identity: None,
@@ -904,7 +905,8 @@ fn dispatch_passes_through_agent_message_and_thought_chunks() {
     );
     assert_eq!(
         messages,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "hello".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -921,7 +923,8 @@ fn dispatch_passes_through_agent_message_and_thought_chunks() {
     );
     assert_eq!(
         thoughts,
-        vec![ClientUpdate::AgentThoughtText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Thought,
             text: "thinking".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -953,7 +956,8 @@ fn dispatch_continues_no_identity_chunks_until_explicit_boundary() {
     );
     assert_eq!(
         first,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "first ".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -961,7 +965,8 @@ fn dispatch_continues_no_identity_chunks_until_explicit_boundary() {
     );
     assert_eq!(
         second,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "second".to_string(),
             boundary: AcpTextBoundary::Continue,
             identity: None,
@@ -1004,7 +1009,8 @@ fn dispatch_restarts_no_identity_chunk_after_tool_call_interleave() {
     );
     assert_eq!(
         after,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "after".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -1037,7 +1043,8 @@ fn dispatch_restarts_no_identity_chunk_across_prompt_turns() {
     );
     assert_eq!(
         next_turn,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "turn two".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
@@ -1071,7 +1078,8 @@ fn dispatch_emits_continue_when_message_identity_persists() {
     );
     assert_eq!(
         first,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "hel".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: Some("msg-7".to_string()),
@@ -1079,7 +1087,8 @@ fn dispatch_emits_continue_when_message_identity_persists() {
     );
     assert_eq!(
         second,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "lo".to_string(),
             boundary: AcpTextBoundary::Continue,
             identity: Some("msg-7".to_string()),
@@ -1124,7 +1133,8 @@ fn dispatch_resets_continuation_after_tool_call_interleave() {
     );
     assert_eq!(
         after,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "after".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: Some("msg-7".to_string()),
@@ -1159,7 +1169,8 @@ fn dispatch_resets_continuation_across_prompt_turns() {
     );
     assert_eq!(
         next_turn,
-        vec![ClientUpdate::AgentMessageText {
+        vec![ClientUpdate::Text {
+            kind: ClientTextKind::Message,
             text: "turn two".to_string(),
             boundary: AcpTextBoundary::StartNewMessage,
             identity: Some("msg-7".to_string()),
@@ -1186,16 +1197,21 @@ fn dispatch_tool_call_text_is_always_start_new_message() {
     );
     assert!(updates.iter().all(|update| matches!(
         update,
-        ClientUpdate::ToolCallText {
+        ClientUpdate::Text {
+            kind: ClientTextKind::Tool,
             boundary: AcpTextBoundary::StartNewMessage,
             identity: None,
             ..
         } | ClientUpdate::ToolCallActivity { .. }
     )));
     assert!(
-        updates
-            .iter()
-            .any(|update| matches!(update, ClientUpdate::ToolCallText { .. })),
+        updates.iter().any(|update| matches!(
+            update,
+            ClientUpdate::Text {
+                kind: ClientTextKind::Tool,
+                ..
+            }
+        )),
         "tool call should have produced at least one text block"
     );
 }

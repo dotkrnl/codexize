@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::PipelineItem;
 
 fn run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
     RunRecord {
@@ -28,6 +29,57 @@ fn collect_run_ids(node: &Node, out: &mut Vec<u64>) {
     }
     for child in &node.children {
         collect_run_ids(child, out);
+    }
+}
+
+fn set_builder_tasks(
+    state: &mut SessionState,
+    done: &[u32],
+    current: Option<u32>,
+    pending: &[u32],
+) {
+    state.builder.pipeline_items.clear();
+    for task_id in done {
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(*task_id),
+            round: None,
+            status: PipelineItemStatus::Approved,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+    }
+    if let Some(task_id) = current {
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(task_id),
+            round: None,
+            status: PipelineItemStatus::Running,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+    }
+    for task_id in pending {
+        state.builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(*task_id),
+            round: None,
+            status: PipelineItemStatus::Pending,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
     }
 }
 
@@ -229,7 +281,7 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
 fn test_retry_success_collapses_round_status_in_builder() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(1);
-    state.builder.current_task = Some(1);
+    set_builder_tasks(&mut state, &[], Some(1), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
         stage: "coder".to_string(),
@@ -294,7 +346,7 @@ fn test_retry_success_collapses_round_status_in_builder() {
 fn failed_unverified_run_maps_to_distinct_node_status() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(1);
-    state.builder.current_task = Some(1);
+    set_builder_tasks(&mut state, &[], Some(1), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
         stage: "coder".to_string(),
@@ -345,9 +397,7 @@ fn test_collapsed_stage_leaf_run_id() {
 fn builder_stage_orders_done_recovery_current_pending() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::BuilderRecovery(4);
-    state.builder.done = vec![3, 1];
-    state.builder.current_task = Some(9);
-    state.builder.pending = vec![8, 7];
+    set_builder_tasks(&mut state, &[3, 1], Some(9), &[8, 7]);
     state.agent_runs.push(RunRecord {
         id: 99,
         stage: "recovery".to_string(),
@@ -398,9 +448,7 @@ fn builder_stage_orders_done_recovery_current_pending() {
 fn builder_recovery_uses_trigger_task_for_position() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::BuilderRecovery(4);
-    state.builder.done = vec![1];
-    state.builder.current_task = Some(2);
-    state.builder.pending = vec![3];
+    set_builder_tasks(&mut state, &[1], Some(2), &[3]);
     state.builder.iteration = 4;
     state.builder.recovery_trigger_task_id = Some(2);
     let mut recovery = run(99, "recovery", RunStatus::Running);
@@ -437,7 +485,7 @@ fn builder_recovery_uses_trigger_task_for_position() {
 fn builder_recovery_sits_between_blocked_round_and_new_round_inside_task() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(5);
-    state.builder.current_task = Some(2);
+    set_builder_tasks(&mut state, &[], Some(2), &[]);
     state.builder.recovery_trigger_task_id = Some(2);
 
     let mut coder_round4 = run(10, "coder", RunStatus::Done);
@@ -476,8 +524,7 @@ fn builder_recovery_sits_between_blocked_round_and_new_round_inside_task() {
 fn recovery_rounds_include_sharding_run_sharing_recovery_round_without_pipeline_mode() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::BuilderRecoverySharding(6);
-    state.builder.done = vec![1, 2];
-    state.builder.pending = vec![3];
+    set_builder_tasks(&mut state, &[1, 2], None, &[3]);
 
     let mut recovery = run(3, "recovery", RunStatus::Done);
     recovery.round = 6;
@@ -524,8 +571,7 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
     use crate::state::PipelineItem;
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::BuilderRecoverySharding(6);
-    state.builder.done = vec![1, 2];
-    state.builder.pending = vec![3];
+    set_builder_tasks(&mut state, &[1, 2], None, &[3]);
     state.builder.iteration = 6;
     // Original (round 1) plan-review and sharding runs.
     state.agent_runs.push(RunRecord {
@@ -912,8 +958,7 @@ fn test_collapse_mode_multiple_attempts_preserved() {
 fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(2);
-    state.builder.done = vec![7];
-    state.builder.current_task = Some(8);
+    set_builder_tasks(&mut state, &[7], Some(8), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
         stage: "coder".to_string(),
@@ -968,7 +1013,7 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
 fn flatten_visible_rows_hides_collapsed_descendants() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ReviewRound(1);
-    state.builder.current_task = Some(3);
+    set_builder_tasks(&mut state, &[], Some(3), &[]);
     state.agent_runs.push(RunRecord {
         id: 1,
         stage: "coder".to_string(),
@@ -1122,8 +1167,7 @@ fn test_agent_run_node_tough_suffix() {
 fn test_task_node_tough_badge() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::ImplementationRound(1);
-    state.builder.current_task = Some(1);
-    state.builder.pending = vec![2];
+    set_builder_tasks(&mut state, &[], Some(1), &[2]);
 
     let normal_run = RunRecord {
         id: 1,

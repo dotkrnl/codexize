@@ -1002,37 +1002,54 @@ fn test_pipeline_item_plan_review_with_mode() {
 
 #[test]
 fn test_pipeline_item_status_lifecycle_vs_verdict() {
+    let is_lifecycle = |status: PipelineItemStatus| {
+        status.is_pending() || status.is_running() || status.is_done() || status.is_failed()
+    };
+    let is_verdict = |status: PipelineItemStatus| {
+        status.is_approved()
+            || status.is_revise()
+            || status.is_human_blocked()
+            || status.is_agent_pivot()
+    };
     assert!(PipelineItemStatus::Pending.is_pending());
     assert!(PipelineItemStatus::HumanBlocked.is_human_blocked());
     assert!(PipelineItemStatus::AgentPivot.is_agent_pivot());
     assert!(!PipelineItemStatus::Done.is_pending());
 
-    assert!(PipelineItemStatus::Pending.is_lifecycle());
-    assert!(PipelineItemStatus::Running.is_lifecycle());
-    assert!(PipelineItemStatus::Done.is_lifecycle());
-    assert!(PipelineItemStatus::Failed.is_lifecycle());
+    assert!(is_lifecycle(PipelineItemStatus::Pending));
+    assert!(is_lifecycle(PipelineItemStatus::Running));
+    assert!(is_lifecycle(PipelineItemStatus::Done));
+    assert!(is_lifecycle(PipelineItemStatus::Failed));
 
-    assert!(!PipelineItemStatus::Pending.is_verdict());
-    assert!(!PipelineItemStatus::Done.is_verdict());
+    assert!(!is_verdict(PipelineItemStatus::Pending));
+    assert!(!is_verdict(PipelineItemStatus::Done));
 
-    assert!(PipelineItemStatus::Approved.is_verdict());
-    assert!(PipelineItemStatus::Revise.is_verdict());
-    assert!(PipelineItemStatus::HumanBlocked.is_verdict());
-    assert!(PipelineItemStatus::AgentPivot.is_verdict());
+    assert!(is_verdict(PipelineItemStatus::Approved));
+    assert!(is_verdict(PipelineItemStatus::Revise));
+    assert!(is_verdict(PipelineItemStatus::HumanBlocked));
+    assert!(is_verdict(PipelineItemStatus::AgentPivot));
 
-    assert!(!PipelineItemStatus::Approved.is_lifecycle());
+    assert!(!is_lifecycle(PipelineItemStatus::Approved));
 }
 
 #[test]
 fn test_pipeline_item_status_terminal() {
-    assert!(!PipelineItemStatus::Pending.is_terminal());
-    assert!(!PipelineItemStatus::Running.is_terminal());
-    assert!(PipelineItemStatus::Done.is_terminal());
-    assert!(PipelineItemStatus::Failed.is_terminal());
-    assert!(PipelineItemStatus::Approved.is_terminal());
-    assert!(PipelineItemStatus::Revise.is_terminal());
-    assert!(PipelineItemStatus::HumanBlocked.is_terminal());
-    assert!(PipelineItemStatus::AgentPivot.is_terminal());
+    let is_verdict = |status: PipelineItemStatus| {
+        status.is_approved()
+            || status.is_revise()
+            || status.is_human_blocked()
+            || status.is_agent_pivot()
+    };
+    let is_terminal =
+        |status: PipelineItemStatus| status.is_done() || status.is_failed() || is_verdict(status);
+    assert!(!is_terminal(PipelineItemStatus::Pending));
+    assert!(!is_terminal(PipelineItemStatus::Running));
+    assert!(is_terminal(PipelineItemStatus::Done));
+    assert!(is_terminal(PipelineItemStatus::Failed));
+    assert!(is_terminal(PipelineItemStatus::Approved));
+    assert!(is_terminal(PipelineItemStatus::Revise));
+    assert!(is_terminal(PipelineItemStatus::HumanBlocked));
+    assert!(is_terminal(PipelineItemStatus::AgentPivot));
 }
 
 #[test]

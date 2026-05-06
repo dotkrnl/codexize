@@ -85,9 +85,9 @@ iteration = 1
     )
     .expect("builder state should deserialize");
 
-    assert_eq!(builder.done, vec![1]);
-    assert_eq!(builder.current_task, Some(2));
-    assert_eq!(builder.pending, vec![3]);
+    assert_eq!(builder.done_task_ids(), vec![1]);
+    assert_eq!(builder.current_task_id(), Some(2));
+    assert_eq!(builder.pending_task_ids(), vec![3]);
 }
 
 #[test]

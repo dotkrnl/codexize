@@ -901,6 +901,19 @@ pub fn register_test_run_id(window_name: &str, run_id: RunId) {
         && previous != run_id
         && let Some((_, run)) = test_supervisor().inner.runs.remove(&previous)
     {
+        // Re-keying onto an already-occupied slot would silently drop the
+        // existing handle. The process-global fixture supervisor still gets
+        // re-used across tests today, so collisions surface when a leaked
+        // fixture from an earlier test still has a handle at this id; warn
+        // so the leak is visible. Once each `App` owns its own supervisor,
+        // this can graduate to a `debug_assert!`.
+        if test_supervisor().inner.runs.contains_key(&run_id) {
+            eprintln!(
+                "register_test_run_id: replacing existing RunHandle at run_id {run_id} \
+                 (window_name={window_name}); shared process-global fixture coupling — \
+                 chunked harness migration pending"
+            );
+        }
         test_supervisor().inner.runs.insert(run_id, run);
     }
 }

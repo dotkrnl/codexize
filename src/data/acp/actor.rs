@@ -1,6 +1,6 @@
 //! Tokio actor that owns the spawned ACP child's stdio.
 
-use super::super::{AcpError, AcpResult};
+use super::{AcpError, AcpResult};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,

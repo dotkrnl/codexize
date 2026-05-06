@@ -2,7 +2,7 @@
 //! apply config options, and start the first prompt turn.
 
 use super::actor::RpcClient;
-use crate::data::acp::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
+use super::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
 use crate::selection::vendor::vendor_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};

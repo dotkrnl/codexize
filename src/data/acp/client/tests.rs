@@ -1,11 +1,11 @@
-use super::super::{AcpTextBoundary, PromptPayload, ToolCallActivityKind};
-use super::actor::{RpcClient, client_request_response};
-use super::dispatch::{AcpBoundaryState, dispatch_update};
-use super::handshake::{
+use super::super::actor::{RpcClient, client_request_response};
+use super::super::dispatch::{AcpBoundaryState, dispatch_update};
+use super::super::handshake::{
     PromptTurnOutcome, parse_initialize_result, parse_prompt_result, prompt_request_params,
 };
+use super::super::tool_call::TOOL_CALL_MAP_CAP;
+use super::super::{AcpTextBoundary, PromptPayload, ToolCallActivityKind};
 use super::*;
-use crate::data::acp_support::tool_call::TOOL_CALL_MAP_CAP;
 
 #[test]
 fn parse_prompt_result_marks_failure_stop_reasons() {

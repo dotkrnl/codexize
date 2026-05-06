@@ -4,11 +4,11 @@
 //! (session start, prompt-turn reset, tool-call interleave, or stable identity
 //! change); `Continue` otherwise.
 
-use crate::data::acp::{AcpTextBoundary, ClientUpdate, ToolCallActivityKind};
-use crate::data::acp_support::tool_call::{
+use super::tool_call::{
     ToolCallDisplayState, ToolCallMap, format_invocation_line, format_result_line,
     is_terminal_status,
 };
+use super::{AcpTextBoundary, ClientUpdate, ToolCallActivityKind};
 use serde_json::Value;
 use std::{collections::VecDeque, path::Path};
 

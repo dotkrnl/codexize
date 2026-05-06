@@ -4,20 +4,14 @@
 //! stdio and outstanding-request map. The synchronous [`AcpSession`] facade
 //! lets sync callers drive prompt turns by polling.
 
-mod actor;
-#[path = "../acp_support/client_dispatch.rs"]
-mod dispatch;
-#[path = "../acp_support/client_handshake.rs"]
-mod handshake;
-
-use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate};
-use crate::data::acp_support::tool_call::ToolCallMap;
-use actor::RpcClient;
-use dispatch::{AcpBoundaryState, dispatch_update};
-use handshake::{
+use super::actor::RpcClient;
+use super::dispatch::{AcpBoundaryState, dispatch_update};
+use super::handshake::{
     HandshakeOutput, PromptTurnOutcome, build_session_runtime, handshake, parse_prompt_result,
     prompt_request_params, spawn_actor,
 };
+use super::tool_call::ToolCallMap;
+use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate};
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,

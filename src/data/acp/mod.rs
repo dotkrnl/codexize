@@ -1,5 +1,10 @@
+mod actor;
 mod client;
-use super::acp_support::{config, events};
+mod config;
+mod dispatch;
+mod events;
+mod handshake;
+mod tool_call;
 
 #[cfg(test)]
 pub use client::client_updates_from_session_updates_for_test;

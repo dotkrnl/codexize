@@ -3,14 +3,13 @@
 //! Canonical state/session data, stage IO contracts, and resume validation
 //! live here. The pipeline module only owns the phase graph and pure
 //! transition mutators.
-
 mod builder;
 #[path = "resume.rs"]
 mod resume_logic;
 mod stage_io;
 #[path = "types.rs"]
 mod types_logic;
-
+pub use crate::data::persistence::resume_session;
 pub use crate::logic::pipeline::{FinishedRunRecord, Phase, TransitionError};
 pub use builder::BuilderState;
 pub use resume_logic::{ResumeError, can_resume};
@@ -19,18 +18,14 @@ pub use stage_io::{
     RECOVERY_SHARDER_IO, REVIEWER_IO, SHARDER_IO, SIMPLIFIER_IO, SPEC_REVIEWER_IO, StageIO,
     stage_io, stage_io_with_mode,
 };
+#[cfg(test)]
+pub(crate) use types_logic::test_fs_lock;
 pub use types_logic::{
     BlockOrigin, Event, LaunchModes, Message, MessageKind, MessageSender, Modes, Node, NodeKind,
     NodeStatus, PendingGuardDecision, PipelineItem, PipelineItemStatus, RunRecord, RunStatus,
     SectionPart, SessionState, codexize_root, session_dir,
 };
-
-pub use crate::data::persistence::resume_session;
-
-#[cfg(test)]
-pub(crate) use types_logic::test_fs_lock;
 pub(crate) use types_logic::{EventsFile, MessagesFile};
-
 /// Compatibility module mirroring the pre-refactor `crate::state::transitions`
 /// surface. Pure mutators are re-exported from
 /// [`crate::logic::pipeline::transitions`]; persisting wrappers come from
@@ -63,13 +58,11 @@ pub mod transitions {
         SPEC_REVIEWER_IO, StageIO, stage_io, stage_io_with_mode,
     };
 }
-
 /// Compatibility module mirroring the pre-refactor `crate::state::resume`
 /// surface.
 pub mod resume {
     pub use crate::data::persistence::resume::resume_session;
     pub use crate::state::resume_logic::{ResumeError, can_resume};
 }
-
 #[cfg(test)]
 mod tests_mod;

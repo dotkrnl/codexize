@@ -1,12 +1,10 @@
 use crate::logic::pipeline::Phase;
 use crate::state::RunRecord;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryTarget {
     Task(u32),
     Stage(&'static str),
 }
-
 pub fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
     match stage {
         "brainstorm" => Some(Phase::BrainstormRunning),
@@ -17,13 +15,11 @@ pub fn retry_phase_for_stage(stage: &str) -> Option<Phase> {
         _ => None,
     }
 }
-
 pub fn retry_target_for_run(run: &RunRecord) -> Option<RetryTarget> {
     run.task_id
         .map(RetryTarget::Task)
         .or_else(|| stage_str(&run.stage).map(RetryTarget::Stage))
 }
-
 pub fn stage_str(stage: &str) -> Option<&'static str> {
     match stage {
         "brainstorm" => Some("brainstorm"),

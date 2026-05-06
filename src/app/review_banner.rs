@@ -2,7 +2,6 @@
 // they're auto-opened for review and stripped (by exact match) once the
 // editor closes. Kept in its own module so the literal stays pinned and the
 // file IO is easy to find.
-
 /// Prepended to spec/plan files when they're auto-opened for review, then
 /// stripped (by exact match) once the editor closes. Keep the literal stable
 /// — `strip_review_banner` removes only this exact string, so any drift
@@ -16,9 +15,7 @@ pub(crate) const REVIEW_BANNER: &str = "\
 ██   leave it in place; it will not appear in the saved artifact.     ██
 ██                                                                    ██
 ████████████████████████████████████████████████████████████████████████
-
 ";
-
 pub(crate) fn prepend_review_banner(path: &std::path::Path) -> bool {
     let Ok(existing) = std::fs::read_to_string(path) else {
         return false;
@@ -31,7 +28,6 @@ pub(crate) fn prepend_review_banner(path: &std::path::Path) -> bool {
     combined.push_str(&existing);
     std::fs::write(path, combined).is_ok()
 }
-
 pub(crate) fn strip_review_banner(path: &std::path::Path) -> std::io::Result<()> {
     let existing = std::fs::read_to_string(path)?;
     let Some(idx) = existing.find(REVIEW_BANNER) else {

@@ -1,17 +1,13 @@
+use super::{LiveModel, build_http_client, fetch_json_response, home_dir, run_provider_warmup};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, env, fs};
-
-use super::{LiveModel, build_http_client, fetch_json_response, home_dir, run_provider_warmup};
-
 const QUOTA_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota";
-
 #[derive(Debug, Deserialize)]
 struct OAuthCreds {
     access_token: Option<String>,
 }
-
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
     let token = resolve_access_token()?;
@@ -19,13 +15,11 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let payload = fetch_usage_payload(&token, &project_id).await?;
     live_models_from_payload(&payload)
 }
-
 fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
     let buckets = payload
         .get("buckets")
         .and_then(Value::as_array)
         .context("Gemini usage response did not include buckets")?;
-
     let mut models = BTreeMap::<String, Option<u8>>::new();
     for bucket in buckets {
         let name = bucket
@@ -44,11 +38,9 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
             *entry = Some(a.min(b));
         }
     }
-
     if models.is_empty() {
         bail!("Gemini quota response had no model buckets");
     }
-
     Ok(models
         .into_iter()
         .map(|(name, quota_percent)| LiveModel {
@@ -58,16 +50,13 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         })
         .collect())
 }
-
 fn dummy_invoke() -> Result<()> {
     run_provider_warmup("Gemini", "gemini", &["--yolo"], "/stats\n/exit\n", &[])
 }
-
 fn resolve_access_token() -> Result<String> {
     if let Ok(token) = env::var("GEMINI_ACCESS_TOKEN") {
         return Ok(token);
     }
-
     let path = home_dir()?.join(".gemini/oauth_creds.json");
     let text =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -77,7 +66,6 @@ fn resolve_access_token() -> Result<String> {
         .access_token
         .context("no Gemini access token found in oauth_creds.json")
 }
-
 fn resolve_project_id() -> Result<String> {
     if let Ok(project_id) = env::var("GEMINI_PROJECT_ID") {
         return Ok(project_id);
@@ -85,7 +73,6 @@ fn resolve_project_id() -> Result<String> {
     if let Ok(project_id) = env::var("GOOGLE_CLOUD_PROJECT") {
         return Ok(project_id);
     }
-
     let path = home_dir()?.join(".gemini/projects.json");
     let text =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -102,7 +89,6 @@ fn resolve_project_id() -> Result<String> {
         .unwrap_or(cwd)
         .to_string_lossy()
         .to_string();
-
     projects
         .get(&cwd_str)
         .or_else(|| projects.get(&cwd_resolved))
@@ -111,22 +97,18 @@ fn resolve_project_id() -> Result<String> {
         .map(ToOwned::to_owned)
         .context("no Gemini project id found")
 }
-
 async fn fetch_usage_payload(token: &str, project_id: &str) -> Result<Value> {
     let client = build_http_client(5)?;
-
     let request = client
         .post(QUOTA_ENDPOINT)
         .bearer_auth(token)
         .json(&json!({ "project": project_id }));
-
     let payload = fetch_json_response(request, "Gemini").await?;
     if payload.get("error").is_some() {
         bail!("Gemini quota response contained an error");
     }
     Ok(payload)
 }
-
 #[cfg(test)]
 #[path = "gemini_tests.rs"]
 mod tests;

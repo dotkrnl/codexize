@@ -2,23 +2,17 @@ mod handlers;
 mod input_focus;
 mod interactive;
 mod split;
-
-use std::time::Duration;
-
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-
-use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
-use crate::state::RunStatus;
-
 use super::status_line::Severity;
 use super::{App, ModalKind, PendingTermination, RetryLaunch, TerminationIntent};
-
+use crate::app_runtime::{AppCommand, UiKey, UiKeyCode};
+use crate::state::RunStatus;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::time::Duration;
 impl App {
     fn marker_already_logged(&self, marker: &str) -> bool {
         let events_path = crate::state::session_dir(&self.state.session_id).join("events.toml");
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
     }
-
     fn request_termination(&mut self, pending: PendingTermination, _window_name: String) {
         if let Some(existing) = self.pending_termination.as_ref()
             && existing.run_id == pending.run_id
@@ -38,7 +32,6 @@ impl App {
             );
             return;
         }
-
         let marker = format!("{}: run_id={}", pending.marker(), pending.run_id);
         if !self.marker_already_logged(&marker) {
             let _ = self.state.log_event(marker);
@@ -52,7 +45,6 @@ impl App {
             Duration::from_secs(5),
         );
     }
-
     /// Push a transient status-line message from a non-render call site.
     ///
     /// Single entry point so renderer toasts and side-effect producers
@@ -61,7 +53,6 @@ impl App {
     pub(crate) fn push_status(&self, message: String, severity: Severity, ttl: Duration) {
         self.status_line.borrow_mut().push(message, severity, ttl);
     }
-
     pub(crate) fn surface_boundary_error(&mut self, message: String, persist_agent_error: bool) {
         let _ = self.state.log_event(message.clone());
         self.push_status(message.clone(), Severity::Error, Duration::from_secs(8));
@@ -71,7 +62,6 @@ impl App {
             self.rebuild_tree_view(None);
         }
     }
-
     pub(crate) fn stop_running_agent(&mut self) {
         let Some(run) = self
             .running_run()
@@ -85,7 +75,6 @@ impl App {
         else {
             return;
         };
-
         self.request_termination(
             PendingTermination {
                 run_id: run.id,
@@ -94,7 +83,6 @@ impl App {
             run.window_name.clone(),
         );
     }
-
     fn retry_running_agent(&mut self) {
         let Some(run) = self
             .running_run()
@@ -116,7 +104,6 @@ impl App {
             );
             return;
         };
-
         self.request_termination(
             PendingTermination {
                 run_id: run.id,
@@ -125,7 +112,6 @@ impl App {
             run.window_name.clone(),
         );
     }
-
     fn open_quit_running_agent_modal(&mut self) {
         let running = self
             .state
@@ -138,12 +124,10 @@ impl App {
             self.pending_quit_confirmation_run_id = running.first().copied();
         }
     }
-
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
         if key.kind != KeyEventKind::Press {
             return false;
         }
-
         // Keep Ctrl+C global so palette/input/modal states cannot swallow an
         // operator stop, but preserve the historical quit path when idle.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -153,11 +137,9 @@ impl App {
             }
             return true;
         }
-
         if self.palette.open {
             return self.handle_palette_key(key);
         }
-
         if let Some(modal) = self.active_modal() {
             if matches!(
                 modal,
@@ -172,11 +154,9 @@ impl App {
             self.confirm_back = false;
             return self.handle_modal_key(modal, key);
         }
-
         if self.is_split_open() {
             return self.handle_split_key(key);
         }
-
         if self.interactive_run_active() {
             if self.interactive_run_waiting_for_input() {
                 let text_entry_key = matches!(key.code, KeyCode::Enter)
@@ -192,17 +172,14 @@ impl App {
                 self.input_mode = false;
             }
         }
-
         if self.input_mode {
             return self.handle_input_key(key);
         }
-
         if self.confirm_back && key.code != KeyCode::Char(':') {
             self.confirm_back = false;
             self.status_line.borrow_mut().clear();
             return false;
         }
-
         if self.can_focus_input()
             && matches!(key.code, KeyCode::Char(_))
             && !key
@@ -212,7 +189,6 @@ impl App {
             self.input_mode = true;
             return self.handle_input_key(key);
         }
-
         match key.code {
             KeyCode::Esc => {
                 if self.is_split_open() {
@@ -282,7 +258,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_app_command(&mut self, command: AppCommand) -> bool {
         match command {
             AppCommand::KeyPress(key) => self.handle_key(key_event_from_ui_key(key)),
@@ -342,7 +317,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.palette.open {
             crate::input_editor::insert_str(
@@ -352,12 +326,10 @@ impl App {
             );
             return;
         }
-
         if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
             self.input_mode = false;
             return;
         }
-
         let can_edit_input = self.split_owns_input()
             || self.interactive_run_waiting_for_input()
             || self.input_mode
@@ -366,7 +338,6 @@ impl App {
             return;
         }
         self.input_mode = true;
-
         if self.maybe_enter_command_mode_from_input_buffer() {
             crate::input_editor::insert_str(
                 &mut self.palette.buffer,
@@ -375,12 +346,10 @@ impl App {
             );
             return;
         }
-
         crate::input_editor::insert_str(&mut self.input_buffer, &mut self.input_cursor, text);
         let _ = self.maybe_enter_command_mode_from_input_buffer();
     }
 }
-
 fn key_event_from_ui_key(key: UiKey) -> KeyEvent {
     let code = match key.code {
         UiKeyCode::Esc => KeyCode::Esc,

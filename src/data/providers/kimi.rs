@@ -1,3 +1,4 @@
+use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
 use crate::runner::{ChildLaunch, run_child_with_timeout};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -6,20 +7,14 @@ use std::{
     env, fs,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
-
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
-
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
     let payload = fetch_usage_payload(&api_key).await?;
     let mut models = BTreeMap::<String, Option<u8>>::new();
-
     if let Some(usage) = payload.get("usage").and_then(Value::as_object) {
         models.insert("kimi-latest".to_string(), usage_remaining_percent(usage));
     }
-
     if let Some(limits) = payload.get("limits").and_then(Value::as_array) {
         for item in limits {
             let detail = item.get("detail").unwrap_or(item);
@@ -35,11 +30,9 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
             models.insert(name, usage_remaining_percent(detail));
         }
     }
-
     if models.is_empty() {
         bail!("Kimi usage response had no usage limits");
     }
-
     Ok(models
         .into_iter()
         .map(|(name, quota_percent)| LiveModel {
@@ -49,19 +42,16 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
         })
         .collect())
 }
-
 fn resolve_api_key() -> Result<String> {
     if let Ok(value) = env::var("KIMI_API_KEY") {
         return Ok(value);
     }
-
     let creds_file = home_dir()?.join(".kimi/credentials/kimi-code.json");
     if creds_file.is_file() {
         let text = fs::read_to_string(&creds_file)
             .with_context(|| format!("failed to read {}", creds_file.display()))?;
         let payload: Value = serde_json::from_str(&text)
             .with_context(|| format!("failed to parse {}", creds_file.display()))?;
-
         // Refresh the token if expired or within 60s of expiry
         let expires_at = payload
             .get("expires_at")
@@ -71,14 +61,12 @@ fn resolve_api_key() -> Result<String> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64();
-
         if expires_at > 0.0 && expires_at < now + 60.0 {
             // Token is expired or nearly expired — run kimi briefly to trigger
             // a credential refresh. Close stdin so kimi sees EOF and exits;
             // kill after 10s if it somehow keeps running.
             let _ =
                 run_child_with_timeout(&kimi_credential_refresh_launch(), Duration::from_secs(10));
-
             // Re-read after potential refresh
             if let Ok(refreshed) = fs::read_to_string(&creds_file)
                 && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(&refreshed)
@@ -87,12 +75,10 @@ fn resolve_api_key() -> Result<String> {
                 return Ok(token.to_string());
             }
         }
-
         if let Some(token) = payload.get("access_token").and_then(Value::as_str) {
             return Ok(token.to_string());
         }
     }
-
     let config_file = home_dir()?.join(".kimi/config.toml");
     let text = fs::read_to_string(&config_file)
         .with_context(|| format!("failed to read {}", config_file.display()))?;
@@ -107,10 +93,8 @@ fn resolve_api_key() -> Result<String> {
             return Ok(api_key.to_string());
         }
     }
-
     bail!("no Kimi API key found")
 }
-
 fn kimi_credential_refresh_launch() -> ChildLaunch {
     ChildLaunch::new("kimi")
         .args(["--yolo", "--print"])
@@ -119,18 +103,14 @@ fn kimi_credential_refresh_launch() -> ChildLaunch {
         .stdout_null()
         .stderr_null()
 }
-
 async fn fetch_usage_payload(api_key: &str) -> Result<Value> {
     let base_url =
         env::var("KIMI_CODE_BASE_URL").unwrap_or_else(|_| DEFAULT_USAGE_BASE_URL.to_string());
     let usage_url = format!("{}/usages", base_url.trim_end_matches('/'));
     let client = build_http_client(5)?;
-
     let request = client.get(&usage_url).bearer_auth(api_key);
-
     fetch_json_response(request, "Kimi").await
 }
-
 fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> {
     if let Some(value) = read_f64(
         data.get("remaining_percent")
@@ -138,7 +118,6 @@ fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> 
     ) {
         return Some(value.round().clamp(0.0, 100.0) as u8);
     }
-
     let limit = read_f64(data.get("limit"))?;
     let used = read_f64(data.get("used"))
         .or_else(|| read_f64(data.get("remaining")).map(|r| limit - r))?;
@@ -149,7 +128,6 @@ fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> 
     };
     Some(remaining.round() as u8)
 }
-
 fn read_f64(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(n)) => n.as_f64(),

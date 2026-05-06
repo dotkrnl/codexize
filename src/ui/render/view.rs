@@ -1,3 +1,7 @@
+#[cfg(test)]
+use crate::app::ModelRefreshState;
+use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
+use chrono::Offset;
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -5,26 +9,16 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph, Widget},
 };
-
-use crate::state::{NodeStatus, Phase, RunRecord, RunStatus};
-use chrono::Offset;
 use std::collections::BTreeSet;
-
-#[cfg(test)]
-use crate::app::ModelRefreshState;
-
 #[path = "input_sheet.rs"]
 mod input_sheet;
 #[path = "pipeline.rs"]
 mod pipeline;
 #[path = "split_view.rs"]
 mod split_view;
-
 use self::pipeline::PipelineWidget;
 use self::split_view::SplitWidget;
-
-use crate::app_runtime::AppView;
-
+pub use super::state::sanitize_live_summary;
 use super::{
     App, ModalKind,
     chrome::{
@@ -45,12 +39,9 @@ use super::{
         spinner_frame, stage_error_content, status_highlight_bg,
     },
 };
-
-pub use super::state::sanitize_live_summary;
-
+use crate::app_runtime::AppView;
 const DEGENERATE_FLOOR: u16 = 16;
 const BODY_FLOOR_NORMAL: u16 = 8;
-
 fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
     fn stage_from_runtime(stage: crate::app_runtime::StageId) -> crate::app::StageId {
         match stage {
@@ -63,7 +54,6 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
             crate::app_runtime::StageId::Review => crate::app::StageId::Review,
         }
     }
-
     match modal {
         crate::app_runtime::ModalKind::SkipToImpl => ModalKind::SkipToImpl,
         crate::app_runtime::ModalKind::GitGuard => ModalKind::GitGuard,
@@ -77,7 +67,6 @@ fn modal_from_runtime(modal: crate::app_runtime::ModalKind) -> ModalKind {
         crate::app_runtime::ModalKind::FinalValidationBlocked => ModalKind::FinalValidationBlocked,
     }
 }
-
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, view: &AppView) {
         // Hold a frame cache for the duration of this draw so the helpers
@@ -90,7 +79,6 @@ impl App {
         let term_h = area.height;
         let width = area.width;
         let degenerate = term_h < DEGENERATE_FLOOR;
-
         // --- Models area (top) ---
         let (model_lines, models_mode) = if degenerate {
             (Vec::new(), self.prev_models_mode)
@@ -105,7 +93,6 @@ impl App {
         };
         self.prev_models_mode = models_mode;
         let models_h = model_lines.len() as u16;
-
         // --- Status line (tick + render) ---
         let now = std::time::Instant::now();
         self.status_line.borrow_mut().tick(now);
@@ -115,16 +102,13 @@ impl App {
             self.status_line.borrow().render()
         };
         let status_h: u16 = if status_line_content.is_some() { 1 } else { 0 };
-
         // --- Determine footer zone ---
         let modal = view.modal.map(modal_from_runtime);
-
         let caps = self.focus_caps();
         let split_open = self.is_split_open();
         let split_owns_input = self.split_owns_input();
         let split_owned_footer_input_active =
             split_owns_input && self.interactive_run_waiting_for_input();
-
         let input_surface_active = !split_owns_input
             && (if self.interactive_run_active() {
                 self.interactive_run_waiting_for_input()
@@ -139,7 +123,6 @@ impl App {
             split_open,
             width,
         );
-
         // Sheet content is owned by the input-mode path only. Modal content
         // is computed independently inside the overlay branch below.
         let sheet_content: Option<Vec<Line<'static>>> =
@@ -148,7 +131,6 @@ impl App {
             } else {
                 None
             };
-
         // Footer height: only the input-mode sheet (when active) plus the
         // always-present keymap+status lines contribute. Modal state is
         // overlaid and does not change body height.
@@ -169,11 +151,9 @@ impl App {
         } else {
             1 + status_h // keymap + optional status
         };
-
         // --- Body height ---
         let chrome_h = models_h + 1 + 1 + footer_h; // models + top rule + bottom rule + footer
         let body_h = term_h.saturating_sub(chrome_h);
-
         self.body_inner_height = body_h as usize;
         self.body_inner_width = width as usize;
         self.split_fullscreen = split_open && term_h <= super::RESPONSIVE_HEIGHT_THRESHOLD;
@@ -182,17 +162,14 @@ impl App {
         self.clamp_split_scroll(self.current_split_content_height());
         self.live_summary_spinner_visible =
             self.live_summary_spinner_visible_for_height(body_h as usize);
-
         // --- Render top-down ---
         let mut y = area.y;
-
         // 1. Models area
         if models_h > 0 {
             let models_area = ratatui::layout::Rect::new(area.x, y, width, models_h);
             frame.render_widget(Paragraph::new(model_lines), models_area);
             y += models_h;
         }
-
         // 2. Top rule — pulls mode badges from the runtime's UI-neutral
         // `AppView` so the production draw path consumes the seam rather than
         // reading pipeline state directly.
@@ -200,7 +177,6 @@ impl App {
         let top_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![top_rule_line]), top_rule_area);
         y += 1;
-
         // 3. Pipeline body & Split
         if body_h > 0 {
             let body_area = ratatui::layout::Rect::new(area.x, y, width, body_h);
@@ -234,14 +210,12 @@ impl App {
             }
             y += body_h;
         }
-
         // 4. Bottom rule (with unread badge)
         let badge = self.unread_badge();
         let bottom_rule_line = bottom_rule(width, badge);
         let bottom_rule_area = ratatui::layout::Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![bottom_rule_line]), bottom_rule_area);
         y += 1;
-
         // 5. Footer zone — three-way branch (see "Determine footer zone").
         if let Some(m) = modal {
             let terminal_width = area.width;
@@ -294,7 +268,6 @@ impl App {
                 frame.render_widget(Paragraph::new(vec![keymap_line]), keymap_area);
             }
         }
-
         if self.palette.open && area.height > 0 && area.width > 0 {
             let overlay_h = self.palette_overlay_height(area.height, modal.is_some());
             if overlay_h > 0 {
@@ -310,7 +283,6 @@ impl App {
             }
         }
     }
-
     /// Compute the bottom-aligned palette overlay height.
     ///
     /// The input row is mandatory; suggestion rows clamp before reaching
@@ -329,16 +301,13 @@ impl App {
         // still get at least the input row.
         const BODY_RESERVE: u16 = 4;
         const MAX_OVERLAY: u16 = 12; // input + up to 10 suggestions + help
-
         let commands = self.palette_commands();
         let filtered = super::palette::filter(&self.palette.buffer, &commands);
         let suggestions = filtered.len().min(10) as u16;
         let desired = 1 + suggestions + 1; // input + suggestions + help
-
         let cap = area_height.saturating_sub(BODY_RESERVE).max(1);
         desired.min(cap).clamp(1, MAX_OVERLAY)
     }
-
     fn palette_overlay_lines(&self, width: u16, max_h: u16) -> Vec<Line<'static>> {
         if max_h == 0 || width == 0 {
             return Vec::new();
@@ -364,15 +333,12 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             ));
         }
-
         let mut lines: Vec<Line<'static>> = vec![Line::from(input_spans)];
         let max = max_h as usize;
-
         let help_text = "Esc close  Tab complete  Enter run";
         let help_fits = max >= 2 && (width as usize) >= help_text.chars().count();
         let help_reserve = if help_fits { 1 } else { 0 };
         let suggestion_capacity = max.saturating_sub(1).saturating_sub(help_reserve);
-
         let filtered = super::palette::filter(&buffer, &commands);
         for cmd in filtered.iter().take(suggestion_capacity) {
             let text = super::palette::suggestion_text(cmd, width);
@@ -381,7 +347,6 @@ impl App {
                 Style::default().fg(Color::Gray),
             )));
         }
-
         if help_fits && lines.len() < max {
             let mut help = help_text.to_string();
             if width < help.chars().count() as u16 {
@@ -392,10 +357,8 @@ impl App {
                 Style::default().fg(Color::DarkGray),
             )));
         }
-
         lines
     }
-
     fn focus_caps(&self) -> FocusCaps {
         FocusCaps {
             can_expand: self
@@ -408,7 +371,6 @@ impl App {
             can_split: self.resolve_split_target_for_selected_row().is_some(),
         }
     }
-
     fn build_top_rule(&self, view: &AppView, width: u16) -> Line<'static> {
         let project = std::env::current_dir()
             .ok()
@@ -421,7 +383,6 @@ impl App {
             width,
         )
     }
-
     fn top_rule_right_text(&self) -> Option<String> {
         // When a run is active, show "<agent-name> · <live-summary-title>".
         // Otherwise show "<stage-label> · <state-label>".
@@ -436,12 +397,10 @@ impl App {
             };
             return Some(format!("{} · {}", agent, summary));
         }
-
         let label = self.state.current_phase.label();
         let state_label = self.phase_state_label();
         Some(format!("{} · {}", label, state_label))
     }
-
     fn phase_state_label(&self) -> &'static str {
         if self.state.agent_error.is_some() {
             return "error";
@@ -454,12 +413,10 @@ impl App {
             _ => "running",
         }
     }
-
     fn unread_badge(&self) -> Option<UnreadBadge> {
         if self.split_fullscreen {
             return None;
         }
-
         let unread = self.unread_below_count();
         let at_bottom = self.viewport_top >= self.max_viewport_top();
         let viewport_bottom = self.viewport_top + self.effective_body_inner_height();
@@ -467,14 +424,12 @@ impl App {
             .first_unread_rendered_line()
             .map(|line| line >= viewport_bottom)
             .unwrap_or(!at_bottom);
-
         if unread > 0 && unread_below_viewport {
             Some(UnreadBadge { count: unread })
         } else {
             None
         }
     }
-
     fn modal_content_lines(&self, modal: ModalKind, width: u16) -> Vec<Line<'static>> {
         match modal {
             ModalKind::SkipToImpl => skip_to_impl_content(

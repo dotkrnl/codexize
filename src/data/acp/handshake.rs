@@ -1,6 +1,5 @@
 //! Spawn the ACP agent, perform `initialize` / `session/new`, apply config
 //! options, and start the first prompt turn.
-
 use super::actor::RpcClient;
 use super::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
 use crate::selection::vendor::vendor_kind_to_str;
@@ -11,14 +10,12 @@ use tokio::io::BufReader;
 use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
-
 #[rustfmt::skip]
 pub(super) fn build_session_runtime() -> AcpResult<Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1).enable_all().thread_name("codexize-acp").build()
         .map_err(|err| AcpError::io(format!("failed to build ACP tokio runtime: {err}")))
 }
-
 #[rustfmt::skip]
 pub(super) async fn spawn_actor(runtime: &Arc<Runtime>, launch: &AcpResolvedLaunch)
     -> AcpResult<(RpcClient, Child)>
@@ -35,13 +32,11 @@ pub(super) async fn spawn_actor(runtime: &Arc<Runtime>, launch: &AcpResolvedLaun
     let stdin = child.stdin.take().ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
     Ok((RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin), child))
 }
-
 pub(super) struct HandshakeOutput {
     pub(super) session_id: String,
     pub(super) supports_close: bool,
     pub(super) prompt_response: oneshot::Receiver<AcpResult<Value>>,
 }
-
 #[rustfmt::skip]
 pub(super) async fn handshake(rpc: &mut RpcClient, launch: &AcpResolvedLaunch) -> AcpResult<HandshakeOutput> {
     let init = parse_initialize_result(rpc.call_async("initialize", json!({
@@ -62,10 +57,8 @@ pub(super) async fn handshake(rpc: &mut RpcClient, launch: &AcpResolvedLaunch) -
         prompt_request_params(&session.session_id, &launch.session.prompt)?)?;
     Ok(HandshakeOutput { session_id: session.session_id, supports_close: init.supports_close, prompt_response })
 }
-
 #[rustfmt::skip]
 pub(super) struct InitializeOutcome { pub(super) protocol_version: u64, pub(super) supports_close: bool }
-
 #[rustfmt::skip]
 pub(super) fn parse_initialize_result(v: Value) -> AcpResult<InitializeOutcome> {
     Ok(InitializeOutcome {
@@ -75,14 +68,12 @@ pub(super) fn parse_initialize_result(v: Value) -> AcpResult<InitializeOutcome> 
             .and_then(Value::as_bool).unwrap_or(false),
     })
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Deserialize)]
 pub(super) struct NewSessionResult {
     #[serde(rename = "sessionId")] pub(super) session_id: String,
     #[serde(rename = "configOptions", default)] pub(super) config_options: Vec<ConfigOption>,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct ConfigOption {
@@ -91,15 +82,12 @@ pub(super) struct ConfigOption {
     #[serde(rename = "currentValue", default)] pub(super) current_value: Option<String>,
     #[serde(default)] pub(super) options: Vec<ConfigChoice>,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct ConfigChoice { pub(super) value: String }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PromptTurnOutcome { Finished, Failed { message: String } }
-
 #[rustfmt::skip]
 pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> {
     let stop = value.get("stopReason").and_then(Value::as_str)
@@ -110,7 +98,6 @@ pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> 
         _ => PromptTurnOutcome::Finished,
     })
 }
-
 #[rustfmt::skip]
 pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
     let text = match prompt {
@@ -124,7 +111,6 @@ pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) ->
         "prompt": [{ "type": "text", "text": text }],
     }))
 }
-
 #[rustfmt::skip]
 async fn apply_session_config(rpc: &mut RpcClient, session_id: &str, session: &AcpSessionSpec,
     options: &mut Vec<ConfigOption>)

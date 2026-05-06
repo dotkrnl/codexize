@@ -6,7 +6,6 @@
 //! sub-modules into a single `crate::*` namespace consumed by `main.rs`,
 //! the integration tests, and the future server-mode binary — these are
 //! the intentional crate-level public API, not migration leftovers.
-
 pub use crate::data::acp;
 pub use crate::data::adapters;
 pub mod app;

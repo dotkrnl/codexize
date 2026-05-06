@@ -3,7 +3,6 @@
 //! Text classification rule: emit `StartNewMessage` at explicit boundaries
 //! (session start, prompt-turn reset, tool-call interleave, or stable identity
 //! change); `Continue` otherwise.
-
 use super::tool_call::{
     ToolCallDisplayState, ToolCallMap, format_invocation_line, format_result_line,
     is_terminal_status,
@@ -12,19 +11,16 @@ use super::{AcpTextBoundary, ClientTextKind, ClientUpdate, ToolCallActivityKind}
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::path::Path;
-
 #[derive(Debug, Clone, Default)]
 struct StreamIdentity {
     last: Option<String>,
     restart: bool,
 }
-
 #[derive(Debug, Clone, Default)]
 pub(super) struct AcpBoundaryState {
     message: StreamIdentity,
     thought: StreamIdentity,
 }
-
 #[rustfmt::skip]
 impl AcpBoundaryState {
     pub(super) fn new() -> Self {
@@ -32,7 +28,6 @@ impl AcpBoundaryState {
         s.reset_for_prompt_turn();
         s
     }
-
     /// ACP servers may legally reuse message ids across turns, so the next
     /// turn must always restart at `StartNewMessage`.
     pub(super) fn reset_for_prompt_turn(&mut self) {
@@ -40,7 +35,6 @@ impl AcpBoundaryState {
         self.thought = StreamIdentity { last: None, restart: true };
     }
 }
-
 #[rustfmt::skip]
 pub(super) fn dispatch_update(
     value: &Value, cwd: &Path, map: &mut ToolCallMap,
@@ -68,7 +62,6 @@ pub(super) fn dispatch_update(
         other => out.push_back(ClientUpdate::Unknown { kind: other.into() }),
     }
 }
-
 #[rustfmt::skip]
 fn push_text(value: &Value, state: &mut StreamIdentity, thought: bool, out: &mut VecDeque<ClientUpdate>) {
     let text = value.pointer("/content/text").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -81,7 +74,6 @@ fn push_text(value: &Value, state: &mut StreamIdentity, thought: bool, out: &mut
         identity,
     });
 }
-
 #[rustfmt::skip]
 fn classify_boundary(state: &mut StreamIdentity, incoming: Option<&str>) -> AcpTextBoundary {
     let boundary = if state.restart {
@@ -97,7 +89,6 @@ fn classify_boundary(state: &mut StreamIdentity, incoming: Option<&str>) -> AcpT
     state.restart = false;
     boundary
 }
-
 #[rustfmt::skip]
 fn extract_identity(value: &Value) -> Option<String> {
     for ptr in ["/messageId", "/message_id", "/id", "/content/messageId", "/content/message_id", "/content/id"] {
@@ -107,7 +98,6 @@ fn extract_identity(value: &Value) -> Option<String> {
     }
     None
 }
-
 #[rustfmt::skip]
 fn handle_tool_call(s: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
     let terminal = s.status.as_deref().map(is_terminal_status).unwrap_or(false);
@@ -121,7 +111,6 @@ fn handle_tool_call(s: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, 
     emit_activity_once(&id, terminal, map, out);
     if terminal { map.evict(&id); }
 }
-
 #[rustfmt::skip]
 fn handle_tool_call_update(p: ToolCallDisplayState, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
     let terminal = p.status.as_deref().map(is_terminal_status).unwrap_or(false);
@@ -141,7 +130,6 @@ fn handle_tool_call_update(p: ToolCallDisplayState, map: &mut ToolCallMap, out: 
         emit_activity_once(&id, true, map, out);
     }
 }
-
 #[rustfmt::skip]
 fn emit_activity_once(id: &str, terminal: bool, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
     if map.was_emitted(id, terminal) { return; }
@@ -149,7 +137,6 @@ fn emit_activity_once(id: &str, terminal: bool, map: &mut ToolCallMap, out: &mut
     out.push_back(ClientUpdate::ToolCallActivity { tool_call_id: id.to_string(), kind });
     map.mark_emitted(id, terminal);
 }
-
 #[rustfmt::skip]
 fn tool_text(text: String) -> ClientUpdate {
     ClientUpdate::Text {

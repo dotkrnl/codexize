@@ -5,7 +5,6 @@ use crate::{
     tasks,
 };
 use anyhow::Context;
-
 pub(crate) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
     for (backup, target) in pairs {
         if backup.exists() {
@@ -13,7 +12,6 @@ pub(crate) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) 
         }
     }
 }
-
 pub(crate) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyhow::Result<String> {
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let parsed = tasks::validate(&tasks_path).context("load tasks.toml")?;
@@ -24,7 +22,6 @@ pub(crate) fn task_toml_for(session_dir: &std::path::Path, task_id: u32) -> anyh
         .ok_or_else(|| anyhow::anyhow!("task id {task_id} not found"))?;
     toml::to_string_pretty(task).context("serialize task.toml")
 }
-
 pub(crate) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> EffortLevel {
     let tasks_path = session_dir.join("artifacts").join("tasks.toml");
     let Ok(parsed) = tasks::validate(&tasks_path) else {
@@ -38,14 +35,12 @@ pub(crate) fn task_effort_for(session_dir: &std::path::Path, task_id: u32) -> Ef
         .map(|_| EffortLevel::Tough)
         .unwrap_or_default()
 }
-
 pub(crate) fn assigned_revise_task_ids(
     builder: &session_state::BuilderState,
     count: usize,
 ) -> Vec<u32> {
     (builder.max_task_id() + 1..builder.max_task_id() + 1 + count as u32).collect()
 }
-
 pub(crate) fn rewrite_tasks_for_revise(
     session_dir: &std::path::Path,
     current_task_id: u32,
@@ -65,16 +60,13 @@ pub(crate) fn rewrite_tasks_for_revise(
     else {
         anyhow::bail!("task id {current_task_id} not found in tasks.toml");
     };
-
     let mut rewritten = Vec::with_capacity(parsed.tasks.len() + new_tasks.len());
     rewritten.extend(parsed.tasks[..current_idx].iter().cloned());
-
     for (task, id) in new_tasks.iter().zip(assigned_ids.iter().copied()) {
         let mut inserted = task.clone();
         inserted.id = id;
         rewritten.push(inserted);
     }
-
     let next_pending_id = assigned_ids
         .iter()
         .copied()
@@ -87,14 +79,12 @@ pub(crate) fn rewrite_tasks_for_revise(
         renumbered.id = next_pending_id;
         rewritten.push(renumbered);
     }
-
     let file = tasks::TasksFile { tasks: rewritten };
     let text = toml::to_string_pretty(&file).context("serialize revised tasks.toml")?;
     std::fs::write(&tasks_path, text)
         .with_context(|| format!("write revised {}", tasks_path.display()))?;
     Ok(())
 }
-
 pub(crate) fn validate_stage_toml_writes(
     session_dir: &std::path::Path,
     stage: &str,
@@ -113,7 +103,6 @@ pub(crate) fn validate_stage_toml_writes(
     let refs = paths.iter().map(|path| path.as_path()).collect::<Vec<_>>();
     crate::runner::validate_toml_artifacts(&refs)
 }
-
 pub(crate) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<ReviewScopeArtifact> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -124,11 +113,9 @@ pub(crate) fn read_review_scope(path: &std::path::Path) -> anyhow::Result<Review
     }
     Ok(scope)
 }
-
 pub(crate) fn read_review_scope_base_sha(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(read_review_scope(path)?.base_sha.trim().to_string())
 }
-
 pub(crate) fn write_review_scope_artifact(
     round_dir: &std::path::Path,
     base_sha: &str,
@@ -139,7 +126,6 @@ pub(crate) fn write_review_scope_artifact(
         format!("base_sha = \"{base_sha}\"\n"),
     )
 }
-
 // `capture_round_base` writes a deterministic placeholder in `cfg(test)`
 // builds so transitions never shell out to git from the test process; this
 // helper is only reachable on the production path.

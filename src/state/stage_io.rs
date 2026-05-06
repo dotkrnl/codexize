@@ -6,19 +6,16 @@ pub struct StageIO {
     pub pointer_artifacts: &'static [&'static str],
     pub writes: &'static [&'static str],
 }
-
 pub const BRAINSTORM_IO: StageIO = StageIO {
     stage: "brainstorm",
     pointer_artifacts: &["artifacts/live_summary.txt"],
     writes: &["artifacts/spec.md"],
 };
-
 pub const SPEC_REVIEWER_IO: StageIO = StageIO {
     stage: "spec-reviewer",
     pointer_artifacts: &["artifacts/spec.md", "artifacts/live_summary.txt"],
     writes: &["artifacts/spec_review.toml"],
 };
-
 pub const PLANNER_IO: StageIO = StageIO {
     stage: "planner",
     pointer_artifacts: &[
@@ -28,7 +25,6 @@ pub const PLANNER_IO: StageIO = StageIO {
     ],
     writes: &["artifacts/plan.md"],
 };
-
 pub const PLAN_REVIEWER_IO: StageIO = StageIO {
     stage: "plan-reviewer",
     pointer_artifacts: &[
@@ -38,7 +34,6 @@ pub const PLAN_REVIEWER_IO: StageIO = StageIO {
     ],
     writes: &["artifacts/plan_review.toml"],
 };
-
 pub const SHARDER_IO: StageIO = StageIO {
     stage: "sharder",
     pointer_artifacts: &[
@@ -48,7 +43,6 @@ pub const SHARDER_IO: StageIO = StageIO {
     ],
     writes: &["artifacts/tasks.toml"],
 };
-
 pub const CODER_IO: StageIO = StageIO {
     stage: "coder",
     pointer_artifacts: &[
@@ -60,7 +54,6 @@ pub const CODER_IO: StageIO = StageIO {
     ],
     writes: &["rounds/{round}/coder_summary.toml"],
 };
-
 pub const REVIEWER_IO: StageIO = StageIO {
     stage: "reviewer",
     pointer_artifacts: &[
@@ -74,7 +67,6 @@ pub const REVIEWER_IO: StageIO = StageIO {
     ],
     writes: &["rounds/{round}/review.toml"],
 };
-
 pub const RECOVERY_IO: StageIO = StageIO {
     stage: "recovery",
     pointer_artifacts: &[
@@ -91,7 +83,6 @@ pub const RECOVERY_IO: StageIO = StageIO {
         "rounds/{round}/recovery.toml",
     ],
 };
-
 /// Recovery-mode plan review: verifies the recovered spec/plan addresses the
 /// triggering review before sharding runs.
 pub const RECOVERY_PLAN_REVIEWER_IO: StageIO = StageIO {
@@ -105,7 +96,6 @@ pub const RECOVERY_PLAN_REVIEWER_IO: StageIO = StageIO {
     ],
     writes: &["artifacts/plan_review.toml"],
 };
-
 /// Behavior-preserving cleanup pass that fires on every normal entry into
 /// `FinalValidation`. The simplifier reads spec/plan, the round's review
 /// scope (for `base_sha..HEAD`), and the live summary, and writes its
@@ -119,7 +109,6 @@ pub const SIMPLIFIER_IO: StageIO = StageIO {
     ],
     writes: &["rounds/{round}/simplification.toml"],
 };
-
 /// Recovery-mode sharding: regenerates the task queue from the recovered
 /// spec/plan while preserving completed task history.
 pub const RECOVERY_SHARDER_IO: StageIO = StageIO {
@@ -131,11 +120,9 @@ pub const RECOVERY_SHARDER_IO: StageIO = StageIO {
     ],
     writes: &["artifacts/tasks.toml"],
 };
-
 pub fn stage_io(stage: &str) -> Option<&'static StageIO> {
     stage_io_with_mode(stage, None)
 }
-
 /// Lookup StageIO by stage name and optional mode. The `"recovery"` mode
 /// selects the recovery-specific variants for `plan-reviewer` and `sharder`.
 pub fn stage_io_with_mode(stage: &str, mode: Option<&str>) -> Option<&'static StageIO> {
@@ -154,7 +141,6 @@ pub fn stage_io_with_mode(stage: &str, mode: Option<&str>) -> Option<&'static St
         _ => None,
     }
 }
-
 #[cfg(test)]
 #[path = "stage_io_tests.rs"]
 mod tests;

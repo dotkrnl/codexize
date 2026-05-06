@@ -5,11 +5,9 @@ use crate::acp::{
 use crate::selection::{VendorKind, vendor::vendor_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
 const CLAUDE_CLI: &str = "claude";
 const CODEX_CLI: &str = "codex";
 const CODEX_ACP_CLI: &str = "codex-acp";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpAgentDefinition {
     pub vendor: VendorKind,
@@ -17,26 +15,21 @@ pub struct AcpAgentDefinition {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpConfig {
     agents: BTreeMap<VendorKind, AcpAgentDefinition>,
 }
-
 #[rustfmt::skip]
 impl AcpConfig {
     pub fn empty() -> Self { Self { agents: BTreeMap::new() } }
-
     pub fn from_agents(agents: impl IntoIterator<Item = AcpAgentDefinition>) -> Self {
         Self { agents: agents.into_iter().map(|a| (a.vendor, a)).collect() }
     }
-
     pub fn available_vendors(&self) -> std::collections::BTreeSet<VendorKind> {
         self.agents.iter()
             .filter(|(_, a)| !a.program.trim().is_empty() && program_is_executable(&a.program))
             .map(|(v, _)| *v).collect()
     }
-
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
         let agent = self.agents.get(&request.vendor).ok_or_else(|| AcpError::human_block(
             format!("ACP agent not configured for vendor {}", vendor_kind_to_str(request.vendor))
@@ -91,7 +84,6 @@ impl AcpConfig {
         })
     }
 }
-
 #[rustfmt::skip]
 impl Default for AcpConfig {
     fn default() -> Self {
@@ -107,18 +99,15 @@ impl Default for AcpConfig {
         ])
     }
 }
-
 #[rustfmt::skip]
 pub fn claude_acp_install_root() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
         .join(".codexize").join("acp")
 }
-
 #[rustfmt::skip]
 pub fn claude_acp_local_program() -> PathBuf {
     claude_acp_install_root().join("node_modules").join(".bin").join("claude-agent-acp")
 }
-
 #[rustfmt::skip]
 pub fn should_offer_claude_acp_install() -> bool {
     program_is_executable(CLAUDE_CLI)
@@ -128,7 +117,6 @@ pub fn should_offer_claude_acp_install() -> bool {
 pub fn should_offer_codex_acp_install() -> bool {
     program_is_executable(CODEX_CLI) && !program_is_executable(CODEX_ACP_CLI)
 }
-
 #[rustfmt::skip]
 fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
     #[cfg(test)]
@@ -145,12 +133,10 @@ fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDe
     }
     AcpAgentDefinition { vendor, program: program.to_string(), args, env: BTreeMap::new() }
 }
-
 #[rustfmt::skip]
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {
     if path.is_absolute() { Ok(path.to_path_buf()) } else { Ok(std::env::current_dir()?.join(path)) }
 }
-
 #[rustfmt::skip]
 fn absolutize_policy(p: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
     Ok(AcpLaunchPolicy {
@@ -158,7 +144,6 @@ fn absolutize_policy(p: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
         shell_policy: p.shell_policy.clone(), enforce_readonly_workspace: p.enforce_readonly_workspace,
     })
 }
-
 #[rustfmt::skip]
 pub fn program_is_executable(program: &str) -> bool {
     let candidate = Path::new(program);
@@ -166,7 +151,6 @@ pub fn program_is_executable(program: &str) -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path).any(|dir| path_is_executable(&dir.join(program)))
 }
-
 #[rustfmt::skip]
 fn path_is_executable(path: &Path) -> bool {
     let Ok(metadata) = path.metadata() else { return false };
@@ -174,13 +158,11 @@ fn path_is_executable(path: &Path) -> bool {
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; metadata.permissions().mode() & 0o111 != 0 }
     #[cfg(not(unix))] { true }
 }
-
 #[rustfmt::skip]
 fn effort_str(e: crate::adapters::EffortLevel) -> &'static str {
     use crate::adapters::EffortLevel::*;
     match e { Low => "low", Normal => "normal", Tough => "tough" }
 }
-
 #[cfg(test)]
 #[path = "acp/config_tests.rs"]
 mod tests_mod;

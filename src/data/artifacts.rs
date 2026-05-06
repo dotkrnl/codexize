@@ -1,6 +1,5 @@
 // artifacts.rs — artifact path helpers and typed wrappers.
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipProposalStatus {
@@ -8,9 +7,7 @@ pub enum SkipProposalStatus {
     SkipToImpl,
     NothingToDo,
 }
-
 pub type SkipToImplKind = SkipProposalStatus;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkipToImplProposal {
     pub proposed: bool,
@@ -18,7 +15,6 @@ pub struct SkipToImplProposal {
     pub status: SkipProposalStatus,
     pub rationale: String,
 }
-
 impl SkipToImplProposal {
     pub fn new(proposed: bool, rationale: String) -> Self {
         Self {
@@ -27,7 +23,6 @@ impl SkipToImplProposal {
             rationale,
         }
     }
-
     /// Read the skip-to-implementation proposal artifact from `path`.
     ///
     /// Returns `Ok((None, []))` if the file is absent. Returns `Err` for
@@ -45,7 +40,6 @@ impl SkipToImplProposal {
         let warnings = proposal.validate_and_fixup()?;
         Ok((Some(proposal), warnings))
     }
-
     fn validate_and_fixup(&mut self) -> anyhow::Result<Vec<String>> {
         if self.proposed && self.rationale.trim().is_empty() {
             anyhow::bail!("rationale cannot be empty if proposed is true");
@@ -62,12 +56,10 @@ impl SkipToImplProposal {
         Ok(warnings)
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSummaryArtifact {
     pub title: String,
 }
-
 impl SessionSummaryArtifact {
     /// Read the session summary artifact from `path`. Returns `Ok(None)` if
     /// the file is absent. Returns `Err` on malformed TOML or invalid
@@ -82,7 +74,6 @@ impl SessionSummaryArtifact {
         artifact.validate()?;
         Ok(Some(artifact))
     }
-
     fn validate(&self) -> anyhow::Result<()> {
         let trimmed = self.title.trim();
         if trimmed.is_empty() {
@@ -94,7 +85,6 @@ impl SessionSummaryArtifact {
         Ok(())
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionArtifact {
     pub id: String,
@@ -102,26 +92,22 @@ pub struct SessionArtifact {
     pub operator: String,
     pub status: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MessagesArtifact {
     #[serde(default)]
     pub messages: Vec<MessageArtifact>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageArtifact {
     pub role: String,
     pub content: String,
     pub timestamp: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EventsArtifact {
     #[serde(default)]
     pub events: Vec<EventArtifact>,
 }
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventArtifact {
     #[serde(rename = "type")]
@@ -130,13 +116,11 @@ pub struct EventArtifact {
     pub payload: toml::map::Map<String, toml::Value>,
     pub timestamp: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactRef {
     pub path: String,
     pub lines: String,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskArtifact {
     pub id: u32,
@@ -149,17 +133,14 @@ pub struct TaskArtifact {
     #[serde(default)]
     pub plan_refs: Vec<ArtifactRef>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TasksArtifact {
     pub tasks: Vec<TaskArtifact>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewScopeArtifact {
     pub base_sha: String,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewStatus {
@@ -168,7 +149,6 @@ pub enum ReviewStatus {
     HumanBlocked,
     AgentPivot,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewArtifact {
     pub status: ReviewStatus,
@@ -178,10 +158,8 @@ pub struct ReviewArtifact {
     #[serde(default)]
     pub new_tasks: Vec<TaskArtifact>,
 }
-
 pub type SpecReviewArtifact = ReviewArtifact;
 pub type PlanReviewArtifact = ReviewArtifact;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryArtifact {
     pub status: ReviewStatus,
@@ -193,7 +171,6 @@ pub struct RecoveryArtifact {
     #[serde(default)]
     pub changed_files: Vec<String>,
 }
-
 /// Minimal Spec representation used by synthetic-artifact generation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Spec {
@@ -202,7 +179,6 @@ pub struct Spec {
     #[serde(default)]
     pub spec_refs: Vec<String>,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     Spec,
@@ -214,7 +190,6 @@ pub enum ArtifactKind {
     SkipToImpl,
     SessionSummary,
 }
-
 impl ArtifactKind {
     pub fn filename(&self) -> &'static str {
         match self {
@@ -229,7 +204,6 @@ impl ArtifactKind {
         }
     }
 }
-
 #[cfg(test)]
 #[path = "artifacts_tests.rs"]
 mod tests;

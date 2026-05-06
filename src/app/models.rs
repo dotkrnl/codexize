@@ -1,3 +1,4 @@
+use super::{App, state::ModelRefreshState, status_line::Severity};
 use crate::{
     cache,
     selection::{CachedModel, QuotaError, VendorKind},
@@ -5,12 +6,8 @@ use crate::{
 use ratatui::style::Color;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-
-use super::{App, state::ModelRefreshState, status_line::Severity};
-
 const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
-
 pub(crate) fn spawn_refresh() -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -24,7 +21,6 @@ pub(crate) fn spawn_refresh() -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<
     }
     rx
 }
-
 pub(crate) fn vendor_tag(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::Claude => "claude",
@@ -33,7 +29,6 @@ pub(crate) fn vendor_tag(vendor: VendorKind) -> &'static str {
         VendorKind::Kimi => "kimi",
     }
 }
-
 pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
     match vendor {
         VendorKind::Claude => Color::Magenta,
@@ -42,7 +37,6 @@ pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
         VendorKind::Kimi => Color::Yellow,
     }
 }
-
 pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::Claude => "claude-",
@@ -51,7 +45,6 @@ pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
         VendorKind::Kimi => "kimi-",
     }
 }
-
 fn quota_error_summary(errors: &[QuotaError]) -> String {
     let names: Vec<&str> = errors.iter().map(|e| vendor_tag(e.vendor)).collect();
     match names.as_slice() {
@@ -60,12 +53,10 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
         many => format!("model refresh: {} quotas unavailable", many.join(", ")),
     }
 }
-
 impl App {
     pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.models = models;
     }
-
     pub(crate) fn refresh_models_if_due(&mut self) {
         match &mut self.model_refresh {
             ModelRefreshState::Fetching { rx, started_at } => match rx.try_recv() {
@@ -119,7 +110,6 @@ impl App {
             }
         }
     }
-
     pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
             rx: spawn_refresh(),
@@ -127,7 +117,6 @@ impl App {
         };
     }
 }
-
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod tests;

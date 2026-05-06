@@ -3,14 +3,11 @@
 //! The TUI owns crossterm event collection and terminal drawing, while this
 //! module owns the application loop ordering: pre-drain tick, post-drain
 //! tick, render, then command dispatch.
-
-use anyhow::Result;
-
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
 use crate::state::RunStatus;
 use crate::{app::App, tui::AppTerminal};
-
+use anyhow::Result;
 /// Result of routing an [`AppCommand`] through the terminal runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalCommandOutcome {
@@ -21,7 +18,6 @@ pub(crate) enum TerminalCommandOutcome {
     /// Command is still owned by the legacy App bridge.
     Legacy(AppCommand),
 }
-
 /// Runtime-owned production state that is not part of the legacy `App`.
 ///
 /// This keeps the migrated quit-confirmation path outside `App`: the UI emits
@@ -31,7 +27,6 @@ pub(crate) enum TerminalCommandOutcome {
 pub(crate) struct TerminalRuntime {
     modal_override: Option<ModalKind>,
 }
-
 impl TerminalRuntime {
     pub(crate) fn view_for_render(&self, mut view: AppView) -> AppView {
         if let Some(modal) = self.modal_override {
@@ -39,14 +34,12 @@ impl TerminalRuntime {
         }
         view
     }
-
     pub(crate) fn drain_live_summary_data_events(
         &mut self,
         events: Option<&mut LiveSummaryEvents>,
     ) -> Vec<DataEvent> {
         events.map(LiveSummaryEvents::drain).unwrap_or_default()
     }
-
     fn drain_app_data_events(&mut self, app: &mut App) {
         let drained = self.drain_live_summary_data_events(app.live_summary_change_events.as_mut());
         if drained
@@ -57,7 +50,6 @@ impl TerminalRuntime {
         }
         app.poll_live_summary_fallback();
     }
-
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn route_command(
@@ -70,7 +62,6 @@ impl TerminalRuntime {
             crate::data::events::dispatch(request, &supervisor)
         })
     }
-
     pub(crate) fn route_command_with_dispatch<F>(
         &mut self,
         command: AppCommand,
@@ -116,7 +107,6 @@ impl TerminalRuntime {
         }
     }
 }
-
 /// Run the production terminal app through the app-runtime seam.
 pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()> {
     let mut runtime = TerminalRuntime::default();
@@ -127,7 +117,6 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         }
         runtime.drain_app_data_events(app);
         app.runtime_tick_after_data_drain();
-
         let view = runtime.view_for_render(app.current_app_view());
         // The production draw path consumes `AppView` end-to-end: the top
         // rule's mode badges are now derived from the seam, so the runtime
@@ -135,7 +124,6 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         // discarded.
         crate::ui::tui::render_app(terminal, &view, |frame| app.draw(frame, &view))?;
         app.on_frame_drawn();
-
         if let Some(command) = input.next_command(app.event_poll_duration(), &view)? {
             let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
                 crate::data::events::dispatch(request, &app.runner_supervisor)
@@ -156,7 +144,6 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         }
     }
 }
-
 #[cfg(test)]
 #[path = "terminal_tests.rs"]
 mod tests;

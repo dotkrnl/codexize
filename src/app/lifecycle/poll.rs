@@ -1,8 +1,6 @@
-use std::time::{Duration, Instant};
-
 use crate::app::{App, ObservedPathState, split::SplitTarget};
 use crate::state::{MessageKind, SessionState};
-
+use std::time::{Duration, Instant};
 impl App {
     pub(crate) fn observed_path_state(path: &std::path::Path) -> ObservedPathState {
         match std::fs::metadata(path) {
@@ -16,7 +14,6 @@ impl App {
             },
         }
     }
-
     pub(crate) fn update_agent_progress(&mut self) {
         if let Ok(messages) = SessionState::load_messages(&self.state.session_id)
             && messages != self.messages
@@ -37,12 +34,10 @@ impl App {
             .collect::<Vec<_>>()
             .join("\n");
         self.agent_line_count = text.lines().filter(|l| !l.trim().is_empty()).count();
-
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         text.hash(&mut hasher);
         let hash = hasher.finish();
-
         let now = Instant::now();
         if self.agent_content_hash == 0 || hash != self.agent_content_hash {
             self.agent_content_hash = hash;
@@ -55,7 +50,6 @@ impl App {
             .agent_last_change
             .map(|last| now.duration_since(last) >= Duration::from_secs(30));
     }
-
     pub(crate) fn poll_agent_run(&mut self) {
         let Some(run_id) = self.current_run_id else {
             self.pending_drain_deadline = None;
@@ -76,7 +70,6 @@ impl App {
             self.pending_drain_deadline = None;
             return;
         }
-
         let deadline = *self
             .pending_drain_deadline
             .get_or_insert_with(|| Instant::now() + Self::stamp_timeout_duration());
@@ -100,7 +93,6 @@ impl App {
                 ),
             );
         }
-
         self.pending_drain_deadline = None;
         self.run_launched = false;
         self.current_run_id = None;

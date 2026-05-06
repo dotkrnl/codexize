@@ -1,5 +1,4 @@
 use super::types::VendorKind;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
 pub enum SelectionPhase {
     #[strum(to_string = "idea")]
@@ -11,7 +10,6 @@ pub enum SelectionPhase {
     #[strum(to_string = "review")]
     Review,
 }
-
 impl SelectionPhase {
     pub fn axes(self) -> &'static [&'static str] {
         match self {
@@ -32,18 +30,15 @@ impl SelectionPhase {
             ],
         }
     }
-
     /// Interactive phases put the user in the loop and expose model
     /// staleness directly; non-interactive phases run headless in rounds.
     pub fn is_interactive(self) -> bool {
         matches!(self, SelectionPhase::Idea | SelectionPhase::Planning)
     }
-
     pub fn name(self) -> &'static str {
         // Kept for backward compatibility until callers migrate.
         self.into()
     }
-
     pub const ALL: [SelectionPhase; 4] = [
         SelectionPhase::Idea,
         SelectionPhase::Planning,
@@ -51,7 +46,6 @@ impl SelectionPhase {
         SelectionPhase::Review,
     ];
 }
-
 pub struct SelectionConfig {
     /// Exponent applied to the normalised role score (0..1). Higher values
     /// sharpen the preference for high-scoring models.
@@ -83,7 +77,6 @@ pub struct SelectionConfig {
     /// to a model-name substring) is being considered for the given phase.
     pub vendor_phase_biases: &'static [(VendorKind, Option<&'static str>, SelectionPhase, f64)],
 }
-
 pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     role_score_exponent: 3,
     quota_soft_threshold: 25.0,
@@ -109,7 +102,6 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
         (VendorKind::Codex, None, SelectionPhase::Review, 1.5),
     ],
 };
-
 impl SelectionConfig {
     pub fn vendor_bias(&self, vendor: VendorKind, name: &str, phase: SelectionPhase) -> f64 {
         self.vendor_phase_biases
@@ -120,7 +112,6 @@ impl SelectionConfig {
             .map(|(_, _, _, bias)| *bias)
             .unwrap_or(1.0)
     }
-
     /// Concave curve: reaches 1.0 at `quota_soft_threshold`, falls off
     /// quadratically to 0 at 0%. At and above the soft threshold this stays
     /// flat at 1.0 (no extra quota penalty).
@@ -132,7 +123,6 @@ impl SelectionConfig {
         1.0 - (1.0 - t).powi(2)
     }
 }
-
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;

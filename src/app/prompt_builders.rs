@@ -1,7 +1,6 @@
 use super::prompt_ctx::{PromptCtx, resolved_agent_path};
 use indoc::formatdoc;
 use std::path::{Path, PathBuf};
-
 pub(crate) fn spec_review_prompt(
     spec_path: &str,
     review_path: &str,
@@ -13,7 +12,6 @@ pub(crate) fn spec_review_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/spec_review.md"))
 }
-
 pub(crate) fn plan_review_prompt(
     spec_path: &str,
     plan_path: &str,
@@ -46,7 +44,6 @@ pub(crate) fn plan_review_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/plan_review.md"))
 }
-
 pub(crate) fn brainstorm_prompt(
     idea: &str,
     spec_path: &str,
@@ -72,7 +69,6 @@ pub(crate) fn brainstorm_prompt(
         .live_arg(live_summary_path, !yolo)
         .render(template)
 }
-
 pub(crate) fn planning_prompt(
     spec_path: &Path,
     review_paths: &[PathBuf],
@@ -102,7 +98,6 @@ pub(crate) fn planning_prompt(
         .live_arg(live_summary_path, !yolo)
         .render(template)
 }
-
 pub(crate) fn sharding_prompt(
     spec_path: &Path,
     plan_path: &Path,
@@ -116,7 +111,6 @@ pub(crate) fn sharding_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/sharding.md"))
 }
-
 pub(crate) fn final_validation_prompt(
     idea_text: &str,
     spec_text: &str,
@@ -140,7 +134,6 @@ pub(crate) fn final_validation_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/final_validation.md"))
 }
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn recovery_prompt(
     spec_path: &Path,
@@ -179,7 +172,6 @@ pub(crate) fn recovery_prompt(
         .live_arg(live_summary_path, interactive)
         .render(template)
 }
-
 pub(crate) fn recovery_plan_review_prompt(
     spec_path: &Path,
     plan_path: &Path,
@@ -197,7 +189,6 @@ pub(crate) fn recovery_plan_review_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/recovery_plan_review.md"))
 }
-
 pub(crate) fn recovery_sharding_prompt(
     spec_path: &Path,
     plan_path: &Path,
@@ -215,7 +206,6 @@ pub(crate) fn recovery_sharding_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/recovery_sharding.md"))
 }
-
 pub(crate) fn coder_prompt(
     session_dir: &Path,
     task_id: u32,
@@ -267,7 +257,6 @@ pub(crate) fn coder_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/coder.md"))
 }
-
 pub(crate) struct ReviewerPromptInputs<'a> {
     pub(crate) session_dir: &'a Path,
     pub(crate) task_id: u32,
@@ -278,7 +267,6 @@ pub(crate) struct ReviewerPromptInputs<'a> {
     pub(crate) review_file: &'a Path,
     pub(crate) live_summary_path: &'a Path,
 }
-
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let mut ctx = PromptCtx::new();
     let prior_reviews = if inputs.round > 1 {
@@ -317,7 +305,6 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         .live_arg(inputs.live_summary_path, false)
         .render(include_str!("prompts/reviewer.md"))
 }
-
 pub(crate) fn simplifier_prompt(
     session_dir: &Path,
     review_scope_file: &Path,

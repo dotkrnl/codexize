@@ -3,10 +3,8 @@
 //! The persistence-side `impl SessionState` block lives in
 //! [`crate::data::persistence::session`]; only pure data and pure mutators
 //! live here.
-
 pub mod phase;
 pub mod transitions;
-
 pub use phase::Phase;
 pub use transitions::{
     FinishedRunRecord, TransitionError, append_final_validation_gap_tasks, append_refine_feedback,

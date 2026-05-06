@@ -5,7 +5,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph},
 };
-
 /// Paint the dim full-screen backdrop that recedes underlying TUI behind a
 /// modal. Compose this around [`render_modal_overlay`] only when there is
 /// underlying UI to recede; surfaces with no underlying TUI (e.g. preflight)
@@ -14,7 +13,6 @@ pub fn render_modal_backdrop(frame: &mut Frame, area: Rect) {
     let dim = Paragraph::new("").style(Style::default().bg(Color::DarkGray));
     frame.render_widget(dim, area);
 }
-
 /// Shared modal width calculation so callers that pre-wrap body text can stay
 /// in lockstep with [`render_modal_overlay`].
 pub fn modal_inner_width(terminal_area: Rect) -> u16 {
@@ -22,7 +20,6 @@ pub fn modal_inner_width(terminal_area: Rect) -> u16 {
     let dialog_w = max_w.min(80).max(max_w.min(40));
     dialog_w.saturating_sub(2)
 }
-
 /// Render the centered modal panel: dark surface, bold accent border, accent
 /// bold title, body text in readable light gray, one blank separator row,
 /// and a keymap row that is layout-reserved (body yields rows when height is
@@ -49,11 +46,8 @@ pub fn render_modal_overlay(
         dialog_w,
         dialog_h,
     );
-
     frame.render_widget(Clear, dialog);
-
     let accent_style = Style::default().fg(accent).add_modifier(Modifier::BOLD);
-
     let mut block = Block::bordered()
         .border_style(accent_style)
         .style(Style::default().bg(Color::Black));
@@ -62,17 +56,14 @@ pub fn render_modal_overlay(
     }
     frame.render_widget(block.clone(), dialog);
     let inner = block.inner(dialog);
-
     if inner.height == 0 || inner.width == 0 {
         return;
     }
-
     let inner_h = inner.height as usize;
     // Reserve the last inner row for the keymap and the row above it as the
     // mandated blank separator. Body wraps/truncates into the rows above.
     let keymap_offset = inner_h.saturating_sub(1);
     let body_capacity = inner_h.saturating_sub(2);
-
     let lines_to_write: Vec<Line<'static>> = if body_capacity == 0 {
         Vec::new()
     } else if content.len() <= body_capacity {
@@ -88,7 +79,6 @@ pub fn render_modal_overlay(
         truncated
     };
     let keymap_line = dialog_body_line(keymap_line);
-
     let buf = frame.buffer_mut();
     for (offset, line) in lines_to_write.iter().enumerate() {
         buf.set_line(inner.x, inner.y + offset as u16, line, inner.width);
@@ -102,7 +92,6 @@ pub fn render_modal_overlay(
         );
     }
 }
-
 fn dialog_body_line(mut line: Line<'static>) -> Line<'static> {
     for span in &mut line.spans {
         span.style = span.style.bg(Color::Black);

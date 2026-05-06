@@ -6,7 +6,6 @@ pub enum SplitTarget {
     /// The Idea node's captured text or active input surface.
     Idea,
 }
-
 // Main-panel renderers are wired in a later slice; keep this helper available now.
 #[allow(dead_code)]
 pub(crate) fn run_main_panel_message_visible(
@@ -15,7 +14,6 @@ pub(crate) fn run_main_panel_message_visible(
     _show_thinking_texts: bool,
 ) -> bool {
     use crate::state::MessageKind;
-
     matches!(
         kind,
         MessageKind::Started
@@ -25,14 +23,12 @@ pub(crate) fn run_main_panel_message_visible(
             | MessageKind::End
     )
 }
-
 pub(crate) fn run_split_panel_message_visible(
     _run: &crate::state::RunRecord,
     kind: crate::state::MessageKind,
     show_thinking_texts: bool,
 ) -> bool {
     use crate::state::MessageKind;
-
     match kind {
         MessageKind::AgentText => true,
         // User input is the approved exception to the split's ACP/debug focus.
@@ -42,7 +38,6 @@ pub(crate) fn run_split_panel_message_visible(
         MessageKind::Brief | MessageKind::Summary | MessageKind::SummaryWarn => false,
     }
 }
-
 #[cfg(test)]
 #[path = "split_tests.rs"]
 mod tests;

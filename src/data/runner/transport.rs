@@ -4,7 +4,6 @@
 //! writes, and the on-disk ACP trace fan-out. The supervisor in
 //! `runner::supervise` consumes these primitives; nothing here owns process
 //! lifecycle or finish-stamp policy.
-
 use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 use std::{
@@ -14,25 +13,20 @@ use std::{
     thread,
     time::Duration,
 };
-
 const TRANSCRIPT_HANDOFF_PARK_INTERVAL: Duration = Duration::from_millis(25);
-
 /// Polling cadence for the runner's ACP receive loop. Kept here so transport
 /// code can sleep between idle reads without re-importing supervisor state.
 pub(super) const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::data::runner) enum AcpCancelReason {
     Terminate,
     Complete,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::data::runner) enum AcpInput {
     Prompt(String),
     Interrupt(String),
 }
-
 /// Resolved per-launch context the supervisor hands to transport helpers.
 /// Field visibility is widened to the whole `runner` module tree so the
 /// co-located test suite can build fixtures directly.
@@ -45,7 +39,6 @@ pub(in crate::data::runner) struct ManagedAcpLaunch {
     pub(in crate::data::runner) cause_path: PathBuf,
     pub(in crate::data::runner) required_artifact: Option<PathBuf>,
 }
-
 /// Resolve the ACP trace path that mirrors a per-run cause file. Trace files
 /// share the same stem as the cause file so postmortems land in one
 /// directory.
@@ -59,11 +52,9 @@ pub(in crate::data::runner) fn acp_trace_path_from_cause_path(cause_path: &Path)
         .unwrap_or_else(|| format!("{file_name}.acp.jsonl"));
     cause_path.with_file_name(trace_name)
 }
-
 pub(in crate::data::runner) fn acp_text_trace_path(launch: &ManagedAcpLaunch) -> PathBuf {
     acp_trace_path_from_cause_path(&launch.cause_path)
 }
-
 pub(in crate::data::runner) fn append_acp_text_trace(
     launch: &ManagedAcpLaunch,
     event: &AcpTextEvent,
@@ -88,7 +79,6 @@ pub(in crate::data::runner) fn append_acp_text_trace(
         let _ = writeln!(file, "{line}");
     }
 }
-
 fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, String, String)> {
     let state = SessionState::load(session_id).ok()?;
     state
@@ -105,7 +95,6 @@ fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, Stri
         })
         .map(|run| (run.id, run.model.clone(), run.vendor.clone()))
 }
-
 fn persist_agent_text_block(
     launch: &ManagedAcpLaunch,
     text: String,
@@ -115,7 +104,6 @@ fn persist_agent_text_block(
         return None;
     }
     let session_id = launch.session_id.as_deref()?;
-
     // ACP output can arrive before the app thread finishes saving the run
     // record, so transcript persistence waits briefly for that handoff.
     let run = (0..80).find_map(|_| {
@@ -137,7 +125,6 @@ fn persist_agent_text_block(
         );
         return None;
     };
-
     let ts = chrono::Utc::now();
     let msg = Message {
         ts,
@@ -155,7 +142,6 @@ fn persist_agent_text_block(
     }
     Some(ts)
 }
-
 fn update_agent_text_block(
     launch: &ManagedAcpLaunch,
     ts: chrono::DateTime<chrono::Utc>,
@@ -182,7 +168,6 @@ fn update_agent_text_block(
         }
     }
 }
-
 /// Per-run accumulator that funnels ACP `session/update` text events into
 /// a single live transcript message, breaking on identity changes the way
 /// `AcpTextAccumulator` reports them.
@@ -190,7 +175,6 @@ pub(in crate::data::runner) struct AcpTextStream {
     pub(in crate::data::runner) accumulator: AcpTextAccumulator,
     pub(in crate::data::runner) live_ts: Option<chrono::DateTime<chrono::Utc>>,
 }
-
 impl AcpTextStream {
     pub(in crate::data::runner) fn new() -> Self {
         Self {
@@ -198,7 +182,6 @@ impl AcpTextStream {
             live_ts: None,
         }
     }
-
     #[cfg(test)]
     pub(in crate::data::runner) fn push_text(
         &mut self,
@@ -208,7 +191,6 @@ impl AcpTextStream {
     ) {
         self.push_text_boundary(launch, chunk, kind, AcpTextBoundary::Continue);
     }
-
     pub(in crate::data::runner) fn push_text_boundary(
         &mut self,
         launch: &ManagedAcpLaunch,
@@ -233,7 +215,6 @@ impl AcpTextStream {
             self.persist_live(launch, &text, kind);
         }
     }
-
     pub(in crate::data::runner) fn finish_turn(
         &mut self,
         launch: &ManagedAcpLaunch,
@@ -243,7 +224,6 @@ impl AcpTextStream {
             self.persist_ready(launch, text, kind);
         }
     }
-
     fn persist_ready(&mut self, launch: &ManagedAcpLaunch, text: String, kind: MessageKind) {
         let text = text.trim().to_string();
         if text.is_empty() {
@@ -256,7 +236,6 @@ impl AcpTextStream {
         }
         let _ = persist_agent_text_block(launch, text, kind);
     }
-
     fn persist_live(&mut self, launch: &ManagedAcpLaunch, text: &str, kind: MessageKind) {
         let text = text.trim();
         if text.is_empty() {

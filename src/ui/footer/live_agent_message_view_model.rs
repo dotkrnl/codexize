@@ -1,6 +1,5 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
-
 const GRADIENT_STOPS: &[(u8, u8, u8)] = &[
     (0xFF, 0x6B, 0x6B),
     (0xFF, 0xD1, 0x66),
@@ -10,7 +9,6 @@ const GRADIENT_STOPS: &[(u8, u8, u8)] = &[
     (0xF0, 0x72, 0xB6),
 ];
 const GRADIENT_STEP: usize = 4;
-
 pub(crate) fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
@@ -18,7 +16,6 @@ pub(crate) fn capitalize_first(s: &str) -> String {
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }
-
 pub(super) fn interpolate_rgb(
     from: (u8, u8, u8),
     to: (u8, u8, u8),
@@ -29,22 +26,18 @@ pub(super) fn interpolate_rgb(
         let delta = end as i16 - start as i16;
         (start as i16 + (delta * step as i16) / max_step as i16) as u8
     };
-
     Color::Rgb(
         interpolate_channel(from.0, to.0),
         interpolate_channel(from.1, to.1),
         interpolate_channel(from.2, to.2),
     )
 }
-
 pub(super) fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
     if text.is_empty() {
         return Vec::new();
     }
-
     let cycle = GRADIENT_STOPS.len() * GRADIENT_STEP;
     let mut spans = Vec::with_capacity(text.chars().count());
-
     for (index, ch) in text.chars().enumerate() {
         let offset = (phase + index) % cycle;
         let start_index = offset / GRADIENT_STEP;
@@ -58,10 +51,8 @@ pub(super) fn gradient_spans(text: &str, phase: usize) -> Vec<Span<'static>> {
         );
         spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
     }
-
     spans
 }
-
 pub fn extract_short_title(text: &str) -> String {
     if let Some((title, _)) = text.split_once('|') {
         title.trim().to_string()
@@ -69,7 +60,6 @@ pub fn extract_short_title(text: &str) -> String {
         text.trim().to_string()
     }
 }
-
 #[cfg(test)]
 #[path = "live_agent_message_view_model_tests.rs"]
 mod tests;

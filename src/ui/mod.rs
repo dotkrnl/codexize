@@ -1,5 +1,4 @@
 //! Canonical home for terminal UI, rendering, and UI-only view state.
-
 pub mod chrome;
 pub mod clock;
 pub mod focus_caps;
@@ -13,7 +12,6 @@ pub mod split;
 pub mod status_line;
 pub mod tui;
 pub mod widgets;
-
 pub use crate::app as runtime;
 pub use crate::dashboard;
 pub use crate::picker;

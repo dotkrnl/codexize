@@ -1,13 +1,10 @@
 // expansion.rs
-use super::*;
-
 use super::tree::VisibleNodeRow;
-
+use super::*;
 impl App {
     pub(crate) fn default_expanded(&self, row: &VisibleNodeRow) -> bool {
         default_expansion(row, self.current_node(), &self.active_path_keys())
     }
-
     pub(crate) fn is_expanded(&self, index: usize) -> bool {
         let Some(row) = self.visible_rows.get(index) else {
             return false;
@@ -19,7 +16,6 @@ impl App {
             &self.collapsed_overrides,
         )
     }
-
     pub(crate) fn is_expanded_body(&self, index: usize) -> bool {
         self.is_expanded(index)
             && self

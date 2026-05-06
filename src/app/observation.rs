@@ -8,32 +8,27 @@ use crate::data::observation::{
 };
 use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
-
 #[cfg(test)]
 use tokio::sync::mpsc;
 impl App {
     pub(crate) fn setup_watcher(&mut self) -> Result<()> {
         self.live_summary_watcher = None;
         self.live_summary_change_events = None;
-
         let Some(path) = self.live_summary_path.clone() else {
             return Ok(());
         };
-
         // Probe parent-directory creation before any test short-circuit so
         // failures still surface as boundary errors with the watcher disabled.
         if let Err(reason) = ensure_live_summary_watch_dir(&path) {
             self.surface_boundary_error(reason, false);
             return Ok(());
         }
-
         #[cfg(test)]
         if !Self::test_uses_real_live_summary_watcher() {
             let (_tx, rx) = mpsc::unbounded_channel();
             self.live_summary_change_events = Some(LiveSummaryEvents::new(rx));
             return Ok(());
         }
-
         match build_live_summary_watcher(&path) {
             LiveSummaryWatcher::Active { watcher, events } => {
                 self.live_summary_watcher = Some(watcher);
@@ -46,12 +41,10 @@ impl App {
         }
         Ok(())
     }
-
     #[cfg(test)]
     fn test_uses_real_live_summary_watcher() -> bool {
         std::env::var_os("CODEXIZE_TEST_REAL_WATCHER").is_some()
     }
-
     pub(crate) fn poll_live_summary_fallback(&mut self) {
         if !self.run_launched {
             self.live_summary_cached_text.clear();
@@ -81,7 +74,6 @@ impl App {
             }
         }
     }
-
     pub(crate) fn read_live_summary_pipeline(&mut self) {
         let Some(run_id) = self.current_run_id else {
             return;
@@ -153,7 +145,6 @@ impl App {
         // away the arrow stays put.
         self.maybe_refocus_to_progress();
     }
-
     /// Per-tick watchdog evaluation. Walks every registered run's state at
     /// `now`, then performs the spec §3.4/§3.5 side effects (warning
     /// interrupt + `SummaryWarn`, or kill `Terminate` + `SummaryWarn`)
@@ -182,7 +173,6 @@ impl App {
             }
         }
     }
-
     fn dispatch_watchdog_warning(&mut self, run_id: u64, now: tokio::time::Instant) {
         // Snapshot exactly the values we need before touching dashboard
         // helpers. Holding a borrow on `self.watchdog` across calls to
@@ -218,7 +208,6 @@ impl App {
             ),
         );
     }
-
     fn dispatch_watchdog_kill(&mut self, run_id: u64, now: tokio::time::Instant) {
         let Some(idle_minutes) = self
             .watchdog
@@ -247,7 +236,6 @@ impl App {
             ),
         );
     }
-
     /// Final read + cleanup of the live-summary file when a run finishes.
     /// Emits any last summary as a Brief message, then deletes the file so
     /// the next run starts with a clean slate.

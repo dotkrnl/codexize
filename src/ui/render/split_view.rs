@@ -5,34 +5,28 @@ use crate::state::Phase;
 use crate::tui::wrap_text;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-
 pub(crate) struct SplitWidget<'a> {
     pub(super) app: &'a App,
 }
-
 impl Widget for SplitWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
             return;
         }
-
         let Some(target) = self.app.split_target else {
             return;
         };
-
         match target {
             SplitTarget::Run(run_id) => self.render_run_split(run_id, area, buf),
             SplitTarget::Idea => self.render_idea_split(area, buf),
         }
     }
 }
-
 impl SplitWidget<'_> {
     fn render_run_split(&self, run_id: u64, area: Rect, buf: &mut Buffer) {
         let Some(run) = self.app.state.agent_runs.iter().find(|r| r.id == run_id) else {
             return;
         };
-
         let msgs: Vec<_> = self
             .app
             .messages
@@ -47,9 +41,7 @@ impl SplitWidget<'_> {
             })
             .cloned()
             .collect();
-
         let local_offset = chrono::Local::now().fixed_offset().offset().fix();
-
         ChatWidget::new(
             &msgs,
             run,
@@ -61,7 +53,6 @@ impl SplitWidget<'_> {
         )
         .render(area, buf);
     }
-
     fn render_idea_split(&self, area: Rect, buf: &mut Buffer) {
         // Split target owns Idea content; selection may still point at a run row after force-open sync.
         if self.app.state.current_phase == Phase::IdeaInput {
@@ -70,19 +61,16 @@ impl SplitWidget<'_> {
             self.render_idea_captured(idea, area, buf);
         }
     }
-
     fn render_idea_captured(&self, idea: &str, area: Rect, buf: &mut Buffer) {
         let width = (area.width as usize).clamp(20, 80);
         let inner_width = width.saturating_sub(4);
         let label = " idea ";
         let fill = width.saturating_sub(label.len() + 2);
-
         let mut lines = Vec::new();
         lines.push(Line::from(Span::styled(
             format!("╭{label}{}╮", "─".repeat(fill)),
             Style::default().fg(Color::DarkGray),
         )));
-
         for chunk in wrap_text(idea, inner_width) {
             let padding = inner_width.saturating_sub(chunk.chars().count());
             lines.push(Line::from(vec![
@@ -92,17 +80,14 @@ impl SplitWidget<'_> {
                 Span::styled(" │", Style::default().fg(Color::DarkGray)),
             ]));
         }
-
         lines.push(Line::from(Span::styled(
             format!("╰{}╯", "─".repeat(width.saturating_sub(2))),
             Style::default().fg(Color::DarkGray),
         )));
-
         // Simple vertical centering within the split area
         let total_h = lines.len() as u16;
         let start_y = area.y + area.height.saturating_sub(total_h) / 2;
         let start_x = area.x + area.width.saturating_sub(width as u16) / 2;
-
         for (i, line) in lines.into_iter().enumerate() {
             let y = start_y + i as u16;
             if y < area.y + area.height {
@@ -110,7 +95,6 @@ impl SplitWidget<'_> {
             }
         }
     }
-
     fn render_idea_input(&self, area: Rect, buf: &mut Buffer) {
         let active = self.app.input_mode;
         let frame_color = if active {
@@ -121,13 +105,11 @@ impl SplitWidget<'_> {
         let width = (area.width as usize).clamp(20, 80);
         let label = if active { " working " } else { " input " };
         let fill = width.saturating_sub(label.len() + 2);
-
         let mut lines = Vec::new();
         lines.push(Line::from(Span::styled(
             format!("╭{label}{}╮", "─".repeat(fill)),
             Style::default().fg(frame_color),
         )));
-
         let placeholder = "describe your idea...";
         let (text, text_style) = if self.app.input_buffer.is_empty() {
             (
@@ -142,13 +124,11 @@ impl SplitWidget<'_> {
                 Style::default().fg(Color::White),
             )
         };
-
         let inner_width = width.saturating_sub(4);
         let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }
-
         let cursor_pos = if active {
             let target = if self.app.input_buffer.is_empty() {
                 0
@@ -171,7 +151,6 @@ impl SplitWidget<'_> {
         } else {
             None
         };
-
         for (idx, chunk) in wrapped.iter().enumerate() {
             let show_cursor_here = cursor_pos.is_some_and(|(line, _)| line == idx);
             let split_col = cursor_pos
@@ -205,7 +184,6 @@ impl SplitWidget<'_> {
                 Span::styled(" │", Style::default().fg(frame_color)),
             ]));
         }
-
         let hint = if active {
             " Enter: submit · Esc: cancel "
         } else {
@@ -216,12 +194,10 @@ impl SplitWidget<'_> {
             format!("╰{}╯", "─".repeat(fill) + hint),
             Style::default().fg(frame_color),
         )));
-
         // Center vertically
         let total_h = lines.len() as u16;
         let start_y = area.y + area.height.saturating_sub(total_h) / 2;
         let start_x = area.x + area.width.saturating_sub(width as u16) / 2;
-
         for (i, line) in lines.into_iter().enumerate() {
             let y = start_y + i as u16;
             if y < area.y + area.height {

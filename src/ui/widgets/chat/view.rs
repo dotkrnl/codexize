@@ -1,3 +1,7 @@
+use crate::app::chat_widget_view_model::chat_scroll_window;
+use crate::app::footer::{HistoricalStyleHints, capitalize_first, format_historical_message};
+use crate::app::render_view_model::spinner_frame;
+use crate::state::{Message, MessageKind, RunRecord, RunStatus};
 use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::{
@@ -7,12 +11,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::Widget,
 };
-
-use crate::app::chat_widget_view_model::chat_scroll_window;
-use crate::app::footer::{HistoricalStyleHints, capitalize_first, format_historical_message};
-use crate::app::render_view_model::spinner_frame;
-use crate::state::{Message, MessageKind, RunRecord, RunStatus};
-
 pub struct ChatWidget<'a> {
     messages: &'a [Message],
     run: &'a RunRecord,
@@ -22,7 +20,6 @@ pub struct ChatWidget<'a> {
     spinner_tick: usize,
     animate_started: bool,
 }
-
 impl<'a> ChatWidget<'a> {
     pub fn new(
         messages: &'a [Message],
@@ -44,16 +41,13 @@ impl<'a> ChatWidget<'a> {
         }
     }
 }
-
 struct SymbolStyle {
     symbol: &'static str,
     color: Color,
 }
-
 fn ss(symbol: &'static str, color: Color) -> SymbolStyle {
     SymbolStyle { symbol, color }
 }
-
 fn message_symbol(
     kind: MessageKind,
     run_status: RunStatus,
@@ -81,7 +75,6 @@ fn message_symbol(
         },
     }
 }
-
 fn hint(is_summary: bool, is_warning: bool, is_dim: bool, is_error: bool) -> HistoricalStyleHints {
     HistoricalStyleHints {
         is_summary,
@@ -90,7 +83,6 @@ fn hint(is_summary: bool, is_warning: bool, is_dim: bool, is_error: bool) -> His
         is_error,
     }
 }
-
 fn kind_to_hints(kind: MessageKind, run_status: RunStatus) -> HistoricalStyleHints {
     match kind {
         MessageKind::Summary => hint(true, false, false, false),
@@ -103,7 +95,6 @@ fn kind_to_hints(kind: MessageKind, run_status: RunStatus) -> HistoricalStyleHin
         _ => Default::default(),
     }
 }
-
 fn format_timestamp(
     ts: &chrono::DateTime<Utc>,
     local_offset: &FixedOffset,
@@ -128,9 +119,7 @@ fn format_timestamp(
         )
     }
 }
-
 use crate::tui::{strip_ansi, wrap_lines_with_prefix, wrap_text};
-
 fn push_wrapped_span_line(
     lines: &mut Vec<Vec<Span<'static>>>,
     current: &mut Vec<Span<'static>>,
@@ -142,7 +131,6 @@ fn push_wrapped_span_line(
     }
     lines.extend(wrap_spans(std::mem::take(current), content_width));
 }
-
 fn flush_if_non_empty(
     lines: &mut Vec<Vec<Span<'static>>>,
     current: &mut Vec<Span<'static>>,
@@ -152,14 +140,12 @@ fn flush_if_non_empty(
         push_wrapped_span_line(lines, current, width);
     }
 }
-
 fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'static>>> {
     if content_width == 0 {
         return Vec::new();
     }
     let mut lines = vec![Vec::new()];
     let mut current_len = 0usize;
-
     for span in spans {
         let style = span.style;
         let mut remaining = span.content.to_string();
@@ -179,7 +165,6 @@ fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'
                     .push(Span::styled(remaining, style));
                 break;
             }
-
             let split_at = remaining
                 .char_indices()
                 .nth(room)
@@ -195,10 +180,8 @@ fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'
             current_len = 0;
         }
     }
-
     lines
 }
-
 fn render_agent_markdown(
     text: &str,
     content_width: usize,
@@ -207,7 +190,6 @@ fn render_agent_markdown(
     if content_width == 0 {
         return Vec::new();
     }
-
     let parser = Parser::new_ext(text, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
     let code_style = Style::default().fg(Color::Cyan);
     let heading_style = base_style.add_modifier(Modifier::BOLD);
@@ -216,7 +198,6 @@ fn render_agent_markdown(
     let mut current: Vec<Span<'static>> = Vec::new();
     let mut list_depth = 0usize;
     let mut in_code_block = false;
-
     for event in parser {
         match event {
             Event::Start(Tag::Paragraph) => {}
@@ -302,9 +283,7 @@ fn render_agent_markdown(
             _ => {}
         }
     }
-
     flush_if_non_empty(&mut lines, &mut current, content_width);
-
     if lines.is_empty() {
         wrap_text(text, content_width)
             .into_iter()
@@ -314,7 +293,6 @@ fn render_agent_markdown(
         lines
     }
 }
-
 fn push_blank_line_if_needed(lines: &mut Vec<Line<'static>>) {
     if lines
         .last()
@@ -323,19 +301,19 @@ fn push_blank_line_if_needed(lines: &mut Vec<Line<'static>>) {
         lines.push(Line::from(Vec::<Span<'static>>::new()));
     }
 }
-
 fn capitalize_first_span(spans: &[Span<'static>]) -> Vec<Span<'static>> {
     let mut capitalized = spans.to_vec();
     for span in &mut capitalized {
         let mut chars = span.content.chars();
-        let Some(first) = chars.next() else { continue; };
+        let Some(first) = chars.next() else {
+            continue;
+        };
         let text = first.to_uppercase().collect::<String>() + chars.as_str();
         span.content = text.into();
         break;
     }
     capitalized
 }
-
 /// Render an agent run's transcript as a list of lines.
 ///
 /// `running_tail` is appended after the historical messages when the run is
@@ -369,7 +347,6 @@ pub fn message_lines(
     }
     lines
 }
-
 fn render_messages(
     messages: &[Message],
     run: &RunRecord,
@@ -381,7 +358,6 @@ fn render_messages(
     let now_local = local_offset.from_utc_datetime(&Utc::now().naive_utc());
     let today_local = now_local.date_naive();
     let mut lines: Vec<Line<'static>> = Vec::new();
-
     for msg in messages {
         let ts_str = format_timestamp(&msg.ts, local_offset, today_local);
         let ts_w = ts_str.chars().count();
@@ -394,7 +370,6 @@ fn render_messages(
             ]
         };
         let indent_prefix = || -> Vec<Span<'static>> { vec![Span::raw(" ".repeat(prefix_width))] };
-
         if msg.kind == MessageKind::Brief {
             let (title, details) = match msg.text.split_once('|') {
                 Some((t, d)) => (t.trim().to_string(), d.trim().to_string()),
@@ -418,7 +393,6 @@ fn render_messages(
             }
             continue;
         }
-
         if msg.kind == MessageKind::UserInput {
             lines.extend(wrap_lines_with_prefix(
                 ts_sym_prefix(),
@@ -430,12 +404,10 @@ fn render_messages(
             push_blank_line_if_needed(&mut lines);
             continue;
         }
-
         let hints = kind_to_hints(msg.kind, run.status);
         let body_style = body_style_from_hints(hints);
         let renders_markdown =
             matches!(msg.kind, MessageKind::AgentText | MessageKind::AgentThought);
-
         if !renders_markdown {
             // Plain (non-markdown) historical messages route through the
             // shared wrap helper so prefix/wrap behavior matches every
@@ -451,7 +423,6 @@ fn render_messages(
             ));
             continue;
         }
-
         // Markdown-aware path keeps its own renderer because each rendered
         // line carries multiple styled spans (code blocks, emphasis,
         // inline code) that the single-style wrap helper cannot reproduce.
@@ -484,10 +455,8 @@ fn render_messages(
         }
         push_blank_line_if_needed(&mut lines);
     }
-
     lines
 }
-
 fn body_style_from_hints(hints: HistoricalStyleHints) -> Style {
     let color = if hints.is_error {
         Color::Red
@@ -502,7 +471,6 @@ fn body_style_from_hints(hints: HistoricalStyleHints) -> Style {
     };
     Style::default().fg(color)
 }
-
 impl Widget for ChatWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
@@ -526,7 +494,6 @@ impl Widget for ChatWidget<'_> {
         }
     }
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn chat_lines(
     messages: &[Message],
@@ -548,39 +515,31 @@ pub fn chat_lines(
         spinner_tick,
         animate_started,
     );
-
     let total = all_lines.len();
     if total == 0 {
         return Vec::new();
     }
-
     let Some(window) = chat_scroll_window(total, available_height, scroll_offset) else {
         return Vec::new();
     };
-
     let mut lines = Vec::new();
-
     if window.show_above_indicator {
         lines.push(Line::from(Span::styled(
             format!("  ↑ {} more above", window.above_count),
             Style::default().fg(Color::DarkGray),
         )));
     }
-
     for line in &all_lines[window.offset..window.visible_end] {
         lines.push(line.clone());
     }
-
     if window.show_below_indicator {
         lines.push(Line::from(Span::styled(
             format!("  ↓ {} more below", window.below_count),
             Style::default().fg(Color::DarkGray),
         )));
     }
-
     lines
 }
-
 #[cfg(test)]
 #[path = "tests_mod.rs"]
 mod tests_mod;

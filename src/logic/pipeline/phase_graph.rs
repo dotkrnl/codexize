@@ -1,13 +1,11 @@
 use super::{Phase, PhaseKind};
 use PhaseKind as P;
-
 #[derive(Debug, Clone, Copy)]
 struct TransitionEdge {
     from: PhaseKind,
     to: PhaseKind,
     guard: RoundGuard,
 }
-
 impl TransitionEdge {
     const fn new(from: PhaseKind, to: PhaseKind) -> Self {
         Self {
@@ -16,18 +14,15 @@ impl TransitionEdge {
             guard: RoundGuard::Any,
         }
     }
-
     const fn guarded(from: PhaseKind, to: PhaseKind, guard: RoundGuard) -> Self {
         Self { from, to, guard }
     }
-
     fn allows(self, from: &Phase, to: &Phase) -> bool {
         self.from == PhaseKind::from(from)
             && self.to == PhaseKind::from(to)
             && self.guard.allows(from.round(), to.round())
     }
 }
-
 #[derive(Debug, Clone, Copy)]
 enum RoundGuard {
     Any,
@@ -38,7 +33,6 @@ enum RoundGuard {
     ToRound(u32),
     FromAtMost(u32),
 }
-
 impl RoundGuard {
     fn allows(self, from: Option<u32>, to: Option<u32>) -> bool {
         match self {
@@ -60,7 +54,6 @@ impl RoundGuard {
         }
     }
 }
-
 // A table stays clearer than statig/rust-fsm here because most parameterized
 // edges are simple round guards rather than state-entry/exit actions.
 const TRANSITION_EDGES: &[TransitionEdge] = &[
@@ -205,7 +198,6 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
         RoundGuard::ToRound(1),
     ),
 ];
-
 pub(super) fn can_transition(from: &Phase, to: &Phase) -> bool {
     TRANSITION_EDGES.iter().any(|edge| edge.allows(from, to))
 }

@@ -45,7 +45,9 @@ impl App {
         stage: &str,
         round: u32,
     ) -> Option<String> {
-        let (_, templates) = Self::ARTIFACT_REASON_TABLE.iter().find(|(c, _)| *c == stage)?;
+        let (_, templates) = Self::ARTIFACT_REASON_TABLE
+            .iter()
+            .find(|(c, _)| *c == stage)?;
         templates
             .iter()
             .map(|template| session_dir.join(Self::render_artifact_template(template, round)))
@@ -160,7 +162,11 @@ impl App {
             "sharding" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
                 let reason = Self::missing_artifact_reasons(&session_dir, "sharding", run.round)
-                    .or_else(|| tasks::validate(&tasks_path).err().map(Self::invalid_artifact));
+                    .or_else(|| {
+                        tasks::validate(&tasks_path)
+                            .err()
+                            .map(Self::invalid_artifact)
+                    });
                 (true, reason)
             }
             "recovery" => {
@@ -188,7 +194,11 @@ impl App {
             "reviewer" => {
                 let review_path = Self::round_dir(&session_dir, run.round).join("review.toml");
                 let reason = Self::missing_artifact_reasons(&session_dir, "reviewer", run.round)
-                    .or_else(|| review::validate(&review_path).err().map(Self::invalid_artifact));
+                    .or_else(|| {
+                        review::validate(&review_path)
+                            .err()
+                            .map(Self::invalid_artifact)
+                    });
                 (true, reason)
             }
             "final-validation" => {
@@ -207,14 +217,13 @@ impl App {
             "simplifier" => {
                 let simplification_path =
                     Self::round_dir(&session_dir, run.round).join("simplification.toml");
-                let reason =
-                    Self::missing_artifact_reasons(&session_dir, "simplifier", run.round)
-                        .or_else(|| {
-                            crate::simplification::validate(&simplification_path)
-                                .err()
-                                .map(Self::invalid_artifact)
-                        })
-                        .or_else(|| self.simplifier_dirty_tree_reason(run));
+                let reason = Self::missing_artifact_reasons(&session_dir, "simplifier", run.round)
+                    .or_else(|| {
+                        crate::simplification::validate(&simplification_path)
+                            .err()
+                            .map(Self::invalid_artifact)
+                    })
+                    .or_else(|| self.simplifier_dirty_tree_reason(run));
                 (true, reason)
             }
             _ => (false, None),
@@ -288,9 +297,7 @@ impl App {
                     run.id, run.stage
                 ));
                 return Ok(Some(match operator_marker {
-                    Some(OperatorTerminationMarker::Stopped) => {
-                        Reason::OperatorKilled.to_string()
-                    }
+                    Some(OperatorTerminationMarker::Stopped) => Reason::OperatorKilled.to_string(),
                     Some(OperatorTerminationMarker::RetryRequested) => {
                         Reason::UserForcedRetry.to_string()
                     }
@@ -390,9 +397,7 @@ impl App {
         let summary = artifact.summary.trim().to_string();
         match artifact.status {
             RecoveryStatus::Approved => None,
-            RecoveryStatus::Revise => {
-                Some(Reason::RecoveryRequestedRevise(summary).to_string())
-            }
+            RecoveryStatus::Revise => Some(Reason::RecoveryRequestedRevise(summary).to_string()),
             RecoveryStatus::HumanBlocked => {
                 Some(Reason::RecoveryRequestedHumanBlocked(summary).to_string())
             }

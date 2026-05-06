@@ -3,7 +3,6 @@ use std::{
     sync::{Condvar, Mutex},
     time::Duration,
 };
-
 /// Run an async IO primitive from a sync compatibility surface.
 ///
 /// New runtime-owned paths should prefer the async function directly. This
@@ -26,14 +25,12 @@ where
         }
         panic!("block_on_io cannot be called from a current-thread Tokio runtime");
     }
-
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("failed to build temporary tokio runtime for sync IO bridge")
         .block_on(future)
 }
-
 /// Block the current thread for `duration` without re-entering Tokio.
 ///
 /// This helper is used from legacy sync code and from `spawn_blocking`

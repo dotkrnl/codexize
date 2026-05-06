@@ -10,7 +10,6 @@
 //
 // Shared bookkeeping (model picking, run tracking, retry routing) stays in
 // this `mod.rs` so per-stage files remain reviewable in isolation.
-
 mod brainstorm;
 mod coder;
 mod dispatch;
@@ -24,7 +23,7 @@ mod reviewer;
 mod sharding;
 mod simplification;
 mod spec_review;
-
+use crate::app::models::vendor_tag;
 use crate::{
     adapters::EffortLevel,
     app::App,
@@ -37,9 +36,6 @@ use crate::{
         self as session_state, LaunchModes, Message, MessageKind, MessageSender, SessionState,
     },
 };
-
-use crate::app::models::vendor_tag;
-
 impl App {
     pub(crate) fn try_test_launch(
         &mut self,
@@ -90,7 +86,6 @@ impl App {
             })())
         }
     }
-
     pub(crate) fn choose_primary_model(
         &mut self,
         override_model: Option<&CachedModel>,
@@ -105,7 +100,6 @@ impl App {
                 vendor_tag(model.vendor).to_string(),
             ));
         }
-
         let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
         let picked = (
             outcome.model.name.clone(),
@@ -115,7 +109,6 @@ impl App {
         self.emit_selection_warning(outcome.warning);
         Some(picked)
     }
-
     pub(crate) fn choose_review_model(
         &mut self,
         override_model: Option<&CachedModel>,
@@ -131,7 +124,6 @@ impl App {
                 vendor_tag(model.vendor).to_string(),
             ));
         }
-
         let outcome =
             select_for_review_with_effort(&self.models, used_vendors, used_models, effort, cheap)?;
         let picked = (
@@ -142,7 +134,6 @@ impl App {
         self.emit_selection_warning(outcome.warning);
         Some(picked)
     }
-
     // This launch bookkeeping intentionally keeps the selected model metadata
     // explicit at the call site so run records cannot silently omit a field.
     #[allow(clippy::too_many_arguments)]
@@ -252,7 +243,6 @@ impl App {
         // onto the new run's deepest visible row.
         self.enable_progress_follow_and_refocus();
     }
-
     fn run_is_interactive(&self, stage: &str, round: u32, modes: LaunchModes) -> bool {
         match stage {
             "brainstorm" | "planning" => !modes.yolo,
@@ -268,7 +258,6 @@ impl App {
             _ => false,
         }
     }
-
     fn session_selected_model_for_validator(&mut self) -> Option<(String, VendorKind, String)> {
         let name = self.state.selected_model.as_ref()?.clone();
         let model = self.models.iter().find(|m| m.name == name)?;
@@ -278,7 +267,6 @@ impl App {
             vendor_tag(model.vendor).to_string(),
         ))
     }
-
     /// Look up the most-recent run on a stage for the given round and
     /// resolve its `(model, vendor_kind, vendor_tag)` triple. Returns
     /// `None` when no matching run exists or its persisted vendor string

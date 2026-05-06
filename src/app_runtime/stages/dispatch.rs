@@ -6,13 +6,11 @@
 // than the home of stage orchestration: the legacy lifecycle / events /
 // finalization modules now hand off through `app_runtime::stages` instead
 // of matching on stage strings themselves.
-
 use crate::{
     app::{App, AppStartupOrigin, RetryLaunch, StageId},
     selection::CachedModel,
     state::Phase,
 };
-
 impl App {
     /// Auto-launch the agent for the current phase if it's a non-interactive
     /// one (spec review, sharding, coder, reviewer). Idempotent: no-op if the
@@ -45,7 +43,6 @@ impl App {
             _ => {}
         }
     }
-
     /// Re-launch a stage after the operator stopped a running run with a
     /// retry intent. The descriptor was captured at modal-open time so
     /// transient state changes between modal-open and finalization don't
@@ -67,7 +64,6 @@ impl App {
             RetryLaunch::Reviewer => self.launch_reviewer(),
         }
     }
-
     /// Launch the canonical retry for a `StageId` value carried by the
     /// stage-error modal. Cross-stage routing lives here so the modal
     /// handler only carries the keybinding contract.
@@ -85,7 +81,6 @@ impl App {
             StageId::Review => self.launch_reviewer(),
         }
     }
-
     pub(crate) fn launch_retry_for_stage(
         &mut self,
         failed_run: &crate::state::RunRecord,

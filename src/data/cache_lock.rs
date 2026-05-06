@@ -6,10 +6,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tracing::warn;
-
 const LOCK_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
-
 /// Execute `f` while holding an exclusive PID-based lockfile at `path`.
 ///
 /// Acquisition uses `O_CREAT | O_EXCL` for atomicity. If the lock is held by
@@ -38,7 +36,6 @@ pub fn with_lock<T>(path: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
         }
     }
 }
-
 fn acquire(path: &Path) -> Result<()> {
     let deadline = Instant::now() + LOCK_TIMEOUT;
     loop {
@@ -60,7 +57,6 @@ fn acquire(path: &Path) -> Result<()> {
         }
     }
 }
-
 fn try_create(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -74,7 +70,6 @@ fn try_create(path: &Path) -> io::Result<()> {
     file.write_all(contents.as_bytes())?;
     Ok(())
 }
-
 /// Returns `true` if the stale lock was removed and the caller should retry.
 fn try_break_stale(path: &Path) -> bool {
     let contents = match fs::read_to_string(path) {
@@ -90,17 +85,14 @@ fn try_break_stale(path: &Path) -> bool {
         }
     };
     let created_at: u64 = lines.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-
     let age_exceeded = now_secs().saturating_sub(created_at) >= LOCK_TIMEOUT.as_secs();
     let pid_dead = !is_process_alive(pid);
-
     if age_exceeded || pid_dead {
         let _ = fs::remove_file(path);
         return true;
     }
     false
 }
-
 fn release(path: &Path) -> Result<()> {
     if let Ok(contents) = fs::read_to_string(path)
         && let Some(pid_str) = contents.lines().next()
@@ -112,20 +104,17 @@ fn release(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-
 fn is_process_alive(pid: i32) -> bool {
     use nix::sys::signal;
     use nix::unistd::Pid;
     signal::kill(Pid::from_raw(pid), None).is_ok()
 }
-
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
 }
-
 #[cfg(test)]
 #[path = "cache_lock_tests.rs"]
 mod tests;

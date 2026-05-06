@@ -5,27 +5,21 @@ use std::{
     io::IsTerminal,
     path::{Path, PathBuf},
 };
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum NormalizedArtifact {
     Toml(toml::Value),
     Text(String),
 }
-
 pub type NormalizedTree = BTreeMap<String, NormalizedArtifact>;
-
 pub fn live_smoke_prereqs_available() -> bool {
     std::io::stdout().is_terminal()
 }
-
 pub fn headless_fallback_active() -> bool {
     !live_smoke_prereqs_available()
 }
-
 pub fn load_normalized_fixture_tree(root: &Path) -> Result<NormalizedTree> {
     load_tree(root, None)
 }
-
 pub fn normalize_session_artifacts(
     root: &Path,
     session_id: &str,
@@ -34,7 +28,6 @@ pub fn normalize_session_artifacts(
     let replacement = ReplacementSet::new(session_id, scratch_root);
     load_tree(root, Some(&replacement))
 }
-
 pub fn diff_normalized_trees(expected: &NormalizedTree, actual: &NormalizedTree) -> Vec<String> {
     let mut diff = Vec::new();
     for path in expected.keys() {
@@ -57,14 +50,12 @@ pub fn diff_normalized_trees(expected: &NormalizedTree, actual: &NormalizedTree)
     }
     diff
 }
-
 #[derive(Debug)]
 struct ReplacementSet {
     session_id: String,
     scratch_root: String,
     hostname: Option<String>,
 }
-
 impl ReplacementSet {
     fn new(session_id: &str, scratch_root: &str) -> Self {
         Self {
@@ -74,13 +65,11 @@ impl ReplacementSet {
         }
     }
 }
-
 fn load_tree(root: &Path, replacements: Option<&ReplacementSet>) -> Result<NormalizedTree> {
     let mut tree = BTreeMap::new();
     collect_tree(root, root, replacements, &mut tree)?;
     Ok(tree)
 }
-
 fn collect_tree(
     root: &Path,
     path: &Path,
@@ -92,14 +81,12 @@ fn collect_tree(
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| format!("collect dir {}", path.display()))?;
     entries.sort_by_key(|entry| entry.path());
-
     for entry in entries {
         let entry_path = entry.path();
         if entry.file_type().context("file type")?.is_dir() {
             collect_tree(root, &entry_path, replacements, tree)?;
             continue;
         }
-
         let rel = entry_path
             .strip_prefix(root)
             .with_context(|| format!("strip prefix {}", entry_path.display()))?;
@@ -107,10 +94,8 @@ fn collect_tree(
         let artifact = normalize_file(&entry_path, replacements)?;
         tree.insert(key, artifact);
     }
-
     Ok(())
 }
-
 fn normalize_relative_path(rel: &Path, replacements: Option<&ReplacementSet>) -> String {
     let segments = rel
         .components()
@@ -125,7 +110,6 @@ fn normalize_relative_path(rel: &Path, replacements: Option<&ReplacementSet>) ->
         .collect::<Vec<_>>();
     PathBuf::from_iter(segments).to_string_lossy().into_owned()
 }
-
 fn normalize_file(
     path: &Path,
     replacements: Option<&ReplacementSet>,
@@ -139,14 +123,12 @@ fn normalize_file(
         }
         return Ok(NormalizedArtifact::Toml(value));
     }
-
     let text = match replacements {
         Some(set) => normalize_text(raw, set),
         None => raw,
     };
     Ok(NormalizedArtifact::Text(text))
 }
-
 fn normalize_toml_value(key: Option<&str>, value: &mut toml::Value, replacements: &ReplacementSet) {
     match value {
         toml::Value::String(text) => {
@@ -175,19 +157,16 @@ fn normalize_toml_value(key: Option<&str>, value: &mut toml::Value, replacements
         _ => {}
     }
 }
-
 fn is_timestamp_key(key: Option<&str>) -> bool {
     // Mirrors SessionState/RunRecord timestamp fields plus Message::ts; update
     // this list whenever persisted timestamp columns are added.
     matches!(key, Some("started_at" | "ended_at" | "ts"))
 }
-
 fn is_env_key(key: Option<&str>) -> bool {
     // Mirrors env-derived RunRecord fields so real host values do not leak into
     // normalized smoke fixtures when the persisted schema grows.
     matches!(key, Some("hostname" | "mount_device_id"))
 }
-
 fn normalize_text(mut text: String, replacements: &ReplacementSet) -> String {
     if !replacements.scratch_root.is_empty() {
         text = text.replace(&replacements.scratch_root, "<ROOT>");
@@ -198,7 +177,6 @@ fn normalize_text(mut text: String, replacements: &ReplacementSet) -> String {
     }
     normalize_rfc3339_substrings(&text)
 }
-
 fn normalize_rfc3339_substrings(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -222,11 +200,9 @@ fn normalize_rfc3339_substrings(text: &str) -> String {
     }
     out
 }
-
 fn looks_like_rfc3339(candidate: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(candidate).is_ok()
 }
-
 fn is_timestamp_char(ch: char) -> bool {
     matches!(ch, '0'..='9' | 'T' | 'Z' | ':' | '.' | '+' | '-')
 }

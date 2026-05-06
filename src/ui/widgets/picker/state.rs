@@ -18,10 +18,8 @@ use ratatui::{
     widgets::{Clear, Paragraph},
 };
 use std::time::{Duration, Instant, SystemTime};
-
 #[path = "view.rs"]
 mod view;
-
 pub struct SessionEntry {
     pub session_id: String,
     pub idea_summary: String,
@@ -30,18 +28,15 @@ pub struct SessionEntry {
     pub last_modified: SystemTime,
     pub archived: bool,
 }
-
 pub struct PickerSelection {
     pub session_id: String,
     pub created: bool,
 }
-
 #[derive(Clone, Copy)]
 pub(super) enum ConfirmKind {
     Archive,
     Delete,
 }
-
 pub struct SessionPicker {
     entries: Vec<SessionEntry>,
     selected: usize,
@@ -57,18 +52,15 @@ pub struct SessionPicker {
     palette: PaletteState,
     status_line: StatusLine,
 }
-
 enum KeyAction {
     Continue,
     SelectSession(PickerSelection),
     Quit,
 }
-
 impl SessionPicker {
     pub fn new() -> Result<Self> {
         Self::new_with_create_modes(Modes::default())
     }
-
     pub fn new_with_create_modes(create_modes: Modes) -> Result<Self> {
         let entries = scan_sessions()?;
         Ok(Self {
@@ -87,7 +79,6 @@ impl SessionPicker {
             status_line: StatusLine::new(),
         })
     }
-
     fn refresh(&mut self) -> Result<()> {
         self.entries = scan_sessions()?;
         let visible_count = self.visible_entries().len();
@@ -96,20 +87,16 @@ impl SessionPicker {
         }
         Ok(())
     }
-
     fn visible_entries(&self) -> Vec<&SessionEntry> {
         picker_view_model::visible_entries(&self.entries, self.show_archived)
     }
-
     fn selected_entry(&self) -> Option<&SessionEntry> {
         picker_view_model::selected_entry(&self.entries, self.show_archived, self.selected)
     }
-
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<Option<PickerSelection>> {
         loop {
             self.status_line.tick(Instant::now());
             terminal.draw(|frame| self.draw(frame))?;
-
             if event::poll(Duration::from_millis(250))? {
                 match event::read()? {
                     Event::Key(key) => {
@@ -133,20 +120,16 @@ impl SessionPicker {
             }
         }
     }
-
     fn handle_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
         if let Some(kind) = self.confirm_modal {
             return self.handle_modal_key(key, kind);
         }
-
         if self.input_mode {
             return self.handle_input_key(key);
         }
-
         if self.palette.open {
             return self.handle_palette_key(key);
         }
-
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => Ok(KeyAction::Quit),
             KeyCode::Char(':') => {
@@ -219,7 +202,6 @@ impl SessionPicker {
             _ => Ok(KeyAction::Continue),
         }
     }
-
     fn handle_modal_key(&mut self, key: KeyEvent, kind: ConfirmKind) -> Result<KeyAction> {
         match key.code {
             KeyCode::Enter => {
@@ -259,7 +241,6 @@ impl SessionPicker {
             _ => Ok(KeyAction::Continue),
         }
     }
-
     fn palette_commands(&self) -> Vec<PaletteCommand> {
         picker_view_model::palette_commands(
             self.selected_entry()
@@ -267,7 +248,6 @@ impl SessionPicker {
                 .unwrap_or(false),
         )
     }
-
     fn handle_palette_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -303,7 +283,6 @@ impl SessionPicker {
             _ => Ok(KeyAction::Continue),
         }
     }
-
     fn execute_palette_input(&mut self, input: &str) -> Result<KeyAction> {
         let commands = self.palette_commands();
         match palette::resolve(input, &commands) {
@@ -329,7 +308,6 @@ impl SessionPicker {
             }
         }
     }
-
     fn execute_palette_command(&mut self, name: &str, args: &str) -> Result<KeyAction> {
         match name {
             "quit" => Ok(KeyAction::Quit),
@@ -364,7 +342,6 @@ impl SessionPicker {
             _ => Ok(KeyAction::Continue),
         }
     }
-
     fn create_session_now(&mut self, idea: &str) -> Result<KeyAction> {
         let session_id = create_session(idea, self.create_modes)?;
         Ok(KeyAction::SelectSession(PickerSelection {
@@ -372,7 +349,6 @@ impl SessionPicker {
             created: true,
         }))
     }
-
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
         match key.code {
             KeyCode::Esc => {
@@ -392,7 +368,6 @@ impl SessionPicker {
         let _ = crate::input_editor::apply(&mut self.input_buffer, &mut self.input_cursor, key);
         Ok(KeyAction::Continue)
     }
-
     fn handle_select(&self) -> Result<KeyAction> {
         if let Some(entry) = self.selected_entry() {
             Ok(KeyAction::SelectSession(PickerSelection {
@@ -403,7 +378,6 @@ impl SessionPicker {
             Ok(KeyAction::Continue)
         }
     }
-
     fn handle_restore(&mut self) -> Result<KeyAction> {
         if let Some(entry) = self.selected_entry()
             && entry.archived
@@ -421,11 +395,9 @@ impl SessionPicker {
         Ok(KeyAction::Continue)
     }
 }
-
 pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
     crate::data::picker_io::scan_sessions()
 }
-
 /// Create a new session on disk and emit the standard creation events.
 ///
 /// `idea` is stored verbatim — the caller is responsible for trimming and
@@ -446,14 +418,12 @@ pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
     }
     Ok(session_id)
 }
-
 pub fn generate_session_id() -> String {
     let now: DateTime<Local> = SystemTime::now().into();
     // Include nanosecond precision so two sessions created in the same
     // wall-clock second cannot collide on the session directory name.
     now.format("%Y%m%d-%H%M%S-%9f").to_string()
 }
-
 #[cfg(test)]
 fn truncate_idea(idea: &Option<String>) -> String {
     match idea {
@@ -464,11 +434,9 @@ fn truncate_idea(idea: &Option<String>) -> String {
         None => "(no idea yet)".to_string(),
     }
 }
-
 pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String {
     let duration = now.duration_since(time).unwrap_or_default();
     let secs = duration.as_secs();
-
     if secs < 60 {
         format!("{}s ago", secs)
     } else if secs < 3600 {
@@ -479,7 +447,6 @@ pub(super) fn format_relative_time(time: SystemTime, now: SystemTime) -> String 
         format!("{}d ago", secs / 86400)
     }
 }
-
 pub(super) fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
     match phase {
         Phase::IdeaInput => ("idea".to_string(), Color::DarkGray, "○"),
@@ -505,7 +472,6 @@ pub(super) fn phase_badge(phase: Phase) -> (String, Color, &'static str) {
         Phase::Simplification(n) => (format!("simplification r{}", n), Color::Cyan, "●"),
     }
 }
-
 pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
     let mut labels = Vec::new();
     if modes.yolo {
@@ -516,7 +482,6 @@ pub(super) fn mode_badge_labels(modes: Modes) -> Vec<&'static str> {
     }
     labels
 }
-
 #[cfg(test)]
 #[path = "tests_mod.rs"]
 mod tests_mod;

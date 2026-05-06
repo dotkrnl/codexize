@@ -1,6 +1,5 @@
 use super::BuilderState;
 use crate::state::{PipelineItem, PipelineItemStatus};
-
 impl BuilderState {
     /// Return the highest task ID ever seen across pipeline items, legacy
     /// queues, task_titles, and recovery snapshots. Used to generate
@@ -22,7 +21,6 @@ impl BuilderState {
             .max(self.recovery_prev_max_task_id.unwrap_or(0));
         from_pipeline.max(from_titles).max(from_recovery)
     }
-
     /// Handle a `revise` verdict that carries `new_tasks`: mark the current
     /// task as done in the pipeline, insert replacement tasks immediately after
     /// it, and renumber all later pending tasks to keep IDs monotonically
@@ -35,12 +33,10 @@ impl BuilderState {
         if new_tasks.is_empty() {
             return vec![];
         }
-
         let current_idx = self
             .pipeline_items
             .iter()
             .position(|item| item.stage == "coder" && item.task_id == Some(current_task_id));
-
         let insert_pos = match current_idx {
             Some(idx) => {
                 self.pipeline_items[idx].status = PipelineItemStatus::Revise;
@@ -49,10 +45,8 @@ impl BuilderState {
             }
             None => self.pipeline_items.len(),
         };
-
         let mut next_id = self.max_task_id() + 1;
         let mut assigned_ids = Vec::with_capacity(new_tasks.len());
-
         for (title, _desc, _test, _tokens) in &new_tasks {
             let task_id = next_id;
             next_id += 1;
@@ -74,7 +68,6 @@ impl BuilderState {
                 },
             );
         }
-
         let renumber_start = insert_pos + new_tasks.len();
         let mut renumber_map = std::collections::BTreeMap::new();
         for item in &mut self.pipeline_items[renumber_start..] {
@@ -88,7 +81,6 @@ impl BuilderState {
                 item.task_id = Some(new_id);
             }
         }
-
         for (i, (title, _, _, _)) in new_tasks.iter().enumerate() {
             self.task_titles.insert(assigned_ids[i], title.clone());
         }
@@ -97,7 +89,6 @@ impl BuilderState {
                 self.task_titles.insert(*new_id, title);
             }
         }
-
         self.last_verdict = Some("revise".to_string());
         assigned_ids
     }

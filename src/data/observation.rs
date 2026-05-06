@@ -5,19 +5,15 @@
 //! probing, content reads, end-of-run drain/remove, and prompt-body reads
 //! used to compose watchdog warnings. Each primitive returns a plain typed
 //! value or outcome — callers decide what to do with it.
-
+use crate::data::events::LiveSummaryEvents;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
-
-use crate::data::events::LiveSummaryEvents;
-
 /// How long without an mtime advance before a live-summary file is treated
 /// as stale and cleared from cache. Mirrors the operator-stated heartbeat
 /// expectation (spec §3.7).
 pub const LIVE_SUMMARY_STALE_AFTER: Duration = Duration::from_secs(60);
-
 /// Outcome of building a live-summary watcher: either a working
 /// `Active { watcher, events }` pair, a degraded `PollOnly` fallback because
 /// the underlying notify backend rejected the path, or `Disabled` when no
@@ -35,7 +31,6 @@ pub enum LiveSummaryWatcher {
     },
     Disabled,
 }
-
 /// Snapshot of a live-summary file at a specific mtime. The content is
 /// returned verbatim; sanitization/dedup is the caller's responsibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +38,6 @@ pub struct LiveSummarySnapshot {
     pub mtime: SystemTime,
     pub content: String,
 }
-
 /// Result of a metadata-only probe of the live-summary path. Callers use
 /// this to decide whether a full read is worth doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +50,6 @@ pub enum LiveSummaryProbe {
     /// File exists and is fresh; `mtime` is the last write timestamp.
     Fresh { mtime: SystemTime },
 }
-
 /// Resolve and create the directory `notify` will watch for
 /// `live_summary_path`.
 ///
@@ -74,7 +67,6 @@ pub fn ensure_live_summary_watch_dir(live_summary_path: &Path) -> Result<PathBuf
     }
     Ok(watch_path)
 }
-
 /// Build a `notify` watcher that fires on writes to `live_summary_path`.
 ///
 /// Calls [`ensure_live_summary_watch_dir`] first, then installs the watcher.
@@ -85,7 +77,6 @@ pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatche
         Ok(path) => path,
         Err(reason) => return LiveSummaryWatcher::PollOnly { reason },
     };
-
     let (tx, rx) = mpsc::unbounded_channel();
     let watched_file = live_summary_path.to_path_buf();
     let watcher_result = RecommendedWatcher::new(
@@ -113,7 +104,6 @@ pub fn build_live_summary_watcher(live_summary_path: &Path) -> LiveSummaryWatche
         },
     }
 }
-
 /// Cheap metadata probe of the live-summary path. Performs no content read.
 pub fn probe_live_summary(path: &Path) -> LiveSummaryProbe {
     let Ok(meta) = std::fs::metadata(path) else {
@@ -132,7 +122,6 @@ pub fn probe_live_summary(path: &Path) -> LiveSummaryProbe {
         LiveSummaryProbe::Fresh { mtime }
     }
 }
-
 /// Read the live-summary file along with its mtime. Returns `None` when
 /// the file is missing, mtime cannot be determined, the contents have been
 /// stale longer than [`LIVE_SUMMARY_STALE_AFTER`], or the read fails.
@@ -144,7 +133,6 @@ pub fn read_live_summary(path: &Path) -> Option<LiveSummarySnapshot> {
     let content = std::fs::read_to_string(path).ok()?;
     Some(LiveSummarySnapshot { mtime, content })
 }
-
 /// Best-effort final read of the live-summary file followed by removal.
 /// Returns the snapshot (verbatim, no staleness gate) when readable; the
 /// removal is attempted regardless of read success so the next run starts
@@ -167,7 +155,6 @@ pub fn drain_live_summary_file(path: &Path) -> Option<LiveSummarySnapshot> {
     let _ = std::fs::remove_file(path);
     content.map(|content| LiveSummarySnapshot { mtime, content })
 }
-
 /// Read a prompt-body file from disk. Returns `None` when the file is
 /// missing or unreadable; the watchdog warning path substitutes a
 /// documented fallback string in that case (spec §3.4).

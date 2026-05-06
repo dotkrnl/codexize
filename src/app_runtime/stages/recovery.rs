@@ -1,16 +1,13 @@
-use anyhow::{Context, Result};
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::recovery_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, PipelineItemStatus};
-
+use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_recovery(&mut self) {
         let _ = self.launch_recovery_with_model(None);
     }
-
     pub(crate) fn launch_recovery_with_model(
         &mut self,
         override_model: Option<CachedModel>,
@@ -40,7 +37,6 @@ impl App {
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("recovery-r{round}.md"));
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("recovery");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -53,7 +49,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let is_human_blocked = self
             .state
             .builder
@@ -62,7 +57,6 @@ impl App {
             .find(|i| i.status == PipelineItemStatus::Running)
             .and_then(|i| i.trigger.as_deref())
             == Some("human_blocked");
-
         let completed = self.state.builder.done_task_ids();
         let mut started = self
             .started_builder_task_ids()
@@ -92,7 +86,6 @@ impl App {
             self.record_agent_error(err.to_string());
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -159,7 +152,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::BuilderRecovery(round)`.
     ///
     /// Runs `reconcile_builder_recovery` and then either advances to recovery

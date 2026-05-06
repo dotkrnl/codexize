@@ -6,7 +6,6 @@
 //! (finish stamps, git-state probes, exit-policy validators), and
 //! [`supervise`] (the per-run loop, the active-run registry, and the
 //! public control surface).
-
 use crate::acp::AcpLaunchPolicy;
 use crate::adapters::AgentRun;
 use crate::selection::VendorKind;
@@ -17,14 +16,11 @@ use std::{
     time::Duration,
 };
 use tokio::process::Command;
-
 mod exit;
 mod supervise;
 mod transport;
-
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
 pub use supervise::{RunId, Supervisor};
-
 #[cfg(test)]
 pub use supervise::{
     cancel_run_labels_matching, drain_test_cancel_receiver_for, drain_test_input_receiver_for,
@@ -33,7 +29,6 @@ pub use supervise::{
     request_run_label_interactive_input_for_test, run_label_is_active,
     run_label_is_waiting_for_input, send_run_label_input, shutdown_all_runs, terminate_run_label,
 };
-
 #[derive(Debug, Clone, Default)]
 pub struct ChildLaunch {
     program: String,
@@ -43,7 +38,6 @@ pub struct ChildLaunch {
     stdout_null: bool,
     stderr_null: bool,
 }
-
 impl ChildLaunch {
     pub fn new(program: impl Into<String>) -> Self {
         Self {
@@ -51,33 +45,27 @@ impl ChildLaunch {
             ..Self::default()
         }
     }
-
     pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.args = args.into_iter().map(Into::into).collect();
         self
     }
-
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.envs.push((key.into(), value.into()));
         self
     }
-
     pub fn stdin_null(mut self) -> Self {
         self.stdin_null = true;
         self
     }
-
     pub fn stdout_null(mut self) -> Self {
         self.stdout_null = true;
         self
     }
-
     pub fn stderr_null(mut self) -> Self {
         self.stderr_null = true;
         self
     }
 }
-
 /// Launch an agent interactively inside the managed ACP runtime boundary.
 /// All agent child-process launches must route through the runner so that
 /// finish-stamp logic is guaranteed to run.
@@ -105,7 +93,6 @@ impl Supervisor {
             AcpLaunchPolicy::default(),
         )
     }
-
     /// Launch an agent non-interactively inside the managed ACP runtime boundary.
     /// All agent child-process launches must route through the runner so that
     /// finish-stamp logic is guaranteed to run.
@@ -132,7 +119,6 @@ impl Supervisor {
             AcpLaunchPolicy::default(),
         )
     }
-
     #[allow(clippy::too_many_arguments)]
     pub fn launch_noninteractive_with_policy(
         &self,
@@ -158,7 +144,6 @@ impl Supervisor {
         )
     }
 }
-
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn launch_interactive(
@@ -180,7 +165,6 @@ pub fn launch_interactive(
         required_artifact,
     )
 }
-
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn launch_noninteractive(
@@ -202,7 +186,6 @@ pub fn launch_noninteractive(
         required_artifact,
     )
 }
-
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn launch_noninteractive_with_policy(
@@ -226,7 +209,6 @@ pub fn launch_noninteractive_with_policy(
         policy,
     )
 }
-
 /// Spawn a child process and await its exit, returning `None` if the timeout
 /// elapsed (in which case the child is killed and reaped) or its exit status
 /// otherwise.
@@ -252,7 +234,6 @@ pub fn run_child_with_timeout(
             .block_on(run_child_with_timeout_async(launch, timeout))
     }
 }
-
 pub async fn run_child_with_timeout_async(
     launch: &ChildLaunch,
     timeout: Duration,
@@ -271,7 +252,6 @@ pub async fn run_child_with_timeout_async(
     if launch.stderr_null {
         command.stderr(Stdio::null());
     }
-
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn: {:?}", launch))?;
@@ -290,6 +270,5 @@ pub async fn run_child_with_timeout_async(
         }
     }
 }
-
 #[cfg(test)]
 mod tests_mod;

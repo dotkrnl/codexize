@@ -1,5 +1,3 @@
-use anyhow::{Context, Result};
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::final_validation_prompt;
@@ -8,18 +6,16 @@ use crate::final_validation::{self, ValidationStatus};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
-
+use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_final_validation(&mut self) {
         let _ = self.launch_final_validation_with_model(None);
     }
-
     pub(crate) fn launch_final_validation_with_model(
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
         self.clear_agent_error();
-
         if self.models.is_empty() {
             self.record_agent_error(
                 "model list not yet loaded — wait a moment and try again".to_string(),
@@ -28,11 +24,9 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let Phase::FinalValidation(round) = self.state.current_phase else {
             return false;
         };
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let artifacts = session_dir.join("artifacts");
@@ -41,15 +35,12 @@ impl App {
         // Force a fresh verdict each entry so a stale TOML can't be mistaken
         // for this run's output during finalization.
         let _ = std::fs::remove_file(&verdict_path);
-
         let idea_text = self.state.idea_text.clone().unwrap_or_default();
         let spec_text = std::fs::read_to_string(&spec_path).unwrap_or_default();
-
         let modes = self.state.launch_modes();
         // Validator effort dial reuses the existing review-phase setting; no
         // new knob (per spec §5.3).
         let effort = modes.effort_for(EffortLevel::Normal, SelectionPhase::Review);
-
         // Spec §5.3: model = session.selected_model, vendor inherited from
         // that model. Fall back to the standard primary picker if the
         // selected model is unknown to the current model list (e.g. the
@@ -74,7 +65,6 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-
         let attempt = self.attempt_for("final-validation", None, round);
         let live_summary_path =
             self.live_summary_path_for_run("final-validation", None, round, attempt);
@@ -99,7 +89,6 @@ impl App {
             self.record_agent_error(format!("error writing prompt: {err}"));
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -158,7 +147,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::FinalValidation(round)`.
     pub(crate) fn finalize_final_validation_success(
         &mut self,

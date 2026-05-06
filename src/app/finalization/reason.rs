@@ -1,5 +1,4 @@
 //! Typed finalization reason codes.
-
 #[derive(Debug, Clone, PartialEq, Eq, strum::Display, strum::EnumString)]
 pub enum Reason {
     #[strum(serialize = "base_missing")]

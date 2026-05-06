@@ -4,21 +4,18 @@
 //! `ui::preflight`. The backend reports facts and performs the chosen
 //! filesystem/process actions; the UI layer renders modals and routes
 //! operator decisions back here.
-
 use anyhow::{Context, Result};
 use std::{
     fs,
     path::Path,
     process::{Command, Stdio},
 };
-
 /// Outcome of the preflight flow as observed by the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreflightOutcome {
     Continue,
     Exit,
 }
-
 /// Backend-detected scenario the runtime should surface to the operator.
 ///
 /// The variants are UI-neutral facts derived from filesystem/process probes;
@@ -31,9 +28,7 @@ pub enum Scenario {
     CodexAcpMissing,
     ClaudeAcpMissing,
 }
-
 pub const GITIGNORE_AUTO_COMMIT_SUBJECT: &str = "chore: ignore .codexize session data";
-
 pub fn detect_git() -> bool {
     Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
@@ -41,7 +36,6 @@ pub fn detect_git() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
-
 pub fn detect_ignored(root: &Path) -> bool {
     let ignored = |path: &std::ffi::OsStr| {
         Command::new("git")
@@ -51,15 +45,12 @@ pub fn detect_ignored(root: &Path) -> bool {
             .map(|o| o.status.success())
             .unwrap_or(false)
     };
-
     if ignored(root.as_os_str()) {
         return true;
     }
-
     let dir_form = format!("{}/", root.display());
     ignored(std::ffi::OsStr::new(&dir_form))
 }
-
 pub fn has_existing_files() -> bool {
     let Ok(entries) = fs::read_dir(".") else {
         return false;
@@ -73,7 +64,6 @@ pub fn has_existing_files() -> bool {
     }
     false
 }
-
 pub fn append_to_gitignore(entry: &str) -> Result<()> {
     let path = Path::new(".gitignore");
     let mut contents = if path.exists() {
@@ -81,32 +71,26 @@ pub fn append_to_gitignore(entry: &str) -> Result<()> {
     } else {
         String::new()
     };
-
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
     contents.push_str(entry);
     contents.push('\n');
-
     fs::write(path, contents).context("failed to write .gitignore")?;
     Ok(())
 }
-
 fn is_codexize_status_path(path: &str) -> bool {
     path == ".codexize" || path.starts_with(".codexize/")
 }
-
 fn accepted_gitignore_status(short_status: &str) -> bool {
     matches!(short_status, " M" | "M " | "MM" | "??" | "A ")
 }
-
 fn parse_porcelain_line(line: &str) -> Option<(&str, &str)> {
     if line.len() < 4 {
         return None;
     }
     Some((&line[..2], &line[3..]))
 }
-
 fn run_git_command_with_stderr(args: &[&str]) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
@@ -123,7 +107,6 @@ fn run_git_command_with_stderr(args: &[&str]) -> Result<(), String> {
     };
     Err(format!("`git {}` failed: {}", args.join(" "), detail))
 }
-
 pub fn maybe_auto_commit_gitignore<F>(mut warn: F)
 where
     F: FnMut(String),
@@ -152,7 +135,6 @@ where
         ));
         return;
     }
-
     let mut filtered: Vec<(String, String)> = Vec::new();
     let porcelain = String::from_utf8_lossy(&output.stdout);
     for line in porcelain.lines() {
@@ -165,14 +147,12 @@ where
         }
         filtered.push((short_status.to_string(), path.to_string()));
     }
-
     let [(status, path)] = filtered.as_slice() else {
         return;
     };
     if path != ".gitignore" || !accepted_gitignore_status(status) {
         return;
     }
-
     if let Err(err) = run_git_command_with_stderr(&["add", ".gitignore"]) {
         warn(format!("warning: .gitignore auto-commit skipped: {err}"));
         return;
@@ -182,7 +162,6 @@ where
         warn(format!("warning: .gitignore auto-commit skipped: {err}"));
     }
 }
-
 pub fn run_git_init() -> Result<()> {
     let status = Command::new("git")
         .arg("init")
@@ -193,7 +172,6 @@ pub fn run_git_init() -> Result<()> {
     }
     Ok(())
 }
-
 pub fn install_claude_acp() -> Result<()> {
     let root = crate::acp::claude_acp_install_root();
     fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
@@ -214,7 +192,6 @@ pub fn install_claude_acp() -> Result<()> {
     }
     Ok(())
 }
-
 pub fn install_codex_acp() -> Result<()> {
     let status = Command::new("brew")
         .args(["install", "codex-acp"])
@@ -228,13 +205,11 @@ pub fn install_codex_acp() -> Result<()> {
     }
     Ok(())
 }
-
 struct ProjectType {
     label: &'static str,
     markers: &'static [&'static str],
     lines: &'static [&'static str],
 }
-
 const PROJECT_TYPES: &[ProjectType] = &[
     ProjectType {
         label: "Rust",
@@ -267,7 +242,6 @@ const PROJECT_TYPES: &[ProjectType] = &[
         lines: &[".bundle/", "vendor/bundle/"],
     },
 ];
-
 pub fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     let mut out = String::from(
         "# OS files\n.DS_Store\nThumbs.db\n\n\
@@ -289,7 +263,6 @@ pub fn generate_heuristic_gitignore(codexize_entry: &str) -> String {
     out.push('\n');
     out
 }
-
 pub fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::path::PathBuf> {
     let finish_marker =
         std::env::temp_dir().join(format!("codexize-gitignore-{}.done", std::process::id()));
@@ -300,7 +273,6 @@ pub fn generate_gitignore_preflight_file(codexize_entry: &str) -> Result<std::pa
     fs::write(&finish_marker, "").context("failed to write finish marker")?;
     Ok(finish_marker)
 }
-
 #[cfg(test)]
 #[path = "preflight_tests.rs"]
 mod tests;

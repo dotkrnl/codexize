@@ -1,14 +1,11 @@
 use std::collections::VecDeque;
-
 /// `Continue` appends to the current live block; `StartNewMessage` finalizes first.
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpTextBoundary { Continue, StartNewMessage }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientTextKind { Message, Thought, Tool }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientUpdate {
@@ -20,11 +17,9 @@ pub enum ClientUpdate {
     PromptTurnFailed { message: String },
     Unknown { kind: String },
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCallActivityKind { Start, Finish }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpRuntimeEvent {
@@ -34,7 +29,6 @@ pub enum AcpRuntimeEvent {
     PromptTurnFailed { message: String },
     ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpTextEvent {
@@ -44,24 +38,19 @@ pub struct AcpTextEvent {
     pub boundary: AcpTextBoundary,
     pub identity: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub struct AcpTextAccumulator {
     buffer: String,
     max_chars: usize,
     ready: VecDeque<String>,
 }
-
 #[rustfmt::skip]
 impl AcpTextAccumulator {
     pub const DEFAULT_MAX_CHARS: usize = 8192;
-
     pub fn new() -> Self { Self::with_max_chars(Self::DEFAULT_MAX_CHARS) }
-
     pub fn with_max_chars(max_chars: usize) -> Self {
         Self { buffer: String::new(), max_chars: max_chars.max(1), ready: VecDeque::new() }
     }
-
     pub fn push(&mut self, chunk: &str) -> Option<String> {
         if !chunk.is_empty() {
             self.buffer.push_str(chunk);
@@ -69,18 +58,14 @@ impl AcpTextAccumulator {
         }
         self.ready.pop_front()
     }
-
     pub fn current_text(&self) -> Option<&str> {
         (!self.buffer.is_empty()).then_some(self.buffer.as_str())
     }
-
     pub fn next_ready(&mut self) -> Option<String> { self.ready.pop_front() }
-
     pub fn finish_prompt_turn(&mut self) -> Option<String> {
         self.ready.pop_front()
             .or_else(|| (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer)))
     }
-
     fn flush_ready(&mut self) {
         while let Some(at) = self.buffer.find("\n\n") {
             let block = self.buffer[..at].to_string();
@@ -96,13 +81,11 @@ impl AcpTextAccumulator {
         }
     }
 }
-
 impl Default for AcpTextAccumulator {
     fn default() -> Self {
         Self::new()
     }
 }
-
 #[rustfmt::skip]
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
     Some(match update {
@@ -121,7 +104,6 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
         ClientUpdate::Unknown { .. } => return None,
     })
 }
-
 #[cfg(test)]
 #[path = "acp/events_tests.rs"]
 mod events_tests;

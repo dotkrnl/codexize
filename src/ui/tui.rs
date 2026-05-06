@@ -1,3 +1,4 @@
+use crate::app_runtime::{AppCommand, AppView, ModalKind, UiKey, UiKeyCode};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -17,14 +18,9 @@ use std::io;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-
-use crate::app_runtime::{AppCommand, AppView, ModalKind, UiKey, UiKeyCode};
-
 pub type AppTerminal = Terminal<CrosstermBackend<io::Stdout>>;
-
 pub fn start() -> Result<AppTerminal> {
     enable_raw_mode()?;
-
     let result = (|| -> Result<AppTerminal> {
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
@@ -32,7 +28,6 @@ pub fn start() -> Result<AppTerminal> {
         let terminal = Terminal::new(backend)?;
         Ok(terminal)
     })();
-
     match result {
         Ok(terminal) => Ok(terminal),
         Err(err) => {
@@ -41,7 +36,6 @@ pub fn start() -> Result<AppTerminal> {
         }
     }
 }
-
 /// Best-effort restoration after `start()` partially succeeds and then
 /// fails (e.g. `Terminal::new` returns `Err` once raw mode, the alternate
 /// screen, and bracketed paste are already armed). Any individual step
@@ -51,7 +45,6 @@ fn restore_terminal_after_failed_start() {
     let _ = execute!(stdout, DisableBracketedPaste, LeaveAlternateScreen);
     let _ = disable_raw_mode();
 }
-
 pub fn stop(terminal: &mut AppTerminal) -> Result<()> {
     disable_raw_mode()?;
     execute!(
@@ -60,10 +53,8 @@ pub fn stop(terminal: &mut AppTerminal) -> Result<()> {
         LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
-
     Ok(())
 }
-
 /// Temporarily drops out of the TUI so an external program (e.g. vim) can
 /// own the terminal, then restores the alternate screen on return.
 pub fn run_foreground<F>(terminal: &mut AppTerminal, f: F) -> Result<()>
@@ -88,7 +79,6 @@ where
     terminal.clear()?;
     outcome
 }
-
 pub fn render_app<F>(terminal: &mut AppTerminal, _view: &AppView, draw: F) -> Result<()>
 where
     F: FnOnce(&mut ratatui::Frame<'_>),
@@ -96,19 +86,16 @@ where
     terminal.draw(draw)?;
     Ok(())
 }
-
 pub fn poll_command(timeout: Duration, view: &AppView) -> Result<Option<AppCommand>> {
     if !event::poll(timeout)? {
         return Ok(None);
     }
     Ok(command_from_event(event::read()?, view))
 }
-
 pub struct CrosstermInputAdapter {
     rx: mpsc::UnboundedReceiver<Event>,
     cancel: CancellationToken,
 }
-
 impl CrosstermInputAdapter {
     pub fn spawn() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -135,7 +122,6 @@ impl CrosstermInputAdapter {
         });
         Self { rx, cancel }
     }
-
     pub fn next_command(
         &mut self,
         timeout: Duration,
@@ -148,13 +134,11 @@ impl CrosstermInputAdapter {
         }
     }
 }
-
 impl Drop for CrosstermInputAdapter {
     fn drop(&mut self) {
         self.cancel.cancel();
     }
 }
-
 pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {
     match event {
         Event::Key(key) => command_from_key_event(key, view),
@@ -162,7 +146,6 @@ pub fn command_from_event(event: Event, view: &AppView) -> Option<AppCommand> {
         _ => None,
     }
 }
-
 fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
     if key.kind != KeyEventKind::Press {
         return None;
@@ -207,7 +190,6 @@ fn command_from_key_event(key: KeyEvent, view: &AppView) -> Option<AppCommand> {
         alt: key.modifiers.contains(KeyModifiers::ALT),
     }))
 }
-
 /// Strip ANSI escape sequences (CSI form `ESC[…<final-byte>`) from `s`.
 /// Shared across the TUI so chat transcript wrapping, validation report
 /// rendering, and live-summary sanitation all agree on what counts as a
@@ -232,7 +214,6 @@ pub fn strip_ansi(s: &str) -> String {
     }
     result
 }
-
 /// Build a sequence of [`Line`]s for "<prefix><body>" where `body` is wrapped
 /// to fit and continuation lines indent to align under the body's first
 /// column. The single point that every transcript-shaped renderer (chat
@@ -275,7 +256,6 @@ pub fn wrap_lines_with_prefix(
     }
     lines
 }
-
 /// Hard-wrap `text` into lines of at most `width` printable chars, preferring
 /// word boundaries when the line has any spaces. Preserves explicit newlines
 /// and strips ANSI escape sequences first so width math counts only what the
@@ -335,7 +315,6 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
     out
 }
-
 #[cfg(test)]
 #[path = "tui_tests.rs"]
 mod tests;

@@ -1,20 +1,15 @@
-use crossterm::event::{KeyCode, KeyEvent};
-
-use crate::state::{NodeStatus, Phase};
-
 use super::super::{App, ExpansionOverride};
-
+use crate::state::{NodeStatus, Phase};
+use crossterm::event::{KeyCode, KeyEvent};
 impl App {
     pub(crate) fn handle_input_key(&mut self, key: KeyEvent) -> bool {
         if self.interactive_run_active() && !self.interactive_run_waiting_for_input() {
             self.input_mode = false;
             return false;
         }
-
         if self.maybe_enter_command_mode_from_input_buffer() {
             return self.handle_palette_key(key);
         }
-
         match key.code {
             KeyCode::Esc => {
                 self.input_mode = false;
@@ -34,7 +29,6 @@ impl App {
                         self.input_mode = true;
                         return false;
                     }
-
                     if keep_input_open {
                         self.send_interactive_input(trimmed);
                         self.input_buffer.clear();
@@ -42,11 +36,9 @@ impl App {
                         self.input_mode = true;
                         return false;
                     }
-
                     if trimmed == "/exit" {
                         return true;
                     }
-
                     if trimmed == "/stats" || trimmed == "/status" || trimmed == "/usage" {
                         self.force_refresh_models();
                         self.input_buffer.clear();
@@ -54,7 +46,6 @@ impl App {
                         self.input_mode = false;
                         return false;
                     }
-
                     if self.state.current_phase == Phase::IdeaInput {
                         self.input_buffer.clear();
                         self.input_cursor = 0;
@@ -62,7 +53,6 @@ impl App {
                         self.launch_brainstorm(trimmed);
                         return false;
                     }
-
                     self.input_buffer.clear();
                     self.input_cursor = 0;
                 }
@@ -75,7 +65,6 @@ impl App {
         let _ = self.maybe_enter_command_mode_from_input_buffer();
         false
     }
-
     pub(crate) fn toggle_expand_focused(&mut self) {
         let Some(row) = self.visible_rows.get(self.selected).cloned() else {
             return;
@@ -101,7 +90,6 @@ impl App {
         self.rebuild_visible_rows();
         self.restore_selection(Some(row.key), self.selected);
     }
-
     pub(crate) fn scroll_or_move_focus(&mut self, delta: isize) {
         let idx = self.selected;
         let area_h = self.effective_body_inner_height();
@@ -112,7 +100,6 @@ impl App {
         };
         let next_y = ys.get(idx + 1).copied().unwrap_or(total);
         let section_bottom = next_y; // exclusive end of selected row's content block
-
         if delta < 0 {
             if self.viewport_top > header_y {
                 self.scroll_viewport(-1, false);
@@ -125,7 +112,6 @@ impl App {
             self.move_focus(delta);
         }
     }
-
     pub(crate) fn move_focus(&mut self, delta: isize) {
         self.explicit_viewport_scroll = false;
         let before = self.selected;

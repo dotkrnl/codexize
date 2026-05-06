@@ -2,12 +2,10 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TasksFile {
     pub tasks: Vec<Task>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: u32,
@@ -22,13 +20,11 @@ pub struct Task {
     #[serde(default)]
     pub plan_refs: Vec<Ref>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ref {
     pub path: String,
     pub lines: String,
 }
-
 /// Validate a tasks TOML file. Returns parsed structure on success,
 /// descriptive error on any structural problem.
 pub fn validate(path: &Path) -> Result<TasksFile> {
@@ -36,11 +32,9 @@ pub fn validate(path: &Path) -> Result<TasksFile> {
         fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     let parsed: TasksFile =
         toml::from_str(&text).with_context(|| format!("malformed TOML in {}", path.display()))?;
-
     if parsed.tasks.is_empty() {
         bail!("tasks array is empty");
     }
-
     let mut seen_ids = std::collections::BTreeSet::new();
     for (i, t) in parsed.tasks.iter().enumerate() {
         let pos = i + 1;
@@ -68,10 +62,8 @@ pub fn validate(path: &Path) -> Result<TasksFile> {
             }
         }
     }
-
     Ok(parsed)
 }
-
 #[cfg(test)]
 #[path = "tasks_tests.rs"]
 mod tests;

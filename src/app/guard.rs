@@ -6,14 +6,11 @@
 //! rounds' artifacts). This module snapshots the relevant state at launch
 //! time and, on exit, verifies, reverts, and reports a reason string that
 //! flows through the normal run-failure machinery.
-
 use crate::app::Reason;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
 const SNAPSHOT_FILE: &str = "snapshot.toml";
-
 /// Decided at run-launch time and persisted on the snapshot so finalization
 /// and resume paths cannot lose the choice. `AutoReset` keeps today's
 /// behavior (fail closed; `git reset --hard` on HEAD-advance). `AskOperator`
@@ -26,7 +23,6 @@ pub enum GuardMode {
     AutoReset,
     AskOperator,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Snapshot {
     /// git HEAD at capture time (full SHA). Empty if git was unavailable.
@@ -53,7 +49,6 @@ pub struct Snapshot {
     #[serde(default)]
     pub working_tree_baseline: Option<String>,
 }
-
 /// Outcome of verifying a snapshot. Three arms so callers cannot
 /// accidentally treat a pending operator decision as a hard error.
 #[derive(Debug, Clone)]
@@ -74,7 +69,6 @@ pub enum VerifyResult {
         warnings: Vec<String>,
     },
 }
-
 fn git_stdout(args: &[&str]) -> Option<String> {
     let output = std::process::Command::new("git").args(args).output().ok()?;
     output
@@ -82,7 +76,6 @@ fn git_stdout(args: &[&str]) -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).to_string())
 }
-
 fn git_head() -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock()
@@ -91,11 +84,9 @@ fn git_head() -> Option<String> {
     let trimmed = git_stdout(&["rev-parse", "HEAD"])?.trim().to_string();
     (!trimmed.is_empty()).then_some(trimmed)
 }
-
 pub fn git_status_dirty() -> bool {
     git_status().map(|s| !s.trim().is_empty()).unwrap_or(false)
 }
-
 fn git_status() -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock()
@@ -103,29 +94,24 @@ fn git_status() -> Option<String> {
         .unwrap_or_else(|err| err.into_inner());
     git_stdout(&["status", "--porcelain"])
 }
-
 fn git_diff_head() -> Option<String> {
     git_stdout(&["diff", "HEAD"])
 }
-
 fn git_working_tree_baseline() -> Option<String> {
     let diff = git_diff_head()?;
     let status = git_status()?;
     Some(format!("diff:\n{diff}\nstatus:\n{status}"))
 }
-
 fn write_snapshot(snapshot_dir: &Path, snap: &Snapshot) -> std::io::Result<()> {
     std::fs::create_dir_all(snapshot_dir)?;
     let text = toml::to_string(snap)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(snapshot_dir.join(SNAPSHOT_FILE), text)
 }
-
 fn read_snapshot(snapshot_dir: &Path) -> Option<Snapshot> {
     let text = std::fs::read_to_string(snapshot_dir.join(SNAPSHOT_FILE)).ok()?;
     toml::from_str(&text).ok()
 }
-
 /// Capture a snapshot for a non-coder agent. Records HEAD and working-tree
 /// status so `verify_non_coder` can detect changes and emit warnings.
 /// `mode` controls how a HEAD-advance violation is handled at verify time.
@@ -145,7 +131,6 @@ pub fn capture_non_coder(
     };
     write_snapshot(snapshot_dir, &snap)
 }
-
 /// Gather the set of control files the coder must not modify for this round.
 /// Includes the current round's task.toml / review_scope.toml and every
 /// file under prior rounds' directories.
@@ -181,7 +166,6 @@ fn coder_control_paths(session_dir: &Path, round: u32) -> Vec<PathBuf> {
     }
     out
 }
-
 pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std::io::Result<()> {
     let mut control_files = BTreeMap::new();
     for p in coder_control_paths(session_dir, round) {
@@ -199,7 +183,6 @@ pub fn capture_coder(snapshot_dir: &Path, session_dir: &Path, round: u32) -> std
     };
     write_snapshot(snapshot_dir, &snap)
 }
-
 /// Verify the snapshot. Returns a typed three-arm result so callers cannot
 /// accidentally treat a pending operator decision as a hard error.
 pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
@@ -214,7 +197,6 @@ pub fn verify(snapshot_dir: &Path, stage: &str) -> VerifyResult {
         verify_non_coder(&snap)
     }
 }
-
 /// Run `git reset --hard <captured_head>` so an operator-driven reset can
 /// share the exact reset path used by `AutoReset` mode without having to
 /// re-read the snapshot.
@@ -230,23 +212,18 @@ pub fn reset_hard_to(captured_head: &str) -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
 fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
     let mut warnings = Vec::new();
-
     if !snap.git_status.trim().is_empty() {
         warnings.push("working tree was dirty before agent launch".to_string());
     }
-
     let current_status = git_status().unwrap_or_default();
     let current_head = git_head().unwrap_or_default();
     let head_changed =
         !snap.head.is_empty() && !current_head.is_empty() && current_head != snap.head;
-
     if current_status.trim() != snap.git_status.trim() {
         warnings.push("non-coder agent modified working tree".to_string());
     }
-
     if head_changed {
         return match snap.mode {
             GuardMode::AutoReset => {
@@ -263,7 +240,6 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
             },
         };
     }
-
     if let Some(expected) = &snap.working_tree_baseline {
         let current = git_working_tree_baseline().unwrap_or_default();
         if &current != expected {
@@ -273,10 +249,8 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
             };
         }
     }
-
     VerifyResult::Ok { warnings }
 }
-
 /// Construct a `Snapshot` for testing without running real git commands.
 #[cfg(test)]
 fn test_snapshot(head: &str, git_status: &str) -> Snapshot {
@@ -289,7 +263,6 @@ fn test_snapshot(head: &str, git_status: &str) -> Snapshot {
         working_tree_baseline: None,
     }
 }
-
 fn verify_coder(snap: &Snapshot) -> VerifyResult {
     let mut violated = Vec::new();
     for (path, expected) in &snap.control_files {
@@ -308,7 +281,6 @@ fn verify_coder(snap: &Snapshot) -> VerifyResult {
         }
     }
 }
-
 #[cfg(test)]
 #[path = "guard_tests.rs"]
 mod tests;

@@ -11,12 +11,9 @@
 //! every interaction. Today the App still calls some primitives directly,
 //! but those calls go through the data layer's public surface — the runtime
 //! seam is just the reified version of that surface as enums.
-
+use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-
-use crate::data::observation::{LiveSummaryProbe, LiveSummarySnapshot};
-
 /// Facts emitted by the data layer that the runtime drains each tick.
 ///
 /// Events are produced by long-lived observers (the live-summary `notify`
@@ -30,7 +27,6 @@ pub enum DataEvent {
     /// and update the watchdog idle clock for the active run.
     LiveSummaryChanged,
 }
-
 /// Typed drain handle for the live-summary `notify` watcher. Holds the raw
 /// notify channel as an implementation detail and adapts each filesystem
 /// notification into a [`DataEvent::LiveSummaryChanged`] so the runtime never
@@ -42,7 +38,6 @@ pub enum DataEvent {
 pub struct LiveSummaryEvents {
     rx: mpsc::UnboundedReceiver<()>,
 }
-
 impl LiveSummaryEvents {
     /// Wrap a notify receiver. Constructed by [`crate::data::observation`]
     /// when a watcher is built; not part of the public seam since the rx is
@@ -50,7 +45,6 @@ impl LiveSummaryEvents {
     pub(crate) fn new(rx: mpsc::UnboundedReceiver<()>) -> Self {
         Self { rx }
     }
-
     /// Drain every pending watcher signal as a typed [`DataEvent`]. Returns
     /// an empty vector when nothing is queued. Non-blocking.
     pub fn drain(&mut self) -> Vec<DataEvent> {
@@ -61,13 +55,11 @@ impl LiveSummaryEvents {
         out
     }
 }
-
 impl std::fmt::Debug for LiveSummaryEvents {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveSummaryEvents").finish_non_exhaustive()
     }
 }
-
 /// Side-effect requests dispatched by the runtime to the data layer.
 ///
 /// Each request maps onto a primitive in [`crate::data`]. Variants cover the
@@ -92,7 +84,6 @@ pub enum DataRequest {
     /// Best-effort terminate of the ACP run (spec §3.5 watchdog kill).
     TerminateRun { run_id: u64 },
 }
-
 /// Typed outcome returned by [`dispatch`] for each request variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataOutcome {
@@ -107,7 +98,6 @@ pub enum DataOutcome {
     /// was not active or had already finished.
     Terminated(bool),
 }
-
 /// Dispatch a [`DataRequest`] to the appropriate data primitive. The runtime
 /// uses this as its only entry point for side effects so the surface stays
 /// small and reviewable.
@@ -132,7 +122,6 @@ pub fn dispatch(
         | DataRequest::ReadPromptBody { .. } => unreachable!(),
     }
 }
-
 /// Dispatch the observation-only subset of [`DataRequest`] without consulting
 /// the runner registry. Returns `None` for variants that need a `Supervisor`
 /// (interrupt/terminate); callers that never issue those variants — e.g. the
@@ -155,7 +144,6 @@ pub fn dispatch_observation(request: &DataRequest) -> Option<DataOutcome> {
         DataRequest::InterruptRun { .. } | DataRequest::TerminateRun { .. } => return None,
     })
 }
-
 #[cfg(test)]
 #[path = "events_tests.rs"]
 mod tests;

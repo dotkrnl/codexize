@@ -8,10 +8,8 @@ use self::stages::{
     build_simple_stage, build_simplification_stage, total_iterations,
 };
 use std::collections::{BTreeMap, BTreeSet};
-
 pub type NodePath = Vec<usize>;
 type RecoveryRoundRuns<'a> = (Vec<&'a RunRecord>, Vec<&'a RunRecord>, Vec<&'a RunRecord>);
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StageKey {
     Idea,
@@ -31,14 +29,12 @@ pub enum StageKey {
     Simplification(u32),
     FinalValidation(u32),
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TaskKey {
     Task(u32),
     BuilderRecovery,
     Fallback(NodeKind, NodePath),
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ModeKey {
     Coder,
@@ -46,7 +42,6 @@ pub enum ModeKey {
     Recovery,
     Named(String),
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NodeKeyPart {
     Stage(StageKey),
@@ -56,24 +51,20 @@ pub enum NodeKeyPart {
     Run(u64),
     Fallback(NodeKind, NodePath),
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeKey {
     parts: Vec<NodeKeyPart>,
 }
-
 impl NodeKey {
     pub fn new(parts: Vec<NodeKeyPart>) -> Self {
         Self { parts }
     }
-
     pub fn ancestors(&self) -> impl Iterator<Item = NodeKey> + '_ {
         (1..self.parts.len()).rev().map(|len| NodeKey {
             parts: self.parts[..len].to_vec(),
         })
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleNodeRow {
     pub depth: usize,
@@ -86,14 +77,12 @@ pub struct VisibleNodeRow {
     pub has_body: bool,
     pub backing_leaf_run_id: Option<u64>,
 }
-
 impl VisibleNodeRow {
     pub fn is_expandable(&self) -> bool {
         self.status != NodeStatus::Pending
             && (self.has_children || self.has_transcript || self.has_body)
     }
 }
-
 pub fn build_tree(state: &SessionState) -> Vec<Node> {
     let mut nodes = vec![
         build_idea_node(state),
@@ -119,7 +108,6 @@ pub fn build_tree(state: &SessionState) -> Vec<Node> {
     }
     nodes
 }
-
 pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
     let (&first, rest) = path.split_first()?;
     let mut node = nodes.get(first)?;
@@ -128,7 +116,6 @@ pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
     }
     Some(node)
 }
-
 pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     let mut parts = Vec::new();
     let mut current = nodes;
@@ -139,12 +126,10 @@ pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     }
     Some(NodeKey::new(parts))
 }
-
 #[cfg(test)]
 pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
     flatten_visible_rows(nodes, |_| true)
 }
-
 pub fn flatten_visible_rows(
     nodes: &[Node],
     mut is_expanded: impl FnMut(&VisibleNodeRow) -> bool,
@@ -159,7 +144,6 @@ pub fn flatten_visible_rows(
     );
     rows
 }
-
 pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
     let run_lookup: BTreeMap<u64, &RunRecord> = runs.iter().map(|run| (run.id, run)).collect();
     nodes
@@ -176,14 +160,12 @@ pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKe
         })
         .collect()
 }
-
 pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey> {
     active_stage_paths(nodes, runs)
         .into_values()
         .flat_map(|path| (1..=path.len()).filter_map(move |d| node_key_at_path(nodes, &path[..d])))
         .collect()
 }
-
 /// Find the deepest node path whose `run_id` or `leaf_run_id` matches `run_id`.
 /// Used by progress-follow focus to refocus on the most specific row backing a
 /// particular run when the operator has not opted out of automatic following.
@@ -209,7 +191,6 @@ pub fn deepest_path_for_run(nodes: &[Node], run_id: u64) -> Option<NodePath> {
     walk(nodes, &mut path, run_id, &mut best);
     best
 }
-
 fn flatten_rows(
     nodes: &[Node],
     parent_path: &mut NodePath,
@@ -241,7 +222,6 @@ fn flatten_rows(
         parent_path.pop();
     }
 }
-
 fn best_active_descendant_path(
     nodes: &[Node],
     stage_path: &[usize],
@@ -252,20 +232,17 @@ fn best_active_descendant_path(
     collect_leaf_candidates(stage, stage_path, run_lookup, &mut candidates);
     candidates.into_iter().max().map(|c| c.path)
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ActiveLeafCandidate {
     priority: ActiveLeafPriority,
     updated_at: chrono::DateTime<chrono::Utc>,
     path: NodePath,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ActiveLeafPriority {
     Running = 2,
     RecentNonPending = 1,
 }
-
 fn collect_leaf_candidates(
     node: &Node,
     path: &[usize],
@@ -289,19 +266,16 @@ fn collect_leaf_candidates(
             path: path.to_vec(),
         });
     }
-
     for (index, child) in node.children.iter().enumerate() {
         let mut child_path = path.to_vec();
         child_path.push(index);
         collect_leaf_candidates(child, &child_path, run_lookup, out);
     }
 }
-
 fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
     if let Some(run_id) = node.run_id {
         return NodeKeyPart::Run(run_id);
     }
-
     match node.kind {
         NodeKind::Stage => stage_key_for(node, path)
             .map(NodeKeyPart::Stage)
@@ -317,7 +291,6 @@ fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
             .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path[..=depth].to_vec())),
     }
 }
-
 /// Identify a top-level stage node by its label rather than by position so
 /// the dynamic per-iteration trio (Loop[N] / Simplification[N] /
 /// FinalValidation[N]) can repeat without breaking expansion-state lookups,
@@ -344,7 +317,6 @@ fn stage_key_for(node: &Node, path: &[usize]) -> Option<StageKey> {
         other => parse_iteration_label(other),
     }
 }
-
 fn parse_iteration_label(label: &str) -> Option<StageKey> {
     let (base, suffix) = label.rsplit_once(" · iteration ")?;
     let index: u32 = suffix.parse().ok()?;
@@ -355,7 +327,6 @@ fn parse_iteration_label(label: &str) -> Option<StageKey> {
         _ => None,
     }
 }
-
 fn task_key_for(node: &Node, path: &[usize]) -> TaskKey {
     if node.label == "Builder Recovery" {
         return TaskKey::BuilderRecovery;
@@ -366,17 +337,14 @@ fn task_key_for(node: &Node, path: &[usize]) -> TaskKey {
         .map(TaskKey::Task)
         .unwrap_or_else(|| TaskKey::Fallback(node.kind, path.to_vec()))
 }
-
 fn parse_task_id(node: &Node) -> Option<u32> {
     let rest = node.label.strip_prefix("Task ")?;
     let digits = rest.split(':').next()?.trim();
     digits.parse().ok()
 }
-
 fn parse_round(node: &Node) -> Option<u32> {
     node.label.strip_prefix("Round ")?.trim().parse().ok()
 }
-
 fn mode_key_for(node: &Node) -> ModeKey {
     match node.label.as_str() {
         "Coder" => ModeKey::Coder,
@@ -385,7 +353,6 @@ fn mode_key_for(node: &Node) -> ModeKey {
         other => ModeKey::Named(other.to_string()),
     }
 }
-
 fn run_node(label: String, status: RunStatus, run_id: u64) -> Node {
     Node {
         label,
@@ -397,17 +364,19 @@ fn run_node(label: String, status: RunStatus, run_id: u64) -> Node {
         leaf_run_id: None,
     }
 }
-
 fn attempt_run_node(run: &RunRecord) -> Node {
     run_node(format!("Attempt {}", run.attempt), run.status, run.id)
 }
-
 fn agent_run_node(run: &RunRecord) -> Node {
     let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
-    let label = format!("{} · {}{}", role_label(&run.stage), run.model, effort_suffix);
+    let label = format!(
+        "{} · {}{}",
+        role_label(&run.stage),
+        run.model,
+        effort_suffix
+    );
     run_node(label, run.status, run.id)
 }
-
 fn role_label(stage: &str) -> &str {
     match stage {
         "brainstorm" => "Brainstorm",
@@ -423,7 +392,6 @@ fn role_label(stage: &str) -> &str {
         _ => stage,
     }
 }
-
 fn latest_attempts<'a>(runs: &[&'a RunRecord]) -> Vec<&'a RunRecord> {
     use std::collections::BTreeMap;
     let mut best: BTreeMap<(String, Option<u32>, u32), &'a RunRecord> = BTreeMap::new();
@@ -439,11 +407,9 @@ fn latest_attempts<'a>(runs: &[&'a RunRecord]) -> Vec<&'a RunRecord> {
     }
     best.into_values().collect()
 }
-
 fn is_failed_status(status: NodeStatus) -> bool {
     matches!(status, NodeStatus::Failed | NodeStatus::FailedUnverified)
 }
-
 fn rollup_status(runs: &[&RunRecord]) -> NodeStatus {
     let latest = latest_attempts(runs);
     if latest.iter().any(|r| r.status == RunStatus::Running) {
@@ -461,7 +427,6 @@ fn rollup_status(runs: &[&RunRecord]) -> NodeStatus {
         NodeStatus::Failed
     }
 }
-
 fn run_status_to_node(status: RunStatus) -> NodeStatus {
     match status {
         RunStatus::Running => NodeStatus::Running,
@@ -470,7 +435,6 @@ fn run_status_to_node(status: RunStatus) -> NodeStatus {
         RunStatus::FailedUnverified => NodeStatus::FailedUnverified,
     }
 }
-
 fn stage_status_from_runs(
     runs: &[&RunRecord],
     state: &SessionState,
@@ -579,14 +543,15 @@ fn stage_status_from_runs(
         NodeStatus::Pending
     }
 }
-
 fn stage_summary(
     _state: &SessionState,
     _stage_key: &str,
     label: &str,
     runs: &[&RunRecord],
 ) -> String {
-    let Some(last) = runs.last() else { return String::new(); };
+    let Some(last) = runs.last() else {
+        return String::new();
+    };
     if runs.len() == 1 && last.status == RunStatus::Done {
         return format!("{} complete", label.to_lowercase());
     }
@@ -595,7 +560,6 @@ fn stage_summary(
     }
     String::new()
 }
-
 fn builder_status(
     state: &SessionState,
     coder_runs: &[&RunRecord],
@@ -627,7 +591,6 @@ fn builder_status(
         _ => NodeStatus::Pending,
     }
 }
-
 fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32> {
     let recovery_rounds: BTreeSet<u32> = state
         .agent_runs
@@ -650,7 +613,6 @@ fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32>
         )
         .collect()
 }
-
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
     if matches!(
         state.current_phase,
@@ -680,7 +642,6 @@ fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String
     }
     format!("{} of {} tasks done", done, total)
 }
-
 /// Collapse single-child layers selectively.
 /// Only Round and AgentRun nodes may be absorbed by their parent.
 /// Stage, Task, and Mode nodes are NEVER absorbed—they always remain visible.
@@ -701,7 +662,6 @@ pub fn collapse_tree(node: &mut Node) {
         }
     }
 }
-
 pub fn current_node_index(nodes: &[Node]) -> usize {
     nodes
         .iter()
@@ -718,7 +678,6 @@ pub fn current_node_index(nodes: &[Node]) -> usize {
         .or_else(|| nodes.iter().rposition(|n| n.status == NodeStatus::Done))
         .unwrap_or(0)
 }
-
 #[cfg(test)]
 #[path = "tests_mod.rs"]
 mod tests_mod;

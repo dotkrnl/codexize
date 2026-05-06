@@ -1,12 +1,10 @@
 use std::time::Instant;
-
 #[cfg(test)]
 use std::{
     cell::RefCell,
     rc::Rc,
     time::{Duration, SystemTime},
 };
-
 /// Clock seam that abstracts wall-clock access for testability.
 ///
 /// The 1 Hz timestamp truncation is a property of this layer: renders
@@ -15,34 +13,28 @@ use std::{
 pub trait Clock: Clone + 'static {
     /// Monotonic instant for TTL calculations and relative timing.
     fn now(&self) -> Instant;
-
     /// Wall-clock timestamp truncated to whole seconds.
     ///
     /// Two calls within the same wall-clock second return byte-identical
     /// strings; calls across a second boundary differ.
     fn timestamp_string(&self) -> String;
 }
-
 /// Production clock backed by the system wall clock.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WallClock;
-
 impl WallClock {
     pub fn new() -> Self {
         Self
     }
 }
-
 impl Clock for WallClock {
     fn now(&self) -> Instant {
         Instant::now()
     }
-
     fn timestamp_string(&self) -> String {
         chrono::Local::now().format("%H:%M:%S").to_string()
     }
 }
-
 /// Test clock with independently controllable instant and system time.
 ///
 /// `advance` moves both timelines forward so TTL expiry and timestamp
@@ -53,20 +45,17 @@ struct TestClockState {
     instant: Instant,
     system: SystemTime,
 }
-
 #[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct TestClock {
     state: Rc<RefCell<TestClockState>>,
 }
-
 #[cfg(test)]
 impl Default for TestClock {
     fn default() -> Self {
         Self::new()
     }
 }
-
 #[cfg(test)]
 impl TestClock {
     pub fn new() -> Self {
@@ -77,7 +66,6 @@ impl TestClock {
             })),
         }
     }
-
     pub fn at(system: SystemTime) -> Self {
         Self {
             state: Rc::new(RefCell::new(TestClockState {
@@ -86,26 +74,22 @@ impl TestClock {
             })),
         }
     }
-
     pub fn advance(&self, duration: Duration) {
         let mut state = self.state.borrow_mut();
         state.instant += duration;
         state.system += duration;
     }
 }
-
 #[cfg(test)]
 impl Clock for TestClock {
     fn now(&self) -> Instant {
         self.state.borrow().instant
     }
-
     fn timestamp_string(&self) -> String {
         let dt = chrono::DateTime::<chrono::Local>::from(self.state.borrow().system);
         dt.format("%H:%M:%S").to_string()
     }
 }
-
 #[cfg(test)]
 #[path = "clock_tests.rs"]
 mod tests;

@@ -3,7 +3,6 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewStatus {
@@ -16,7 +15,6 @@ pub enum ReviewStatus {
     HumanBlocked,
     AgentPivot,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewVerdict {
     pub status: ReviewStatus,
@@ -26,14 +24,12 @@ pub struct ReviewVerdict {
     #[serde(default)]
     pub new_tasks: Vec<Task>,
 }
-
 /// Parse and validate a review TOML file.
 pub fn validate(path: &Path) -> Result<ReviewVerdict> {
     let text =
         fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     let parsed: ReviewVerdict = toml::from_str(&text)
         .with_context(|| format!("malformed review TOML in {}", path.display()))?;
-
     if parsed.summary.trim().is_empty() {
         bail!("summary is empty");
     }
@@ -71,10 +67,8 @@ pub fn validate(path: &Path) -> Result<ReviewVerdict> {
             bail!("new_tasks[{i}]: estimated_tokens must be > 0");
         }
     }
-
     Ok(parsed)
 }
-
 #[cfg(test)]
 #[path = "review_tests.rs"]
 mod tests;

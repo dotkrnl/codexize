@@ -1,17 +1,14 @@
 //! Pure parsers and formatters for ACP `tool_call` / `tool_call_update`
 //! payloads, plus the per-session merge map.
-
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-
 pub(super) const SNIPPET_MAX_CHARS: usize = 160;
 pub(super) const INVOCATION_LINE_MAX: usize = 200;
 pub(super) const RESULT_LINE_MAX: usize = 200;
 pub(super) const INVOCATION_PREFIX: &str = "tool: ";
 pub(super) const RESULT_PREFIX: &str = "result: ";
 pub(super) const TOOL_CALL_MAP_CAP: usize = 256;
-
 #[derive(Debug, Default, Clone)]
 pub(super) struct ToolCallDisplayState {
     pub(super) tool_call_id: Option<String>,
@@ -23,14 +20,12 @@ pub(super) struct ToolCallDisplayState {
     pub(super) raw_output: Value,
     pub(super) content: Vec<Value>,
 }
-
 fn nonempty_str(v: &Value, k: &str) -> Option<String> {
     v.get(k)
         .and_then(Value::as_str)
         .filter(|t| !t.is_empty())
         .map(str::to_string)
 }
-
 impl ToolCallDisplayState {
     #[rustfmt::skip]
     pub(super) fn from_value(v: &Value) -> Self {
@@ -48,7 +43,6 @@ impl ToolCallDisplayState {
             content: v.get("content").and_then(Value::as_array).cloned().unwrap_or_default(),
         }
     }
-
     /// Merge non-empty fields; absent / null values never erase known state.
     #[rustfmt::skip]
     pub(super) fn merge(&mut self, p: &ToolCallDisplayState) {
@@ -61,7 +55,6 @@ impl ToolCallDisplayState {
         if !p.content.is_empty() { self.content = p.content.clone(); }
     }
 }
-
 /// `toolCallId` → merged display state. FIFO-bounded with overwrite-on-id-reuse;
 /// `emitted` records (id, is_terminal) monotonically.
 #[derive(Debug, Default)]
@@ -70,14 +63,12 @@ pub(super) struct ToolCallMap {
     order: VecDeque<String>,
     emitted: BTreeSet<(String, bool)>,
 }
-
 #[rustfmt::skip]
 impl ToolCallMap {
     pub(super) fn new() -> Self { Self::default() }
     #[cfg(test)] pub(super) fn len(&self) -> usize { self.entries.len() }
     #[cfg(test)] pub(super) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> { self.entries.get(id) }
     #[cfg(test)] pub(super) fn contains(&self, id: &str) -> bool { self.entries.contains_key(id) }
-
     pub(super) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() { self.order.retain(|x| x != &id); }
         while self.order.len() >= TOOL_CALL_MAP_CAP {
@@ -87,17 +78,14 @@ impl ToolCallMap {
         self.order.push_back(id.clone());
         self.entries.insert(id, state);
     }
-
     pub(super) fn merge(&mut self, id: &str, p: &ToolCallDisplayState) -> Option<&ToolCallDisplayState> {
         let entry = self.entries.get_mut(id)?;
         entry.merge(p);
         Some(entry)
     }
-
     pub(super) fn evict(&mut self, id: &str) {
         if self.entries.remove(id).is_some() { self.order.retain(|x| x != id); }
     }
-
     pub(super) fn mark_emitted(&mut self, id: &str, terminal: bool) {
         self.emitted.insert((id.to_string(), terminal));
     }
@@ -105,16 +93,13 @@ impl ToolCallMap {
         self.emitted.contains(&(id.to_string(), terminal))
     }
 }
-
 #[rustfmt::skip]
 pub(super) fn is_terminal_status(s: &str) -> bool {
     matches!(s, "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error")
 }
-
 fn is_success_status(s: &str) -> bool {
     matches!(s, "completed" | "success" | "succeeded" | "ok")
 }
-
 /// Strip ANSI escapes; replace control chars and whitespace runs with one space.
 #[rustfmt::skip]
 pub(super) fn sanitize_snippet(input: &str) -> String {
@@ -128,7 +113,6 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
     }
     out.trim().to_string()
 }
-
 /// Truncate to `max` chars, appending `...` if any chars dropped.
 #[rustfmt::skip]
 pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
@@ -136,17 +120,14 @@ pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     let cutoff = text.char_indices().nth(max.saturating_sub(3)).map(|(i, _)| i).unwrap_or(text.len());
     format!("{}...", &text[..cutoff])
 }
-
 fn collapse_ws(t: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SnippetKind {
     Output,
     Stderr,
 }
-
 #[rustfmt::skip]
 fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)> {
     let success = state.status.as_deref().map(is_success_status).unwrap_or(true);
@@ -175,7 +156,6 @@ fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)>
     }
     None
 }
-
 #[rustfmt::skip]
 fn shorten_path(path: &Path, cwd: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(cwd) && !rel.as_os_str().is_empty() {
@@ -184,7 +164,6 @@ fn shorten_path(path: &Path, cwd: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
-
 #[rustfmt::skip]
 fn extract_command(raw: &Value) -> Option<String> {
     if let Some(items) = raw.get("command").and_then(Value::as_array) {
@@ -201,7 +180,6 @@ fn extract_command(raw: &Value) -> Option<String> {
         .iter()
         .find_map(|p| raw.pointer(p).and_then(Value::as_str).filter(|t| !t.is_empty()).map(str::to_string))
 }
-
 #[rustfmt::skip]
 fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> {
     let kind = state.kind.as_deref();
@@ -217,7 +195,6 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
     let title = sanitize_snippet(state.title.as_deref()?);
     (!title.is_empty()).then_some(title)
 }
-
 pub(super) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {
     let body = invocation_label(state, cwd).unwrap_or_else(|| "tool".to_string());
     truncate_with_ellipsis(
@@ -225,7 +202,6 @@ pub(super) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -
         INVOCATION_LINE_MAX,
     )
 }
-
 #[rustfmt::skip]
 pub(super) fn format_result_line(state: &ToolCallDisplayState) -> String {
     let status = state.status.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("unknown");
@@ -242,7 +218,6 @@ pub(super) fn format_result_line(state: &ToolCallDisplayState) -> String {
     }
     truncate_with_ellipsis(&collapse_ws(&line), RESULT_LINE_MAX)
 }
-
 #[cfg(test)]
 #[path = "tool_call_tests.rs"]
 mod tests_mod;

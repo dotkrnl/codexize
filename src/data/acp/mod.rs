@@ -3,7 +3,6 @@ mod client;
 mod dispatch;
 mod handshake;
 mod tool_call;
-
 #[cfg(test)]
 pub fn client_updates_from_session_updates_for_test(
     values: impl IntoIterator<Item = serde_json::Value>,
@@ -29,13 +28,10 @@ pub use super::acp_events::{
     AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientTextKind,
     ClientUpdate, ToolCallActivityKind, translate_update,
 };
-
 use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-
 pub type AcpResult<T> = Result<T, AcpError>;
-
 #[rustfmt::skip]
 #[derive(thiserror::Error)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,23 +40,19 @@ pub enum AcpError {
     #[error("{0}")] Io(String),
     #[error("{0}")] Protocol(String),
 }
-
 #[rustfmt::skip]
 impl AcpError {
     pub fn human_block(m: impl Into<String>) -> Self { Self::HumanBlock(m.into()) }
     pub fn protocol(m: impl Into<String>) -> Self { Self::Protocol(m.into()) }
     pub fn io(m: impl Into<String>) -> Self { Self::Io(m.into()) }
 }
-
 impl From<std::io::Error> for AcpError {
     #[rustfmt::skip]
     fn from(value: std::io::Error) -> Self { Self::io(value.to_string()) }
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptPayload { Text(String), File(PathBuf) }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpReasoningEffort {
@@ -68,21 +60,18 @@ pub enum AcpReasoningEffort {
     #[strum(to_string = "medium")] Medium,
     #[strum(to_string = "high")] High,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum AcpPermissionMode {
     #[strum(to_string = "ask")] Ask,
     #[strum(to_string = "code")] Code,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AcpShellCommandPolicy {
     #[default] FullAccess,
     Allowlist(Vec<String>),
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AcpLaunchPolicy {
@@ -90,7 +79,6 @@ pub struct AcpLaunchPolicy {
     pub shell_policy: AcpShellCommandPolicy,
     pub enforce_readonly_workspace: bool,
 }
-
 #[rustfmt::skip]
 impl AcpLaunchPolicy {
     pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
@@ -109,7 +97,6 @@ impl AcpLaunchPolicy {
         }
     }
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
@@ -117,11 +104,9 @@ pub struct AcpLaunchRequest {
     pub requested_effort: EffortLevel, pub effective_effort: EffortLevel,
     pub interactive: bool, pub modes: LaunchModes, pub policy: AcpLaunchPolicy,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpSpawnSpec { pub program: String, pub args: Vec<String>, pub env: BTreeMap<String, String> }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpSessionSpec {
@@ -129,7 +114,6 @@ pub struct AcpSessionSpec {
     pub reasoning_effort: AcpReasoningEffort, pub permission_mode: AcpPermissionMode,
     pub policy: AcpLaunchPolicy, pub metadata: BTreeMap<String, String>,
 }
-
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpResolvedLaunch {

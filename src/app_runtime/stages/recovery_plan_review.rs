@@ -1,16 +1,13 @@
-use anyhow::Context;
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::recovery_plan_review_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
-
+use anyhow::Context;
 impl App {
     pub(crate) fn launch_recovery_plan_review(&mut self) {
         let _ = self.launch_recovery_plan_review_with_model(None);
     }
-
     pub(crate) fn launch_recovery_plan_review_with_model(
         &mut self,
         override_model: Option<CachedModel>,
@@ -33,7 +30,6 @@ impl App {
         let plan_path = artifacts.join("plan.md");
         let plan_review_path = artifacts.join("plan_review.toml");
         let _ = std::fs::remove_file(&plan_review_path);
-
         let recovery_path = session_dir
             .join("rounds")
             .join(format!("{round:03}"))
@@ -47,7 +43,6 @@ impl App {
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("recovery-plan-review-r{round}.md"));
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("plan-review");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -60,7 +55,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let prompt = recovery_plan_review_prompt(
             &spec_path,
             &plan_path,
@@ -78,12 +72,10 @@ impl App {
             self.record_agent_error(err.to_string());
             return false;
         }
-
         session_state::transitions::mark_latest_pipeline_stage_running(
             &mut self.state,
             "plan-review",
         );
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),

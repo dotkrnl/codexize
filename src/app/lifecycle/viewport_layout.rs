@@ -3,16 +3,13 @@
 //! Owns the math that drives "running stage stays pinned at the top while
 //! you scroll" so both `viewport.rs` clamping and the renderer can call it
 //! through the same surface.
-
 use crate::app::App;
 use crate::state::NodeStatus;
 use crate::ui::render::frame_cache::{cached_header_y_offsets, cached_running_depth_0_header};
-
 impl App {
     pub(crate) fn header_y_offsets(&self) -> (Vec<usize>, usize) {
         cached_header_y_offsets(|| self.compute_header_y_offsets())
     }
-
     fn compute_header_y_offsets(&self) -> (Vec<usize>, usize) {
         let mut ys = Vec::with_capacity(self.visible_rows.len());
         let mut y = 0usize;
@@ -27,11 +24,9 @@ impl App {
         }
         (ys, y)
     }
-
     pub(crate) fn running_depth_0_header(&self) -> Option<(usize, usize)> {
         cached_running_depth_0_header(|| self.compute_running_depth_0_header())
     }
-
     fn compute_running_depth_0_header(&self) -> Option<(usize, usize)> {
         let (ys, _) = self.header_y_offsets();
         let mut candidates = self
@@ -49,12 +44,10 @@ impl App {
         }
         Some(candidate)
     }
-
     pub(crate) fn pinned_running_header(&self, viewport_top: usize) -> Option<(usize, usize)> {
         self.running_depth_0_header()
             .filter(|(_, header_y)| *header_y < viewport_top)
     }
-
     pub(crate) fn effective_body_height_for_top(
         &self,
         viewport_top: usize,
@@ -66,11 +59,9 @@ impl App {
             body_height
         }
     }
-
     pub(crate) fn effective_body_inner_height(&self) -> usize {
         self.effective_body_height_for_top(self.viewport_top, self.body_inner_height)
     }
-
     pub(crate) fn max_viewport_top_for_height(&self, body_height: usize) -> usize {
         if body_height == 0 {
             return 0;

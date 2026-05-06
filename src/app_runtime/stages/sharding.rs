@@ -1,23 +1,19 @@
-use anyhow::{Context, Result};
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::sharding_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 use crate::tasks;
-
+use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_sharding(&mut self) {
         let _ = self.launch_sharding_with_model(None);
     }
-
     pub(crate) fn launch_sharding_with_model(
         &mut self,
         override_model: Option<CachedModel>,
     ) -> bool {
         self.clear_agent_error();
-
         if self.models.is_empty() {
             self.record_agent_error(
                 "model list not yet loaded — wait a moment and try again".to_string(),
@@ -26,13 +22,11 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("sharding");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -45,9 +39,7 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let _ = std::fs::remove_file(&tasks_path);
-
         let prompt_path = session_dir.join("prompts").join("sharding.md");
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -59,7 +51,6 @@ impl App {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -112,7 +103,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::ShardingRunning`.
     pub(crate) fn finalize_sharding_success(
         &mut self,

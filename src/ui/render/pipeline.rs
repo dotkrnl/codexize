@@ -8,16 +8,13 @@ use crate::ui::render::frame_cache::{
 };
 use itertools::Itertools;
 use std::rc::Rc;
-
 pub(crate) struct PipelineWidget<'a> {
     pub(super) app: &'a App,
 }
-
 pub(crate) struct RunningTailLine {
     pub(super) line: Line<'static>,
     kind: PipelineLineKind,
 }
-
 fn into_pipeline(lines: Vec<Line<'static>>) -> Vec<PipelineLine> {
     lines
         .into_iter()
@@ -27,10 +24,8 @@ fn into_pipeline(lines: Vec<Line<'static>>) -> Vec<PipelineLine> {
         })
         .collect()
 }
-
 fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style {
     use ratatui::style::{Color, Style};
-
     match status {
         crate::state::NodeStatus::Pending => Style::default().fg(Color::DarkGray),
         crate::state::NodeStatus::Running => Style::default().fg(Color::Cyan),
@@ -41,20 +36,17 @@ fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style 
         crate::state::NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),
     }
 }
-
 impl Widget for PipelineWidget<'_> {
     fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
         if area.height == 0 || area.width == 0 {
             return;
         }
-
         let area_h = area.height as usize;
         let viewport_top = self
             .app
             .viewport_top
             .min(self.app.max_viewport_top_for_height(area_h));
         let pinned_header = self.app.pinned_running_header(viewport_top);
-
         let visible_tail_runs = self
             .app
             .visible_live_summary_tail_runs(area_h, viewport_top);
@@ -71,7 +63,6 @@ impl Widget for PipelineWidget<'_> {
         } else {
             (area.y, area_h)
         };
-
         let end = (viewport_top + content_h).min(lines.len());
         for (offset, rendered) in lines[viewport_top..end].iter().enumerate() {
             buf.set_line(
@@ -83,7 +74,6 @@ impl Widget for PipelineWidget<'_> {
         }
     }
 }
-
 impl App {
     fn live_agent_progress_recent(&self) -> bool {
         const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -105,14 +95,12 @@ impl App {
                     .unwrap_or(true)
             })
     }
-
     pub(crate) fn live_agent_spinner_active(&self) -> bool {
         self.state
             .agent_runs
             .iter()
             .any(|run| run.status == RunStatus::Running)
     }
-
     pub(crate) fn pipeline_render_lines(
         &self,
         suppressed_container_runs: &BTreeSet<u64>,
@@ -130,7 +118,6 @@ impl App {
             })
         }
     }
-
     fn compute_pipeline_render_lines(&self) -> Vec<PipelineLine> {
         let mut lines = Vec::new();
         for index in 0..self.visible_rows.len() {
@@ -150,7 +137,6 @@ impl App {
         }
         lines
     }
-
     pub(crate) fn visible_live_summary_tail_runs(
         &self,
         area_h: usize,
@@ -174,12 +160,10 @@ impl App {
             })
             .collect()
     }
-
     pub(crate) fn live_summary_spinner_visible_for_height(&self, area_h: usize) -> bool {
         if !self.live_agent_spinner_active() {
             return false;
         }
-
         // If the split is showing a running run, the spinner should be visible.
         if let Some(SplitTarget::Run(run_id)) = self.split_target
             && self
@@ -190,7 +174,6 @@ impl App {
         {
             return true;
         }
-
         let viewport_top = self
             .viewport_top
             .min(self.max_viewport_top_for_height(area_h));
@@ -198,7 +181,6 @@ impl App {
             .visible_live_summary_tail_runs(area_h, viewport_top)
             .is_empty()
     }
-
     fn should_suppress_tail(&self, run: &RunRecord) -> bool {
         if run.status != RunStatus::Running {
             return true;
@@ -227,7 +209,6 @@ impl App {
         }
         false
     }
-
     /// Return the trailing tail line for a split-panel transcript.
     ///
     /// Always renders a transcript-leaf shape (`HH:MM:SS ⠋ <title>`), never the
@@ -253,7 +234,6 @@ impl App {
         };
         Some(line)
     }
-
     pub(crate) fn node_header(
         &self,
         index: usize,
@@ -269,10 +249,8 @@ impl App {
         };
         let is_focused = index == self.selected;
         let depth = self.visible_rows[index].depth;
-
         // Structural focus marker: `▌` follows the persistent section color gutter.
         let focus_glyph = if is_focused { "▌" } else { " " };
-
         // Thin tree glyphs for indentation.
         let indent = if depth > 0 {
             let connector = if is_last_sibling(&self.visible_rows, index) {
@@ -284,7 +262,6 @@ impl App {
         } else {
             String::new()
         };
-
         let mut style = if is_focused {
             Style::default().add_modifier(Modifier::BOLD)
         } else {
@@ -293,12 +270,10 @@ impl App {
         if node.status == NodeStatus::Pending {
             style = style.fg(Color::DarkGray);
         }
-
         let dim = Style::default().fg(Color::DarkGray);
         let color_block_style = status_highlight_bg(node.status)
             .map(|bg| Style::default().bg(bg))
             .unwrap_or_default();
-
         let mut spans = vec![
             Span::styled(" ", color_block_style),
             Span::styled(focus_glyph, Style::default()),
@@ -314,10 +289,8 @@ impl App {
             spans.push(Span::styled(" · ", dim));
             spans.push(Span::styled(node.summary.clone(), dim));
         }
-
         Line::from(spans).style(style)
     }
-
     pub(crate) fn cached_row_body_with_empty(&self, index: usize) -> Rc<Vec<PipelineLine>> {
         cached_row_body(index, || {
             let width = self.body_inner_width.max(1);
@@ -325,14 +298,12 @@ impl App {
             self.node_body_lines_with_offset(index, width, &local_offset, &BTreeSet::new())
         })
     }
-
     /// Cheap length-only accessor for `node_body`. Reads the cached row
     /// body's length without cloning each `Line`, which `header_y_offsets`
     /// drives once per row per frame.
     pub(crate) fn node_body_len(&self, index: usize) -> usize {
         self.cached_row_body_with_empty(index).len()
     }
-
     fn node_body_lines_with_offset(
         &self,
         index: usize,
@@ -343,14 +314,12 @@ impl App {
         let Some(node) = self.node_for_row(index) else {
             return Vec::new();
         };
-
         let Some(id) = node.run_id.or(node.leaf_run_id) else {
             return into_pipeline(self.render_compact_node(node, index));
         };
         let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) else {
             return into_pipeline(self.render_compact_node(node, index));
         };
-
         // Main panel restores the system/status/user transcript surface
         // for both interactive and non-interactive runs. ACP output
         // (`AgentText`) and thought/tool text (`AgentThought`) stay in
@@ -360,9 +329,7 @@ impl App {
             .messages
             .iter()
             .filter(|m| m.run_id == id)
-            .filter(|m| {
-                run_main_panel_message_visible(run, m.kind, self.state.show_thinking_texts)
-            })
+            .filter(|m| run_main_panel_message_visible(run, m.kind, self.state.show_thinking_texts))
             .cloned()
             .collect();
         let running_tail =
@@ -390,13 +357,14 @@ impl App {
         if run.stage == "final-validation" {
             let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
             let indent = format!(" {} ", "│ ".repeat(depth));
-            lines.extend(into_pipeline(
-                self.final_validation_report_lines_for_run(run, &indent, available_width),
-            ));
+            lines.extend(into_pipeline(self.final_validation_report_lines_for_run(
+                run,
+                &indent,
+                available_width,
+            )));
         }
         lines
     }
-
     fn spinner_state(&self) -> (&'static str, &'static str) {
         if self.live_agent_progress_recent() {
             (spinner_frame(self.spinner_tick), "running")
@@ -404,7 +372,6 @@ impl App {
             (spinner_frame(0), "stalled")
         }
     }
-
     /// Choose the trailing line that closes a still-running transcript body.
     ///
     /// Per spec, leaf transcript rows render the tail as a "live agent
@@ -460,7 +427,6 @@ impl App {
             kind: PipelineLineKind::RunningLeafTail { run_id: run.id },
         })
     }
-
     /// Read and parse the final-validation verdict matching `run.round` and
     /// format it for the dashboard body. Returns an empty Vec when the
     /// artifact is missing or fails to parse — invalid verdicts are routed
@@ -483,13 +449,11 @@ impl App {
         };
         super::super::state::final_validation_report_lines(&verdict, indent, width)
     }
-
     fn render_compact_node(&self, node: &crate::state::Node, index: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
         let gutter = "│ ".repeat(depth);
         let dim = Style::default().fg(Color::DarkGray);
-
         if node.status == NodeStatus::Running
             && self.run_launched
             && self.live_agent_spinner_active()

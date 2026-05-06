@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VendorKind {
     Claude,
@@ -7,15 +6,12 @@ pub enum VendorKind {
     Gemini,
     Kimi,
 }
-
 #[derive(Debug, Clone)]
 pub struct QuotaError {
     pub vendor: VendorKind,
     pub message: String,
 }
-
 use std::collections::BTreeMap;
-
 /// Origin of the per-phase rank scores carried on a model.
 ///
 /// `Ipbr` is the only value that authorizes automatic phase selection or
@@ -37,7 +33,6 @@ pub enum ScoreSource {
     /// fallback.
     Aistupidlevel,
 }
-
 /// Per-phase ipbr rank scores. Each field corresponds to one ipbr
 /// scoreboard column: Idea = `i_adj`, Planning = `p_adj`, Build = `b_adj`,
 /// Review = `r`.
@@ -53,7 +48,6 @@ pub struct IpbrPhaseScores {
     pub build: Option<f64>,
     pub review: Option<f64>,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct CachedModel {
     pub vendor: VendorKind,
@@ -88,7 +82,6 @@ pub struct CachedModel {
     /// has no entry yet. `None` for normal models.
     pub fallback_from: Option<String>,
 }
-
 impl CachedModel {
     pub fn axis(&self, key: &str) -> Option<f64> {
         self.axes
@@ -97,7 +90,6 @@ impl CachedModel {
             .map(|(_, value)| *value)
     }
 }
-
 #[cfg(test)]
 #[path = "types_tests.rs"]
 mod tests;

@@ -1,24 +1,20 @@
-use anyhow::Result;
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::brainstorm_prompt;
 use crate::app::{App, guard};
 use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
-
+use anyhow::Result;
 impl App {
     pub(crate) fn launch_brainstorm(&mut self, idea: String) {
         let _ = self.launch_brainstorm_with_model(idea, None);
     }
-
     pub(crate) fn launch_brainstorm_with_model(
         &mut self,
         idea: String,
         override_model: Option<CachedModel>,
     ) -> bool {
         self.clear_agent_error();
-
         if self.models.is_empty() {
             self.record_agent_error(
                 "model list not yet loaded — wait a moment and try again".to_string(),
@@ -27,7 +23,6 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("brainstorm");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -42,7 +37,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let session_id = &self.state.session_id;
         let prompt_path = session_state::session_dir(session_id)
             .join("prompts")
@@ -50,7 +44,6 @@ impl App {
         let spec_path = session_state::session_dir(session_id)
             .join("artifacts")
             .join("spec.md");
-
         let _ = std::fs::remove_file(&spec_path);
         let _ = std::fs::remove_file(
             session_state::session_dir(session_id)
@@ -62,7 +55,6 @@ impl App {
                 .join("artifacts")
                 .join(ArtifactKind::SessionSummary.filename()),
         );
-
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -82,7 +74,6 @@ impl App {
             self.record_agent_error(format!("error writing prompt: {e}"));
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -155,7 +146,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::BrainstormRunning`.
     ///
     /// Reads the optional `skip_proposal.toml` and `session_summary.toml`
@@ -185,7 +175,6 @@ impl App {
                 None
             }
         };
-
         let summary_path = session_dir
             .join("artifacts")
             .join(ArtifactKind::SessionSummary.filename());
@@ -203,10 +192,8 @@ impl App {
                 ));
             }
         }
-
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-
         match proposal {
             Some(p) if p.proposed => {
                 session_state::transitions::record_skip_to_impl_proposal(

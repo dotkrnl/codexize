@@ -2,18 +2,15 @@
 //! IO-performing loader. These helpers take an already-resolved quota or
 //! reset map and pick the best fallback for a given model name; they
 //! perform no backend IO and so are safe to call from the logic layer.
-
 use super::types::VendorKind;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
-
 pub fn find_quota_by_heuristic(
     model_name: &str,
     vendor: VendorKind,
     quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
 ) -> Option<u8> {
     let vendor_quotas = quotas.get(&vendor)?;
-
     match vendor {
         VendorKind::Codex => {
             if model_name.contains("spark") || model_name.contains("mini") {
@@ -46,14 +43,12 @@ pub fn find_quota_by_heuristic(
         VendorKind::Kimi => vendor_quotas.values().find_map(|q| *q),
     }
 }
-
 pub fn find_reset_by_heuristic(
     model_name: &str,
     vendor: VendorKind,
     resets: &BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>,
 ) -> Option<DateTime<Utc>> {
     let vendor_resets = resets.get(&vendor)?;
-
     match vendor {
         VendorKind::Claude => vendor_resets
             .get(model_name)

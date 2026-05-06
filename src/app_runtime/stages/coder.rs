@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
     coder_prompt, read_review_scope, task_effort_for, task_toml_for, write_review_scope_artifact,
@@ -7,12 +5,11 @@ use crate::app::prompts::{
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
-
+use anyhow::Result;
 impl App {
     pub(crate) fn launch_coder(&mut self) {
         let _ = self.launch_coder_with_model(None);
     }
-
     pub(crate) fn launch_coder_with_model(&mut self, override_model: Option<CachedModel>) -> bool {
         self.clear_agent_error();
         if self.models.is_empty() {
@@ -26,29 +23,24 @@ impl App {
         let Phase::ImplementationRound(r) = self.state.current_phase else {
             return false;
         };
-
         let Some(task_id) = self.ensure_builder_task_for_round(r) else {
             self.record_agent_error("no pending tasks".to_string());
             let _ = self.state.save();
             return false;
         };
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let task_file = round_dir.join("task.toml");
         let dirty_before_coder = guard::git_status_dirty();
-
         if !task_file.exists() {
             let body = task_toml_for(&session_dir, task_id).unwrap_or_else(|e| {
                 format!("# task body could not be loaded: {e}\nid = {task_id}\n")
             });
             let _ = std::fs::write(&task_file, body);
         }
-
         // Pin the base HEAD before the coder runs; preserves original base on resume.
         self.capture_round_base(&round_dir);
-
         let modes = self.state.launch_modes();
         self.record_dirty_worktree_yolo_gate(dirty_before_coder, modes);
         let requested_effort = task_effort_for(&session_dir, task_id);
@@ -65,7 +57,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let prompt_path = session_dir.join("prompts").join(format!("coder-r{r}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -97,14 +88,12 @@ impl App {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
-
         let window_name =
             run_label_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
         let run_id = self.state.next_agent_run_id();
@@ -153,7 +142,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::ImplementationRound(round)`.
     pub(crate) fn finalize_coder_success(
         &mut self,

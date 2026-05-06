@@ -4,7 +4,6 @@
 //! probes and side-effect installers live in [`crate::data::preflight`]; this
 //! module turns those typed results into ratatui frames and dispatches the
 //! chosen action back through the data layer.
-
 use crate::data::preflight as backend;
 pub use crate::data::preflight::PreflightOutcome;
 use crate::data::preflight::Scenario;
@@ -19,7 +18,6 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::time::Duration;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModalAction {
     Accept,
@@ -27,7 +25,6 @@ enum ModalAction {
     Exit,
     Ignore,
 }
-
 fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Line<'static>) {
     match scenario {
         Scenario::NoGitEmpty => {
@@ -136,7 +133,6 @@ fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Li
         }
     }
 }
-
 fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
     let (title, body_copy, keymap_line) = preflight_modal_content(scenario);
     let body_lines = preflight_body_lines(frame.area(), body_copy);
@@ -149,7 +145,6 @@ fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
         keymap_line,
     );
 }
-
 fn preflight_body_lines(
     area: ratatui::layout::Rect,
     paragraphs: Vec<String>,
@@ -169,7 +164,6 @@ fn preflight_body_lines(
     }
     lines
 }
-
 fn preflight_keymap_line(actions: &[(&str, Color, &str, Option<Color>, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (idx, (marker, marker_color, alternate, alternate_color, action)) in
@@ -197,7 +191,6 @@ fn preflight_keymap_line(actions: &[(&str, Color, &str, Option<Color>, &str)]) -
     }
     Line::from(spans)
 }
-
 pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     let has_git = backend::detect_git();
     let root = codexize_root();
@@ -208,7 +201,6 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
         },
         _ => format!("{}/", root.display()),
     };
-
     if has_git {
         if backend::detect_ignored(&root) {
             run_acp_install_modals_if_missing(terminal)?;
@@ -222,20 +214,17 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
         run_acp_install_modals_if_missing(terminal)?;
         return Ok(PreflightOutcome::Continue);
     }
-
     let scenario = if backend::has_existing_files() {
         Scenario::NoGitHasFiles
     } else {
         Scenario::NoGitEmpty
     };
-
     if run_git_init_modal(terminal, scenario, &codexize_entry)? == PreflightOutcome::Exit {
         return Ok(PreflightOutcome::Exit);
     }
     run_acp_install_modals_if_missing(terminal)?;
     Ok(PreflightOutcome::Continue)
 }
-
 fn run_git_init_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
@@ -245,7 +234,6 @@ fn run_git_init_modal(
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario);
         })?;
-
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
@@ -274,7 +262,6 @@ fn run_git_init_modal(
         }
     }
 }
-
 fn run_gitignore_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
@@ -284,7 +271,6 @@ fn run_gitignore_modal(
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario);
         })?;
-
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
@@ -304,7 +290,6 @@ fn run_gitignore_modal(
         }
     }
 }
-
 fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
     if crate::acp::should_offer_codex_acp_install() {
         run_acp_install_modal(
@@ -322,7 +307,6 @@ fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
     }
     Ok(())
 }
-
 fn run_acp_install_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
@@ -332,7 +316,6 @@ fn run_acp_install_modal(
         terminal.draw(|frame| {
             render_preflight_modal(frame, scenario);
         })?;
-
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
@@ -350,7 +333,6 @@ fn run_acp_install_modal(
         }
     }
 }
-
 fn classify_required_modal_key(key: KeyCode) -> ModalAction {
     match key {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
@@ -358,7 +340,6 @@ fn classify_required_modal_key(key: KeyCode) -> ModalAction {
         _ => ModalAction::Ignore,
     }
 }
-
 fn classify_gitignore_modal_key(key: KeyCode) -> ModalAction {
     match key {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
@@ -367,7 +348,6 @@ fn classify_gitignore_modal_key(key: KeyCode) -> ModalAction {
         _ => ModalAction::Ignore,
     }
 }
-
 fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
     match key {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,
@@ -379,7 +359,6 @@ fn classify_optional_modal_key(key: KeyCode) -> ModalAction {
         _ => ModalAction::Ignore,
     }
 }
-
 #[cfg(test)]
 #[path = "preflight_tests.rs"]
 mod tests;

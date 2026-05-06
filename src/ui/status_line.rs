@@ -1,10 +1,7 @@
-use std::time::{Duration, Instant};
-
+use super::clock::{Clock, WallClock};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-
-use super::clock::{Clock, WallClock};
-
+use std::time::{Duration, Instant};
 /// Severity drives both color and replacement priority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -13,7 +10,6 @@ pub enum Severity {
     Warn,
     Error,
 }
-
 /// A single transient status message with a TTL.
 #[derive(Debug)]
 struct StatusMessage {
@@ -22,7 +18,6 @@ struct StatusMessage {
     pushed_at: Instant,
     ttl: Duration,
 }
-
 /// General-purpose transient status queue.
 ///
 /// Owned by `App` and shared with non-render call sites via
@@ -36,19 +31,16 @@ where
     current: Option<StatusMessage>,
     clock: C,
 }
-
 impl StatusLine {
     pub fn new() -> Self {
         Self::with_clock(WallClock::new())
     }
 }
-
 impl Default for StatusLine {
     fn default() -> Self {
         Self::new()
     }
 }
-
 impl<C> StatusLine<C>
 where
     C: Clock,
@@ -59,7 +51,6 @@ where
             clock,
         }
     }
-
     /// Push a message. Severity priority is enforced here:
     ///
     /// - An incoming message replaces the current one only if its severity
@@ -73,7 +64,6 @@ where
             Some(msg) if msg.expired_at(now) => true,
             Some(msg) => severity >= msg.severity,
         };
-
         if should_replace {
             self.current = Some(StatusMessage {
                 text: message,
@@ -83,7 +73,6 @@ where
             });
         }
     }
-
     /// Expire any message whose TTL has elapsed relative to `now`.
     pub fn tick(&mut self, now: Instant) {
         let expired = self.current.as_ref().is_some_and(|msg| msg.expired_at(now));
@@ -91,12 +80,10 @@ where
             self.current = None;
         }
     }
-
     /// Clear the current message so a later lower-severity push can take the line.
     pub fn clear(&mut self) {
         self.current = None;
     }
-
     /// Render the current message to 0 or 1 `Line`.
     ///
     /// The caller should `tick` first so that expired messages are
@@ -114,13 +101,11 @@ where
         )))
     }
 }
-
 impl StatusMessage {
     fn expired_at(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.pushed_at) >= self.ttl
     }
 }
-
 #[cfg(test)]
 #[path = "status_line_tests.rs"]
 mod tests;

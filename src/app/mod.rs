@@ -43,59 +43,49 @@ mod tests_split_sync;
 pub(crate) use crate::ui::widgets::tree::view as tree;
 pub(crate) mod watchdog;
 mod yolo_exit;
-
-pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
-pub(crate) use sheet::bottom_sheet;
-pub(crate) use status_line::{Severity, StatusLine};
-
+pub(crate) use self::state::ModelRefreshState;
+use self::tree::{NodeKey, VisibleNodeRow};
 use crate::{
     cache,
     selection::{CachedModel, QuotaError, VendorKind},
     state::{Message, Node, SessionState},
 };
-
-pub(crate) use self::state::ModelRefreshState;
-use self::tree::{NodeKey, VisibleNodeRow};
-
+pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
+pub(crate) use sheet::bottom_sheet;
+pub(crate) use status_line::{Severity, StatusLine};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     rc::Rc,
     time::{Duration, Instant, SystemTime},
 };
-
 pub(crate) type RetryKey = (String, Option<u32>, u32);
 pub(crate) type FailedModelSet = HashSet<(VendorKind, String)>;
 const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
 const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 const DEFAULT_EVENT_POLL_MS: u64 = 250;
 const LIVE_SUMMARY_EVENT_POLL_MS: u64 = 50;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ObservedPathState {
     exists: bool,
     modified_at: Option<SystemTime>,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct YoloExitSnapshot {
     live_summary: ObservedPathState,
     finish_stamp: ObservedPathState,
     stage_artifacts: Vec<ObservedPathState>,
 }
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct YoloExitObservation {
     snapshot: YoloExitSnapshot,
     saw_new_update: bool,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExpansionOverride {
     Expanded,
     Collapsed,
 }
-
 /// Identifies a running stage for Family B error modals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StageId {
@@ -107,7 +97,6 @@ pub(crate) enum StageId {
     Implementation,
     Review,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModalKind {
     SkipToImpl,
@@ -119,7 +108,6 @@ pub(crate) enum ModalKind {
     StageError(StageId),
     FinalValidationBlocked,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RetryLaunch {
     Brainstorm,
@@ -133,7 +121,6 @@ pub(crate) enum RetryLaunch {
     Coder,
     Reviewer,
 }
-
 impl RetryLaunch {
     fn for_run(run: &crate::state::RunRecord) -> Option<Self> {
         // Recovery sub-stages all share `stage == "recovery"`, so we key off the
@@ -157,7 +144,6 @@ impl RetryLaunch {
         }
     }
 }
-
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminationIntent {
@@ -165,7 +151,6 @@ pub(crate) enum TerminationIntent {
     StopAndRetry(RetryLaunch),
     StopAndQuit,
 }
-
 impl TerminationIntent {
     fn summary(&self) -> &'static str {
         match self {
@@ -174,7 +159,6 @@ impl TerminationIntent {
             Self::StopAndQuit => "stop and quit",
         }
     }
-
     fn in_progress_status(&self) -> &'static str {
         match self {
             Self::StopOnly => "Stopping agent...",
@@ -183,13 +167,11 @@ impl TerminationIntent {
         }
     }
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingTermination {
     run_id: u64,
     intent: TerminationIntent,
 }
-
 impl PendingTermination {
     fn marker(&self) -> &'static str {
         match self.intent {
@@ -198,14 +180,12 @@ impl PendingTermination {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandReturnTarget {
     Idea,
     FooterInteractive,
     SplitInteractive,
 }
-
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TestLaunchOutcome {
@@ -213,22 +193,18 @@ pub(crate) struct TestLaunchOutcome {
     pub(crate) artifact_contents: Option<String>,
     pub(crate) launch_error: Option<String>,
 }
-
 #[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct TestLaunchHarness {
     pub(crate) outcomes: std::collections::VecDeque<TestLaunchOutcome>,
 }
-
 pub const RESPONSIVE_HEIGHT_THRESHOLD: u16 = 60;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppStartupOrigin {
     #[default]
     Default,
     PickerCreated,
 }
-
 pub struct App {
     pub(crate) state: SessionState,
     pub(crate) nodes: Vec<Node>,
@@ -305,7 +281,6 @@ pub struct App {
     pub(crate) palette: palette::PaletteState,
     pub(crate) command_return_target: Option<CommandReturnTarget>,
 }
-
 fn default_expansion(
     row: &VisibleNodeRow,
     _current_node: usize,
@@ -313,7 +288,6 @@ fn default_expansion(
 ) -> bool {
     row.is_expandable()
 }
-
 fn effective_expansion(
     row: &VisibleNodeRow,
     current_node: usize,
@@ -329,17 +303,14 @@ fn effective_expansion(
         None => default_expansion(row, current_node, active_keys),
     }
 }
-
 fn startup_cache_has_expired_section(loaded: &cache::LoadedCache) -> bool {
     let dashboard_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true);
     let quotas_expired = loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true);
     dashboard_expired || quotas_expired
 }
-
 #[doc(hidden)]
 pub mod snapshot_support {
     use super::*;
-
     pub fn default_footer_keymap(width: u16) -> String {
         let line = footer::keymap::keymap(
             crate::state::Phase::IdeaInput,
@@ -360,7 +331,6 @@ pub mod snapshot_support {
         .to_string();
         format!("{line}\n")
     }
-
     pub fn warn_status_line() -> String {
         let mut line = status_line::StatusLine::new();
         line.push(

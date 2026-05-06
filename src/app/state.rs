@@ -1,7 +1,6 @@
 use crate::selection::{CachedModel, QuotaError};
 use std::time::Instant;
 use tokio::sync::mpsc;
-
 #[derive(Debug)]
 pub(crate) enum ModelRefreshState {
     Fetching {

@@ -4,7 +4,6 @@
 //! [`crate::state`] free of `std::fs`, `std::process`, and direct clock
 //! reads. The struct itself lives in `src/state/types.rs`; this file extends
 //! it with another `impl` block.
-
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
 use crate::state::{
@@ -13,13 +12,11 @@ use crate::state::{
 };
 use anyhow::{Context, Result};
 use std::fs;
-
 impl SessionState {
     pub fn load(session_id: &str) -> Result<Self> {
         let path = session_dir(session_id).join("session.toml");
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read session state from {}", path.display()))?;
-
         // Reject v1 files (no schema_version field)
         let raw: toml::Value = toml::from_str(&text)
             .with_context(|| format!("failed to parse session state from {}", path.display()))?;
@@ -30,10 +27,8 @@ impl SessionState {
                 session_id
             );
         }
-
         let state: SessionState = toml::from_str(&text)
             .with_context(|| format!("failed to parse session state from {}", path.display()))?;
-
         if state.schema_version != 3 {
             anyhow::bail!(
                 "session {} uses schema v{}; archive with `codexize archive {}` and start fresh.",
@@ -42,10 +37,8 @@ impl SessionState {
                 session_id
             );
         }
-
         Ok(state)
     }
-
     pub fn save(&self) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)
@@ -56,20 +49,17 @@ impl SessionState {
             .with_context(|| format!("failed to write session state to {}", path.display()))?;
         Ok(())
     }
-
     /// Append an event to the session's events.toml audit trail.
     pub fn log_event(&self, message: impl Into<String>) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
         reject_old_artifact(&dir.join("events.jsonl"))?;
         let path = dir.join("events.toml");
-
         let event = Event {
             timestamp: chrono::Utc::now().to_rfc3339(),
             phase: self.current_phase,
             message: message.into(),
         };
-
         let mut file = read_events_file(&path)?;
         file.events.push(event);
         let text = toml::to_string_pretty(&file).context("failed to serialize events")?;
@@ -77,19 +67,16 @@ impl SessionState {
             .with_context(|| format!("failed to write events to {}", path.display()))?;
         Ok(())
     }
-
     /// Transition to a new phase with validation and persistence.
     pub fn transition_to(&mut self, next_phase: Phase) -> Result<()> {
         super::transitions::execute_transition(self, next_phase)
     }
-
     /// Append a message to the session's messages.toml file.
     pub fn append_message(&self, message: &Message) -> Result<()> {
         let dir = session_dir(&self.session_id);
         fs::create_dir_all(&dir)?;
         reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
-
         let mut file = read_messages_file(&path)?;
         file.messages.push(message.clone());
         let text = toml::to_string_pretty(&file).context("failed to serialize messages")?;
@@ -97,7 +84,6 @@ impl SessionState {
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
-
     /// Update the text for an existing message identified by its timestamp.
     pub fn update_message_text(
         &self,
@@ -108,7 +94,6 @@ impl SessionState {
         fs::create_dir_all(&dir)?;
         reject_old_artifact(&dir.join("messages.jsonl"))?;
         let path = dir.join("messages.toml");
-
         let mut file = read_messages_file(&path)?;
         let Some(message) = file.messages.iter_mut().find(|message| message.ts == ts) else {
             return Ok(false);
@@ -122,7 +107,6 @@ impl SessionState {
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(true)
     }
-
     /// Load all messages for a session from messages.toml.
     pub fn load_messages(session_id: &str) -> Result<Vec<Message>> {
         let dir = session_dir(session_id);
@@ -131,10 +115,8 @@ impl SessionState {
         if !path.exists() {
             return Ok(Vec::new());
         }
-
         Ok(read_messages_file(&path)?.messages)
     }
-
     /// Remove persisted messages whose run id is in `run_ids`.
     pub fn remove_messages_for_runs(
         &self,
@@ -150,7 +132,6 @@ impl SessionState {
         if !path.exists() {
             return Ok(());
         }
-
         let mut file = read_messages_file(&path)?;
         file.messages
             .retain(|message| !run_ids.contains(&message.run_id));
@@ -159,7 +140,6 @@ impl SessionState {
             .with_context(|| format!("failed to write messages to {}", path.display()))?;
         Ok(())
     }
-
     /// Create a new RunRecord, push it to agent_runs, and return its id.
     #[allow(clippy::too_many_arguments)]
     pub fn create_run_record(
@@ -190,7 +170,6 @@ impl SessionState {
             section_path,
         )
     }
-
     /// Create a RunRecord with an id already reserved by the launch path.
     #[allow(clippy::too_many_arguments)]
     pub fn create_run_record_with_id(
@@ -231,7 +210,6 @@ impl SessionState {
         self.agent_runs.push(run);
         id
     }
-
     /// Resume running runs on session load.
     ///
     /// Returns the current run ID if exactly one `Running` run exists after
@@ -242,11 +220,9 @@ impl SessionState {
         // Check for hostname/device identity mismatch first
         let current_hostname = capture_hostname();
         let current_device_id = capture_mount_device_id();
-
         // Collect messages to append after the loop
         let mut messages_to_append = Vec::new();
         let mut events_to_log = Vec::new();
-
         // Finalize any Running records with hostname or device mismatch
         for run in &mut self.agent_runs {
             if run.status != RunStatus::Running {
@@ -293,7 +269,6 @@ impl SessionState {
                 ));
             }
         }
-
         // Append collected messages and events
         for msg in messages_to_append {
             let _ = self.append_message(&msg);
@@ -301,19 +276,16 @@ impl SessionState {
         for event in events_to_log {
             let _ = self.log_event(event);
         }
-
         let running_ids: Vec<u64> = self
             .agent_runs
             .iter()
             .filter(|r| r.status == RunStatus::Running)
             .map(|r| r.id)
             .collect();
-
         if running_ids.is_empty() {
             self.save()?;
             return Ok(None);
         }
-
         if running_ids.len() > 1 {
             anyhow::bail!(
                 "session {} has {} concurrent runs; repair manually by editing session.toml",
@@ -321,13 +293,11 @@ impl SessionState {
                 running_ids.len()
             );
         }
-
         let run_id = running_ids[0];
         self.save()?;
         Ok(Some(run_id))
     }
 }
-
 #[cfg(test)]
 impl SessionState {
     /// Capture current hostname for same-host resume validation. Exposed for
@@ -335,13 +305,11 @@ impl SessionState {
     pub(crate) fn capture_hostname() -> Option<String> {
         capture_hostname()
     }
-
     /// Capture device ID of the mount containing the worktree's `.git` path.
     pub(crate) fn capture_mount_device_id() -> Option<u64> {
         capture_mount_device_id()
     }
 }
-
 /// Capture current hostname for same-host resume validation.
 fn capture_hostname() -> Option<String> {
     std::process::Command::new("hostname")
@@ -357,13 +325,11 @@ fn capture_hostname() -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
-
 /// Capture device ID of the mount containing the worktree's `.git` path.
 fn capture_mount_device_id() -> Option<u64> {
     let git_path = std::env::current_dir().ok()?.join(".git");
     capture_mount_device_id_for_path(&git_path)
 }
-
 fn capture_mount_device_id_for_path(path: &std::path::Path) -> Option<u64> {
     #[cfg(unix)]
     {
@@ -376,7 +342,6 @@ fn capture_mount_device_id_for_path(path: &std::path::Path) -> Option<u64> {
         None
     }
 }
-
 fn reject_old_artifact(path: &std::path::Path) -> Result<()> {
     if path.exists() {
         anyhow::bail!(
@@ -386,7 +351,6 @@ fn reject_old_artifact(path: &std::path::Path) -> Result<()> {
     }
     Ok(())
 }
-
 fn read_events_file(path: &std::path::Path) -> Result<EventsFile> {
     if !path.exists() {
         return Ok(EventsFile::default());
@@ -395,7 +359,6 @@ fn read_events_file(path: &std::path::Path) -> Result<EventsFile> {
         .with_context(|| format!("failed to read events from {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("failed to parse events from {}", path.display()))
 }
-
 fn read_messages_file(path: &std::path::Path) -> Result<MessagesFile> {
     if !path.exists() {
         return Ok(MessagesFile::default());

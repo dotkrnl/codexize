@@ -1,17 +1,14 @@
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::plan_review_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
-
+use anyhow::Result;
+use crossterm::event::{KeyCode, KeyEvent};
 impl App {
     pub(crate) fn launch_plan_review(&mut self) {
         let _ = self.launch_plan_review_with_model(None);
     }
-
     pub(crate) fn launch_plan_review_with_model(
         &mut self,
         override_model: Option<CachedModel>,
@@ -25,7 +22,6 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let round = match self.state.current_phase {
             Phase::PlanReviewPaused => self.completed_rounds("plan-review") + 1,
             _ => self.completed_rounds("plan-review").max(1),
@@ -39,7 +35,6 @@ impl App {
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("plan-review-{round}.md"));
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("plan-review");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -66,7 +61,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let attempt = self.attempt_for("plan-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("plan-review", None, round, attempt);
         let prompt = plan_review_prompt(
@@ -83,7 +77,6 @@ impl App {
             self.record_agent_error(format!("error writing prompt: {err}"));
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -147,7 +140,6 @@ impl App {
         }
     }
 }
-
 impl App {
     /// Modal handler for the "plan review paused — accept verdict?" prompt.
     /// Co-located with the plan-review launch so the stage's launch and
@@ -170,7 +162,6 @@ impl App {
             _ => false,
         }
     }
-
     /// Co-located success-finalization for `Phase::PlanReviewRunning`.
     pub(crate) fn finalize_plan_review_success(
         &mut self,

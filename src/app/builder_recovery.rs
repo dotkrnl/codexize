@@ -224,7 +224,10 @@ impl App {
             .chain(done_ids.iter().copied())
             .chain(started_ids.iter().copied())
             .collect::<BTreeSet<_>>();
-        if let Some(id) = recovered_ids.iter().find(|id| !historical_ids.contains(id) && **id <= historical_max) {
+        if let Some(id) = recovered_ids
+            .iter()
+            .find(|id| !historical_ids.contains(id) && **id <= historical_max)
+        {
             anyhow::bail!(
                 "new recovery task id {id} must be greater than prior max id {historical_max}"
             );
@@ -260,9 +263,15 @@ impl App {
         let verdict = match review::validate(&plan_review_path) {
             Ok(v) => v,
             Err(err) => {
-                let reason = Reason::RecoveryPlanReviewFailed(recovery_error_detail(&err)).to_string();
+                let reason =
+                    Reason::RecoveryPlanReviewFailed(recovery_error_detail(&err)).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
-                let failed_run = self.state.agent_runs.iter().find(|r| r.id == run.id).cloned();
+                let failed_run = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.id == run.id)
+                    .cloned();
                 let run_ref = failed_run.as_ref().unwrap_or(run);
                 if !self.maybe_auto_retry(run_ref) {
                     self.record_agent_error(reason);
@@ -329,8 +338,7 @@ impl App {
             .pipeline_items
             .iter()
             .filter(|item| {
-                item.stage == "coder"
-                    && item.task_id.is_some_and(|id| done_ids.contains(&id))
+                item.stage == "coder" && item.task_id.is_some_and(|id| done_ids.contains(&id))
             })
             .cloned()
             .collect();
@@ -377,7 +385,6 @@ impl App {
             recovered_titles,
         );
     }
-
     pub(crate) fn handle_recovery_sharding_completed(
         &mut self,
         run: &crate::state::RunRecord,
@@ -389,9 +396,15 @@ impl App {
         let parsed = match tasks::validate(&tasks_path) {
             Ok(p) => p,
             Err(err) => {
-                let reason = Reason::RecoveryShardingFailed(recovery_error_detail(&err)).to_string();
+                let reason =
+                    Reason::RecoveryShardingFailed(recovery_error_detail(&err)).to_string();
                 self.finalize_run_record(run.id, false, Some(reason.clone()));
-                let failed_run = self.state.agent_runs.iter().find(|r| r.id == run.id).cloned();
+                let failed_run = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .find(|r| r.id == run.id)
+                    .cloned();
                 let run_ref = failed_run.as_ref().unwrap_or(run);
                 if !self.maybe_auto_retry(run_ref) {
                     self.record_agent_error(reason);

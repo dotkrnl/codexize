@@ -7,7 +7,6 @@ pub(crate) struct ChatScrollWindow {
     pub above_count: usize,
     pub below_count: usize,
 }
-
 pub(crate) fn chat_scroll_window(
     total_lines: usize,
     available_height: usize,
@@ -16,18 +15,15 @@ pub(crate) fn chat_scroll_window(
     if total_lines == 0 || available_height == 0 {
         return None;
     }
-
     let has_overflow = total_lines > available_height;
     let max_offset = compute_max_chat_scroll_offset(total_lines, available_height, has_overflow);
     let offset = scroll_offset.min(max_offset);
-
     let show_above_indicator = offset > 0;
     let mut message_rows = available_height.saturating_sub(show_above_indicator as usize);
     let show_below_indicator = total_lines > offset.saturating_add(message_rows);
     if show_below_indicator {
         message_rows = message_rows.saturating_sub(1);
     }
-
     let visible_end = (offset + message_rows).min(total_lines);
     Some(ChatScrollWindow {
         offset,
@@ -38,7 +34,6 @@ pub(crate) fn chat_scroll_window(
         below_count: total_lines.saturating_sub(visible_end),
     })
 }
-
 pub(crate) fn max_chat_scroll_offset(total_lines: usize, available_height: usize) -> usize {
     compute_max_chat_scroll_offset(
         total_lines,
@@ -46,7 +41,6 @@ pub(crate) fn max_chat_scroll_offset(total_lines: usize, available_height: usize
         total_lines > available_height,
     )
 }
-
 fn compute_max_chat_scroll_offset(
     total_lines: usize,
     available_height: usize,
@@ -58,7 +52,6 @@ fn compute_max_chat_scroll_offset(
         0
     }
 }
-
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;

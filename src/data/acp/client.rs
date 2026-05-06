@@ -1,6 +1,5 @@
 //! ACP JSON-RPC stdio client. Wire transport is a tokio actor; the
 //! [`AcpSession`] facade lets sync callers drive prompt turns by polling.
-
 use super::actor::RpcClient;
 use super::dispatch::{AcpBoundaryState, dispatch_update};
 use super::handshake::{
@@ -17,7 +16,6 @@ use std::sync::Arc;
 use tokio::process::Child;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
-
 pub trait AcpSession: Send {
     fn session_id(&self) -> &str;
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>>;
@@ -25,14 +23,11 @@ pub trait AcpSession: Send {
     fn cancel_prompt(&mut self) -> AcpResult<()>;
     fn close(&mut self) -> AcpResult<()>;
 }
-
 pub trait AcpConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>>;
 }
-
 #[derive(Debug, Clone, Default)]
 pub struct SubprocessConnector;
-
 impl AcpConnector for SubprocessConnector {
     #[rustfmt::skip]
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>> {
@@ -45,7 +40,6 @@ impl AcpConnector for SubprocessConnector {
         Ok(Box::new(SubprocessSession::new(session, rpc, child, runtime, launch)))
     }
 }
-
 struct SubprocessSession {
     session_id: String,
     rpc: RpcClient,
@@ -61,7 +55,6 @@ struct SubprocessSession {
     pending_updates: VecDeque<ClientUpdate>,
     acp_trace_path: Option<PathBuf>,
 }
-
 impl SubprocessSession {
     #[rustfmt::skip]
     fn new(h: HandshakeOutput, rpc: RpcClient, child: Child, runtime: Arc<Runtime>, launch: &AcpResolvedLaunch) -> Self {
@@ -77,23 +70,19 @@ impl SubprocessSession {
             acp_trace_path: launch.session.metadata.get("codexize.acp_trace_path").map(PathBuf::from),
         }
     }
-
     fn finish_prompt_turn(&mut self) {
         self.prompt_finished = true;
         self.prompt_response = None;
         self.boundary_state.reset_for_prompt_turn();
     }
-
     fn fail_turn(&mut self, message: String) -> ClientUpdate {
         self.finish_prompt_turn();
         ClientUpdate::PromptTurnFailed { message }
     }
 }
-
 impl AcpSession for SubprocessSession {
     #[rustfmt::skip]
     fn session_id(&self) -> &str { &self.session_id }
-
     #[rustfmt::skip]
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
         if let Some(q) = self.pending_updates.pop_front() { return Ok(Some(q)); }
@@ -126,7 +115,6 @@ impl AcpSession for SubprocessSession {
                 self.fail_turn("ACP prompt turn channel disconnected".to_string()),
         }))
     }
-
     #[rustfmt::skip]
     fn submit_prompt(&mut self, text: &str) -> AcpResult<()> {
         if !self.prompt_finished {
@@ -138,12 +126,10 @@ impl AcpSession for SubprocessSession {
         self.prompt_finished = false;
         Ok(())
     }
-
     #[rustfmt::skip]
     fn cancel_prompt(&mut self) -> AcpResult<()> {
         self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id }))
     }
-
     #[rustfmt::skip]
     fn close(&mut self) -> AcpResult<()> {
         if self.closed { return Ok(()); }
@@ -172,12 +158,10 @@ impl AcpSession for SubprocessSession {
         }
     }
 }
-
 impl Drop for SubprocessSession {
     #[rustfmt::skip]
     fn drop(&mut self) { let _ = self.close(); }
 }
-
 #[rustfmt::skip]
 fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
     let Some(path) = path else { return };
@@ -188,6 +172,5 @@ fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
         let _ = writeln!(file, "{line}");
     }
 }
-
 #[cfg(test)]
 mod tests;

@@ -3,7 +3,6 @@
 //! dashboard refresh, and quota refresh involved in producing the
 //! `CachedModel` list — the logic layer is forbidden to touch any of
 //! these directly (see `scripts/check-layers.sh`).
-
 use crate::acp::AcpConfig;
 use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
@@ -11,12 +10,10 @@ use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
 use std::collections::BTreeSet;
-
 pub async fn assemble_models_async() -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load();
     assemble_with_refresh(loaded, &AcpConfig::default().available_vendors()).await
 }
-
 /// Build the canonical model universe purely from cached data, performing no
 /// network fetches. Returns an empty vector if the dashboard cache is missing.
 /// Useful at startup to render the model strip immediately while a background
@@ -25,7 +22,6 @@ pub fn assemble_from_cached_only() -> Vec<CachedModel> {
     let loaded = cache::load();
     assemble_from_loaded(&loaded)
 }
-
 /// Build the canonical model universe from an already-loaded cache snapshot.
 ///
 /// Does not consult the network; treats every section as authoritative. The
@@ -34,7 +30,6 @@ pub fn assemble_from_cached_only() -> Vec<CachedModel> {
 pub fn assemble_from_loaded(loaded: &LoadedCache) -> Vec<CachedModel> {
     assemble_from_loaded_with_available(loaded, &AcpConfig::default().available_vendors())
 }
-
 fn assemble_from_loaded_with_available(
     loaded: &LoadedCache,
     available_vendors: &BTreeSet<VendorKind>,
@@ -59,7 +54,6 @@ fn assemble_from_loaded_with_available(
         .unwrap_or_default();
     pure::assemble_universe(dashboard, quotas, resets, available_vendors)
 }
-
 async fn assemble_with_refresh(
     loaded: LoadedCache,
     available_vendors: &BTreeSet<VendorKind>,
@@ -76,9 +70,7 @@ async fn assemble_with_refresh(
         Some(section) => (section.data, section.expired),
         None => (std::collections::BTreeMap::new(), false),
     };
-
     let mut quota_errors = Vec::new();
-
     // Dashboard refresh (independent of quota refresh).
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
@@ -116,7 +108,6 @@ async fn assemble_with_refresh(
     } else {
         cached_dashboard
     };
-
     // Quota refresh (independent of dashboard outcome).
     // On per-vendor error, preserve that vendor's expired cached data so
     // a single failing vendor cannot wipe out previously-known quotas.
@@ -139,7 +130,6 @@ async fn assemble_with_refresh(
         quota_payload = cached_quota;
         reset_payload = cached_resets;
     }
-
     let models = pure::assemble_universe(
         dashboard_entries,
         quota_payload,
@@ -148,6 +138,5 @@ async fn assemble_with_refresh(
     );
     (models, quota_errors)
 }
-
 #[cfg(test)]
 mod tests_mod;

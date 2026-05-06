@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
     ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope, reviewer_prompt,
@@ -11,12 +9,11 @@ use crate::selection::CachedModel;
 use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
 };
-
+use anyhow::Result;
 impl App {
     pub(crate) fn launch_reviewer(&mut self) {
         let _ = self.launch_reviewer_with_model(None);
     }
-
     pub(crate) fn launch_reviewer_with_model(
         &mut self,
         override_model: Option<CachedModel>,
@@ -38,16 +35,13 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{r:03}"));
         let review_path = round_dir.join("review.toml");
         let review_scope_file = round_dir.join("review_scope.toml");
         let task_file = round_dir.join("task.toml");
-
         let _ = std::fs::remove_file(&review_path);
-
         let excluded = self
             .state
             .agent_runs
@@ -76,7 +70,6 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let live_summary_path =
             self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
@@ -106,14 +99,12 @@ impl App {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
-
         let window_name = run_label_with_model(
             &format!("[Round {r} Reviewer]"),
             &model,
@@ -170,7 +161,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::ReviewRound(round)`.
     pub(crate) fn finalize_reviewer_success(
         &mut self,

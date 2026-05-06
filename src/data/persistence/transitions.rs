@@ -4,7 +4,6 @@
 //! defined in [`crate::logic::pipeline::transitions`]. Callers in the runtime
 //! and tests should prefer these wrappers; tests that need a pure mutation
 //! can still call the logic-layer counterpart directly.
-
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
 use crate::logic::pipeline::transitions::{
@@ -14,7 +13,6 @@ use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionStat
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::Path;
-
 /// Execute a validated transition, updating the state and persisting it.
 ///
 /// Force-ship guard: `BlockedNeedsUser -> Done` is rejected at runtime unless
@@ -23,7 +21,6 @@ use std::path::Path;
 /// only final-validation blocks may take it.
 pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     validate_transition(&state.current_phase, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
-
     if matches!(state.current_phase, Phase::BlockedNeedsUser)
         && matches!(to, Phase::Done)
         && state.block_origin != Some(BlockOrigin::FinalValidation)
@@ -33,10 +30,8 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
             state.block_origin
         );
     }
-
     let old_phase = state.current_phase;
     state.current_phase = to;
-
     // `block_origin` describes the *current* block. Clear it whenever the
     // session leaves `BlockedNeedsUser` so a subsequent re-block must set a
     // fresh origin and stale provenance can never satisfy the force-ship
@@ -44,21 +39,17 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     if matches!(old_phase, Phase::BlockedNeedsUser) && !matches!(to, Phase::BlockedNeedsUser) {
         state.block_origin = None;
     }
-
     state
         .log_event(format!(
             "transitioned phase from {:?} to {:?}",
             old_phase, to
         ))
         .context("failed to log transition event")?;
-
     state
         .save()
         .context("failed to save state after transition")?;
-
     Ok(())
 }
-
 /// Set `block_origin` and transition to `BlockedNeedsUser`. The single throat
 /// for entering a block — every code path that would have called
 /// `execute_transition(state, Phase::BlockedNeedsUser)` should call this
@@ -67,7 +58,6 @@ pub fn block_with_origin(state: &mut SessionState, origin: BlockOrigin) -> Resul
     state.block_origin = Some(origin);
     execute_transition(state, Phase::BlockedNeedsUser)
 }
-
 /// Outcome of [`enter_final_validation`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FinalValidationEntry {
@@ -79,7 +69,6 @@ pub enum FinalValidationEntry {
     /// and the validator must not be launched.
     CapExceeded,
 }
-
 /// Single throat for entering `FinalValidation(round)`. Increments
 /// `validation_attempts` on success; on the 4th attempt (cap already
 /// exhausted) blocks instead so the validator never spawns. Callers MUST
@@ -101,7 +90,6 @@ pub fn enter_final_validation(
     execute_transition(state, target)?;
     Ok(FinalValidationEntry::Entered { attempt })
 }
-
 /// Outcome of [`enter_simplification`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimplificationEntry {
@@ -114,7 +102,6 @@ pub enum SimplificationEntry {
     /// launched.
     CapExceeded,
 }
-
 /// Single throat for entering `Simplification(round)`. Increments the
 /// per-round entry in `simplification_attempts` on success; on the 4th
 /// attempt for the same round (cap already exhausted) blocks instead so the
@@ -139,7 +126,6 @@ pub fn enter_simplification(state: &mut SessionState, round: u32) -> Result<Simp
     execute_transition(state, target)?;
     Ok(SimplificationEntry::Entered { attempt: next })
 }
-
 /// Compute the section path for a new agent run at creation time.
 ///
 /// The path is frozen once here so the renderer can group runs by structural
@@ -204,7 +190,6 @@ fn compute_section_path(
     path.push(SectionPart::Stage(stage.to_string()));
     path
 }
-
 /// Find the iteration number for a round based on pipeline items.
 ///
 /// Used for simplifier/final-validation which are not tied to a specific task.
@@ -218,7 +203,6 @@ fn loop_iteration_for_round(state: &SessionState, round: u32) -> u32 {
         .max()
         .unwrap_or(1)
 }
-
 /// Determine the outer iteration number for a recovery stage run.
 ///
 /// Peeks at `next_iteration_for_recovery` without consuming it: the override
@@ -245,7 +229,6 @@ fn recovery_iteration_for_path(state: &SessionState, task_id: Option<u32>) -> u3
         .max()
         .unwrap_or(1)
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn start_agent_run(
     state: &mut SessionState,
@@ -274,7 +257,6 @@ pub fn start_agent_run(
         modes,
     )
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn start_agent_run_with_id(
     state: &mut SessionState,
@@ -304,7 +286,6 @@ pub fn start_agent_run_with_id(
         Some(path),
     )
 }
-
 pub fn finish_run_record(
     state: &mut SessionState,
     run_id: u64,
@@ -335,11 +316,9 @@ pub fn finish_run_record(
         error,
     })
 }
-
 pub fn resume_running_runs(state: &mut SessionState) -> Result<Option<u64>> {
     state.resume_running_runs()
 }
-
 /// Try to read and parse a TOML artifact at `path`. Returns an error if the
 /// file is missing or malformed — the orchestrator treats either case as an
 /// incomplete agent turn and retries.
@@ -348,7 +327,6 @@ pub fn try_parse_toml_artifact<T: serde::de::DeserializeOwned>(path: &Path) -> R
         .with_context(|| format!("artifact missing or unreadable: {}", path.display()))?;
     toml::from_str(&text).with_context(|| format!("unparseable TOML artifact: {}", path.display()))
 }
-
 #[cfg(test)]
 #[path = "transitions_tests.rs"]
 mod tests;

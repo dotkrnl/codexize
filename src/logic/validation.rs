@@ -1,7 +1,6 @@
 use crate::tasks::{Ref, Task};
 use anyhow::bail;
 use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidationStatus {
@@ -9,13 +8,11 @@ pub enum ValidationStatus {
     GoalGap,
     NeedsHuman,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Gap {
     pub description: String,
     pub checked: Vec<String>,
 }
-
 /// Minimal task schema emitted by the validator in a `goal_gap` verdict.
 /// Intentionally omits `id`, `spec_refs`, and `plan_refs` — the orchestrator
 /// assigns those during ingestion.
@@ -26,7 +23,6 @@ pub struct ValidatorGapTask {
     pub test: String,
     pub estimated_tokens: u32,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationVerdict {
     pub status: ValidationStatus,
@@ -38,14 +34,11 @@ pub struct ValidationVerdict {
     #[serde(default)]
     pub new_tasks: Vec<ValidatorGapTask>,
 }
-
 pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
     let parsed: ValidationVerdict = toml::from_str(text)?;
-
     if parsed.summary.trim().is_empty() {
         bail!("summary is empty");
     }
-
     match parsed.status {
         ValidationStatus::GoalMet => {
             if !parsed.gaps.is_empty() {
@@ -72,7 +65,6 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             }
         }
     }
-
     for (i, gap) in parsed.gaps.iter().enumerate() {
         if gap.description.trim().is_empty() {
             bail!("gaps[{i}]: empty description");
@@ -86,7 +78,6 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             }
         }
     }
-
     for (i, task) in parsed.new_tasks.iter().enumerate() {
         if task.title.trim().is_empty() {
             bail!("new_tasks[{i}]: empty title");
@@ -101,10 +92,8 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             bail!("new_tasks[{i}]: estimated_tokens must be > 0");
         }
     }
-
     Ok(parsed)
 }
-
 /// Convert validator gap tasks into full [`Task`] entries.
 ///
 /// `max_task_id` is the current highest task ID in the session; new IDs start

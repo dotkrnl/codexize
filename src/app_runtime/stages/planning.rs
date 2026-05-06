@@ -1,23 +1,19 @@
-use anyhow::Result;
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::planning_prompt;
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, RunStatus};
-
+use anyhow::Result;
 impl App {
     pub(crate) fn launch_planning(&mut self) {
         let _ = self.launch_planning_with_model(None, true);
     }
-
     pub(crate) fn launch_planning_with_model(
         &mut self,
         override_model: Option<CachedModel>,
         interactive: bool,
     ) -> bool {
         self.clear_agent_error();
-
         if self.models.is_empty() {
             self.record_agent_error(
                 "model list not yet loaded — wait a moment and try again".to_string(),
@@ -26,12 +22,10 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let spec_path = session_dir.join("artifacts").join("spec.md");
         let plan_path = session_dir.join("artifacts").join("plan.md");
-
         let review_paths: Vec<std::path::PathBuf> = self
             .state
             .agent_runs
@@ -44,7 +38,6 @@ impl App {
             })
             .filter(|path| path.exists())
             .collect();
-
         let modes = self.state.launch_modes();
         let phase = Self::phase_for_stage("planning");
         let effort = modes.effort_for(EffortLevel::Normal, phase);
@@ -57,9 +50,7 @@ impl App {
             return false;
         };
         let (model, vendor_kind, vendor) = chosen;
-
         let _ = std::fs::remove_file(&plan_path);
-
         let prompt_path = session_dir.join("prompts").join("planning.md");
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -77,14 +68,12 @@ impl App {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
         };
-
         // YOLO planning must take the existing non-interactive runner path.
         let interactive = interactive && !modes.yolo;
         let guard_mode = if interactive {
@@ -147,7 +136,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::PlanningRunning`.
     ///
     /// Spec line 46 conjoins yolo plan-review skip with `artifacts/plan.md`

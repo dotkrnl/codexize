@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize};
-
 #[path = "phase_graph.rs"]
 mod phase_graph;
 #[cfg(test)]
 #[path = "phase_tests.rs"]
 mod phase_tests;
-
 // `EnumString` is intentionally not derived: no caller parses phase names back
 // into `Phase`, and the parameterized variants would require runtime-format
 // parsing that strum cannot generate.
@@ -79,7 +77,6 @@ pub enum Phase {
     #[strum(to_string = "Blocked")]
     BlockedNeedsUser,
 }
-
 impl Phase {
     fn round(self) -> Option<u32> {
         match self {
@@ -93,7 +90,6 @@ impl Phase {
             _ => None,
         }
     }
-
     /// Short, TUI-facing label used by the dashboard/picker. Spec §3.2.4
     /// proposes folding `label()` into Display, but several variants here
     /// (`Round N Coder`, `Final Validation` without round, `Simplification`
@@ -123,7 +119,6 @@ impl Phase {
             Phase::Simplification(_) => "Simplification".to_string(),
         }
     }
-
     /// Returns true if a transition from `self` to `target` is valid.
     pub fn can_transition_to(&self, target: &Phase) -> bool {
         phase_graph::can_transition(self, target)

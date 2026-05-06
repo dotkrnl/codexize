@@ -15,25 +15,21 @@
 //! `PipelineLine` / `PipelineLineKind` live here rather than `pipeline.rs` so
 //! the layout helpers under `app/lifecycle/` can also see them without
 //! depending on `view.rs`'s private submodules.
-
 use ratatui::text::Line;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PipelineLineKind {
     Other,
     RunningLeafTail { run_id: u64 },
     RunningContainerPlaceholder { run_id: u64 },
 }
-
 #[derive(Clone)]
 pub(crate) struct PipelineLine {
     pub(crate) line: Line<'static>,
     pub(crate) kind: PipelineLineKind,
 }
-
 #[derive(Default)]
 struct FrameCache {
     pipeline_lines: Option<Vec<PipelineLine>>,
@@ -46,19 +42,16 @@ struct FrameCache {
     /// per frame.
     row_bodies: HashMap<usize, Rc<Vec<PipelineLine>>>,
 }
-
 thread_local! {
     static IN_FRAME: Cell<bool> = const { Cell::new(false) };
     static CACHE: RefCell<FrameCache> = RefCell::new(FrameCache::default());
 }
-
 /// RAII guard that opens a render frame: callers (here, `App::draw`) hold
 /// one for the duration of a frame so cached helpers reuse a single
 /// computation and the cache is cleared on drop, even on panic.
 pub(crate) struct FrameGuard {
     _private: (),
 }
-
 impl FrameGuard {
     pub(crate) fn enter() -> Self {
         IN_FRAME.with(|f| f.set(true));
@@ -66,18 +59,15 @@ impl FrameGuard {
         FrameGuard { _private: () }
     }
 }
-
 impl Drop for FrameGuard {
     fn drop(&mut self) {
         CACHE.with(|c| *c.borrow_mut() = FrameCache::default());
         IN_FRAME.with(|f| f.set(false));
     }
 }
-
 fn in_frame() -> bool {
     IN_FRAME.with(|f| f.get())
 }
-
 /// Return the cached full-transcript pipeline line list (computed with an
 /// empty `suppressed_container_runs` set), populating it via `populate` on
 /// first miss. Outside a frame guard the helper bypasses the cache.
@@ -101,7 +91,6 @@ where
             .clone()
     })
 }
-
 /// Variant of [`cached_pipeline_lines`] that returns a filtered clone with
 /// `RunningContainerPlaceholder` entries dropped for any `run_id` in
 /// `suppressed_container_runs`. Equivalent to recomputing
@@ -128,7 +117,6 @@ where
         })
         .collect()
 }
-
 /// Return the cached `(ys, total)` header offset table, populating via
 /// `populate` on first miss. Outside a frame guard the helper bypasses the
 /// cache.
@@ -152,7 +140,6 @@ where
             .clone()
     })
 }
-
 /// Return the cached `running_depth_0_header` lookup, populating via
 /// `populate` on first miss. Outside a frame guard the helper bypasses the
 /// cache.
@@ -175,7 +162,6 @@ where
             .expect("just populated")
     })
 }
-
 /// Return the cached body lines for `index` (computed with an empty
 /// `suppressed_container_runs`), populating via `populate` on first miss.
 /// Returns an `Rc` so callers can share the cached body without cloning the
@@ -196,7 +182,6 @@ where
     });
     body
 }
-
 #[cfg(test)]
 #[path = "frame_cache_tests.rs"]
 mod tests;

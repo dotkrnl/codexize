@@ -1,16 +1,13 @@
 //! Persisting resume flow that reads optional artifacts and logs progress.
-
 use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::logic::pipeline::phase::Phase;
 use crate::state::{ResumeError, SessionState, can_resume, session_dir};
-
 /// Resume a session, logging the resumption event.
 pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
     can_resume(state)?;
     state
         .log_event("resuming session")
         .map_err(|e| ResumeError::InvalidState(format!("Failed to log resume event: {e}")))?;
-
     if state.current_phase == Phase::SkipToImplPending {
         let path = session_dir(&state.session_id)
             .join("artifacts")
@@ -46,10 +43,8 @@ pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
             }
         }
     }
-
     Ok(())
 }
-
 #[cfg(test)]
 #[path = "resume_tests.rs"]
 mod tests;

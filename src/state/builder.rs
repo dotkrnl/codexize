@@ -1,7 +1,6 @@
 use crate::state::{PipelineItem, PipelineItemStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-
 #[path = "builder_queue.rs"]
 mod builder_queue;
 #[path = "builder_revise.rs"]
@@ -9,7 +8,6 @@ mod builder_revise;
 #[cfg(test)]
 #[path = "builder_tests.rs"]
 mod builder_tests;
-
 /// Tracks the builder loop — which tasks are pending, done, what iteration
 /// we're on, and enough state to resume a killed session.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -61,7 +59,6 @@ pub struct BuilderState {
     #[serde(default)]
     pub next_iteration_for_recovery: Option<u32>,
 }
-
 #[derive(Debug, Default, Deserialize)]
 struct BuilderStateWire {
     #[serde(default)]
@@ -95,7 +92,6 @@ struct BuilderStateWire {
     #[serde(default)]
     next_iteration_for_recovery: Option<u32>,
 }
-
 impl<'de> Deserialize<'de> for BuilderState {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -120,7 +116,6 @@ impl<'de> Deserialize<'de> for BuilderState {
         Ok(state)
     }
 }
-
 impl BuilderState {
     fn hydrate_legacy_pipeline_items(
         &mut self,
@@ -134,7 +129,6 @@ impl BuilderState {
         if done.is_empty() && current_task.is_none() && pending.is_empty() {
             return;
         }
-
         let mut seen = BTreeSet::new();
         let mut next_pipeline_id = 1;
         for (task_id, status, round) in done

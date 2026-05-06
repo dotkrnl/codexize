@@ -1,18 +1,15 @@
-use std::collections::BTreeSet;
-use std::fs;
-use std::time::Duration;
-
+use super::{
+    RetryTarget, Severity, parse_task_label_id, retry_stage_for_label, retry_target_for_run,
+};
 use crate::app::App;
 use crate::app::prompts::restore_artifacts;
 use crate::app::tree::node_at_path;
 use crate::artifacts::ArtifactKind;
 use crate::logic::rules::retry_phase_for_stage;
 use crate::state::{self as session_state, NodeKind, Phase, PipelineItemStatus, RunStatus};
-
-use super::{
-    RetryTarget, Severity, parse_task_label_id, retry_stage_for_label, retry_target_for_run,
-};
-
+use std::collections::BTreeSet;
+use std::fs;
+use std::time::Duration;
 impl App {
     fn cancel_run_label(&self, base: &str) {
         let prefix = format!("{base} ");
@@ -23,7 +20,6 @@ impl App {
             self.runner_supervisor.cancel_run(run.id);
         }
     }
-
     pub(crate) fn selected_retry_target(&self) -> Option<RetryTarget> {
         let row = self.visible_rows.get(self.selected)?;
         for depth in (1..=row.path.len()).rev() {
@@ -56,7 +52,6 @@ impl App {
             })
             .or_else(|| self.state.builder.current_task_id().map(RetryTarget::Task))
     }
-
     pub(crate) fn retry_selected_target(&mut self) {
         let Some(target) = self.selected_retry_target() else {
             self.push_status(
@@ -71,7 +66,6 @@ impl App {
             RetryTarget::Stage(stage) => self.retry_stage(stage),
         }
     }
-
     fn retry_task(&mut self, task_id: u32) {
         let task_rounds = self
             .state
@@ -93,7 +87,6 @@ impl App {
             })
             .unwrap_or(1);
         let recovery_context_matches = self.state.builder.recovery_trigger_task_id == Some(task_id);
-
         let removed_runs = self
             .state
             .agent_runs
@@ -117,7 +110,6 @@ impl App {
             );
             return;
         }
-
         let removed_ids = removed_runs
             .iter()
             .map(|run| run.id)
@@ -129,7 +121,6 @@ impl App {
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
         }
-
         self.state
             .agent_runs
             .retain(|run| !removed_ids.contains(&run.id));
@@ -139,7 +130,6 @@ impl App {
         self.failed_models.retain(|(stage, key_task_id, _), _| {
             *key_task_id != Some(task_id) && stage != "recovery"
         });
-
         if let Some(item) = self
             .state
             .builder
@@ -165,7 +155,6 @@ impl App {
                     iteration: self.state.builder.iteration.max(1),
                 });
         }
-
         self.clear_agent_error();
         self.current_run_id = None;
         self.run_launched = false;
@@ -183,7 +172,6 @@ impl App {
         self.rebuild_tree_view(None);
         self.launch_coder();
     }
-
     fn retry_stage(&mut self, stage: &'static str) {
         let removed_runs = self
             .state
@@ -203,11 +191,9 @@ impl App {
             );
             return;
         }
-
         let removed_ids = self.remove_retry_runs(&removed_runs);
         self.failed_models
             .retain(|(key_stage, key_task_id, _), _| key_stage != stage || key_task_id.is_some());
-
         self.clear_agent_error();
         self.current_run_id = None;
         self.run_launched = false;
@@ -234,7 +220,6 @@ impl App {
             _ => {}
         }
     }
-
     fn remove_retry_runs(&mut self, removed_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
         let removed_ids = removed_runs
             .iter()
@@ -247,7 +232,6 @@ impl App {
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
         }
-
         self.state
             .agent_runs
             .retain(|run| !removed_ids.contains(&run.id));
@@ -256,14 +240,11 @@ impl App {
             .retain(|message| !removed_ids.contains(&message.run_id));
         removed_ids
     }
-
     pub(crate) fn go_back(&mut self) {
         use std::fs;
-
         let session_dir = session_state::session_dir(&self.state.session_id);
         let artifacts = session_dir.join("artifacts");
         let prompts = session_dir.join("prompts");
-
         // Interrupt the running agent (if any) so rewinding takes effect even
         // when the phase-specific cancel_run_label base doesn't match the launch
         // run label (e.g. "[Spec Review 1]" vs "[Spec Review]").
@@ -281,7 +262,6 @@ impl App {
                 }
             }
         }
-
         match self.state.current_phase {
             Phase::BrainstormRunning => {
                 self.cancel_run_label("[Brainstorm]");
@@ -420,7 +400,6 @@ impl App {
             }
             Phase::IdeaInput | Phase::BlockedNeedsUser | Phase::Done => {}
         }
-
         self.clear_agent_error();
         self.run_launched = false;
         self.current_run_id = None;

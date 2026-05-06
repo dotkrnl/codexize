@@ -3,7 +3,6 @@ use super::ranking::phase_rank_score;
 use super::types::{CachedModel, VendorKind};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-
 /// Returns the set of model names that should be visible in the UI.
 ///
 /// Union of top-3-by-pure-ipbr-phase-rank across the four phases, plus
@@ -13,7 +12,6 @@ use std::collections::{BTreeMap, BTreeSet};
 /// the spec restricts those fields to display-only roles.
 pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
     let mut visible = BTreeSet::new();
-
     for phase in [
         SelectionPhase::Idea,
         SelectionPhase::Planning,
@@ -28,19 +26,16 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
             .iter()
             .filter_map(|m| phase_rank_score(m, phase).map(|score| (m, score)))
             .collect();
-
         ranked.sort_by(|(a_model, a_score), (b_model, b_score)| {
             b_score
                 .partial_cmp(a_score)
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a_model.name.cmp(&b_model.name))
         });
-
         for (model, _) in ranked.into_iter().take(3) {
             visible.insert(model.name.clone());
         }
     }
-
     // Per-vendor backfill: keep at least one model per vendor visible even
     // when no phase rank lifted it into the top-3. The backfill uses
     // inventory ordering (`display_order`, then name) so cosmetic summary
@@ -50,7 +45,6 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
         .filter(|m| visible.contains(&m.name))
         .map(|m| m.vendor)
         .collect();
-
     for vendor in [
         VendorKind::Claude,
         VendorKind::Codex,
@@ -68,10 +62,8 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
             visible.insert(best.name.clone());
         }
     }
-
     visible
 }
-
 /// Computes dense phase ranks from pure ipbr phase scores.
 ///
 /// Returns a map from model name to 1-based rank, ordered by phase score
@@ -84,18 +76,15 @@ pub fn phase_rank(models: &[CachedModel], phase: SelectionPhase) -> BTreeMap<Str
         .iter()
         .filter_map(|m| phase_rank_score(m, phase).map(|score| (m, score)))
         .collect();
-
     ranked.sort_by(|(a_model, a_score), (b_model, b_score)| {
         b_score
             .partial_cmp(a_score)
             .unwrap_or(Ordering::Equal)
             .then_with(|| a_model.name.cmp(&b_model.name))
     });
-
     let mut result = BTreeMap::new();
     let mut current_rank: u32 = 0;
     let mut prev_score: Option<f64> = None;
-
     for (model, score) in &ranked {
         if prev_score.is_none_or(|p: f64| (*score - p).abs() > f64::EPSILON) {
             current_rank += 1;
@@ -103,10 +92,8 @@ pub fn phase_rank(models: &[CachedModel], phase: SelectionPhase) -> BTreeMap<Str
         result.insert(model.name.clone(), current_rank);
         prev_score = Some(*score);
     }
-
     result
 }
-
 #[cfg(test)]
 #[path = "display_tests.rs"]
 mod tests;

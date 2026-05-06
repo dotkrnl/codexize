@@ -1,16 +1,3 @@
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
-    rc::Rc,
-    time::{Duration, Instant},
-};
-
-use crate::{
-    cache,
-    state::{self as session_state, Phase, SessionState},
-    tasks,
-};
-
 use super::super::{
     App, AppStartupOrigin,
     models::spawn_refresh,
@@ -19,12 +6,21 @@ use super::super::{
     status_line,
     tree::{build_tree, current_node_index, node_key_at_path},
 };
-
+use crate::{
+    cache,
+    state::{self as session_state, Phase, SessionState},
+    tasks,
+};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    rc::Rc,
+    time::{Duration, Instant},
+};
 impl App {
     pub fn new(state: SessionState) -> Self {
         Self::new_with_startup_origin(state, AppStartupOrigin::Default)
     }
-
     pub fn new_with_startup_origin(
         mut state: SessionState,
         startup_origin: AppStartupOrigin,
@@ -237,12 +233,10 @@ impl App {
         app
     }
 }
-
 #[cfg(test)]
 fn app_runner_supervisor() -> crate::runner::Supervisor {
     crate::runner::Supervisor::shared_for_test()
 }
-
 #[cfg(not(test))]
 fn app_runner_supervisor() -> crate::runner::Supervisor {
     crate::runner::Supervisor::new()

@@ -1,12 +1,10 @@
 use super::*;
-
 impl SessionPicker {
     pub(super) fn draw(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
         let term_h = area.height;
         let width = area.width;
         let degenerate = term_h < 10;
-
         let top_rule_right = if self.show_archived {
             Some("showing archived".to_string())
         } else {
@@ -20,14 +18,12 @@ impl SessionPicker {
             top_rule_right.as_deref(),
             width,
         );
-
         let status_content = if degenerate {
             None
         } else {
             self.status_line.render()
         };
         let status_h = if status_content.is_some() { 1 } else { 0 };
-
         let footer_h = if self.input_mode {
             let inner_width = width.saturating_sub(4).max(1) as usize;
             let wrapped_len = wrap_text(&self.input_buffer, inner_width).len().max(1) as u16;
@@ -35,30 +31,24 @@ impl SessionPicker {
         } else {
             1 + status_h
         };
-
         let chrome_h = 1 + 1 + footer_h;
         let body_h = term_h.saturating_sub(chrome_h);
         self.body_inner_height = body_h as usize;
-
         let mut y = area.y;
-
         let top_rect = Rect::new(area.x, y, width, 1);
         frame.render_widget(Paragraph::new(vec![top_rule]), top_rect);
         y += 1;
-
         if body_h > 0 {
             let body_rect = Rect::new(area.x, y, width, body_h);
             self.draw_list(frame, body_rect, degenerate);
             y += body_h;
         }
-
         if !self.input_mode {
             let bottom_rule = bottom_rule(width, None);
             let bottom_rect = Rect::new(area.x, y, width, 1);
             frame.render_widget(Paragraph::new(vec![bottom_rule]), bottom_rect);
             y += 1;
         }
-
         if let Some(kind) = self.confirm_modal {
             self.draw_modal(frame, area, kind);
         } else if self.input_mode {
@@ -73,7 +63,6 @@ impl SessionPicker {
                 self.draw_footer(frame, footer_rect, degenerate);
             }
         }
-
         if self.palette.open && area.height > 0 && area.width > 0 && self.confirm_modal.is_none() {
             let overlay_h = self.palette_overlay_height(area.height);
             if overlay_h > 0 {
@@ -89,7 +78,6 @@ impl SessionPicker {
             }
         }
     }
-
     fn draw_list(
         &mut self,
         frame: &mut ratatui::Frame<'_>,
@@ -97,7 +85,6 @@ impl SessionPicker {
         degenerate: bool,
     ) {
         let visible = self.visible_entries();
-
         if visible.is_empty() {
             let message = Paragraph::new("No sessions yet — press n to create one")
                 .style(Style::default().fg(Color::DarkGray));
@@ -112,20 +99,15 @@ impl SessionPicker {
             );
             return;
         }
-
         let now = SystemTime::now();
         let mut rendered_rows: Vec<(usize, Line<'static>)> = Vec::new();
-
         let mut selected_top_idx = 0;
         let mut selected_bottom_idx = 0;
-
         for (idx, entry) in visible.iter().enumerate() {
             let (badge, color, prefix) = phase_badge(entry.current_phase);
             let time = format_relative_time(entry.last_modified, now);
-
             let is_selected = idx == self.selected;
             let is_expanded = self.expanded.as_ref() == Some(&entry.session_id) && !degenerate;
-
             let leading = if is_selected { ">" } else { " " };
             let mut spans = vec![
                 Span::raw(leading),
@@ -156,17 +138,14 @@ impl SessionPicker {
                     span.style = span.style.add_modifier(Modifier::BOLD);
                 }
             }
-
             if is_selected {
                 selected_top_idx = rendered_rows.len();
             }
             rendered_rows.push((idx, line));
-
             if is_expanded {
                 let mut details = Vec::new();
                 let dim = Style::default().fg(Color::DarkGray);
                 let default_style = Style::default().fg(Color::White);
-
                 let phase_status = if entry.current_phase == Phase::Done {
                     "done"
                 } else if entry.current_phase == Phase::BlockedNeedsUser {
@@ -176,7 +155,6 @@ impl SessionPicker {
                 } else {
                     "running"
                 };
-
                 details.push(Line::from(vec![
                     Span::raw("      "),
                     Span::styled("Phase: ", dim),
@@ -185,7 +163,6 @@ impl SessionPicker {
                         default_style,
                     ),
                 ]));
-
                 let idea_text = if entry.idea_summary == "(no idea yet)" {
                     "(no idea yet)".to_string()
                 } else {
@@ -193,7 +170,6 @@ impl SessionPicker {
                     st.and_then(|s| s.idea_text.clone())
                         .unwrap_or_else(|| entry.idea_summary.clone())
                 };
-
                 let wrap_width = area.width.saturating_sub(14).max(1) as usize;
                 let idea_lines = wrap_text(&idea_text, wrap_width);
                 for (i, il) in idea_lines.iter().enumerate() {
@@ -204,7 +180,6 @@ impl SessionPicker {
                         Span::styled(il.clone(), default_style),
                     ]));
                 }
-
                 let st = SessionState::load(&entry.session_id).ok();
                 let last_agent = st
                     .and_then(|s| s.agent_runs.last().map(|r| r.window_name.clone()))
@@ -214,7 +189,6 @@ impl SessionPicker {
                     Span::styled("Last agent: ", dim),
                     Span::styled(last_agent, default_style),
                 ]));
-
                 let modified: DateTime<Local> = entry.last_modified.into();
                 details.push(Line::from(vec![
                     Span::raw("      "),
@@ -224,7 +198,6 @@ impl SessionPicker {
                         default_style,
                     ),
                 ]));
-
                 for d in details {
                     rendered_rows.push((idx, d));
                 }
@@ -233,24 +206,20 @@ impl SessionPicker {
                 selected_bottom_idx = rendered_rows.len() - 1;
             }
         }
-
         if selected_top_idx < self.viewport_top {
             self.viewport_top = selected_top_idx;
         } else if selected_bottom_idx >= self.viewport_top + area.height as usize {
             self.viewport_top = selected_bottom_idx + 1 - area.height as usize;
         }
-
         let end = (self.viewport_top + area.height as usize).min(rendered_rows.len());
         let buf = frame.buffer_mut();
         for (i, (_, line)) in rendered_rows[self.viewport_top..end].iter().enumerate() {
             buf.set_line(area.x, area.y + i as u16, line, area.width);
         }
     }
-
     pub(super) fn page_step(&self) -> usize {
         picker_view_model::page_step(self.body_inner_height)
     }
-
     fn keymap_line(
         &self,
         width: u16,
@@ -306,7 +275,6 @@ impl SessionPicker {
         ];
         render_keymap_line(&[&nav, &actions, &system], caps_fn, width)
     }
-
     fn draw_footer(
         &self,
         frame: &mut ratatui::Frame<'_>,
@@ -320,10 +288,8 @@ impl SessionPicker {
                 _ => true,
             }
         };
-
         let km_line = self.keymap_line(area.width, &caps_fn);
         let mut lines = Vec::new();
-
         if let Some(msg) = self.status_line.render() {
             if degenerate {
                 lines.push(msg); // replace keymap with status
@@ -334,7 +300,6 @@ impl SessionPicker {
         } else {
             lines.push(km_line);
         }
-
         let buf = frame.buffer_mut();
         for (i, line) in lines.iter().rev().enumerate() {
             let y = area.y + area.height.saturating_sub(1 + i as u16);
@@ -343,7 +308,6 @@ impl SessionPicker {
             }
         }
     }
-
     fn draw_input(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
         let inner_width = area.width.saturating_sub(4).max(1) as usize;
         let placeholder = "describe your idea...";
@@ -357,12 +321,10 @@ impl SessionPicker {
         } else {
             (self.input_buffer.clone(), Style::default().fg(Color::White))
         };
-
         let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }
-
         let cursor_pos = {
             let target = if self.input_buffer.is_empty() {
                 0
@@ -381,12 +343,10 @@ impl SessionPicker {
             }
             found
         };
-
         let mut content = Vec::new();
         for (idx, chunk) in wrapped.iter().enumerate() {
             let show_cursor_here = idx == cursor_pos.0;
             let split_col = if show_cursor_here { cursor_pos.1 } else { 0 };
-
             if show_cursor_here {
                 let byte = chunk
                     .char_indices()
@@ -408,7 +368,6 @@ impl SessionPicker {
                 content.push(Line::from(Span::styled(chunk.clone(), text_style)));
             }
         }
-
         let caps_fn: &dyn Fn(Option<Capability>) -> bool = &|_| true;
         let controls = vec![
             KeyBinding {
@@ -425,7 +384,6 @@ impl SessionPicker {
             },
         ];
         let keymap = render_keymap_line(&[&controls], caps_fn, area.width);
-
         let sheet_lines = bottom_sheet(content, keymap, area.height, area.width);
         for (i, line) in sheet_lines.into_iter().enumerate() {
             if i < area.height as usize {
@@ -435,7 +393,6 @@ impl SessionPicker {
             }
         }
     }
-
     fn draw_modal(
         &self,
         frame: &mut ratatui::Frame<'_>,
@@ -453,7 +410,6 @@ impl SessionPicker {
                 Some("This cannot be undone."),
             ),
         };
-
         let mut content = vec![Line::from(Span::styled(
             title,
             Style::default().fg(Color::White),
@@ -470,7 +426,6 @@ impl SessionPicker {
             Style::default().fg(Color::Gray),
         )));
         content.push(Line::from(""));
-
         let caps_fn: &dyn Fn(Option<Capability>) -> bool = &|_| true;
         let actions = vec![
             KeyBinding {
@@ -491,7 +446,6 @@ impl SessionPicker {
             caps_fn,
             area.width.clamp(40, 80).saturating_sub(4),
         );
-
         // Picker has underlying chrome behind the confirmation modal, so we
         // draw the dim backdrop before the panel.
         render_modal_backdrop(frame, area);
@@ -504,7 +458,6 @@ impl SessionPicker {
             modal_keymap,
         );
     }
-
     fn palette_overlay_height(&self, total_height: u16) -> u16 {
         picker_view_model::palette_overlay_height(
             &self.palette.buffer,
@@ -514,7 +467,6 @@ impl SessionPicker {
             total_height,
         )
     }
-
     fn palette_lines(&self, width: u16, inner_h: u16) -> Vec<Line<'static>> {
         picker_view_model::palette_lines(
             &self.palette.buffer,

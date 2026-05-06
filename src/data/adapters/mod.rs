@@ -1,9 +1,7 @@
+use crate::selection::VendorKind;
 use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-use crate::selection::VendorKind;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EffortLevel {
     Low,
@@ -11,14 +9,12 @@ pub enum EffortLevel {
     Normal,
     Tough,
 }
-
 pub struct AgentRun {
     pub model: String,
     pub prompt_path: PathBuf,
     pub effort: EffortLevel,
     pub modes: LaunchModes,
 }
-
 pub fn all_vendors() -> [VendorKind; 4] {
     [
         VendorKind::Codex,
@@ -27,11 +23,9 @@ pub fn all_vendors() -> [VendorKind; 4] {
         VendorKind::Kimi,
     ]
 }
-
 pub fn short_model(model: &str) -> String {
     crate::model_names::run_label_name(model)
 }
-
 pub fn effort_suffix(vendor: VendorKind, effort: EffortLevel) -> &'static str {
     match effort {
         EffortLevel::Normal => "",
@@ -46,14 +40,12 @@ pub fn effort_suffix(vendor: VendorKind, effort: EffortLevel) -> &'static str {
         },
     }
 }
-
 pub fn effort_suffix_from_str(vendor_str: &str, effort: EffortLevel) -> &'static str {
     match crate::selection::vendor::str_to_vendor(vendor_str) {
         Some(vendor) => effort_suffix(vendor, effort),
         None => "",
     }
 }
-
 pub fn run_label_with_model(
     base: &str,
     model: &str,
@@ -68,7 +60,6 @@ pub fn run_label_with_model(
         format!("{base} {short}{suffix}")
     }
 }
-
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

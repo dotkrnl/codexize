@@ -1,11 +1,9 @@
 use super::types::{CachedModel, VendorKind};
 use crate::dashboard;
-
 /// Vendors that expose a high-reasoning ("tough") mode.
 pub fn is_effort_capable(vendor: VendorKind) -> bool {
     matches!(vendor, VendorKind::Claude | VendorKind::Codex)
 }
-
 /// Models eligible for tough tasks. Combines the vendor-capability filter
 /// with the Claude-tier filter: only opus Claude variants qualify; all
 /// Codex models qualify; Kimi and Gemini do not.
@@ -19,7 +17,6 @@ pub fn is_tough_eligible(model: &CachedModel) -> bool {
         VendorKind::Kimi | VendorKind::Gemini => false,
     }
 }
-
 /// Models eligible for Cheap mode. This stays parallel to
 /// [`is_tough_eligible`] so budget-tier policy is centralized with vendor
 /// model-name matching.
@@ -31,7 +28,6 @@ pub fn is_cheap_eligible(model: &CachedModel) -> bool {
         VendorKind::Gemini => name.contains("flash") || name.contains("nano"),
     }
 }
-
 pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
     match v {
         VendorKind::Claude => "claude",
@@ -40,7 +36,6 @@ pub fn vendor_kind_to_str(v: VendorKind) -> &'static str {
         VendorKind::Kimi => "moonshotai",
     }
 }
-
 pub fn str_to_vendor(s: &str) -> Option<VendorKind> {
     match s {
         "claude" => Some(VendorKind::Claude),
@@ -50,11 +45,9 @@ pub fn str_to_vendor(s: &str) -> Option<VendorKind> {
         _ => None,
     }
 }
-
 pub fn vendor_for_dashboard_model(model: &dashboard::DashboardModel) -> Option<VendorKind> {
     let name = model.name.as_str();
     let vendor = model.vendor.as_str();
-
     // Check by model name patterns first
     if name.starts_with("claude-") || name.contains("claude") {
         return Some(VendorKind::Claude);
@@ -76,7 +69,6 @@ pub fn vendor_for_dashboard_model(model: &dashboard::DashboardModel) -> Option<V
     if name.starts_with("kimi-") || name.contains("kimi") || name.contains("moonshot") {
         return Some(VendorKind::Kimi);
     }
-
     // Check by vendor name
     match vendor {
         "anthropic" | "claude" => Some(VendorKind::Claude),
@@ -98,7 +90,6 @@ pub fn vendor_for_dashboard_model(model: &dashboard::DashboardModel) -> Option<V
         }
     }
 }
-
 #[cfg(test)]
 #[path = "vendor_tests.rs"]
 mod tests;

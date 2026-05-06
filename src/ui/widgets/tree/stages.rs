@@ -1,7 +1,6 @@
 use super::*;
 use itertools::Itertools;
 use std::collections::BTreeSet;
-
 fn node(
     label: impl Into<String>,
     kind: NodeKind,
@@ -19,7 +18,6 @@ fn node(
         leaf_run_id: None,
     }
 }
-
 /// Boundary rounds — the rounds at which final-validation has run, sorted
 /// ascending and deduplicated. Iteration N's round range is bounded above
 /// by `iteration_boundaries(state)[N - 1]` (when present); when absent the
@@ -34,7 +32,6 @@ fn iteration_boundaries(state: &SessionState) -> Vec<u32> {
         .dedup()
         .collect()
 }
-
 /// Inclusive (start, optional end) round range for the given outer
 /// iteration. End is `None` while the iteration's closing FV hasn't run,
 /// which means the "open" iteration absorbs every round from `start`
@@ -52,12 +49,10 @@ pub(super) fn iteration_round_range(state: &SessionState, iteration: u32) -> (u3
     let end = bounds.get((iteration - 1) as usize).copied();
     (start, end)
 }
-
 pub(super) fn round_in_iteration(state: &SessionState, iteration: u32, round: u32) -> bool {
     let (start, end) = iteration_round_range(state, iteration);
     round >= start && end.is_none_or(|last| round <= last)
 }
-
 /// Total number of iteration trios the dashboard should emit. Equal to
 /// the largest iteration recorded on a pipeline item (validator-created
 /// future tasks bump this even before they've started running) OR the
@@ -76,7 +71,6 @@ pub(super) fn total_iterations(state: &SessionState) -> u32 {
     let fv_iterations = iteration_boundaries(state).len() as u32;
     max_pipeline.max(fv_iterations).max(1)
 }
-
 /// Decorate a stage label with " · iteration N" when N >= 2 so the
 /// label-based StageKey lookup can recover the iteration index. Iteration 1
 /// keeps the bare label so existing tests and snapshots stay stable.
@@ -87,7 +81,6 @@ pub(super) fn iteration_label(base: &str, iteration: u32) -> String {
         format!("{base} · iteration {iteration}")
     }
 }
-
 /// Task ids that belong to the requested iteration (in pipeline order).
 pub(super) fn task_ids_for_iteration(state: &SessionState, iteration: u32) -> Vec<u32> {
     state
@@ -99,7 +92,6 @@ pub(super) fn task_ids_for_iteration(state: &SessionState, iteration: u32) -> Ve
         .unique()
         .collect()
 }
-
 pub(super) fn build_idea_node(state: &SessionState) -> Node {
     let (status, summary) = match state.current_phase {
         Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
@@ -107,7 +99,6 @@ pub(super) fn build_idea_node(state: &SessionState) -> Node {
     };
     node("Idea", NodeKind::Stage, status, summary, Vec::new())
 }
-
 pub(super) fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
     let recovery_rounds = recovery_rounds_for_stage(state, stage_key);
     let runs: Vec<&RunRecord> = state
@@ -122,7 +113,6 @@ pub(super) fn build_simple_stage(state: &SessionState, stage_key: &str, label: &
     let children = runs.iter().map(|run| agent_run_node(run)).collect();
     node(label, NodeKind::Stage, status, summary, children)
 }
-
 pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
     let recovery_rounds = recovery_rounds_for_stage(state, stage_key);
     let runs: Vec<&RunRecord> = state
@@ -152,7 +142,6 @@ pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &
         .collect();
     node(label, NodeKind::Stage, status, summary, children)
 }
-
 pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node {
     let in_iteration_round = |round: u32| round_in_iteration(state, iteration, round);
     let coder_runs: Vec<&RunRecord> = state
@@ -220,7 +209,6 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             task_id_set.contains(&id).then_some((id, item.status))
         })
         .collect();
-
     // Group runs into chronological round segments. A "segment" is one
     // contiguous streak of same-(task_id, round) runs in global id order,
     // with no run of a different (task_id, round) interleaved between them.
@@ -258,7 +246,6 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         }
         last_key = Some(key);
     }
-
     let mut children = Vec::new();
     for &task_id in &ordered_task_ids {
         let is_tough = coder_runs
@@ -319,7 +306,6 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 }
             }
         };
-
         let base_label = match state.builder.task_titles.get(&task_id) {
             Some(title) if !title.trim().is_empty() => {
                 format!("Task {}: {}", task_id, title.trim())
@@ -400,7 +386,13 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         } else {
             NodeStatus::Pending
         };
-        let recovery_node = node("Builder Recovery", NodeKind::Task, recovery_status, "", round_nodes);
+        let recovery_node = node(
+            "Builder Recovery",
+            NodeKind::Task,
+            recovery_status,
+            "",
+            round_nodes,
+        );
         let target_task_id = state
             .builder
             .recovery_trigger_task_id
@@ -426,17 +418,20 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             children.insert(fallback_pos, recovery_node);
         }
     }
-    node(iteration_label("Loop", iteration), NodeKind::Stage, status, summary, children)
+    node(
+        iteration_label("Loop", iteration),
+        NodeKind::Stage,
+        status,
+        summary,
+        children,
+    )
 }
-
 pub(super) fn build_simplification_stage(state: &SessionState, iteration: u32) -> Node {
     build_per_iteration_stage(state, iteration, "simplifier", "Simplification")
 }
-
 pub(super) fn build_final_validation_stage(state: &SessionState, iteration: u32) -> Node {
     build_per_iteration_stage(state, iteration, "final-validation", "Final Validation")
 }
-
 /// Shared scaffolding for the iteration-scoped trio's tail two stages.
 /// Filters runs to this iteration, derives stage status/summary (delegating
 /// to the global phase machinery only for iteration 1, since later trios
@@ -478,9 +473,14 @@ fn build_per_iteration_stage(
             )
         })
         .collect();
-    node(iteration_label(label, iteration), NodeKind::Stage, status, summary, children)
+    node(
+        iteration_label(label, iteration),
+        NodeKind::Stage,
+        status,
+        summary,
+        children,
+    )
 }
-
 /// Roll up the per-iteration Simplification / Final Validation status when
 /// iteration > 1: only the *current* iteration owns the global phase
 /// machinery (`Phase::Simplification`/`Phase::FinalValidation`), so older

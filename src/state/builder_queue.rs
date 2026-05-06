@@ -1,23 +1,19 @@
 use super::BuilderState;
 use crate::state::{PipelineItem, PipelineItemStatus};
-
 impl BuilderState {
     pub(super) fn is_selectable_task_item(item: &PipelineItem) -> bool {
         matches!(item.status, PipelineItemStatus::Pending)
             || (item.status == PipelineItemStatus::Revise
                 && item.mode.as_deref() != Some("superseded"))
     }
-
     pub(super) fn pipeline_task_items(&self) -> impl Iterator<Item = &PipelineItem> {
         self.pipeline_items
             .iter()
             .filter(|item| item.stage == "coder" && item.task_id.is_some())
     }
-
     pub fn next_pipeline_id(&self) -> u32 {
         self.pipeline_items.iter().map(|i| i.id).max().unwrap_or(0) + 1
     }
-
     pub fn push_pipeline_item(&mut self, mut item: PipelineItem) -> u32 {
         if item.id == 0 {
             item.id = self.next_pipeline_id();
@@ -26,15 +22,12 @@ impl BuilderState {
         self.pipeline_items.push(item);
         id
     }
-
     pub fn get_pipeline_item(&self, id: u32) -> Option<&PipelineItem> {
         self.pipeline_items.iter().find(|i| i.id == id)
     }
-
     pub fn get_pipeline_item_mut(&mut self, id: u32) -> Option<&mut PipelineItem> {
         self.pipeline_items.iter_mut().find(|i| i.id == id)
     }
-
     pub fn update_pipeline_status(&mut self, id: u32, status: PipelineItemStatus) -> bool {
         if let Some(item) = self.get_pipeline_item_mut(id) {
             item.status = status;
@@ -43,28 +36,24 @@ impl BuilderState {
             false
         }
     }
-
     pub fn pipeline_items_by_stage(&self, stage: &str) -> Vec<&PipelineItem> {
         self.pipeline_items
             .iter()
             .filter(|i| i.stage == stage)
             .collect()
     }
-
     pub fn pending_pipeline_items(&self) -> Vec<&PipelineItem> {
         self.pipeline_items
             .iter()
             .filter(|i| i.status == PipelineItemStatus::Pending)
             .collect()
     }
-
     pub fn running_pipeline_items(&self) -> Vec<&PipelineItem> {
         self.pipeline_items
             .iter()
             .filter(|i| i.status == PipelineItemStatus::Running)
             .collect()
     }
-
     pub fn reset_task_pipeline(&mut self, tasks: impl IntoIterator<Item = (u32, Option<String>)>) {
         self.pipeline_items.clear();
         for (task_id, title) in tasks {
@@ -84,13 +73,11 @@ impl BuilderState {
         self.iteration = 0;
         self.last_verdict = None;
     }
-
     pub fn current_task_id(&self) -> Option<u32> {
         self.pipeline_task_items()
             .find(|item| item.status == PipelineItemStatus::Running)
             .and_then(|item| item.task_id)
     }
-
     pub fn done_task_ids(&self) -> Vec<u32> {
         self.pipeline_task_items()
             .filter(|item| {
@@ -102,14 +89,12 @@ impl BuilderState {
             .filter_map(|item| item.task_id)
             .collect()
     }
-
     pub fn pending_task_ids(&self) -> Vec<u32> {
         self.pipeline_task_items()
             .filter(|item| Self::is_selectable_task_item(item))
             .filter_map(|item| item.task_id)
             .collect()
     }
-
     pub fn has_unfinished_tasks(&self) -> bool {
         self.pipeline_task_items().any(|item| {
             item.status == PipelineItemStatus::Running
@@ -118,7 +103,6 @@ impl BuilderState {
                 || Self::is_selectable_task_item(item)
         })
     }
-
     pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
         if let Some(index) = self.pipeline_items.iter().position(|item| {
             item.stage == "coder"
@@ -129,7 +113,6 @@ impl BuilderState {
             self.iteration = round;
             return self.pipeline_items[index].task_id;
         }
-
         if let Some(index) = self.pipeline_items.iter().position(|item| {
             item.stage == "coder" && item.task_id.is_some() && Self::is_selectable_task_item(item)
         }) {
@@ -139,10 +122,8 @@ impl BuilderState {
             let task_id = self.pipeline_items[index].task_id;
             return task_id;
         }
-
         None
     }
-
     pub fn set_task_status(
         &mut self,
         task_id: u32,

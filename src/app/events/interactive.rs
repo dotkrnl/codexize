@@ -1,10 +1,7 @@
-use std::time::Duration;
-
-use crate::state::{Message, MessageKind, MessageSender, RunStatus};
-
 use super::super::App;
 use super::super::status_line::Severity;
-
+use crate::state::{Message, MessageKind, MessageSender, RunStatus};
+use std::time::Duration;
 impl App {
     pub(crate) fn interactive_run_active(&self) -> bool {
         let Some(run_id) = self.current_run_id else {
@@ -14,7 +11,6 @@ impl App {
             run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
         })
     }
-
     pub(crate) fn interactive_run_waiting_for_input(&self) -> bool {
         let Some(run_id) = self.current_run_id else {
             return false;
@@ -26,7 +22,6 @@ impl App {
                 && self.runner_supervisor.run_is_waiting_for_input(run_id)
         })
     }
-
     pub(crate) fn exit_interactive_run_locally(&mut self) {
         let Some(run_id) = self.current_run_id else {
             return;
@@ -37,7 +32,6 @@ impl App {
             self.runner_supervisor.request_run_exit(run_id);
         }
     }
-
     pub(crate) fn send_interactive_input(&mut self, input: String) {
         let Some(run_id) = self.current_run_id else {
             return;
@@ -69,7 +63,6 @@ impl App {
             );
         }
     }
-
     pub(crate) fn append_user_input_message(&mut self, run_id: u64, input: String) {
         let message = Message {
             ts: chrono::Utc::now(),
@@ -87,7 +80,6 @@ impl App {
             self.agent_last_change = Some(std::time::Instant::now());
         }
     }
-
     pub(crate) fn interrupt_interactive_input(&mut self, input: String) {
         let trimmed = input.trim().to_string();
         if trimmed.is_empty() {
@@ -117,7 +109,6 @@ impl App {
             );
         }
     }
-
     pub(crate) fn toggle_noninteractive_texts(&mut self) {
         self.state.show_noninteractive_texts = !self.state.show_noninteractive_texts;
         let label = if self.state.show_noninteractive_texts {
@@ -139,7 +130,6 @@ impl App {
             self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
         }
     }
-
     pub(crate) fn toggle_thinking_texts(&mut self) {
         self.state.show_thinking_texts = !self.state.show_thinking_texts;
         let label = if self.state.show_thinking_texts {

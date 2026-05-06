@@ -1,20 +1,17 @@
-#[cfg(test)]
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
 use crate::dashboard::DashboardModel;
 #[cfg(test)]
 use crate::dashboard::IngestEvent;
 use crate::model_names;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
-
+#[cfg(test)]
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[derive(Debug, Clone)]
 pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
     pub(crate) display_order: usize,
 }
-
 /// Canonicalized score record produced by score ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
 /// the existing exact-match merge keeps working; richer normalization is
@@ -47,13 +44,11 @@ pub(crate) struct ScoreEntry {
     pub(crate) score_source: ScoreSource,
     pub(crate) ipbr_row_matched: bool,
 }
-
 #[derive(Debug, Clone)]
 pub(crate) struct MergeResult {
     pub(crate) models: Vec<DashboardModel>,
     pub(crate) warnings: Vec<String>,
 }
-
 /// Normalize an ipbr lookup key per spec §"Model Matching":
 /// lowercase, replace runs of `.`, `_`, `/`, and ASCII whitespace with
 /// `-`, collapse repeated `-`, then trim leading/trailing `-`.
@@ -83,7 +78,6 @@ pub(crate) fn normalize_ipbr_key(input: &str) -> String {
     }
     out
 }
-
 #[cfg(test)]
 pub(crate) fn merge(
     inventory: Vec<InventoryEntry>,
@@ -91,7 +85,6 @@ pub(crate) fn merge(
 ) -> Vec<DashboardModel> {
     merge_with_warnings(inventory, scores).models
 }
-
 pub(crate) fn merge_with_warnings(
     inventory: Vec<InventoryEntry>,
     scores: Vec<ScoreEntry>,
@@ -102,7 +95,6 @@ pub(crate) fn merge_with_warnings(
         .filter(|s| s.score_source != ScoreSource::Ipbr)
         .map(|s| (s.name.clone(), s))
         .collect();
-
     let mut consumed_ipbr_scores = BTreeSet::new();
     let mut models: Vec<DashboardModel> = Vec::with_capacity(inventory.len());
     for inv in inventory {
@@ -131,7 +123,6 @@ pub(crate) fn merge_with_warnings(
             ));
         }
     }
-
     let inv_names: std::collections::HashSet<String> =
         models.iter().map(|m| m.name.clone()).collect();
     for (score_index, sc) in scores.iter().enumerate() {
@@ -144,14 +135,12 @@ pub(crate) fn merge_with_warnings(
             ));
         }
     }
-
     models.sort_by_key(|m| m.display_order);
     MergeResult {
         models,
         warnings: ipbr_lookup.warnings,
     }
 }
-
 pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
     scores
         .into_iter()
@@ -171,14 +160,12 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
         })
         .collect()
 }
-
 pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
     inventory
         .into_iter()
         .map(|inv| empty_inventory_model(inv.name, inv.vendor, inv.display_order))
         .collect()
 }
-
 fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> DashboardModel {
     DashboardModel {
         name,
@@ -195,7 +182,6 @@ fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> 
         fallback_from: None,
     }
 }
-
 pub fn synthesize_sibling(
     name: &str,
     vendor: &str,
@@ -212,7 +198,6 @@ pub fn synthesize_sibling(
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
     })?;
-
     Some(DashboardModel {
         name: name.to_string(),
         vendor: if !vendor.is_empty() {
@@ -235,7 +220,6 @@ pub fn synthesize_sibling(
         fallback_from: Some(sibling.name.clone()),
     })
 }
-
 #[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(crate) fn merged_axes(
@@ -249,7 +233,6 @@ pub(crate) fn merged_axes(
     let mut axes: BTreeMap<String, f64> = BTreeMap::new();
     let mut provenance: BTreeMap<String, String> = BTreeMap::new();
     let mut events = Vec::new();
-
     for entry in entries.iter().rev() {
         let suite = entry
             .get("suite")
@@ -287,10 +270,8 @@ pub(crate) fn merged_axes(
             }
         }
     }
-
     Some((axes.into_iter().collect(), provenance, events))
 }
-
 #[cfg(test)]
 pub(crate) fn value_to_f64(value: Option<&Value>) -> Option<f64> {
     match value {
@@ -300,7 +281,6 @@ pub(crate) fn value_to_f64(value: Option<&Value>) -> Option<f64> {
         _ => None,
     }
 }
-
 #[cfg(test)]
 pub(crate) fn value_to_string(value: &Value) -> String {
     match value {
@@ -308,7 +288,6 @@ pub(crate) fn value_to_string(value: &Value) -> String {
         other => other.to_string(),
     }
 }
-
 fn dashboard_model_from_score(
     name: String,
     inventory_vendor: &str,
@@ -346,7 +325,6 @@ fn dashboard_model_from_score(
         fallback_from,
     }
 }
-
 fn version_stem(name: &str) -> Option<&str> {
     let (prefix, tail) = name.rsplit_once('.')?;
     if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
@@ -355,7 +333,6 @@ fn version_stem(name: &str) -> Option<&str> {
         None
     }
 }
-
 fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEntry> {
     let stem = version_stem(name)?;
     scores
@@ -367,21 +344,17 @@ fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEn
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
 }
-
 struct IpbrLookup {
     matches: HashMap<String, usize>,
     warnings: Vec<String>,
 }
-
 fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup {
     let mut owners: HashMap<String, usize> = HashMap::new();
     let mut collisions: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
-
     for (index, score) in scores.iter().enumerate() {
         if score.score_source != ScoreSource::Ipbr {
             continue;
         }
-
         for key in ipbr_keys_for_score(score) {
             match owners.get(&key).copied() {
                 Some(owner) if owner != index => {
@@ -394,11 +367,9 @@ fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup {
             }
         }
     }
-
     for key in collisions.keys() {
         owners.remove(key);
     }
-
     let matches = owners.into_iter().collect();
     let warnings = collisions
         .into_iter()
@@ -411,10 +382,8 @@ fn build_ipbr_lookup(scores: &[ScoreEntry]) -> IpbrLookup {
             format!("ipbr normalized key '{key}' collided across rows: {rows}; key ignored")
         })
         .collect();
-
     IpbrLookup { matches, warnings }
 }
-
 fn ipbr_keys_for_score(score: &ScoreEntry) -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
     let display_key = normalize_ipbr_key(&score.name);
@@ -435,7 +404,6 @@ fn ipbr_keys_for_score(score: &ScoreEntry) -> BTreeSet<String> {
     }
     keys
 }
-
 fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
     let target = model_names::EXPLICIT_SCORE_FALLBACKS
         .iter()
@@ -443,7 +411,6 @@ fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&
         .map(|(_, to)| *to)?;
     existing.iter().find(|m| m.name == target)
 }
-
 #[cfg(test)]
 #[path = "dashboard_model_tests.rs"]
 mod tests;

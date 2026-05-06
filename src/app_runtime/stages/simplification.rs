@@ -1,5 +1,3 @@
-use anyhow::Result;
-
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
@@ -7,12 +5,11 @@ use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
-
+use anyhow::Result;
 impl App {
     pub(crate) fn launch_simplifier(&mut self) {
         let _ = self.launch_simplifier_with_model(None);
     }
-
     pub(crate) fn launch_simplifier_with_model(
         &mut self,
         override_model: Option<CachedModel>,
@@ -26,11 +23,9 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         }
-
         let Phase::Simplification(round) = self.state.current_phase else {
             return false;
         };
-
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
@@ -46,22 +41,18 @@ impl App {
             .join("001")
             .join("review_scope.toml");
         let simplification_path = round_dir.join("simplification.toml");
-
         // Force a fresh verdict each entry so a stale TOML can't be mistaken
         // for this run's output during finalization. Mirrors final-validation.
         let _ = std::fs::remove_file(&simplification_path);
-
         if let Err(err) = read_review_scope(&review_scope_file) {
             self.record_agent_error(format!("invalid review scope: {err:#}"));
             let _ = self.state.save();
             return false;
         }
-
         let modes = self.state.launch_modes();
         // SelectionPhase::Build matches the coder's effort dial so
         // the simplifier inherits the same "normal vs. tough" wiring.
         let effort = modes.effort_for(EffortLevel::Normal, SelectionPhase::Build);
-
         // Model selection precedence (spec §2.3, Q5/b):
         //   1. explicit operator override (retry from picker);
         //   2. an already-selected simplifier run for this round (retry
@@ -90,7 +81,6 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-
         let attempt = self.attempt_for("simplifier", None, round);
         let live_summary_path = self.live_summary_path_for_run("simplifier", None, round, attempt);
         let prompt = simplifier_prompt(
@@ -109,7 +99,6 @@ impl App {
             self.record_agent_error(format!("error writing prompt: {err}"));
             return false;
         }
-
         let run = AgentRun {
             model: model.clone(),
             prompt_path: prompt_path.clone(),
@@ -169,7 +158,6 @@ impl App {
             }
         }
     }
-
     /// Co-located success-finalization for `Phase::Simplification(round)`.
     ///
     /// The artifact-validation gate above has already accepted the

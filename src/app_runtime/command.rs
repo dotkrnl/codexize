@@ -13,9 +13,7 @@
 //! [`AppCommand::CancelModal`]). Remaining focus-local key handling still
 //! lives in `app/` and migrates out as each surface is split into a
 //! narrower domain variant.
-
 use super::view::StageId;
-
 /// UI-neutral key action emitted by terminal input collection.
 ///
 /// This intentionally mirrors only operator-visible key intent, not the
@@ -27,7 +25,6 @@ pub struct UiKey {
     pub ctrl: bool,
     pub alt: bool,
 }
-
 /// Terminal-independent key identity used inside [`AppCommand::KeyPress`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiKeyCode {
@@ -46,7 +43,6 @@ pub enum UiKeyCode {
     Char(char),
     Unknown,
 }
-
 /// Domain-level operator intent. Variants intentionally avoid encoding
 /// terminal-specific input (keysyms, scroll deltas in pixels, …) so the
 /// same enum can drive a non-terminal UI.
@@ -96,7 +92,6 @@ pub enum AppCommand {
     /// Cancel an active modal without taking the destructive action.
     CancelModal,
 }
-
 #[cfg(test)]
 #[path = "command_tests.rs"]
 mod tests;

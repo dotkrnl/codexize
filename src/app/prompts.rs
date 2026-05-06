@@ -16,11 +16,9 @@ pub(crate) use super::stage_support::{
     restore_artifacts, rewrite_tasks_for_revise, task_effort_for, task_toml_for,
     validate_stage_toml_writes, write_review_scope_artifact,
 };
-
 // formatdoc! remains the canonical renderer for thin inline wrappers; see
 // `prompt_builders::PromptCtx::live_summary_instruction`.
 #[allow(unused_imports)]
-use indoc::formatdoc;
-
-#[allow(unused_imports)]
 pub(super) use super::review_banner::{REVIEW_BANNER, prepend_review_banner, strip_review_banner};
+#[allow(unused_imports)]
+use indoc::formatdoc;

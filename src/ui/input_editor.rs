@@ -4,9 +4,7 @@
 //! `String` and `usize` cursor; this module only mutates them in response
 //! to key events. Returns `true` when a key is consumed, `false` to let
 //! the caller handle it (e.g. Enter, Esc).
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 pub fn apply(buffer: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
     let len = buffer.chars().count();
     if *cursor > len {
@@ -93,7 +91,6 @@ pub fn apply(buffer: &mut String, cursor: &mut usize, key: KeyEvent) -> bool {
         _ => false,
     }
 }
-
 pub fn insert_str(buffer: &mut String, cursor: &mut usize, s: &str) {
     let len = buffer.chars().count();
     if *cursor > len {
@@ -105,14 +102,12 @@ pub fn insert_str(buffer: &mut String, cursor: &mut usize, s: &str) {
     buffer.insert_str(byte_cursor, &normalized);
     *cursor += inserted_chars;
 }
-
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
         .map(|(i, _)| i)
         .unwrap_or(s.len())
 }
-
 fn delete_backward(buffer: &mut String, cursor: &mut usize) {
     if *cursor == 0 {
         return;
@@ -122,7 +117,6 @@ fn delete_backward(buffer: &mut String, cursor: &mut usize) {
     buffer.replace_range(prev..here, "");
     *cursor -= 1;
 }
-
 fn delete_forward(buffer: &mut String, cursor: &mut usize) {
     let len = buffer.chars().count();
     if *cursor >= len {
@@ -132,7 +126,6 @@ fn delete_forward(buffer: &mut String, cursor: &mut usize) {
     let next = char_to_byte(buffer, *cursor + 1);
     buffer.replace_range(here..next, "");
 }
-
 fn delete_word_backward(buffer: &mut String, cursor: &mut usize) {
     let chars: Vec<char> = buffer.chars().collect();
     let mut end_char = *cursor;
@@ -147,7 +140,6 @@ fn delete_word_backward(buffer: &mut String, cursor: &mut usize) {
     buffer.replace_range(start_byte..here, "");
     *cursor = end_char;
 }
-
 #[cfg(test)]
 #[path = "input_editor_tests.rs"]
 mod tests;

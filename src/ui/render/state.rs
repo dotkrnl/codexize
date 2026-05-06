@@ -6,9 +6,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 /// Determines whether the row at `index` is the last sibling at its depth.
 ///
 /// Scans forward from `index + 1` until a row with depth <= current depth is
@@ -22,11 +20,9 @@ pub(crate) fn is_last_sibling(visible_rows: &[VisibleNodeRow], index: usize) -> 
         .map(|r| r.depth < cur_depth)
         .unwrap_or(true)
 }
-
 pub(crate) fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
 }
-
 pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
     match status {
         NodeStatus::Running => Some(Color::Cyan),
@@ -36,7 +32,6 @@ pub(crate) fn status_highlight_bg(status: NodeStatus) -> Option<Color> {
         NodeStatus::Pending | NodeStatus::WaitingUser | NodeStatus::Skipped => None,
     }
 }
-
 /// Render the parsed final-validation verdict for the dashboard body.
 ///
 /// Always emits the full report (status, summary, findings, gaps with
@@ -77,7 +72,6 @@ pub fn final_validation_report_lines(
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
     };
-
     let indent_width = indent.chars().count();
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
@@ -86,7 +80,6 @@ pub fn final_validation_report_lines(
         Span::styled(" · ", dim),
         Span::styled(status_text.to_string(), status_style),
     ]));
-
     push_wrapped_field(
         &mut lines,
         indent,
@@ -97,7 +90,6 @@ pub fn final_validation_report_lines(
         Style::default(),
         width,
     );
-
     if !verdict.findings.is_empty() {
         lines.push(Line::from(vec![
             Span::styled(indent.to_string(), dim),
@@ -166,7 +158,6 @@ pub fn final_validation_report_lines(
     }
     lines
 }
-
 /// Push a "<indent><prefix><body>" entry through the shared
 /// [`wrap_lines_with_prefix`] helper so the validation report's wrap behavior
 /// matches every other transcript-shaped surface (chat messages, status
@@ -197,33 +188,28 @@ fn push_wrapped_field(
         width,
     ));
 }
-
 pub fn sanitize_live_summary(text: &str) -> String {
     let stripped = strip_ansi(text);
     let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(500).collect()
 }
-
 pub(crate) fn skip_to_impl_content(
     rationale: Option<&str>,
     kind: Option<crate::artifacts::SkipToImplKind>,
     width: u16,
 ) -> Vec<Line<'static>> {
     use crate::artifacts::SkipToImplKind;
-
     let is_nothing = kind == Some(SkipToImplKind::NothingToDo);
     let header = if is_nothing {
         "The brainstorm agent found nothing to implement."
     } else {
         "The brainstorm agent proposes skipping directly to implementation."
     };
-
     let rationale_text = rationale
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("(no rationale provided)");
     let rationale_lines = wrap_text(rationale_text, width.max(1) as usize);
-
     let mut lines = vec![
         Line::from(Span::styled(
             header.to_string(),
@@ -238,10 +224,8 @@ pub(crate) fn skip_to_impl_content(
     for line in rationale_lines {
         lines.push(Line::from(line));
     }
-
     lines
 }
-
 pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line<'static>> {
     let (captured_short, current_short) = decision
         .map(|d| {
@@ -250,7 +234,6 @@ pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line
             (cap.to_string(), cur.to_string())
         })
         .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
-
     vec![
         Line::from(Span::styled(
             "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),
@@ -266,7 +249,6 @@ pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line
         ]),
     ]
 }
-
 pub(crate) fn stage_error_title(stage_id: StageId) -> &'static str {
     match stage_id {
         StageId::Brainstorm => "Brainstorm failed",
@@ -278,7 +260,6 @@ pub(crate) fn stage_error_title(stage_id: StageId) -> &'static str {
         StageId::Review => "Review failed",
     }
 }
-
 /// Semantic accent for a modal dialog: Red = error/failure, Yellow =
 /// warning/guard/skip/quit/confirmation, Cyan = paused/informational.
 /// The renderer applies the bold modifier itself; callers pass the bare
@@ -294,7 +275,6 @@ pub(crate) fn modal_accent_color(kind: ModalKind) -> Color {
         ModalKind::FinalValidationBlocked => Color::Red,
     }
 }
-
 pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
     match kind {
         ModalKind::SkipToImpl => Some("Skip to implementation?"),
@@ -307,7 +287,6 @@ pub(crate) fn modal_title(kind: ModalKind) -> Option<&'static str> {
         ModalKind::FinalValidationBlocked => Some("Final Validation Blocked"),
     }
 }
-
 pub(crate) fn stage_error_content(
     _stage_id: StageId,
     error: Option<&str>,
@@ -319,7 +298,6 @@ pub(crate) fn stage_error_content(
         .unwrap_or("(no error details)");
     let truncated: String = error_text.chars().take(300).collect();
     let wrapped = wrap_text(&truncated, width.max(1) as usize);
-
     // The modal title already carries the semantic red accent. Keep the body
     // content light so stage errors follow the shared modal body-color
     // contract instead of repeating an accent-colored heading inside the body.
@@ -330,10 +308,8 @@ pub(crate) fn stage_error_content(
             Style::default().fg(Color::White),
         )));
     }
-
     lines
 }
-
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;

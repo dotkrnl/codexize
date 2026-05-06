@@ -1,6 +1,5 @@
 use super::*;
 use crate::tui::wrap_text;
-
 impl App {
     pub(crate) fn input_sheet_content(&self, width: u16) -> Vec<Line<'static>> {
         let inner_width = (width as usize).saturating_sub(4).max(1);
@@ -15,12 +14,10 @@ impl App {
         } else {
             (self.input_buffer.clone(), Style::default().fg(Color::White))
         };
-
         let mut wrapped = wrap_text(&text, inner_width);
         if wrapped.is_empty() {
             wrapped.push(String::new());
         }
-
         let cursor_pos = {
             let target = if self.input_buffer.is_empty() {
                 0
@@ -39,14 +36,11 @@ impl App {
             }
             found
         };
-
         let prompt_span = Span::styled("> ", Style::default().fg(Color::DarkGray));
         let mut lines = Vec::new();
-
         for (idx, chunk) in wrapped.iter().enumerate() {
             let show_cursor_here = idx == cursor_pos.0;
             let split_col = if show_cursor_here { cursor_pos.1 } else { 0 };
-
             if show_cursor_here {
                 let byte = chunk
                     .char_indices()
@@ -80,7 +74,6 @@ impl App {
                 }
             }
         }
-
         lines
     }
 }

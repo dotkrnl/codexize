@@ -4,42 +4,32 @@ use crate::{
 };
 use anyhow::Result;
 use std::fs;
-
 pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
     let sessions_dir = state::codexize_root().join("sessions");
-
     if !sessions_dir.exists() {
         fs::create_dir_all(&sessions_dir)?;
         return Ok(Vec::new());
     }
-
     let mut entries = Vec::new();
-
     for entry in fs::read_dir(&sessions_dir)? {
         let entry = entry?;
         let path = entry.path();
-
         if !path.is_dir() {
             continue;
         }
-
         let session_id = match path.file_name().and_then(|n| n.to_str()) {
             Some(id) => id.to_string(),
             None => continue,
         };
-
         let toml_path = path.join("session.toml");
         if !toml_path.exists() {
             continue;
         }
-
         let state = match SessionState::load(&session_id) {
             Ok(s) => s,
             Err(_) => continue,
         };
-
         let last_modified = fs::metadata(&toml_path)?.modified()?;
-
         entries.push(SessionEntry {
             session_id,
             idea_summary: state
@@ -55,17 +45,13 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
             archived: state.archived,
         });
     }
-
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_modified));
-
     Ok(entries)
 }
-
 pub fn delete_session(session_id: &str) -> Result<()> {
     fs::remove_dir_all(state::session_dir(session_id))?;
     Ok(())
 }
-
 fn truncate_idea(idea: &Option<String>) -> String {
     match idea {
         Some(text) if text.chars().count() > 80 => {

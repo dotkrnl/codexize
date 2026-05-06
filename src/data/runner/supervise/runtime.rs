@@ -1,12 +1,6 @@
-use crate::acp::{AcpConnector, AcpRuntimeEvent, SubprocessConnector, translate_update};
-use crate::state::MessageKind;
-use anyhow::{Result, anyhow};
-use std::sync::Arc;
-use std::{collections::VecDeque, fs, thread};
-use tokio::sync::{mpsc, watch};
-
 use super::launch::write_launch_cause;
 use super::{CancelSignal, ManagedAcpOutcome};
+use crate::acp::{AcpConnector, AcpRuntimeEvent, SubprocessConnector, translate_update};
 use crate::runner::exit::{
     enforce_readonly_workspace_policy, git_rev_parse_head, git_status_porcelain,
     validate_toml_artifacts, write_finish_stamp_for_outcome,
@@ -15,7 +9,11 @@ use crate::runner::transport::{
     ACP_POLL_INTERVAL, AcpCancelReason, AcpInput, AcpTextStream, ManagedAcpLaunch,
     append_acp_text_trace,
 };
-
+use crate::state::MessageKind;
+use anyhow::{Result, anyhow};
+use std::sync::Arc;
+use std::{collections::VecDeque, fs, thread};
+use tokio::sync::{mpsc, watch};
 /// Sync output of the per-run loop. Holds everything `finalize_managed_acp_launch`
 /// needs to apply enforcement and write the finish stamp on the async tail
 /// without re-snapshotting git state.
@@ -25,7 +23,6 @@ struct ManagedAcpRunResult {
     git_status_before: Option<String>,
     enforce_readonly: bool,
 }
-
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel: &CancelSignal,
@@ -39,14 +36,12 @@ fn run_managed_acp_launch(
     // enforces that no git-visible workspace state changes during the run.
     let git_status_before_result = enforce_readonly.then(git_status_porcelain).transpose();
     let git_status_before = git_status_before_result.as_ref().ok().cloned().flatten();
-
     // The inner closure keeps the original `?`-propagating shape so the loop
     // body is unchanged below; the wrapping result carries the data the async
     // finalisation needs (`head_before`, `git_status_before`, policy flag) so
     // the supervisor's blocking section never crosses an await boundary.
     let outcome = git_status_before_result
         .and_then(|_| run_managed_acp_loop(&launch, cancel, input_rx, waiting_for_input));
-
     ManagedAcpRunResult {
         outcome,
         head_before,
@@ -54,7 +49,6 @@ fn run_managed_acp_launch(
         enforce_readonly,
     }
 }
-
 fn run_managed_acp_loop(
     launch: &ManagedAcpLaunch,
     cancel: &CancelSignal,
@@ -70,7 +64,6 @@ fn run_managed_acp_loop(
     let mut pending_input = VecDeque::new();
     let mut waiting_for_interactive_prompt = false;
     let mut interrupting_turn = false;
-
     let outcome = loop {
         if let Some(reason) = cancel.pending_reason() {
             let _ = waiting_for_input.send_replace(false);
@@ -95,7 +88,6 @@ fn run_managed_acp_loop(
                 }
             }
         }
-
         while let Ok(input) = input_rx.try_recv() {
             match input {
                 AcpInput::Prompt(text) => pending_input.push_back(text),
@@ -109,7 +101,6 @@ fn run_managed_acp_loop(
                 }
             }
         }
-
         if waiting_for_interactive_prompt && let Some(text) = pending_input.pop_front() {
             let _ = waiting_for_input.send_replace(false);
             session
@@ -118,12 +109,10 @@ fn run_managed_acp_loop(
             waiting_for_interactive_prompt = false;
             interrupting_turn = false;
         }
-
         let event = session
             .try_next_update()
             .map_err(|err| anyhow!("{err}"))?
             .and_then(|update| translate_update(update, launch.resolved.interactive));
-
         match event {
             Some(AcpRuntimeEvent::PromptTurnFinished) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
@@ -205,10 +194,8 @@ fn run_managed_acp_loop(
             | None => poll_park(),
         }
     };
-
     Ok(outcome)
 }
-
 /// Pace the inner sync loop without busy-spinning. `park_timeout` returns
 /// after the interval (or sooner if `Thread::unpark` was called); using park
 /// keeps the runner product code off the banned blocking-poll primitive
@@ -219,7 +206,6 @@ fn poll_park() {
     // awaitable without a blocking bridge.
     thread::park_timeout(ACP_POLL_INTERVAL);
 }
-
 pub(super) async fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel: Arc<CancelSignal>,
@@ -238,7 +224,6 @@ pub(super) async fn finalize_managed_acp_launch(
         )
     })
     .await;
-
     let result = match blocking_result {
         Ok(result) => result,
         Err(err) => {
@@ -253,7 +238,6 @@ pub(super) async fn finalize_managed_acp_launch(
             return;
         }
     };
-
     let outcome = result.outcome.and_then(|outcome| {
         enforce_readonly_workspace_policy(
             result.enforce_readonly,
@@ -262,7 +246,6 @@ pub(super) async fn finalize_managed_acp_launch(
         )
         .map(|()| outcome)
     });
-
     match outcome {
         Ok(outcome) => {
             let _ = write_finish_stamp_for_outcome(

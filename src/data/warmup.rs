@@ -9,7 +9,6 @@ use std::{
     io::{Read, Write},
     time::{Duration, Instant},
 };
-
 pub struct WarmupSpec<'a> {
     pub program: &'a str,
     pub args: &'a [&'a str],
@@ -17,7 +16,6 @@ pub struct WarmupSpec<'a> {
     pub env: &'a [(&'a str, &'a str)],
     pub settle_timeout: Duration,
 }
-
 pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -28,7 +26,6 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
             pixel_height: 0,
         })
         .with_context(|| format!("failed to allocate PTY for {} warm-up", spec.program))?;
-
     let mut command = CommandBuilder::new(spec.program);
     for arg in spec.args {
         command.arg(arg);
@@ -36,15 +33,12 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
     for (key, value) in spec.env {
         command.env(key, value);
     }
-
     let master = pair.master;
     let slave = pair.slave;
-
     let mut child = slave
         .spawn_command(command)
         .with_context(|| format!("failed to start {} warm-up", spec.program))?;
     drop(slave);
-
     let mut stdin = master
         .take_writer()
         .context("failed to open warm-up PTY writer")?;
@@ -52,7 +46,6 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
         .write_all(spec.script.as_bytes())
         .with_context(|| format!("failed to write {} warm-up script", spec.program))?;
     drop(stdin);
-
     // Drain PTY output in a background thread so the child never blocks on a
     // full PTY buffer. Without this, CLIs that produce large startup output
     // (e.g. Kimi's ~2.5 KB banner vs the ~4 KB kernel buffer) stall before
@@ -66,14 +59,12 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
         let mut buf = [0u8; 1024];
         while reader.read(&mut buf).unwrap_or(0) > 0 {}
     });
-
     let started = Instant::now();
     loop {
         if let Some(status) = child.try_wait().context("failed to poll warm-up process")? {
             if status.success() {
                 return Ok(());
             }
-
             if started.elapsed() < Duration::from_millis(300) {
                 bail!(
                     "{} warm-up exited immediately with {}",
@@ -81,10 +72,8 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
                     status
                 );
             }
-
             return Ok(());
         }
-
         if started.elapsed() >= spec.settle_timeout {
             #[cfg(unix)]
             if let Some(pgid) = master.process_group_leader() {
@@ -93,11 +82,9 @@ pub fn run(spec: WarmupSpec<'_>) -> Result<()> {
             let _ = child.kill();
             return Ok(());
         }
-
         crate::data::async_bridge::sleep_blocking(Duration::from_millis(50));
     }
 }
-
 #[cfg(test)]
 #[path = "warmup_tests.rs"]
 mod tests;

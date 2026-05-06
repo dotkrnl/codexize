@@ -1,13 +1,9 @@
-use std::time::Duration;
-
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-use crate::state::{Phase, RunStatus};
-
 use super::super::palette::{self, PaletteCommand};
 use super::super::status_line::Severity;
 use super::super::{App, ModalKind, PendingTermination, StageId, TerminationIntent};
-
+use crate::state::{Phase, RunStatus};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::time::Duration;
 impl App {
     pub(crate) fn palette_commands(&self) -> Vec<PaletteCommand> {
         // Direct keys in the running app (see `handle_key`): `Esc` quits the
@@ -91,7 +87,6 @@ impl App {
         }
         commands
     }
-
     pub(crate) fn handle_palette_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Esc => {
@@ -151,13 +146,11 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn execute_palette_input(&mut self, input: &str) -> bool {
         if input.trim() == "/exit" && self.interactive_run_active() {
             self.exit_interactive_run_locally();
             return false;
         }
-
         let commands = self.palette_commands();
         match palette::resolve(input, &commands) {
             palette::MatchResult::Exact { command, args }
@@ -191,7 +184,6 @@ impl App {
             }
         }
     }
-
     pub(crate) fn execute_palette_command(&mut self, name: &str, args: &str) -> bool {
         match name {
             "quit" => {
@@ -265,7 +257,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_modal_key(&mut self, modal: ModalKind, key: KeyEvent) -> bool {
         match modal {
             ModalKind::SkipToImpl => self.handle_skip_to_impl_modal_key(key),
@@ -280,13 +271,11 @@ impl App {
             }
         }
     }
-
     pub(crate) fn dismiss_interactive_exit_prompt(&mut self) {
         if let Some(key) = self.interactive_exit_prompt_key() {
             self.interactive_exit_prompt_dismissed_at = Some(key);
         }
     }
-
     pub(crate) fn handle_interactive_exit_prompt_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Enter => {
@@ -311,7 +300,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_quit_running_agent_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Enter | KeyCode::Char('y') => {
@@ -345,7 +333,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_stage_error_modal_key(
         &mut self,
         stage_id: StageId,
@@ -368,7 +355,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_skip_to_impl_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
@@ -391,7 +377,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_final_validation_blocked_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Enter => {
@@ -414,7 +399,6 @@ impl App {
             _ => false,
         }
     }
-
     pub(crate) fn handle_guard_modal_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,

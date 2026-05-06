@@ -23,7 +23,6 @@ struct Cli {
     #[arg(short = 'm', long = "message")]
     message: Option<String>,
 }
-
 /// Result of validating CLI flags for the top-level (no-subcommand) path.
 ///
 /// `DirectCreate` skips the picker and creates a fresh YOLO session from
@@ -33,7 +32,6 @@ enum LaunchPlan {
     DirectCreate { idea: String, modes: state::Modes },
     Picker { create_modes: state::Modes },
 }
-
 fn plan_launch(cli: &Cli) -> Result<LaunchPlan> {
     let create_modes = state::Modes {
         yolo: cli.yolo,
@@ -56,7 +54,6 @@ fn plan_launch(cli: &Cli) -> Result<LaunchPlan> {
         None => Ok(LaunchPlan::Picker { create_modes }),
     }
 }
-
 fn main() -> ExitCode {
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
@@ -70,7 +67,6 @@ fn main() -> ExitCode {
         }
     }
 }
-
 fn try_main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -78,35 +74,29 @@ fn try_main() -> Result<()> {
         .build()?;
     runtime.block_on(try_main_async())
 }
-
 async fn try_main_async() -> Result<()> {
     let cli = Cli::parse();
-
     let plan = plan_launch(&cli)?;
     struct TerminalGuard {
         terminal: Option<tui::AppTerminal>,
     }
-
     impl TerminalGuard {
         fn start() -> Result<Self> {
             Ok(Self {
                 terminal: Some(tui::start()?),
             })
         }
-
         fn terminal_mut(&mut self) -> &mut tui::AppTerminal {
             self.terminal
                 .as_mut()
                 .expect("terminal already taken from TerminalGuard")
         }
-
         fn into_terminal(mut self) -> tui::AppTerminal {
             self.terminal
                 .take()
                 .expect("terminal already taken from TerminalGuard")
         }
     }
-
     impl Drop for TerminalGuard {
         fn drop(&mut self) {
             if let Some(mut terminal) = self.terminal.take() {
@@ -114,15 +104,12 @@ async fn try_main_async() -> Result<()> {
             }
         }
     }
-
     let mut terminal_guard = TerminalGuard::start()?;
-
     if preflight::check(terminal_guard.terminal_mut())? == preflight::PreflightOutcome::Exit {
         let mut terminal = terminal_guard.into_terminal();
         tui::stop(&mut terminal)?;
         return Ok(());
     }
-
     let (session_id, startup_origin, resume_warnings) = match plan {
         LaunchPlan::DirectCreate { idea, modes } => {
             // Direct creation always produces a fresh session, so the
@@ -143,7 +130,6 @@ async fn try_main_async() -> Result<()> {
                     return Ok(());
                 }
             };
-
             let resume_warnings = if !selection.created {
                 resume_ignored_mode_warnings(create_modes)
             } else {
@@ -160,7 +146,6 @@ async fn try_main_async() -> Result<()> {
             )
         }
     };
-
     codexize::diagnostics::init_session_tracing(&session_id)?;
     if !resume_warnings.is_empty() {
         let _span = warn_span!("resume_warnings", session_id = %session_id).entered();
@@ -168,17 +153,14 @@ async fn try_main_async() -> Result<()> {
             warn!("{warning}");
         }
     }
-
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume::resume_session(&mut state);
-
     let mut app = app::App::new_with_startup_origin(state, startup_origin);
     let mut terminal = terminal_guard.into_terminal();
     let result = app_runtime::run_terminal_app(&mut app, &mut terminal);
     tui::stop(&mut terminal)?;
     result
 }
-
 fn resume_ignored_mode_warnings(modes: state::Modes) -> Vec<&'static str> {
     let mut warnings = Vec::new();
     if modes.yolo {
@@ -189,7 +171,6 @@ fn resume_ignored_mode_warnings(modes: state::Modes) -> Vec<&'static str> {
     }
     warnings
 }
-
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;

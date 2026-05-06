@@ -1,5 +1,4 @@
 //! Tokio actor that owns the spawned ACP child's stdio.
-
 use super::{AcpError, AcpResult};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -11,18 +10,15 @@ use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-
 type Pending = HashMap<u64, oneshot::Sender<AcpResult<Value>>>;
 type Updates = mpsc::UnboundedSender<AcpResult<Value>>;
 type Respond = Option<(u64, oneshot::Sender<AcpResult<Value>>)>;
-
 #[rustfmt::skip]
 #[derive(Debug)]
 pub(super) enum RpcCommand {
     Send { method: String, params: Value, respond: Respond },
     Shutdown,
 }
-
 pub(super) struct RpcClient {
     runtime: Arc<Runtime>,
     cancel: CancellationToken,
@@ -31,7 +27,6 @@ pub(super) struct RpcClient {
     updates: mpsc::UnboundedReceiver<AcpResult<Value>>,
     actor: Option<JoinHandle<()>>,
 }
-
 #[rustfmt::skip]
 impl RpcClient {
     pub(super) fn start<R, W>(runtime: Arc<Runtime>, reader: R, writer: W) -> Self
@@ -46,13 +41,11 @@ impl RpcClient {
             commands: commands_tx, updates, actor: Some(actor),
         }
     }
-
     fn enqueue(&self, method: &str, params: Value, respond: Respond) -> AcpResult<()> {
         let kind = if respond.is_some() { "request" } else { "notification" };
         self.commands.send(RpcCommand::Send { method: method.to_string(), params, respond })
             .map_err(|_| AcpError::io(format!("failed to enqueue ACP {kind} {method}: actor stopped")))
     }
-
     pub(super) fn start_request(&self, method: &str, params: Value)
         -> AcpResult<oneshot::Receiver<AcpResult<Value>>>
     {
@@ -61,16 +54,13 @@ impl RpcClient {
         self.enqueue(method, params, Some((id, tx)))?;
         Ok(rx)
     }
-
     pub(super) fn notify(&self, method: &str, params: Value) -> AcpResult<()> {
         self.enqueue(method, params, None)
     }
-
     pub(super) async fn call_async(&mut self, method: &str, params: Value) -> AcpResult<Value> {
         self.start_request(method, params)?.await
             .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
     }
-
     pub(super) fn try_next_update(&mut self) -> AcpResult<Option<Value>> {
         match self.updates.try_recv() {
             Ok(Ok(v)) => Ok(Some(v)),
@@ -78,22 +68,18 @@ impl RpcClient {
             Err(_) => Ok(None),
         }
     }
-
     fn join_actor(&mut self, runtime: &Runtime) {
         if let Some(actor) = self.actor.take() { let _ = runtime.block_on(actor); }
     }
-
     pub(super) fn shutdown_blocking_no_child(&mut self) {
         self.cancel.cancel();
         self.join_actor(&self.runtime.clone());
     }
-
     /// Graceful: queue Shutdown after pending writes, then await actor.
     pub(super) fn shutdown_async(&mut self, runtime: &Runtime) {
         let _ = self.commands.send(RpcCommand::Shutdown);
         self.join_actor(runtime);
     }
-
     /// Aggressive: kill the actor and reap the child immediately.
     pub(super) fn shutdown_blocking(&mut self, mut child: Child) {
         self.cancel.cancel();
@@ -105,7 +91,6 @@ impl RpcClient {
         });
     }
 }
-
 #[rustfmt::skip]
 async fn actor_loop<R, W>(
     mut reader: R, mut writer: W,
@@ -158,7 +143,6 @@ async fn actor_loop<R, W>(
         let _ = writer.shutdown().await;
     }
 }
-
 #[rustfmt::skip]
 async fn handle_command<W>(cmd: RpcCommand, writer: &mut W, pending: &mut Pending, writer_open: &mut bool)
     -> AcpResult<()>
@@ -182,7 +166,6 @@ where W: AsyncWrite + Unpin
     if let Some((id, tx)) = respond.take() { pending.insert(id, tx); }
     Ok(())
 }
-
 #[rustfmt::skip]
 async fn handle_inbound_line<W>(line: &str, writer: &mut W, pending: &mut Pending,
     updates: &Updates, writer_open: &mut bool) -> AcpResult<()>
@@ -224,13 +207,11 @@ where W: AsyncWrite + Unpin
     }
     Ok(())
 }
-
 #[rustfmt::skip]
 fn broadcast_error(pending: &mut Pending, updates: &Updates, err: AcpError) {
     for (_, tx) in pending.drain() { let _ = tx.send(Err(err.clone())); }
     let _ = updates.send(Err(err));
 }
-
 #[rustfmt::skip]
 async fn write_line<W>(writer: &mut W, message: &Value) -> std::io::Result<()>
 where W: AsyncWrite + Unpin
@@ -242,7 +223,6 @@ where W: AsyncWrite + Unpin
     writer.flush().await?;
     Ok(())
 }
-
 #[rustfmt::skip]
 pub(super) fn client_request_response(method: &str, params: &Value) -> Option<Value> {
     if method != "session/request_permission" { return None; }

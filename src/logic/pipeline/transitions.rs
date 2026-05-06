@@ -5,7 +5,6 @@
 //! no process spawning. The persisting counterparts that wrap these helpers
 //! with logging and `state.save()` live in
 //! [`crate::data::persistence::transitions`].
-
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
 use crate::state::{
@@ -15,11 +14,9 @@ use crate::state::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeSet;
-
 #[cfg(test)]
 #[path = "transitions_tests.rs"]
 mod transitions_tests;
-
 /// Errors that can occur during phase transitions.
 #[derive(Debug, thiserror::Error)]
 pub enum TransitionError {
@@ -30,7 +27,6 @@ pub enum TransitionError {
         reason: String,
     },
 }
-
 /// Validate that a transition from `from` to `to` is allowed.
 pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionError> {
     if !from.can_transition_to(to) {
@@ -42,20 +38,17 @@ pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionErr
     }
     Ok(())
 }
-
 /// Hard cap on `FinalValidation` runs per session. The 4th attempted entry
 /// auto-routes to `BlockedNeedsUser` *before* the validator launches, with
 /// `block_origin = FinalValidation` so the operator can force-ship or rewind.
 /// Hard-coded per spec §4 — there is no runtime override.
 pub const VALIDATION_ATTEMPT_CAP: u32 = 3;
-
 /// Hard cap on `Simplification(round)` runs for a given round. The 4th
 /// attempted entry for the same round auto-routes to `BlockedNeedsUser` with
 /// `block_origin = Simplification`. Force-ship is *not* unlocked from a
 /// simplification block — that escape hatch remains tied to
 /// `BlockOrigin::FinalValidation`.
 pub const SIMPLIFICATION_ATTEMPT_CAP: u32 = 3;
-
 pub fn prepare_new_session_for_brainstorm(
     state: &mut SessionState,
     idea: impl Into<String>,
@@ -65,31 +58,24 @@ pub fn prepare_new_session_for_brainstorm(
     state.idea_text = Some(idea.into());
     state.current_phase = Phase::BrainstormRunning;
 }
-
 pub fn archive_session(state: &mut SessionState) {
     state.archived = true;
 }
-
 pub fn restore_archived_session(state: &mut SessionState) {
     state.archived = false;
 }
-
 pub fn record_agent_error(state: &mut SessionState, message: impl Into<String>) {
     state.agent_error = Some(message.into());
 }
-
 pub fn clear_agent_error(state: &mut SessionState) {
     state.agent_error = None;
 }
-
 pub fn set_yolo_mode(state: &mut SessionState, value: bool) {
     state.modes.yolo = value;
 }
-
 pub fn set_cheap_mode(state: &mut SessionState, value: bool) {
     state.modes.cheap = value;
 }
-
 pub fn record_brainstorm_launch(
     state: &mut SessionState,
     idea: impl Into<String>,
@@ -98,11 +84,9 @@ pub fn record_brainstorm_launch(
     state.idea_text = Some(idea.into());
     state.selected_model = Some(model.into());
 }
-
 pub fn record_session_title(state: &mut SessionState, title: impl Into<String>) {
     state.title = Some(title.into());
 }
-
 pub fn record_skip_to_impl_proposal(
     state: &mut SessionState,
     rationale: impl Into<String>,
@@ -111,16 +95,13 @@ pub fn record_skip_to_impl_proposal(
     state.skip_to_impl_rationale = Some(rationale.into());
     state.skip_to_impl_kind = Some(kind);
 }
-
 pub fn clear_skip_to_impl_proposal(state: &mut SessionState) {
     state.skip_to_impl_rationale = None;
     state.skip_to_impl_kind = None;
 }
-
 pub fn reset_builder_after_rewind(state: &mut SessionState) {
     state.builder = BuilderState::default();
 }
-
 pub fn load_task_titles_if_empty(
     state: &mut SessionState,
     titles: impl IntoIterator<Item = (u32, String)>,
@@ -129,7 +110,6 @@ pub fn load_task_titles_if_empty(
         state.builder.task_titles = titles.into_iter().collect();
     }
 }
-
 pub fn initialize_task_pipeline(
     state: &mut SessionState,
     tasks: impl IntoIterator<Item = (u32, String)>,
@@ -143,11 +123,9 @@ pub fn initialize_task_pipeline(
         .builder
         .reset_task_pipeline(tasks.into_iter().map(|(id, title)| (id, Some(title))));
 }
-
 pub fn ensure_builder_task_for_round(state: &mut SessionState, round: u32) -> Option<u32> {
     state.builder.ensure_task_for_round(round)
 }
-
 pub fn mark_task_status(
     state: &mut SessionState,
     task_id: u32,
@@ -156,11 +134,9 @@ pub fn mark_task_status(
 ) -> bool {
     state.builder.set_task_status(task_id, status, round)
 }
-
 pub fn record_builder_verdict(state: &mut SessionState, verdict: impl Into<String>) {
     state.builder.last_verdict = Some(verdict.into());
 }
-
 pub fn mark_current_task_for_recovery(
     state: &mut SessionState,
     triggering_round: u32,
@@ -176,18 +152,15 @@ pub fn mark_current_task_for_recovery(
         .set_task_status(current_task_id, status, Some(triggering_round));
     Some(current_task_id)
 }
-
 pub fn append_refine_feedback(
     state: &mut SessionState,
     feedback: impl IntoIterator<Item = String>,
 ) {
     state.builder.pending_refine_feedback.extend(feedback);
 }
-
 pub fn take_pending_refine_feedback(state: &mut SessionState) -> Vec<String> {
     std::mem::take(&mut state.builder.pending_refine_feedback)
 }
-
 pub fn apply_revise_with_new_tasks(
     state: &mut SessionState,
     task_id: u32,
@@ -197,7 +170,6 @@ pub fn apply_revise_with_new_tasks(
         .builder
         .apply_revise_with_new_tasks(task_id, new_tasks)
 }
-
 /// Append validator-emitted gap tasks under a fresh outer iteration so the
 /// dashboard can render them in their own (Loop, Simplification,
 /// FinalValidation) trio after the prior iteration's FV. Without the bump,
@@ -229,7 +201,6 @@ pub fn append_final_validation_gap_tasks(
         });
     }
 }
-
 pub fn queue_recovery_stage(
     state: &mut SessionState,
     round: u32,
@@ -255,7 +226,6 @@ pub fn queue_recovery_stage(
         iteration,
     });
 }
-
 pub fn queue_recovery_plan_review(state: &mut SessionState, round: u32) {
     let iteration = recovery_iteration(state);
     state.builder.push_pipeline_item(PipelineItem {
@@ -271,7 +241,6 @@ pub fn queue_recovery_plan_review(state: &mut SessionState, round: u32) {
         iteration,
     });
 }
-
 pub fn queue_recovery_sharding(state: &mut SessionState, round: u32) {
     let iteration = recovery_iteration(state);
     state.builder.push_pipeline_item(PipelineItem {
@@ -287,7 +256,6 @@ pub fn queue_recovery_sharding(state: &mut SessionState, round: u32) {
         iteration,
     });
 }
-
 /// Pick the outer iteration that recovery sub-pipeline items should join:
 /// the iteration of the task that triggered recovery (so the recovery node
 /// renders inside the same Loop[N] subtree as its trigger task), falling
@@ -311,7 +279,6 @@ fn recovery_iteration(state: &SessionState) -> u32 {
         .max()
         .unwrap_or(1)
 }
-
 pub fn mark_latest_pipeline_stage_running(state: &mut SessionState, stage: &str) -> bool {
     mark_latest_pipeline_stage(
         state,
@@ -320,7 +287,6 @@ pub fn mark_latest_pipeline_stage_running(state: &mut SessionState, stage: &str)
         PipelineItemStatus::Running,
     )
 }
-
 pub fn mark_latest_pipeline_stage_done(state: &mut SessionState, stage: &str) -> bool {
     mark_latest_pipeline_stage(
         state,
@@ -329,7 +295,6 @@ pub fn mark_latest_pipeline_stage_done(state: &mut SessionState, stage: &str) ->
         PipelineItemStatus::Done,
     )
 }
-
 fn mark_latest_pipeline_stage(
     state: &mut SessionState,
     stage: &str,
@@ -349,7 +314,6 @@ fn mark_latest_pipeline_stage(
         false
     }
 }
-
 pub fn replace_recovery_pipeline(
     state: &mut SessionState,
     items: Vec<PipelineItem>,
@@ -361,7 +325,6 @@ pub fn replace_recovery_pipeline(
     state.builder.pipeline_items = items;
     normalize_pipeline_item_ids(&mut state.builder);
 }
-
 fn normalize_pipeline_item_ids(builder: &mut BuilderState) {
     let mut seen = BTreeSet::new();
     let mut next_id = builder.next_pipeline_id();
@@ -377,24 +340,19 @@ fn normalize_pipeline_item_ids(builder: &mut BuilderState) {
         next_id += 1;
     }
 }
-
 pub fn set_retry_reset_run_id_cutoff(state: &mut SessionState, run_id: u64) {
     state.builder.retry_reset_run_id_cutoff = Some(run_id);
 }
-
 pub fn set_phase_for_operator_retry(state: &mut SessionState, phase: Phase) {
     state.current_phase = phase;
 }
-
 pub fn increment_recovery_cycle_count(state: &mut SessionState) -> u32 {
     state.builder.recovery_cycle_count += 1;
     state.builder.recovery_cycle_count
 }
-
 pub fn reset_recovery_cycle_count(state: &mut SessionState) {
     state.builder.recovery_cycle_count = 0;
 }
-
 pub fn record_builder_recovery_context(
     state: &mut SessionState,
     trigger_task_id: Option<u32>,
@@ -407,14 +365,12 @@ pub fn record_builder_recovery_context(
     state.builder.recovery_prev_task_ids = prev_task_ids;
     state.builder.recovery_trigger_summary = trigger_summary;
 }
-
 pub fn clear_builder_recovery_context(state: &mut SessionState) {
     state.builder.recovery_trigger_task_id = None;
     state.builder.recovery_prev_max_task_id = None;
     state.builder.recovery_prev_task_ids.clear();
     state.builder.recovery_trigger_summary = None;
 }
-
 #[derive(Debug, Clone)]
 pub struct FinishedRunRecord {
     pub ended_at: DateTime<Utc>,
@@ -425,11 +381,9 @@ pub struct FinishedRunRecord {
     pub unverified: bool,
     pub error: Option<String>,
 }
-
 pub fn record_pending_guard_decision(state: &mut SessionState, decision: PendingGuardDecision) {
     state.pending_guard_decision = Some(decision);
 }
-
 pub fn take_pending_guard_decision(
     state: &mut SessionState,
     context: &str,
@@ -439,11 +393,9 @@ pub fn take_pending_guard_decision(
         .take()
         .ok_or_else(|| anyhow::anyhow!("{context}: no pending guard decision"))
 }
-
 pub fn clear_pending_guard_decision(state: &mut SessionState) {
     state.pending_guard_decision = None;
 }
-
 pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Phase) {
     // The guard modal is an interstitial persisted phase; on "keep", finalization
     // must resume the original running phase before applying its normal successor.
@@ -451,7 +403,6 @@ pub fn restore_guard_originating_phase(state: &mut SessionState, originating: Ph
     // to the paused running phases, so this restore cannot use execute_transition.
     state.current_phase = originating;
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn create_run_record_in_memory(
     state: &mut SessionState,

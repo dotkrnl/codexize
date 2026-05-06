@@ -7,7 +7,6 @@
 //! (`crate::data::selection_assembly`), which calls into this module after
 //! the snapshots have been resolved. The merge / coverage-gap helpers are
 //! exposed because that orchestrator needs them between IO calls.
-
 use super::quota;
 use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, QuotaError, ScoreSource, VendorKind};
@@ -15,7 +14,6 @@ use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::dashboard::{self, DashboardModel};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-
 /// Build the canonical model universe from already-resolved snapshots.
 ///
 /// Pure: callers (the data-layer adapter) are responsible for any cache
@@ -43,7 +41,6 @@ pub fn assemble_universe(
         .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
         .filter(|(vendor, _)| available_vendors.contains(vendor))
         .collect();
-
     // Convert dashboard entries to DashboardModels for sibling synthesis
     let mut dashboard_models: Vec<DashboardModel> = dashboard_entries
         .into_iter()
@@ -66,7 +63,6 @@ pub fn assemble_universe(
             fallback_from: e.fallback_from,
         })
         .collect();
-
     // Synthesize entries for live-quota models missing from the ranking API
     let existing: HashSet<String> = dashboard_models.iter().map(|m| m.name.clone()).collect();
     let mut synthesized: HashSet<String> = HashSet::new();
@@ -83,7 +79,6 @@ pub fn assemble_universe(
             }
         }
     }
-
     // Build CachedModel list — omit models with no dashboard entry (guaranteed by
     // the fact we only iterate dashboard_models)
     let mut models: Vec<CachedModel> = dashboard_models
@@ -102,7 +97,6 @@ pub fn assemble_universe(
                 .copied()
                 .flatten()
                 .or_else(|| quota::find_reset_by_heuristic(&m.name, vendor, &parsed_resets));
-
             Some(CachedModel {
                 vendor,
                 name: m.name,
@@ -121,7 +115,6 @@ pub fn assemble_universe(
             })
         })
         .collect();
-
     // Collapse all Kimi models into a single "kimi-latest" representative.
     // The canonical pick is the ipbr-matched sibling with the largest sum of
     // present phase scores; ipbr scores are authoritative (unlike cosmetic
@@ -161,16 +154,13 @@ pub fn assemble_universe(
         models.retain(|m| m.vendor != VendorKind::Kimi);
         models.push(canonical);
     }
-
     // Stamp fallback:overall provenance for zero-as-missing and truly-missing
     // axes, and emit selection.zero_as_missing counters.
     for model in &mut models {
         stamp_selection_provenance(model);
     }
-
     models
 }
-
 /// Merge a freshly-fetched quota map (keyed by `VendorKind`) into the cached
 /// payload (keyed by vendor string). Successfully-refreshed vendors overwrite
 /// cached entries; cached entries for vendors that did not refresh
@@ -181,7 +171,6 @@ pub fn merge_quota_payload(
 ) -> QuotaPayload {
     let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
     let mut merged: QuotaPayload = BTreeMap::new();
-
     for (vendor_str, models) in cached {
         let preserve = match parse_vendor_str(vendor_str) {
             Some(kind) => !succeeded.contains(&kind),
@@ -196,14 +185,12 @@ pub fn merge_quota_payload(
     }
     merged
 }
-
 pub fn merge_reset_payload(
     cached: &ResetPayload,
     fresh: BTreeMap<VendorKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
 ) -> ResetPayload {
     let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
     let mut merged: ResetPayload = BTreeMap::new();
-
     for (vendor_str, models) in cached {
         let preserve = match parse_vendor_str(vendor_str) {
             Some(kind) => !succeeded.contains(&kind),
@@ -218,7 +205,6 @@ pub fn merge_reset_payload(
     }
     merged
 }
-
 pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool {
     quotas.iter().any(|(vendor, models)| {
         let Some(reset_models) = resets.get(vendor) else {
@@ -227,7 +213,6 @@ pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> 
         models.keys().any(|name| !reset_models.contains_key(name))
     })
 }
-
 /// On ipbr score fetch/parse failure: prefer the previously cached entries
 /// when they carry any ipbr-sourced rows, so a transient ipbr outage does
 /// not wipe out the last known ranking authority. Fall through to the
@@ -249,7 +234,6 @@ pub fn resolve_score_failure_entries(
         inventory_only
     }
 }
-
 pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEntry> {
     models
         .iter()
@@ -269,7 +253,6 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
         })
         .collect()
 }
-
 pub fn dashboard_warnings_to_quota_errors(warnings: Vec<String>) -> Vec<QuotaError> {
     warnings
         .into_iter()
@@ -282,7 +265,6 @@ pub fn dashboard_warnings_to_quota_errors(warnings: Vec<String>) -> Vec<QuotaErr
         })
         .collect()
 }
-
 pub fn parse_vendor_str(s: &str) -> Option<VendorKind> {
     match s {
         "anthropic" | "claude" => Some(VendorKind::Claude),
@@ -292,6 +274,5 @@ pub fn parse_vendor_str(s: &str) -> Option<VendorKind> {
         _ => None,
     }
 }
-
 #[cfg(test)]
 mod tests_mod;

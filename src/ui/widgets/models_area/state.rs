@@ -1,20 +1,17 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ModelsAreaMode {
     #[default]
     FullTable,
     CompactQuota,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum QuotaColumn {
     Expanded,
     Narrow,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProbColumn {
     IpbrVerbose,
@@ -22,18 +19,15 @@ pub(super) enum ProbColumn {
     TopRank,
     None,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ResetColumn {
     Shown,
     Hidden,
 }
-
 const NAME_WIDTH_MIN: usize = 8;
 const ELLIPSIS: &str = "...";
 pub(super) const VERY_WIDE_THRESHOLD: u16 = 140;
 pub(super) const RESET_TIME_MAX_WIDTH: usize = 12;
-
 pub(super) fn choose_mode(
     visible_count: u16,
     models_budget: u16,
@@ -56,7 +50,6 @@ pub(super) fn choose_mode(
         }
     }
 }
-
 pub(super) fn name_budget_for(
     width: u16,
     vendor_width: usize,
@@ -67,14 +60,12 @@ pub(super) fn name_budget_for(
     let fixed = full_row_fixed_width(vendor_width, quota, prob_col, reset_col);
     (width as usize).saturating_sub(fixed)
 }
-
 pub(super) fn probability_percent(weight: f64, total: f64) -> u8 {
     if total <= 0.0 || weight <= 0.0 {
         return 0;
     }
     (weight / total * 100.0).round().clamp(0.0, 99.0) as u8
 }
-
 pub(super) fn probability_color(pct: u8, max_pct: u8) -> Color {
     if pct == 0 {
         return Color::DarkGray;
@@ -93,7 +84,6 @@ pub(super) fn probability_color(pct: u8, max_pct: u8) -> Color {
     };
     Color::Rgb(r, g, 60)
 }
-
 pub(super) fn format_name_with_freshness(
     short_name: &str,
     is_new: bool,
@@ -103,7 +93,6 @@ pub(super) fn format_name_with_freshness(
         return Vec::new();
     }
     let name_len = short_name.width();
-
     if is_new {
         if name_len + " (new)".width() <= budget {
             let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
@@ -124,7 +113,6 @@ pub(super) fn format_name_with_freshness(
             return spans;
         }
     }
-
     if name_len <= budget {
         let pad = budget - name_len;
         let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
@@ -133,7 +121,6 @@ pub(super) fn format_name_with_freshness(
         }
         return spans;
     }
-
     let ellipsis_len = ELLIPSIS.width();
     if budget > ellipsis_len {
         let visible_width = budget - ellipsis_len;
@@ -152,7 +139,6 @@ pub(super) fn format_name_with_freshness(
             Span::styled(ELLIPSIS, ellipsis_style()),
         ];
     }
-
     let mut truncated = String::new();
     let mut w = 0;
     for c in ELLIPSIS.chars() {
@@ -165,11 +151,9 @@ pub(super) fn format_name_with_freshness(
     }
     vec![Span::styled(truncated, ellipsis_style())]
 }
-
 pub(super) fn name_width_min() -> usize {
     NAME_WIDTH_MIN
 }
-
 pub(super) fn full_row_fixed_width(
     vendor_width: usize,
     quota: QuotaColumn,
@@ -193,19 +177,15 @@ pub(super) fn full_row_fixed_width(
     };
     vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs + reset_width
 }
-
 fn name_style() -> Style {
     Style::default().fg(Color::Cyan)
 }
-
 fn freshness_style() -> Style {
     Style::default().fg(Color::DarkGray)
 }
-
 fn ellipsis_style() -> Style {
     Style::default().fg(Color::DarkGray)
 }
-
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;

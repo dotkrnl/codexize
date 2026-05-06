@@ -8,6 +8,50 @@ use crate::state::{self as session_state, MessageKind, PendingGuardDecision, Pip
 use crate::{coder_summary, final_validation, review, tasks};
 
 impl App {
+    const ARTIFACT_REASON_TABLE: &[(&'static str, &'static [&'static str])] = &[
+        ("brainstorm", &["artifacts/spec.md"]),
+        ("spec-review", &["artifacts/spec-review-{round}.md"]),
+        ("planning", &["artifacts/plan.md"]),
+        ("plan-review", &["artifacts/plan-review-{round}.md"]),
+        ("sharding", &["artifacts/tasks.toml"]),
+        (
+            "recovery",
+            &[
+                "artifacts/spec.md",
+                "artifacts/plan.md",
+                "artifacts/tasks.toml",
+                "rounds/{round:03}/recovery.toml",
+            ],
+        ),
+        ("reviewer", &["rounds/{round:03}/review.toml"]),
+        (
+            "final-validation",
+            &["artifacts/final_validation_{round}.toml"],
+        ),
+        ("simplifier", &["rounds/{round:03}/simplification.toml"]),
+    ];
+
+    fn render_artifact_template(template: &str, round: u32) -> String {
+        template
+            .replace("{round:03}", &format!("{round:03}"))
+            .replace("{round}", &round.to_string())
+    }
+
+    fn missing_artifact_reasons(
+        session_dir: &std::path::Path,
+        stage: &str,
+        round: u32,
+    ) -> Option<String> {
+        let templates = Self::ARTIFACT_REASON_TABLE
+            .iter()
+            .find_map(|(candidate, templates)| (*candidate == stage).then_some(*templates))?;
+        templates
+            .iter()
+            .map(|template| session_dir.join(Self::render_artifact_template(template, round)))
+            .any(|path| !Self::artifact_present(&path))
+            .then(|| Reason::ArtifactMissing.to_string())
+    }
+
     fn missing_required_artifact<'a>(
         paths: impl IntoIterator<Item = &'a std::path::Path>,
     ) -> Option<String> {
@@ -136,69 +180,46 @@ impl App {
     ) -> Result<Option<String>> {
         let session_dir = session_state::session_dir(&self.state.session_id);
         let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
-            "brainstorm" => {
-                let spec_path = session_dir.join("artifacts").join("spec.md");
-                (true, Self::missing_required_artifact([spec_path.as_path()]))
-            }
-            "spec-review" => {
-                let review_path = session_dir
-                    .join("artifacts")
-                    .join(format!("spec-review-{}.md", run.round));
-                (
-                    true,
-                    Self::missing_required_artifact([review_path.as_path()]),
-                )
-            }
-            "planning" => {
-                let plan_path = session_dir.join("artifacts").join("plan.md");
-                (true, Self::missing_required_artifact([plan_path.as_path()]))
-            }
-            "plan-review" => {
-                let review_path = session_dir
-                    .join("artifacts")
-                    .join(format!("plan-review-{}.md", run.round));
-                (
-                    true,
-                    Self::missing_required_artifact([review_path.as_path()]),
-                )
-            }
+            "brainstorm" | "spec-review" | "planning" | "plan-review" => (
+                true,
+                Self::missing_artifact_reasons(&session_dir, &run.stage, run.round),
+            ),
             "sharding" => {
+                let tasks_path = session_dir.join("artifacts").join("tasks.toml");
+                let reason = if let Some(reason) =
+                    Self::missing_artifact_reasons(&session_dir, "sharding", run.round)
+                {
+                    Some(reason)
+                } else {
+                    tasks::validate(&tasks_path)
+                        .err()
+                        .map(|err| Reason::ArtifactInvalid(err.to_string()).to_string())
+                };
+                (true, reason)
+            }
+            "recovery" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
                 let reason =
                     if let Some(reason) = Self::missing_required_artifact([tasks_path.as_path()]) {
                         Some(reason)
+                    } else if let Some(reason) =
+                        Self::missing_artifact_reasons(&session_dir, "recovery", run.round)
+                    {
+                        Some(reason)
+                    } else if let Err(err) =
+                        validate_stage_toml_writes(&session_dir, "recovery", run.round)
+                    {
+                        Some(Reason::ArtifactInvalid(err.to_string()).to_string())
                     } else {
-                        tasks::validate(&tasks_path)
-                            .err()
-                            .map(|err| Reason::ArtifactInvalid(err.to_string()).to_string())
+                        let recovery_path = session_dir
+                            .join("rounds")
+                            .join(format!("{:03}", run.round))
+                            .join("recovery.toml");
+                        match tasks::validate(&tasks_path) {
+                            Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
+                            Err(err) => Some(Reason::ArtifactInvalid(err.to_string()).to_string()),
+                        }
                     };
-                (true, reason)
-            }
-            "recovery" => {
-                let spec_path = session_dir.join("artifacts").join("spec.md");
-                let plan_path = session_dir.join("artifacts").join("plan.md");
-                let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-                let recovery_path = session_dir
-                    .join("rounds")
-                    .join(format!("{:03}", run.round))
-                    .join("recovery.toml");
-                let reason = if let Some(reason) = Self::missing_required_artifact([
-                    spec_path.as_path(),
-                    plan_path.as_path(),
-                    tasks_path.as_path(),
-                    recovery_path.as_path(),
-                ]) {
-                    Some(reason)
-                } else if let Err(err) =
-                    validate_stage_toml_writes(&session_dir, "recovery", run.round)
-                {
-                    Some(Reason::ArtifactInvalid(err.to_string()).to_string())
-                } else {
-                    match tasks::validate(&tasks_path) {
-                        Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
-                        Err(err) => Some(Reason::ArtifactInvalid(err.to_string()).to_string()),
-                    }
-                };
                 (true, reason)
             }
             "coder" => {
@@ -212,7 +233,7 @@ impl App {
                     .join(format!("{:03}", run.round))
                     .join("review.toml");
                 let reason = if let Some(reason) =
-                    Self::missing_required_artifact([review_path.as_path()])
+                    Self::missing_artifact_reasons(&session_dir, "reviewer", run.round)
                 {
                     Some(reason)
                 } else {
@@ -227,7 +248,7 @@ impl App {
                     .join("artifacts")
                     .join(format!("final_validation_{}.toml", run.round));
                 let reason = if let Some(reason) =
-                    Self::missing_required_artifact([verdict_path.as_path()])
+                    Self::missing_artifact_reasons(&session_dir, "final-validation", run.round)
                 {
                     Some(reason)
                 } else {
@@ -243,7 +264,7 @@ impl App {
                     .join(format!("{:03}", run.round))
                     .join("simplification.toml");
                 let reason = if let Some(reason) =
-                    Self::missing_required_artifact([simplification_path.as_path()])
+                    Self::missing_artifact_reasons(&session_dir, "simplifier", run.round)
                 {
                     Some(reason)
                 } else if let Err(err) = crate::simplification::validate(&simplification_path) {

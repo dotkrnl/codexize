@@ -32,7 +32,6 @@ tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter", "fmt
 unicode-width = "0.2.2"
 pulldown-cmark = "0.13.3"
 uuid = { version = "1.18.1", features = ["v4"] }
-strfmt = "0.2"
 
 [dev-dependencies]
 insta = "1.42"

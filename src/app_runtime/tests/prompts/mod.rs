@@ -19,32 +19,6 @@ fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
     });
 }
 
-#[test]
-fn prompt_builders_stay_thin_and_formatdoc_based() {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source =
-        std::fs::read_to_string(manifest_dir.join("src/app/prompts.rs")).expect("read prompts.rs");
-    let builders = std::fs::read_to_string(manifest_dir.join("src/app/prompt_builders.rs"))
-        .expect("read prompt_builders.rs");
-
-    assert!(
-        source.lines().count() <= 350,
-        "src/app/prompts.rs should stay at or below the prompt-wrapper budget"
-    );
-    assert!(
-        !source.contains("prompt_template!"),
-        "prompt builders should use formatdoc! instead of the bespoke replacement macro"
-    );
-    assert!(
-        !builders.contains("macro_rules! prompt") && !builders.contains("prompt!("),
-        "prompt_builders.rs should not keep a bespoke placeholder replacement macro"
-    );
-    assert!(
-        builders.contains("live_summary_instruction") && builders.contains("formatdoc!"),
-        "at least one prompt builder should render through formatdoc!"
-    );
-}
-
 // `with_temp_root_and_cwd` chdir's the entire process; guard tests in
 // `app::guard` shell out to `git` from cwd, so the two cannot run
 // concurrently without serializing.

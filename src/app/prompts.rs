@@ -7,11 +7,11 @@ pub(crate) use super::prompt_builders::{
     spec_review_prompt,
 };
 #[cfg(test)]
-pub(crate) use super::prompt_builders::{
+pub(crate) use super::prompt_ctx::{
     live_summary_instruction, live_summary_instruction_interactive,
 };
 #[allow(unused_imports)]
-pub(crate) use super::prompt_support::{
+pub(crate) use super::stage_support::{
     assigned_revise_task_ids, git_rev_parse_head, read_review_scope, read_review_scope_base_sha,
     restore_artifacts, rewrite_tasks_for_revise, task_effort_for, task_toml_for,
     validate_stage_toml_writes, write_review_scope_artifact,

@@ -1,462 +1,113 @@
-// Public prompt-builder functions for every agent stage. Long prompt bodies
-// live in `src/app/prompts/*.md`; this file stays focused on path binding and
-// prompt-specific dynamic blocks.
+use super::prompt_ctx::{PromptCtx, resolved_agent_path};
 use indoc::formatdoc;
-use std::collections::HashMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-struct PromptCtx {
-    project_doc_instr: String,
+#[rustfmt::skip]
+pub(crate) fn spec_review_prompt(spec_path: &str, review_path: &str, live_summary_path: &str) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("spec_path", spec_path).path_arg("review_path", review_path).live_arg(live_summary_path, false).render(include_str!("prompts/spec_review.md"))
 }
 
-impl PromptCtx {
-    fn new() -> Self {
-        Self {
-            project_doc_instr: project_doc_instr(),
-        }
-    }
-
-    fn path(&self, path: impl AsRef<Path>) -> String {
-        agent_path(path.as_ref())
-    }
-
-    fn live_summary_instruction(&self, path: impl AsRef<Path>) -> String {
-        formatdoc!(
-            "\n\nImmediately create {path}, then every 2–3 min — including across long tool calls and while sub-agents are running — and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll; do not \"fire and wait\" on a sub-agent for more than 2–3 min without an update. Keep this file current until you exit. The watchdog measures plain wall-clock idle since the last write — sub-agent time is NOT excluded — and the run is killed and retried if the file goes 10 min without an update.\n",
-            path = self.path(path)
-        )
-    }
-
-    fn live_summary_instruction_interactive(&self, path: impl AsRef<Path>) -> String {
-        formatdoc!(
-            "\n\nImmediately create {path}, then every 2–3 min — including across long tool calls and while sub-agents are running — overwrite it with `<short title> | <one-paragraph summary>` so the operator can follow along. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll. Keep this file current until you exit.\n",
-            path = self.path(path)
-        )
-    }
-}
-
-fn resolved_agent_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
-    let mut resolved = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
-            Component::RootDir => resolved.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = resolved.pop();
-            }
-            Component::Normal(part) => resolved.push(part),
-        }
-    }
-    resolved
-}
-
-fn agent_path(path: &Path) -> String {
-    resolved_agent_path(path).display().to_string()
-}
-
-fn join_ids(ids: &[u32], empty: &str) -> String {
-    if ids.is_empty() {
-        empty.to_string()
-    } else {
-        ids.iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-fn render_template(template: &str, bindings: &[(&str, String)]) -> String {
-    let vars = bindings
-        .iter()
-        .map(|(key, value)| ((*key).to_string(), value.clone()))
-        .collect::<HashMap<_, _>>();
-    // `formatdoc!` requires literal templates, so file-backed prompt bodies use
-    // a maintained formatter while inline helper snippets still use formatdoc.
-    strfmt::strfmt(template, &vars).expect("prompt template placeholders should match bindings")
-}
-
-/// Prepended to every agent prompt. Surfaces project-specific guidance
-/// (CLAUDE.md / AGENTS.md) before the agent acts. Returns an empty string
-/// if neither file is present in the cwd, to avoid wasting prompt context
-/// directing the agent to read files that don't exist.
-pub(crate) fn project_doc_instr() -> String {
-    let claude_path = Path::new("CLAUDE.md");
-    let agents_path = Path::new("AGENTS.md");
-    let docs = match (claude_path.exists(), agents_path.exists()) {
-        (true, true) => format!(
-            "{} and {}",
-            agent_path(claude_path),
-            agent_path(agents_path)
-        ),
-        (true, false) => agent_path(claude_path),
-        (false, true) => agent_path(agents_path),
-        (false, false) => return String::new(),
-    };
-    format!("Read {docs} in the repo first and follow those directions carefully.\n\n")
-}
-
-#[cfg(test)]
-pub(crate) fn live_summary_instruction(path: &Path) -> String {
-    PromptCtx::new().live_summary_instruction(path)
-}
-
-#[cfg(test)]
-pub(crate) fn live_summary_instruction_interactive(path: &Path) -> String {
-    PromptCtx::new().live_summary_instruction_interactive(path)
-}
-
-pub(crate) fn spec_review_prompt(
-    spec_path: &str,
-    review_path: &str,
-    live_summary_path: &str,
-) -> String {
-    let ctx = PromptCtx::new();
-    render_template(
-        include_str!("prompts/spec_review.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec_path", ctx.path(spec_path)),
-            ("review_path", ctx.path(review_path)),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
-}
-
-pub(crate) fn plan_review_prompt(
-    spec_path: &str,
-    plan_path: &str,
-    review_path: &str,
-    round: u32,
-    live_summary_path: &str,
-) -> String {
-    let ctx = PromptCtx::new();
+#[rustfmt::skip]
+pub(crate) fn plan_review_prompt(spec_path: &str, plan_path: &str, review_path: &str, round: u32, live_summary_path: &str) -> String {
+    let mut ctx = PromptCtx::new();
     let review_path = ctx.path(review_path);
-    let review_dir = Path::new(&review_path)
-        .parent()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
+    let review_dir = Path::new(&review_path).parent().map(Path::display).map(|p| p.to_string()).unwrap_or_default();
     let prior_block = if round > 1 {
-        format!(
-            "\nPrior plan reviews (read first; do NOT re-flag what's already addressed):\n{}\n",
-            (1..round)
-                .map(|r| format!("    {review_dir}/plan-review-{r}.md"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    } else {
-        String::new()
-    };
-    render_template(
-        include_str!("prompts/plan_review.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec_path", ctx.path(spec_path)),
-            ("plan_path", ctx.path(plan_path)),
-            ("review_path", review_path),
-            ("prior_block", prior_block),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+        format!("\nPrior plan reviews (read first; do NOT re-flag what's already addressed):\n{}\n", (1..round).map(|r| format!("    {review_dir}/plan-review-{r}.md")).collect::<Vec<_>>().join("\n"))
+    } else { String::new() };
+    ctx.path_arg("spec_path", spec_path).path_arg("plan_path", plan_path).set("review_path", review_path).set("prior_block", prior_block).live_arg(live_summary_path, false).render(include_str!("prompts/plan_review.md"))
 }
 
-/// Builds the brainstorm-stage prompt. The prompt embeds the workflow inline
-/// and explicitly refuses to invoke skills.
-pub(crate) fn brainstorm_prompt(
-    idea: &str,
-    spec_path: &str,
-    summary_path: &str,
-    live_summary_path: &str,
-    yolo: bool,
-) -> String {
-    let ctx = PromptCtx::new();
+#[rustfmt::skip]
+pub(crate) fn brainstorm_prompt(idea: &str, spec_path: &str, summary_path: &str, live_summary_path: &str, yolo: bool) -> String {
+    let mut ctx = PromptCtx::new();
     let summary_path = ctx.path(summary_path);
-    let skip_proposal_path = Path::new(&summary_path)
-        .parent()
-        .map(|dir| dir.join("skip_proposal.toml"))
-        .unwrap_or_else(|| resolved_agent_path(Path::new("skip_proposal.toml")));
-    let instr = if yolo {
-        ctx.live_summary_instruction(live_summary_path)
-    } else {
-        ctx.live_summary_instruction_interactive(live_summary_path)
-    };
-    render_template(
-        if yolo {
-            include_str!("prompts/brainstorm_yolo.md")
-        } else {
-            include_str!("prompts/brainstorm_interactive.md")
-        },
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("idea", idea.to_string()),
-            ("spec_path", ctx.path(spec_path)),
-            ("summary_path", summary_path),
-            ("skip_proposal_path", ctx.path(skip_proposal_path)),
-            ("instr", instr),
-        ],
-    )
+    let skip_proposal_path = Path::new(&summary_path).parent().map(|dir| dir.join("skip_proposal.toml")).unwrap_or_else(|| resolved_agent_path(Path::new("skip_proposal.toml")));
+    let template = if yolo { include_str!("prompts/brainstorm_yolo.md") } else { include_str!("prompts/brainstorm_interactive.md") };
+    ctx.set("idea", idea).path_arg("spec_path", spec_path).set("summary_path", summary_path).path_arg("skip_proposal_path", skip_proposal_path).live_arg(live_summary_path, !yolo).render(template)
 }
 
-pub(crate) fn planning_prompt(
-    spec_path: &Path,
-    review_paths: &[PathBuf],
-    plan_path: &Path,
-    live_summary_path: &Path,
-    yolo: bool,
-) -> String {
-    let ctx = PromptCtx::new();
-    let reviews_block = if review_paths.is_empty() {
+#[rustfmt::skip]
+pub(crate) fn planning_prompt(spec_path: &Path, review_paths: &[PathBuf], plan_path: &Path, live_summary_path: &Path, yolo: bool) -> String {
+    let mut ctx = PromptCtx::new();
+    let reviews = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
-    } else {
-        review_paths
-            .iter()
-            .enumerate()
-            .map(|(i, p)| format!("  - review {}: {}", i + 1, ctx.path(p)))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let instr = if yolo {
-        ctx.live_summary_instruction(live_summary_path)
-    } else {
-        ctx.live_summary_instruction_interactive(live_summary_path)
-    };
-    render_template(
-        if yolo {
-            include_str!("prompts/planning_yolo.md")
-        } else {
-            include_str!("prompts/planning_interactive.md")
-        },
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec", ctx.path(spec_path)),
-            ("reviews", reviews_block),
-            ("plan", ctx.path(plan_path)),
-            ("instr", instr),
-        ],
-    )
+    } else { review_paths.iter().enumerate().map(|(i, p)| format!("  - review {}: {}", i + 1, ctx.path(p))).collect::<Vec<_>>().join("\n") };
+    let template = if yolo { include_str!("prompts/planning_yolo.md") } else { include_str!("prompts/planning_interactive.md") };
+    ctx.path_arg("spec", spec_path).set("reviews", reviews).path_arg("plan", plan_path).live_arg(live_summary_path, !yolo).render(template)
 }
 
-pub(crate) fn sharding_prompt(
-    spec_path: &Path,
-    plan_path: &Path,
-    tasks_path: &Path,
-    live_summary_path: &Path,
-) -> String {
-    let ctx = PromptCtx::new();
-    render_template(
-        include_str!("prompts/sharding.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec", ctx.path(spec_path)),
-            ("plan", ctx.path(plan_path)),
-            ("tasks", ctx.path(tasks_path)),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+#[rustfmt::skip]
+pub(crate) fn sharding_prompt(spec_path: &Path, plan_path: &Path, tasks_path: &Path, live_summary_path: &Path) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("spec", spec_path).path_arg("plan", plan_path).path_arg("tasks", tasks_path).live_arg(live_summary_path, false).render(include_str!("prompts/sharding.md"))
 }
 
-pub(crate) fn final_validation_prompt(
-    idea_text: &str,
-    spec_text: &str,
-    verdict_path: &Path,
-    live_summary_path: &Path,
-    simplification_path: Option<&Path>,
-) -> String {
-    let ctx = PromptCtx::new();
-    // The validator may inspect the simplifier self-report, but its verdict
-    // remains independent.
+#[rustfmt::skip]
+pub(crate) fn final_validation_prompt(idea_text: &str, spec_text: &str, verdict_path: &Path, live_summary_path: &Path, simplification_path: Option<&Path>) -> String {
+    let mut ctx = PromptCtx::new();
     let simplification_block = match simplification_path {
-        Some(path) if path.exists() => format!(
-            "\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n",
-            ctx.path(path)
-        ),
+        Some(path) if path.exists() => formatdoc!("\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n", ctx.path(path)),
         _ => String::new(),
     };
-    render_template(
-        include_str!("prompts/final_validation.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("idea_text", idea_text.to_string()),
-            ("spec_text", spec_text.to_string()),
-            ("verdict", ctx.path(verdict_path)),
-            ("live_summary", ctx.path(live_summary_path)),
-            ("simplification_block", simplification_block),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+    ctx.set("idea_text", idea_text).set("spec_text", spec_text).path_arg("verdict", verdict_path).path_arg("live_summary", live_summary_path).set("simplification_block", simplification_block).live_arg(live_summary_path, false).render(include_str!("prompts/final_validation.md"))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn recovery_prompt(
-    spec_path: &Path,
-    plan_path: &Path,
-    tasks_path: &Path,
-    trigger_task_id: Option<u32>,
-    trigger_summary: Option<&str>,
-    completed_task_ids: &[u32],
-    started_task_ids: &[u32],
-    live_summary_path: &Path,
-    recovery_path: &Path,
-    interactive: bool,
-) -> String {
-    let ctx = PromptCtx::new();
-    let instr = if interactive {
-        ctx.live_summary_instruction_interactive(live_summary_path)
-    } else {
-        ctx.live_summary_instruction(live_summary_path)
-    };
-    render_template(
-        if interactive {
-            include_str!("prompts/recovery_interactive.md")
-        } else {
-            include_str!("prompts/recovery_noninteractive.md")
-        },
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec", ctx.path(spec_path)),
-            ("plan", ctx.path(plan_path)),
-            ("tasks", ctx.path(tasks_path)),
-            ("recovery", ctx.path(recovery_path)),
-            (
-                "trigger_task",
-                trigger_task_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "(none)".to_string()),
-            ),
-            (
-                "trigger_summary",
-                trigger_summary.unwrap_or("(none recorded)").to_string(),
-            ),
-            ("completed", join_ids(completed_task_ids, "(none)")),
-            ("started", join_ids(started_task_ids, "(none)")),
-            ("instr", instr),
-        ],
-    )
+#[rustfmt::skip]
+pub(crate) fn recovery_prompt(spec_path: &Path, plan_path: &Path, tasks_path: &Path, trigger_task_id: Option<u32>, trigger_summary: Option<&str>, completed_task_ids: &[u32], started_task_ids: &[u32], live_summary_path: &Path, recovery_path: &Path, interactive: bool) -> String {
+    let mut ctx = PromptCtx::new();
+    let template = if interactive { include_str!("prompts/recovery_interactive.md") } else { include_str!("prompts/recovery_noninteractive.md") };
+    ctx.path_arg("spec", spec_path)
+        .path_arg("plan", plan_path)
+        .path_arg("tasks", tasks_path)
+        .path_arg("recovery", recovery_path)
+        .set("trigger_task", trigger_task_id.map(|id| id.to_string()).unwrap_or_else(|| "(none)".to_string()))
+        .set("trigger_summary", trigger_summary.unwrap_or("(none recorded)"))
+        .ids("completed", completed_task_ids, "(none)")
+        .ids("started", started_task_ids, "(none)")
+        .live_arg(live_summary_path, interactive)
+        .render(template)
 }
 
-pub(crate) fn recovery_plan_review_prompt(
-    spec_path: &Path,
-    plan_path: &Path,
-    triggering_review_path: &Path,
-    recovery_path: &Path,
-    live_summary_path: &Path,
-    plan_review_output_path: &Path,
-) -> String {
-    let ctx = PromptCtx::new();
-    render_template(
-        include_str!("prompts/recovery_plan_review.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec", ctx.path(spec_path)),
-            ("plan", ctx.path(plan_path)),
-            ("review", ctx.path(triggering_review_path)),
-            ("recovery", ctx.path(recovery_path)),
-            ("output", ctx.path(plan_review_output_path)),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+#[rustfmt::skip]
+pub(crate) fn recovery_plan_review_prompt(spec_path: &Path, plan_path: &Path, triggering_review_path: &Path, recovery_path: &Path, live_summary_path: &Path, plan_review_output_path: &Path) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("spec", spec_path).path_arg("plan", plan_path).path_arg("review", triggering_review_path).path_arg("recovery", recovery_path).path_arg("output", plan_review_output_path).live_arg(live_summary_path, false).render(include_str!("prompts/recovery_plan_review.md"))
 }
 
-pub(crate) fn recovery_sharding_prompt(
-    spec_path: &Path,
-    plan_path: &Path,
-    live_summary_path: &Path,
-    tasks_output_path: &Path,
-    completed_ids: &[u32],
-    id_floor: u32,
-) -> String {
-    let ctx = PromptCtx::new();
-    render_template(
-        include_str!("prompts/recovery_sharding.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec", ctx.path(spec_path)),
-            ("plan", ctx.path(plan_path)),
-            ("completed", join_ids(completed_ids, "none")),
-            ("id_floor", id_floor.to_string()),
-            ("output", ctx.path(tasks_output_path)),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+#[rustfmt::skip]
+pub(crate) fn recovery_sharding_prompt(spec_path: &Path, plan_path: &Path, live_summary_path: &Path, tasks_output_path: &Path, completed_ids: &[u32], id_floor: u32) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("spec", spec_path).path_arg("plan", plan_path).ids("completed", completed_ids, "none").set("id_floor", id_floor.to_string()).path_arg("output", tasks_output_path).live_arg(live_summary_path, false).render(include_str!("prompts/recovery_sharding.md"))
 }
 
-pub(crate) fn coder_prompt(
-    session_dir: &Path,
-    task_id: u32,
-    round: u32,
-    task_file: &Path,
-    live_summary_path: &Path,
-    resume: bool,
-    refine_carryover: &[String],
-) -> String {
-    let ctx = PromptCtx::new();
+#[rustfmt::skip]
+pub(crate) fn coder_prompt(session_dir: &Path, task_id: u32, round: u32, task_file: &Path, live_summary_path: &Path, resume: bool, refine_carryover: &[String]) -> String {
+    let mut ctx = PromptCtx::new();
     let prev_review = if round > 1 {
-        let p = session_dir
-            .join("rounds")
-            .join(format!("{:03}", round - 1))
-            .join("review.toml");
+        let p = session_dir.join("rounds").join(format!("{:03}", round - 1)).join("review.toml");
         if p.exists() {
-            format!(
-                "\nPrevious reviewer feedback (round {}): {}\nReviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.\n",
-                round - 1,
-                ctx.path(&p)
-            )
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
+            formatdoc!("\nPrevious reviewer feedback (round {}): {}\nReviewer feedback comes from an AI agent. Evaluate each item critically — address what improves the code, rebut the rest in coder_summary.toml.\n", round - 1, ctx.path(&p))
+        } else { String::new() }
+    } else { String::new() };
     let refine_block = if refine_carryover.is_empty() {
         String::new()
     } else {
-        format!(
-            "\nRefine carryover from prior task's reviewer (apply opportunistically — these are nice-to-haves, not blockers):\n{}\n",
-            refine_carryover
-                .iter()
-                .map(|item| format!("  - {}", item.trim()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
+        format!("\nRefine carryover from prior task's reviewer (apply opportunistically — these are nice-to-haves, not blockers):\n{}\n", refine_carryover.iter().map(|item| format!("  - {}", item.trim())).collect::<Vec<_>>().join("\n"))
     };
-    render_template(
-        include_str!("prompts/coder.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("task_id", task_id.to_string()),
-            ("round", round.to_string()),
-            ("task", ctx.path(task_file)),
-            ("spec", ctx.path(session_dir.join("artifacts/spec.md"))),
-            ("plan", ctx.path(session_dir.join("artifacts/plan.md"))),
-            (
-                "coder_summary",
-                ctx.path(
-                    session_dir
-                        .join("rounds")
-                        .join(format!("{round:03}"))
-                        .join("coder_summary.toml"),
-                ),
-            ),
-            ("prev_review", prev_review),
-            ("refine_block", refine_block),
-            (
-                "resume_hint",
-                if resume {
-                    "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n".to_string()
-                } else {
-                    String::new()
-                },
-            ),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+    ctx.set("task_id", task_id.to_string())
+        .set("round", round.to_string())
+        .path_arg("task", task_file)
+        .path_arg("spec", session_dir.join("artifacts/spec.md"))
+        .path_arg("plan", session_dir.join("artifacts/plan.md"))
+        .path_arg("coder_summary", session_dir.join("rounds").join(format!("{round:03}")).join("coder_summary.toml"))
+        .set("prev_review", prev_review)
+        .set("refine_block", refine_block)
+        .set("resume_hint", if resume { "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n" } else { "" })
+        .live_arg(live_summary_path, false)
+        .render(include_str!("prompts/coder.md"))
 }
 
 pub(crate) struct ReviewerPromptInputs<'a> {
@@ -470,73 +121,31 @@ pub(crate) struct ReviewerPromptInputs<'a> {
     pub(crate) live_summary_path: &'a Path,
 }
 
+#[rustfmt::skip]
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
-    let ctx = PromptCtx::new();
+    let mut ctx = PromptCtx::new();
     let prior_reviews = if inputs.round > 1 {
-        format!(
-            "  Prior reviews for this task (read first; do not repeat their feedback):\n{}\n",
-            (1..inputs.round)
-                .map(|r| format!(
-                    "    {}",
-                    ctx.path(
-                        inputs
-                            .session_dir
-                            .join("rounds")
-                            .join(format!("{r:03}"))
-                            .join("review.toml")
-                    )
-                ))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
-    } else {
-        String::new()
-    };
+        format!("  Prior reviews for this task (read first; do not repeat their feedback):\n{}\n", (1..inputs.round).map(|r| format!("    {}", ctx.path(inputs.session_dir.join("rounds").join(format!("{r:03}")).join("review.toml")))).collect::<Vec<_>>().join("\n"))
+    } else { String::new() };
     let coder_summary_section = inputs.coder_summary_file.map_or(String::new(), |path| {
-        format!(
-            "  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n",
-            ctx.path(path),
-            inputs.round
-        )
+        formatdoc!("  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n", ctx.path(path), inputs.round)
     });
-    render_template(
-        include_str!("prompts/reviewer.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("task_id", inputs.task_id.to_string()),
-            ("round", inputs.round.to_string()),
-            ("task", ctx.path(inputs.task_file)),
-            ("spec", ctx.path(inputs.session_dir.join("artifacts/spec.md"))),
-            ("plan", ctx.path(inputs.session_dir.join("artifacts/plan.md"))),
-            ("review_scope", ctx.path(inputs.review_scope_file)),
-            ("prior_reviews", prior_reviews),
-            ("coder_summary_section", coder_summary_section),
-            (
-                "review_scope_text",
-                "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n".to_string(),
-            ),
-            ("review", ctx.path(inputs.review_file)),
-            ("instr", ctx.live_summary_instruction(inputs.live_summary_path)),
-        ],
-    )
+    ctx.set("task_id", inputs.task_id.to_string())
+        .set("round", inputs.round.to_string())
+        .path_arg("task", inputs.task_file)
+        .path_arg("spec", inputs.session_dir.join("artifacts/spec.md"))
+        .path_arg("plan", inputs.session_dir.join("artifacts/plan.md"))
+        .path_arg("review_scope", inputs.review_scope_file)
+        .set("prior_reviews", prior_reviews)
+        .set("coder_summary_section", coder_summary_section)
+        .set("review_scope_text", "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n")
+        .path_arg("review", inputs.review_file)
+        .live_arg(inputs.live_summary_path, false)
+        .render(include_str!("prompts/reviewer.md"))
 }
 
-pub(crate) fn simplifier_prompt(
-    session_dir: &Path,
-    review_scope_file: &Path,
-    simplification_path: &Path,
-    live_summary_path: &Path,
-) -> String {
-    let ctx = PromptCtx::new();
-    render_template(
-        include_str!("prompts/simplifier.md"),
-        &[
-            ("project_doc_instr", ctx.project_doc_instr.clone()),
-            ("spec_path", ctx.path(session_dir.join("artifacts/spec.md"))),
-            ("plan_path", ctx.path(session_dir.join("artifacts/plan.md"))),
-            ("review_scope_path", ctx.path(review_scope_file)),
-            ("simplification_path", ctx.path(simplification_path)),
-            ("instr", ctx.live_summary_instruction(live_summary_path)),
-        ],
-    )
+#[rustfmt::skip]
+pub(crate) fn simplifier_prompt(session_dir: &Path, review_scope_file: &Path, simplification_path: &Path, live_summary_path: &Path) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("spec_path", session_dir.join("artifacts/spec.md")).path_arg("plan_path", session_dir.join("artifacts/plan.md")).path_arg("review_scope_path", review_scope_file).path_arg("simplification_path", simplification_path).live_arg(live_summary_path, false).render(include_str!("prompts/simplifier.md"))
 }

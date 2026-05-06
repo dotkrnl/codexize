@@ -131,30 +131,18 @@ pub fn node_at_path<'a>(nodes: &'a [Node], path: &[usize]) -> Option<&'a Node> {
 
 pub fn node_key_at_path(nodes: &[Node], path: &[usize]) -> Option<NodeKey> {
     let mut parts = Vec::new();
-    let mut absolute_path = Vec::new();
     let mut current = nodes;
-
     for (depth, &index) in path.iter().enumerate() {
-        absolute_path.push(index);
         let node = current.get(index)?;
-        parts.push(node_key_part(node, &absolute_path, depth));
+        parts.push(node_key_part(node, &path[..=depth], depth));
         current = &node.children;
     }
-
     Some(NodeKey::new(parts))
 }
 
 #[cfg(test)]
 pub fn collect_all_rows(nodes: &[Node]) -> Vec<VisibleNodeRow> {
-    let mut rows = Vec::new();
-    flatten_rows(
-        nodes,
-        &mut Vec::new(),
-        &mut Vec::new(),
-        &mut rows,
-        &mut |_| true,
-    );
-    rows
+    flatten_visible_rows(nodes, |_| true)
 }
 
 pub fn flatten_visible_rows(
@@ -174,34 +162,26 @@ pub fn flatten_visible_rows(
 
 pub fn active_stage_paths(nodes: &[Node], runs: &[RunRecord]) -> BTreeMap<NodeKey, NodePath> {
     let run_lookup: BTreeMap<u64, &RunRecord> = runs.iter().map(|run| (run.id, run)).collect();
-    let mut active = BTreeMap::new();
-
-    for (index, node) in nodes.iter().enumerate() {
-        if node.kind != NodeKind::Stage || node.status != NodeStatus::Running {
-            continue;
-        }
-        let path = vec![index];
-        let Some(stage_key) = node_key_at_path(nodes, &path) else {
-            continue;
-        };
-        if let Some(best_path) = best_active_descendant_path(nodes, &path, &run_lookup) {
-            active.insert(stage_key, best_path);
-        }
-    }
-
-    active
+    nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| {
+            if node.kind != NodeKind::Stage || node.status != NodeStatus::Running {
+                return None;
+            }
+            let path = vec![index];
+            let stage_key = node_key_at_path(nodes, &path)?;
+            let best_path = best_active_descendant_path(nodes, &path, &run_lookup)?;
+            Some((stage_key, best_path))
+        })
+        .collect()
 }
 
 pub fn active_path_keys(nodes: &[Node], runs: &[RunRecord]) -> BTreeSet<NodeKey> {
-    let mut keys = BTreeSet::new();
-    for path in active_stage_paths(nodes, runs).into_values() {
-        for depth in 1..=path.len() {
-            if let Some(key) = node_key_at_path(nodes, &path[..depth]) {
-                keys.insert(key);
-            }
-        }
-    }
-    keys
+    active_stage_paths(nodes, runs)
+        .into_values()
+        .flat_map(|path| (1..=path.len()).filter_map(move |d| node_key_at_path(nodes, &path[..d])))
+        .collect()
 }
 
 /// Find the deepest node path whose `run_id` or `leaf_run_id` matches `run_id`.
@@ -270,11 +250,7 @@ fn best_active_descendant_path(
     let stage = node_at_path(nodes, stage_path)?;
     let mut candidates = Vec::new();
     collect_leaf_candidates(stage, stage_path, run_lookup, &mut candidates);
-    candidates.sort_by(|left, right| right.cmp(left));
-    candidates
-        .into_iter()
-        .next()
-        .map(|candidate| candidate.path)
+    candidates.into_iter().max().map(|c| c.path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -410,35 +386,26 @@ fn mode_key_for(node: &Node) -> ModeKey {
     }
 }
 
-fn attempt_run_node(run: &RunRecord) -> Node {
+fn run_node(label: String, status: RunStatus, run_id: u64) -> Node {
     Node {
-        label: format!("Attempt {}", run.attempt),
+        label,
         kind: NodeKind::AgentRun,
-        status: run_status_to_node(run.status),
+        status: run_status_to_node(status),
         summary: String::new(),
         children: Vec::new(),
-        run_id: Some(run.id),
+        run_id: Some(run_id),
         leaf_run_id: None,
     }
 }
 
+fn attempt_run_node(run: &RunRecord) -> Node {
+    run_node(format!("Attempt {}", run.attempt), run.status, run.id)
+}
+
 fn agent_run_node(run: &RunRecord) -> Node {
     let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
-    let label = format!(
-        "{} · {}{}",
-        role_label(&run.stage),
-        run.model,
-        effort_suffix
-    );
-    Node {
-        label,
-        kind: NodeKind::AgentRun,
-        status: run_status_to_node(run.status),
-        summary: String::new(),
-        children: Vec::new(),
-        run_id: Some(run.id),
-        leaf_run_id: None,
-    }
+    let label = format!("{} · {}{}", role_label(&run.stage), run.model, effort_suffix);
+    run_node(label, run.status, run.id)
 }
 
 fn role_label(stage: &str) -> &str {
@@ -619,16 +586,12 @@ fn stage_summary(
     label: &str,
     runs: &[&RunRecord],
 ) -> String {
-    if runs.is_empty() {
-        return String::new();
+    let Some(last) = runs.last() else { return String::new(); };
+    if runs.len() == 1 && last.status == RunStatus::Done {
+        return format!("{} complete", label.to_lowercase());
     }
-    if let Some(last) = runs.last() {
-        if runs.len() == 1 && last.status == RunStatus::Done {
-            return format!("{} complete", label.to_lowercase());
-        }
-        if last.status == RunStatus::Running {
-            return format!("{} running", label.to_lowercase());
-        }
+    if last.status == RunStatus::Running {
+        return format!("{} running", label.to_lowercase());
     }
     String::new()
 }
@@ -639,9 +602,11 @@ fn builder_status(
     reviewer_runs: &[&RunRecord],
     recovery_runs: &[&RunRecord],
 ) -> NodeStatus {
-    if coder_runs.iter().any(|r| r.status == RunStatus::Running)
-        || reviewer_runs.iter().any(|r| r.status == RunStatus::Running)
-        || recovery_runs.iter().any(|r| r.status == RunStatus::Running)
+    if [coder_runs, reviewer_runs, recovery_runs]
+        .iter()
+        .copied()
+        .flatten()
+        .any(|r| r.status == RunStatus::Running)
     {
         return NodeStatus::Running;
     }
@@ -664,29 +629,26 @@ fn builder_status(
 }
 
 fn recovery_rounds_for_stage(state: &SessionState, stage: &str) -> BTreeSet<u32> {
-    let mut rounds: BTreeSet<u32> = state
-        .builder
-        .pipeline_items
-        .iter()
-        .filter(|item| item.stage == stage && item.mode.as_deref() == Some("recovery"))
-        .filter_map(|item| item.round)
-        .collect();
-
     let recovery_rounds: BTreeSet<u32> = state
         .agent_runs
         .iter()
         .filter(|run| run.stage == "recovery")
         .map(|run| run.round)
         .collect();
-    for run in state.agent_runs.iter().filter(|run| run.stage == stage) {
-        // RunRecord has no phase discriminator today; this round-only join is
-        // the recovery attribution chokepoint if phase tagging is added later.
-        if recovery_rounds.contains(&run.round) {
-            rounds.insert(run.round);
-        }
-    }
-
-    rounds
+    state
+        .builder
+        .pipeline_items
+        .iter()
+        .filter(|item| item.stage == stage && item.mode.as_deref() == Some("recovery"))
+        .filter_map(|item| item.round)
+        .chain(
+            state
+                .agent_runs
+                .iter()
+                .filter(|run| run.stage == stage && recovery_rounds.contains(&run.round))
+                .map(|run| run.round),
+        )
+        .collect()
 }
 
 fn builder_summary(state: &SessionState, recovery_runs: &[&RunRecord]) -> String {
@@ -729,10 +691,7 @@ pub fn collapse_tree(node: &mut Node) {
     if node.children.len() == 1 {
         let child_kind = node.children[0].kind;
         if matches!(child_kind, NodeKind::Round | NodeKind::AgentRun) {
-            let child = node
-                .children
-                .pop()
-                .expect("invariant: len() == 1 before collapsing single-child tree layer");
+            let child = node.children.pop().unwrap();
             if child.kind == NodeKind::AgentRun {
                 node.leaf_run_id = child.run_id;
             } else {

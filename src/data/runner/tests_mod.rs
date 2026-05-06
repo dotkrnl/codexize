@@ -76,12 +76,10 @@ fn request_run_label_exit_completes_interactive_stages_without_term() {
 
         request_run_label_exit(window_name);
 
-        let receiver = test_cancel_receivers()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(window_name)
-            .expect("cancel receiver");
-        assert_eq!(receiver.try_recv().unwrap(), AcpCancelReason::Complete);
+        assert_eq!(
+            drain_test_cancel_receiver_for(window_name),
+            vec!["complete"]
+        );
         assert!(!run_label_is_active(window_name));
     }
 }
@@ -94,12 +92,10 @@ fn cancel_run_labels_matching_still_terminates_run() {
 
     cancel_run_labels_matching("[Recovery Terminate Test]");
 
-    let receiver = test_cancel_receivers()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove("[Recovery Terminate Test]")
-        .expect("cancel receiver");
-    assert_eq!(receiver.try_recv().unwrap(), AcpCancelReason::Terminate);
+    assert_eq!(
+        drain_test_cancel_receiver_for("[Recovery Terminate Test]"),
+        vec!["terminate"],
+    );
     assert!(!run_label_is_active("[Recovery Terminate Test]"));
 }
 
@@ -114,14 +110,9 @@ fn interrupt_run_label_input_queues_interrupt_when_turn_is_active() {
         "new instructions".to_string()
     ));
 
-    let receiver = test_input_receivers()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove("[Interrupt]")
-        .expect("input receiver");
     assert_eq!(
-        receiver.try_recv().unwrap(),
-        AcpInput::Interrupt("new instructions".to_string())
+        drain_test_input_receiver_for("[Interrupt]"),
+        vec![("interrupt", "new instructions".to_string())],
     );
     shutdown_all_runs();
 }

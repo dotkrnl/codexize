@@ -3161,6 +3161,7 @@ fn final_validation_done_run_renders_full_goal_met_report() {
             r#"status = "goal_met"
 summary = "All goals achieved"
 findings = ["Inspected src/ and tests/"]
+dream_recommendation = "skip"
 "#,
         );
 

@@ -150,7 +150,11 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
     assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
     assert_eq!(
         resolved.session.policy.allowed_write_paths,
-        vec![verdict_path.clone(), live_summary_path.clone()]
+        vec![
+            verdict_path.clone(),
+            live_summary_path.clone(),
+            temp.path().join(".codexize/memory/**")
+        ]
     );
     assert!(resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
@@ -164,9 +168,10 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
             .get("CODEXIZE_ACP_ALLOWED_WRITE_PATHS")
             .cloned(),
         Some(format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             verdict_path.display(),
-            live_summary_path.display()
+            live_summary_path.display(),
+            temp.path().join(".codexize/memory/**").display()
         ))
     );
     assert_eq!(

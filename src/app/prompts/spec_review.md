@@ -18,4 +18,5 @@ MUST cover, in this order:
     authoritative section. Do not propose edits to that section.
   - Bottom-line judgement on the last line: ship-as-is / needs-revision /
     reject.
+{memory_context}
 {instr}

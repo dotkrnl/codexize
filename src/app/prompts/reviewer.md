@@ -73,4 +73,5 @@ Rules:
   - agent_pivot   → autonomous recovery required; explain the pivot.
   - Don't repeat feedback from prior reviews unless the coder ignored it
     without good reason — in which case call that out explicitly.
+{memory_context}
 {instr}

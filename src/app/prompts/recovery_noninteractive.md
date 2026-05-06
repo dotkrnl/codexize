@@ -43,4 +43,5 @@ Hard requirements:
         feedback      = ["one item per remediation step (optional)"]
         changed_files = ["artifacts/spec.md", "artifacts/plan.md", "artifacts/tasks.toml"]
                                                         # paths you actually edited (audit trail)
+{memory_context}
 {instr}

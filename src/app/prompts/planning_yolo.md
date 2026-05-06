@@ -62,4 +62,5 @@ Hard rules:
   - Don't ask whether to continue, proceed, or run follow-up skills — when
     both files are written, STOP and exit. The orchestrator drives stage
     transitions.
+{memory_context}
 {instr}

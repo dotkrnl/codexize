@@ -89,4 +89,5 @@ Hard rules:
   - Stay in this stage's scope. Out-of-scope ideas → leave for follow-up,
     don't act on them here.
   - Final validation runs after you. Don't try to do its job.
+{memory_context}
 {instr}

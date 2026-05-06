@@ -135,6 +135,8 @@ fn validation_report_renders_goal_met_summary_and_findings() {
         findings: vec!["Inspected src/ and tests/".to_string()],
         gaps: Vec::new(),
         new_tasks: Vec::new(),
+        dream_recommendation: None,
+        dream_reason: None,
     };
     let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
     assert!(text.contains("goal_met"));
@@ -159,6 +161,8 @@ fn validation_report_renders_goal_gap_with_citations_and_tasks() {
             test: "cargo test retry::".to_string(),
             estimated_tokens: 5000,
         }],
+        dream_recommendation: None,
+        dream_reason: None,
     };
     let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
     assert!(text.contains("goal_gap"));
@@ -180,6 +184,8 @@ fn validation_report_renders_needs_human_with_gap_citations() {
             checked: vec!["artifacts/spec.md".to_string()],
         }],
         new_tasks: Vec::new(),
+        dream_recommendation: None,
+        dream_reason: None,
     };
     let text = lines_text(&final_validation_report_lines(&verdict, "", 200));
     assert!(text.contains("needs_human"));
@@ -204,6 +210,8 @@ fn validation_report_wraps_long_summary_to_width() {
         findings: Vec::new(),
         gaps: Vec::new(),
         new_tasks: Vec::new(),
+        dream_recommendation: None,
+        dream_reason: None,
     };
     let lines = final_validation_report_lines(&verdict, "", WIDTH);
     // No printable line may exceed the requested width.
@@ -238,6 +246,8 @@ fn validation_report_wraps_long_finding_and_gap_description() {
             checked: Vec::new(),
         }],
         new_tasks: Vec::new(),
+        dream_recommendation: None,
+        dream_reason: None,
     };
     let lines = final_validation_report_lines(&verdict, "", WIDTH);
     for line in &lines {

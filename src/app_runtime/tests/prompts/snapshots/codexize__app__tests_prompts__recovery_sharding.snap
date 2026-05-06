@@ -61,6 +61,17 @@ cause rejection.
     estimated_tokens = 90000
     spec_refs = [{ path = "artifacts/spec.md", lines = "10-45" }]
     plan_refs = [{ path = "artifacts/plan.md", lines = "22-60" }]
+Project Memory:
+  - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
+  - Memory root: /tmp/codexize-prompt-fixture/session/.codexize/memory
+  - Read /tmp/codexize-prompt-fixture/session/.codexize/memory/index.md first if it exists.
+  - Use /tmp/codexize-prompt-fixture/session/.codexize/memory/manifest.toml to select at most a small number of relevant topic, journal, or dream files for deeper reading.
+  - Do not read the entire memory directory or scan the full memory store.
+  - Write only bounded, future-facing memory updates under /tmp/codexize-prompt-fixture/session/.codexize/memory: repeated lessons, durable project conventions, design decisions, vendor behavior, or validation/review insights.
+  - Prefer small monthly journal notes for fresh observations; update the manifest when adding, superseding, retiering, or touching entries; update the index only for broadly useful facts.
+  - Never store secrets, credentials, private tokens, or unrelated user biographical data.
+
+
 
 
 Immediately create /tmp/codexize-prompt-fixture/session/artifacts/live_summary.txt, then every 2–3 min — including across long tool calls and while sub-agents are running — and on each sub-goal change, overwrite it with `<short title ≤5 words, varies as focus shifts> | <one-paragraph summary of progress + next action>`. If you delegate to a sub-agent or any other long-running call, poll its progress periodically and rewrite the live summary on each poll; do not "fire and wait" on a sub-agent for more than 2–3 min without an update. Keep this file current until you exit. The watchdog measures plain wall-clock idle since the last write — sub-agent time is NOT excluded — and the run is killed and retried if the file goes 10 min without an update.

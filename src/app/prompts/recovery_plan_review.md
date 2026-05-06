@@ -35,4 +35,5 @@ Routing downstream:
   - revise / human_blocked / agent_pivot → recovery re-runs with your
     feedback. If the recovery artifact requested `trigger = "human_blocked"`,
     the retry is interactive so the operator can decide.
+{memory_context}
 {instr}

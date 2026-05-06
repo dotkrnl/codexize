@@ -8,6 +8,12 @@ pub enum ValidationStatus {
     GoalGap,
     NeedsHuman,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DreamRecommendation {
+    Suggest,
+    Skip,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Gap {
     pub description: String,
@@ -33,6 +39,10 @@ pub struct ValidationVerdict {
     pub gaps: Vec<Gap>,
     #[serde(default)]
     pub new_tasks: Vec<ValidatorGapTask>,
+    #[serde(default)]
+    pub dream_recommendation: Option<DreamRecommendation>,
+    #[serde(default)]
+    pub dream_reason: Option<String>,
 }
 pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
     let parsed: ValidationVerdict = toml::from_str(text)?;
@@ -47,6 +57,23 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             if !parsed.new_tasks.is_empty() {
                 bail!("status=goal_met must not include new_tasks");
             }
+            let Some(recommendation) = &parsed.dream_recommendation else {
+                bail!("status=goal_met requires dream_recommendation");
+            };
+            match recommendation {
+                DreamRecommendation::Suggest => {
+                    if parsed
+                        .dream_reason
+                        .as_deref()
+                        .is_none_or(|reason| reason.trim().is_empty())
+                    {
+                        bail!(
+                            "status=goal_met with dream_recommendation=suggest requires dream_reason"
+                        );
+                    }
+                }
+                DreamRecommendation::Skip => {}
+            }
         }
         ValidationStatus::GoalGap => {
             if parsed.gaps.is_empty() {
@@ -55,6 +82,9 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             if parsed.new_tasks.is_empty() {
                 bail!("status=goal_gap requires at least one new_task");
             }
+            if parsed.dream_recommendation.is_some() || parsed.dream_reason.is_some() {
+                bail!("status=goal_gap must not include dream fields");
+            }
         }
         ValidationStatus::NeedsHuman => {
             if parsed.gaps.is_empty() {
@@ -62,6 +92,9 @@ pub fn parse_verdict_toml(text: &str) -> anyhow::Result<ValidationVerdict> {
             }
             if !parsed.new_tasks.is_empty() {
                 bail!("status=needs_human must not include new_tasks");
+            }
+            if parsed.dream_recommendation.is_some() || parsed.dream_reason.is_some() {
+                bail!("status=needs_human must not include dream fields");
             }
         }
     }

@@ -68,4 +68,5 @@ Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
 If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
+{memory_context}
 {instr}

@@ -54,4 +54,5 @@ the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
 {review_path} saying so. Do NOT invent issues.
+{memory_context}
 {instr}

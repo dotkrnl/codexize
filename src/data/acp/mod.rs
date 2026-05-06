@@ -28,7 +28,10 @@ pub use super::acp_events::{
     AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientTextKind,
     ClientUpdate, ToolCallActivityKind, translate_update,
 };
-use crate::{adapters::EffortLevel, selection::VendorKind, state::LaunchModes};
+use crate::{
+    adapters::EffortLevel, logic::memory::memory_glob_from_session_path, selection::VendorKind,
+    state::LaunchModes,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 pub type AcpResult<T> = Result<T, AcpError>;
@@ -83,8 +86,11 @@ pub struct AcpLaunchPolicy {
 impl AcpLaunchPolicy {
     pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
         let cmds = ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"];
+        let verdict_path = verdict_path.into();
+        let live_summary_path = live_summary_path.into();
+        let memory_glob = memory_glob_from_session_path(&verdict_path);
         Self {
-            allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
+            allowed_write_paths: vec![verdict_path, live_summary_path, memory_glob],
             shell_policy: AcpShellCommandPolicy::Allowlist(cmds.map(String::from).to_vec()),
             enforce_readonly_workspace: true,
         }

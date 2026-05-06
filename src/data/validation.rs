@@ -4,8 +4,8 @@
 //! [`crate::logic::validation`]. This module is the thin IO shell that reads
 //! a verdict file off disk and delegates checking to the pure parser.
 pub use crate::logic::validation::{
-    Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask, normalize_gap_tasks,
-    parse_verdict_toml,
+    DreamRecommendation, Gap, ValidationStatus, ValidationVerdict, ValidatorGapTask,
+    normalize_gap_tasks, parse_verdict_toml,
 };
 use anyhow::{Context, Result};
 use std::fs;

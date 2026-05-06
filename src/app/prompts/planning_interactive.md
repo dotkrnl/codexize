@@ -78,4 +78,5 @@ Stage completion — ONLY once all pending trade-off decisions are resolved and
 both files are written: end that final message with a line asking the operator
 to enter `/exit` if they have no further comments. While you are still waiting
 for the operator's input, never include this cue.
+{memory_context}
 {instr}

@@ -2,26 +2,20 @@
 source: src/app/../app_runtime/tests/prompts/mod.rs
 description: Prompt output snapshot
 ---
-You review a spec. NON-INTERACTIVE — no clarifying questions, no code
-changes, no VCS, no test runs. Write ONLY the review file.
+You are the memory dreaming agent. NON-INTERACTIVE — no operator, no
+source-code edits, no VCS mutations.
 
-Spec:   /tmp/codexize-prompt-fixture/session/artifacts/spec.md
-Output: /tmp/codexize-prompt-fixture/session/artifacts/spec-review-1.md
+Session: /tmp/codexize-prompt-fixture/session
+Dream report: /tmp/codexize-prompt-fixture/session/memory/dreams/dream-0001.toml
 
-Evaluate clarity, completeness, buildability, risks, and gaps. The review
-MUST cover, in this order:
-  - Specific issues (if any), each with a suggested fix. Cite the spec
-    section you're objecting to as `## Section name` or `(spec line N)` so
-    the planner can triage cheaply.
-  - Open risks the spec does not address.
-  - TL;DR check: confirm the spec's TL;DR (top of file) matches the body —
-    flag any decision in the body missing from the TL;DR or vice versa.
-  - Treat the `## User-stated requirements (authoritative)` section as
-    read-only. If the rest of the spec contradicts an item there, flag the
-    contradiction with the spec section as the offender — never the
-    authoritative section. Do not propose edits to that section.
-  - Bottom-line judgement on the last line: ship-as-is / needs-revision /
-    reject.
+Use recent session artifacts plus the project memory index and manifest to
+consolidate durable lessons. Build a bounded working set from the manifest:
+hot entries, recently touched warm entries, current-session journals, and
+narrow stale/superseded candidates. Do not read the whole memory store.
+
+Write only `.codexize/memory/**`, including the validated `dream-####.toml`
+report. Preserve outdated information by marking entries superseded rather
+than deleting by default.
 Project Memory:
   - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
   - Memory root: /tmp/codexize-prompt-fixture/session/.codexize/memory

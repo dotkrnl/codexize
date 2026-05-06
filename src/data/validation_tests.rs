@@ -18,6 +18,7 @@ fn goal_met_basic() {
         &dir,
         r#"status = "goal_met"
 summary = "All goals achieved"
+dream_recommendation = "skip"
 findings = ["Inspected src/ and tests/ — everything looks good"]
 "#,
     );
@@ -27,6 +28,34 @@ findings = ["Inspected src/ and tests/ — everything looks good"]
     assert_eq!(verdict.findings.len(), 1);
     assert!(verdict.gaps.is_empty());
     assert!(verdict.new_tasks.is_empty());
+    assert_eq!(
+        verdict.dream_recommendation,
+        Some(DreamRecommendation::Skip)
+    );
+    assert!(verdict.dream_reason.is_none());
+}
+
+#[test]
+fn goal_met_with_dream_suggestion_requires_reason() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_verdict(
+        &dir,
+        r#"status = "goal_met"
+summary = "All goals achieved"
+findings = ["Inspected src/ and tests/ — everything looks good"]
+dream_recommendation = "suggest"
+dream_reason = "Several reviewer lessons should be consolidated."
+"#,
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(
+        verdict.dream_recommendation,
+        Some(DreamRecommendation::Suggest)
+    );
+    assert_eq!(
+        verdict.dream_reason.as_deref(),
+        Some("Several reviewer lessons should be consolidated.")
+    );
 }
 
 #[test]
@@ -83,6 +112,7 @@ fn goal_met_with_empty_findings_allowed() {
         &dir,
         r#"status = "goal_met"
 summary = "Nothing to validate"
+dream_recommendation = "skip"
 "#,
     );
     let verdict = validate(&path).unwrap();
@@ -115,10 +145,38 @@ fn empty_summary_fails() {
         &dir,
         r#"status = "goal_met"
 summary = "   "
+dream_recommendation = "skip"
 "#,
     );
     let err = validate(&path).unwrap_err();
     assert!(format!("{err:#}").contains("summary"));
+}
+
+#[test]
+fn goal_met_without_dream_recommendation_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_verdict(
+        &dir,
+        r#"status = "goal_met"
+summary = "Looks good"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("dream_recommendation"));
+}
+
+#[test]
+fn goal_met_dream_suggest_without_reason_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_verdict(
+        &dir,
+        r#"status = "goal_met"
+summary = "Looks good"
+dream_recommendation = "suggest"
+"#,
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("dream_reason"));
 }
 
 #[test]
@@ -128,6 +186,7 @@ fn goal_met_with_gaps_fails() {
         &dir,
         r#"status = "goal_met"
 summary = "Looks good"
+dream_recommendation = "skip"
 
 [[gaps]]
 description = "Oops"
@@ -145,6 +204,7 @@ fn goal_met_with_new_tasks_fails() {
         &dir,
         r#"status = "goal_met"
 summary = "Looks good"
+dream_recommendation = "skip"
 
 [[new_tasks]]
 title = "Extra"

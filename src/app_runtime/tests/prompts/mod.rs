@@ -11,12 +11,30 @@ use super::test_support::with_temp_root_and_cwd;
 use crate::app::prompts::*;
 
 fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
+    if !name.starts_with("live_summary") {
+        assert_memory_block(name, actual);
+    }
     insta::with_settings!({
         description => "Prompt output snapshot",
         omit_expression => true,
     }, {
         insta::assert_snapshot!(name, actual);
     });
+}
+
+fn assert_memory_block(name: &str, actual: &str) {
+    assert!(
+        actual.contains("Project Memory"),
+        "{name} prompt must include the shared memory block"
+    );
+    assert!(
+        actual.contains(".codexize/memory/index.md"),
+        "{name} prompt must point agents at the project memory index"
+    );
+    assert!(
+        actual.contains("Do not read the entire memory directory"),
+        "{name} prompt must forbid full-store memory scans"
+    );
 }
 
 // `with_temp_root_and_cwd` chdir's the entire process; guard tests in
@@ -63,14 +81,13 @@ fn prompt_insta_snapshots_match_fixtures() {
                 "/tmp/codexize-prompt-fixture/session/artifacts/live_summary.interactive.txt",
             )),
         );
-        assert_prompt_insta_snapshot(
-            "spec_review",
-            &spec_review_prompt(
-                &spec.display().to_string(),
-                &spec_review_out.display().to_string(),
-                &live.display().to_string(),
-            ),
+        let spec_review = spec_review_prompt(
+            &spec.display().to_string(),
+            &spec_review_out.display().to_string(),
+            &live.display().to_string(),
         );
+        assert_memory_block("spec_review", &spec_review);
+        assert_prompt_insta_snapshot("spec_review", &spec_review);
         assert_prompt_insta_snapshot(
             "plan_review_round1",
             &plan_review_prompt(
@@ -138,6 +155,14 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &final_verdict_r3,
                 &live,
                 None,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "dreaming",
+            &dreaming_prompt(
+                &session_dir,
+                &session_dir.join("memory/dreams/dream-0001.toml"),
+                &live,
             ),
         );
         assert_prompt_insta_snapshot(

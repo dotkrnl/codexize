@@ -2,6 +2,8 @@ use std::{
     collections::HashMap,
     path::{Component, Path, PathBuf},
 };
+
+use crate::logic::memory::memory_root_from_session_path;
 pub(super) struct PromptCtx {
     values: HashMap<&'static str, String>,
 }
@@ -46,6 +48,21 @@ impl PromptCtx {
             include_str!("prompts/live_summary.md")
         };
         self.set("instr", Self::render_values(template, [("path", path)]))
+    }
+    pub(super) fn memory_arg(&mut self, session_or_artifact_path: impl AsRef<Path>) -> &mut Self {
+        let memory_root = memory_root_from_session_path(session_or_artifact_path.as_ref());
+        let rendered = Self::render_values(
+            include_str!("prompts/memory_context.md"),
+            [
+                ("memory_root", self.path(&memory_root)),
+                ("memory_index", self.path(memory_root.join("index.md"))),
+                (
+                    "memory_manifest",
+                    self.path(memory_root.join("manifest.toml")),
+                ),
+            ],
+        );
+        self.set("memory_context", rendered)
     }
     pub(super) fn render(&self, template: &str) -> String {
         Self::render_values(template, self.values.iter().map(|(k, v)| (*k, v.clone())))

@@ -69,4 +69,5 @@ missing/empty fields cause rejection.
       {{ path = "artifacts/plan.md", lines = "22-60" }},
       {{ path = "artifacts/plan.md", lines = "110-125" }},
     ]
+{memory_context}
 {instr}

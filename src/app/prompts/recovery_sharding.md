@@ -57,4 +57,5 @@ cause rejection.
     estimated_tokens = 90000
     spec_refs = [{{ path = "artifacts/spec.md", lines = "10-45" }}]
     plan_refs = [{{ path = "artifacts/plan.md", lines = "22-60" }}]
+{memory_context}
 {instr}

@@ -9,6 +9,7 @@ pub(crate) fn spec_review_prompt(
     let mut ctx = PromptCtx::new();
     ctx.path_arg("spec_path", spec_path)
         .path_arg("review_path", review_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/spec_review.md"))
 }
@@ -41,6 +42,7 @@ pub(crate) fn plan_review_prompt(
         .path_arg("plan_path", plan_path)
         .set("review_path", review_path)
         .set("prior_block", prior_block)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/plan_review.md"))
 }
@@ -66,6 +68,7 @@ pub(crate) fn brainstorm_prompt(
         .path_arg("spec_path", spec_path)
         .set("summary_path", summary_path)
         .path_arg("skip_proposal_path", skip_proposal_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)
 }
@@ -95,6 +98,7 @@ pub(crate) fn planning_prompt(
     ctx.path_arg("spec", spec_path)
         .set("reviews", reviews)
         .path_arg("plan", plan_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)
 }
@@ -108,6 +112,7 @@ pub(crate) fn sharding_prompt(
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .path_arg("tasks", tasks_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/sharding.md"))
 }
@@ -131,8 +136,22 @@ pub(crate) fn final_validation_prompt(
         .path_arg("verdict", verdict_path)
         .path_arg("live_summary", live_summary_path)
         .set("simplification_block", simplification_block)
+        .memory_arg(verdict_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/final_validation.md"))
+}
+#[cfg(test)]
+pub(crate) fn dreaming_prompt(
+    session_dir: &Path,
+    dream_report_path: &Path,
+    live_summary_path: &Path,
+) -> String {
+    let mut ctx = PromptCtx::new();
+    ctx.path_arg("session_dir", session_dir)
+        .path_arg("dream_report", dream_report_path)
+        .live_arg(live_summary_path, false)
+        .memory_arg(session_dir)
+        .render(include_str!("prompts/dreaming.md"))
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn recovery_prompt(
@@ -157,6 +176,7 @@ pub(crate) fn recovery_prompt(
         .path_arg("plan", plan_path)
         .path_arg("tasks", tasks_path)
         .path_arg("recovery", recovery_path)
+        .memory_arg(spec_path)
         .set(
             "trigger_task",
             trigger_task_id
@@ -186,6 +206,7 @@ pub(crate) fn recovery_plan_review_prompt(
         .path_arg("review", triggering_review_path)
         .path_arg("recovery", recovery_path)
         .path_arg("output", plan_review_output_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/recovery_plan_review.md"))
 }
@@ -203,6 +224,7 @@ pub(crate) fn recovery_sharding_prompt(
         .ids("completed", completed_ids, "none")
         .set("id_floor", id_floor.to_string())
         .path_arg("output", tasks_output_path)
+        .memory_arg(spec_path)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/recovery_sharding.md"))
 }
@@ -251,6 +273,7 @@ pub(crate) fn coder_prompt(
         .path_arg("spec", session_dir.join("artifacts/spec.md"))
         .path_arg("plan", session_dir.join("artifacts/plan.md"))
         .path_arg("coder_summary", session_dir.join("rounds").join(format!("{round:03}")).join("coder_summary.toml"))
+        .memory_arg(session_dir)
         .set("prev_review", prev_review)
         .set("refine_block", refine_block)
         .set("resume_hint", if resume { "\nThis is a RESUME of a previous coding session on the same task — pick up where\nyou left off, honour the reviewer feedback above, and finish the work.\n" } else { "" })
@@ -298,6 +321,7 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         .path_arg("spec", inputs.session_dir.join("artifacts/spec.md"))
         .path_arg("plan", inputs.session_dir.join("artifacts/plan.md"))
         .path_arg("review_scope", inputs.review_scope_file)
+        .memory_arg(inputs.session_dir)
         .set("prior_reviews", prior_reviews)
         .set("coder_summary_section", coder_summary_section)
         .set("review_scope_text", "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n")
@@ -330,6 +354,7 @@ pub(crate) fn simplifier_prompt(
         .path_arg("review_scope_path", review_scope_file)
         .path_arg("simplification_path", simplification_path)
         .set("refine_block", refine_block)
+        .memory_arg(session_dir)
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/simplifier.md"))
 }

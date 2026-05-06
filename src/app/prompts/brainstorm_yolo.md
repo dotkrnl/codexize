@@ -85,4 +85,5 @@ Hard rules:
     skills (including any "continue to next stage" inline prompt). When
     your output files are written, STOP and exit; the orchestrator drives
     stage transitions.
+{memory_context}
 {instr}

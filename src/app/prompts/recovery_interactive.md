@@ -56,4 +56,6 @@ Hard requirements:
 Stage completion — ONLY once all pending confirmation decisions are resolved
 and your output files are written: end that final message with a line asking
 the operator to enter `/exit` if they have no further comments. While you are
-still waiting for the operator's confirmation, never include this cue.{instr}
+still waiting for the operator's confirmation, never include this cue.
+{memory_context}
+{instr}

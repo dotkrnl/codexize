@@ -55,9 +55,10 @@ spec (under the precedence above). Do not flag tangential pre-existing
 workspace issues unrelated to the goal. Items in `## Out of scope` are
 never gaps.
 
-Outputs (the ONLY two paths you may Write):
+Outputs (the only paths you may Write):
   - {verdict} — the verdict TOML.
-  - {live_summary} — the live progress summary (rules below).{simplification_block}
+  - {live_summary} — the live progress summary (rules below).
+  - `.codexize/memory/**` — bounded advisory memory updates only.{simplification_block}
 
 Verdict TOML schema (validated programmatically; parse failure or schema
 violation = run failure):
@@ -68,6 +69,10 @@ violation = run failure):
       "<one bullet per area you inspected (regardless of verdict); include the workspace-status note here>",
       # ...
     ]
+
+    # Required when status = "goal_met"; forbidden otherwise.
+    dream_recommendation = "suggest" | "skip"
+    dream_reason = "<required only when dream_recommendation = \"suggest\">"
 
     # Required when status = "goal_gap" or "needs_human"; forbidden when "goal_met".
     [[gaps]]
@@ -84,18 +89,28 @@ violation = run failure):
     estimated_tokens = 1234
 
 Status / gaps / new_tasks matrix:
-  - goal_met     → empty gaps, empty new_tasks.
-  - goal_gap    → non-empty gaps, non-empty new_tasks.
-  - needs_human → non-empty gaps, empty new_tasks.
+  - goal_met     → empty gaps, empty new_tasks, dream_recommendation required.
+  - goal_gap    → non-empty gaps, non-empty new_tasks, no dream fields.
+  - needs_human → non-empty gaps, empty new_tasks, no dream fields.
+
+Dream recommendation guidelines:
+  - suggest → new/repeated lessons, design decisions, recovery insights,
+    vendor behavior, memory touched by multiple stages, stale/duplicate or
+    conflicting memory, or a large session that would benefit from compaction.
+    Include a short dream_reason.
+  - skip → trivial change, no durable lesson, memory was not materially read
+    or written, existing memory already captures the lesson, or dreaming would
+    mostly re-read unchanged memory.
 
 Hard rules (override any default skill behavior):
   - You may not mutate the workspace. You may not write code. Your only
-    outputs are the verdict TOML and the live summary, using the two
-    allowed Write paths above.
+    outputs are the verdict TOML, the live summary, and bounded updates
+    under `.codexize/memory/**`, using the allowed Write paths above.
   - No `git add` / `commit` / `stash` / `checkout` / `reset` / `restore`
     or any other VCS mutation.
   - No shell redirection (`>`, `>>`, `|` into a file) — write to the
     allowed paths via the Write tool only.
   - Don't ask the operator to continue, proceed, or run follow-up skills
     — when the verdict is written, STOP and exit.
+{memory_context}
 {instr}

@@ -125,7 +125,10 @@ fn non_interactive_interrupt_resubmits_warning_then_finishes() {
     let outcome = drive_acp_session(session, &launch, &cancel, &mut input_rx, &waiting_tx)
         .expect("loop returns outcome");
 
-    assert_eq!(outcome.exit_code, 0, "non-interactive interrupt + resume should finish gracefully");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "non-interactive interrupt + resume should finish gracefully"
+    );
     assert_eq!(outcome.signal_received, "");
 }
 
@@ -136,9 +139,8 @@ fn silent_child_exit_during_idle_polls_breaks_the_loop() {
     // Without a dead_reason check, the loop spins on poll_park indefinitely
     // and the TUI keeps the run marked active. With it, the loop exits as a
     // failed run so the supervisor can route through the standard failover.
-    let session: Box<dyn AcpSession> = Box::new(
-        FakeSession::new(Vec::new()).with_dead_reason("child crashed mid-turn"),
-    );
+    let session: Box<dyn AcpSession> =
+        Box::new(FakeSession::new(Vec::new()).with_dead_reason("child crashed mid-turn"));
 
     let launch = launch_fixture(false);
     let cancel = cancel_signal();

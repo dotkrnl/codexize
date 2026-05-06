@@ -13,6 +13,7 @@ pub(crate) mod guard;
 mod lifecycle;
 pub(crate) mod models;
 pub use crate::ui::widgets::models_area::view as models_area;
+mod notifications;
 mod observation;
 pub(crate) use crate::ui::palette;
 mod prompt_builders;
@@ -34,6 +35,9 @@ pub use crate::ui::status_line;
 mod test_support;
 // The private app suites live in layer-owned directories, but remain declared
 // here so they can exercise App internals without widening production APIs.
+#[cfg(test)]
+#[path = "notifications_tests.rs"]
+mod tests_notifications;
 #[cfg(test)]
 #[path = "../app_runtime/tests/prompts/mod.rs"]
 mod tests_prompts;
@@ -269,6 +273,8 @@ pub struct App {
     pub(crate) yolo_exit_issued: HashSet<u64>,
     pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
     pub(crate) runner_supervisor: crate::runner::Supervisor,
+    pub(crate) notification_runtime: crate::data::notifications::NotificationRuntime,
+    pub(crate) interactive_wait_marker: Option<crate::data::notifications::InteractiveWaitMarker>,
     /// Per-run liveness watchdog state. Allocated as part of task 1
     /// scaffolding; the App-side lifecycle hookup that inserts/removes
     /// entries (and ticks `evaluate`) lands with task 2.

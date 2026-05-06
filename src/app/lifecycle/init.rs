@@ -95,6 +95,10 @@ impl App {
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),
             watchdog: super::watchdog::WatchdogRegistry::from_env(),
+            notification_runtime: crate::data::notifications::NotificationRuntime::from_config(
+                crate::data::notifications::load_ntfy_config(),
+            ),
+            interactive_wait_marker: None,
             #[cfg(test)]
             test_launch_harness: None,
             messages,

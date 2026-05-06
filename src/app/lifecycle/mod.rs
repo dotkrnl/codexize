@@ -204,6 +204,7 @@ impl App {
     /// observed *after* the drain so tool-call transitions land on the
     /// state the watchdog evaluates this tick.
     pub(crate) fn runtime_tick_after_data_drain(&mut self) {
+        self.maybe_emit_interactive_wait_notification();
         self.tick_watchdog();
         self.synchronize_split_target();
     }
@@ -250,6 +251,7 @@ impl App {
         // Re-engage tail-follow on phase change so the new stage's transcript
         // streams into view.
         self.set_follow_tail(true);
+        self.maybe_emit_phase_notification(next_phase);
         Ok(())
     }
     /// Set `block_origin` on the session and transition into

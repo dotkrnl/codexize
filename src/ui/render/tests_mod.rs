@@ -73,6 +73,8 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         yolo_exit_issued: std::collections::HashSet::new(),
         yolo_exit_observations: HashMap::new(),
         runner_supervisor: crate::runner::Supervisor::shared_for_test(),
+        notification_runtime: crate::data::notifications::NotificationRuntime::from_config(None),
+        interactive_wait_marker: None,
         watchdog: super::super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages,

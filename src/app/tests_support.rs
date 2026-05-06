@@ -95,6 +95,8 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         yolo_exit_issued: HashSet::new(),
         yolo_exit_observations: HashMap::new(),
         runner_supervisor: crate::runner::Supervisor::shared_for_test(),
+        notification_runtime: crate::data::notifications::NotificationRuntime::from_config(None),
+        interactive_wait_marker: None,
         watchdog: super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),

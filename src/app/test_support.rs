@@ -6,8 +6,8 @@
 //! cwd swap for prompts that probe the working directory), an `App`
 //! constructor that wires up the visible-row cache, and a key-event helper.
 
-use super::*;
 use super::tree::{build_tree, current_node_index, node_key_at_path};
+use super::*;
 
 /// Pin `CODEXIZE_ROOT` to a tempdir and chdir into it for the duration of
 /// `f`. Required by prompts that read `CLAUDE.md`/`AGENTS.md` from the

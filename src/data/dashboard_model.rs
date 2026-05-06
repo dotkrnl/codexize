@@ -724,16 +724,10 @@ mod tests {
             out.push_str(&format!("  vendor: {}\n", model.vendor));
             out.push_str(&format!("  overall_score: {:.4}\n", model.overall_score));
             out.push_str(&format!("  current_score: {:.4}\n", model.current_score));
-            out.push_str(&format!(
-                "  standard_error: {:.4}\n",
-                model.standard_error
-            ));
+            out.push_str(&format!("  standard_error: {:.4}\n", model.standard_error));
             out.push_str(&format!("  display_order: {}\n", model.display_order));
             out.push_str(&format!("  score_source: {:?}\n", model.score_source));
-            out.push_str(&format!(
-                "  ipbr_row_matched: {}\n",
-                model.ipbr_row_matched
-            ));
+            out.push_str(&format!("  ipbr_row_matched: {}\n", model.ipbr_row_matched));
             out.push_str(&format!(
                 "  fallback_from: {}\n",
                 model.fallback_from.as_deref().unwrap_or("-")

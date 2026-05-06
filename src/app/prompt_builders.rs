@@ -1,5 +1,3 @@
-// prompts.rs
-//
 // Public prompt-builder functions for every agent stage. Long prompt bodies
 // live in `src/app/prompts/*.md`; this file stays focused on path binding and
 // prompt-specific dynamic blocks.
@@ -72,6 +70,17 @@ fn resolved_agent_path(path: &Path) -> PathBuf {
 
 fn agent_path(path: &Path) -> String {
     resolved_agent_path(path).display().to_string()
+}
+
+fn join_ids(ids: &[u32], empty: &str) -> String {
+    if ids.is_empty() {
+        empty.to_string()
+    } else {
+        ids.iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 /// Prepended to every agent prompt. Surfaces project-specific guidance
@@ -286,16 +295,6 @@ pub(crate) fn recovery_prompt(
     interactive: bool,
 ) -> String {
     let ctx = PromptCtx::new();
-    let csv = |ids: &[u32], empty: &str| {
-        if ids.is_empty() {
-            empty.to_string()
-        } else {
-            ids.iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-    };
     let instr = if interactive {
         ctx.live_summary_instruction_interactive(live_summary_path)
     } else {
@@ -316,8 +315,8 @@ pub(crate) fn recovery_prompt(
             .map(|id| id.to_string())
             .unwrap_or_else(|| "(none)".to_string()),
         trigger_summary = trigger_summary.unwrap_or("(none recorded)"),
-        completed = csv(completed_task_ids, "(none)"),
-        started = csv(started_task_ids, "(none)"),
+        completed = join_ids(completed_task_ids, "(none)"),
+        started = join_ids(started_task_ids, "(none)"),
         instr = instr,
     )
 }
@@ -352,21 +351,12 @@ pub(crate) fn recovery_sharding_prompt(
     id_floor: u32,
 ) -> String {
     let ctx = PromptCtx::new();
-    let completed = if completed_ids.is_empty() {
-        "none".to_string()
-    } else {
-        completed_ids
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
     prompt!(
         include_str!("prompts/recovery_sharding.md"),
         project_doc_instr = ctx.project_doc_instr,
         spec = ctx.path(spec_path),
         plan = ctx.path(plan_path),
-        completed = completed,
+        completed = join_ids(completed_ids, "none"),
         id_floor = id_floor,
         output = ctx.path(tasks_output_path),
         instr = ctx.live_summary_instruction(live_summary_path),

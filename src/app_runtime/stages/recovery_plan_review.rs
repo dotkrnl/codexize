@@ -3,7 +3,6 @@ use anyhow::Context;
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::recovery_plan_review_prompt;
 use crate::app::{App, guard};
-use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 
@@ -100,6 +99,7 @@ impl App {
         );
         let window_name =
             run_label_with_model("[Recovery Plan Review]", &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("plan-review", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -107,7 +107,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

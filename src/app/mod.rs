@@ -304,6 +304,7 @@ pub struct App {
     pub(crate) pending_yolo_toggle_gate: Option<&'static str>,
     pub(crate) yolo_exit_issued: HashSet<u64>,
     pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
+    pub(crate) runner_supervisor: crate::runner::Supervisor,
     /// Per-run liveness watchdog state. Allocated as part of task 1
     /// scaffolding; the App-side lifecycle hookup that inserts/removes
     /// entries (and ticks `evaluate`) lands with task 2.

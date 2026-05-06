@@ -155,10 +155,10 @@ impl App {
 
     pub(crate) fn interactive_exit_prompt_key(&self) -> Option<(u64, usize)> {
         let run_id = self.current_run_id?;
-        let run = self.state.agent_runs.iter().find(|run| {
+        self.state.agent_runs.iter().find(|run| {
             run.id == run_id && run.status == RunStatus::Running && run.modes.interactive
         })?;
-        if !crate::runner::run_label_is_waiting_for_input(&run.window_name) {
+        if !self.runner_supervisor.run_is_waiting_for_input(run_id) {
             return None;
         }
         let (message_index, message) =
@@ -207,7 +207,7 @@ impl App {
         self.refresh_models_if_due();
         self.poll_agent_run();
         if self.pending_app_exit {
-            crate::runner::shutdown_all_runs();
+            self.runner_supervisor.shutdown_all_runs();
             return Ok(true);
         }
         self.maybe_yolo_auto_resolve();

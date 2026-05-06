@@ -6,7 +6,6 @@ use crate::data::observation::{
     self, LiveSummaryProbe, LiveSummarySnapshot, LiveSummaryWatcher, build_live_summary_watcher,
     ensure_live_summary_watch_dir,
 };
-use crate::data::runner;
 use crate::state::{Message, MessageKind, MessageSender};
 use anyhow::Result;
 
@@ -94,16 +93,13 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some((run_window_name, run_model, run_vendor)) = self.running_run().map(|run| {
-            (
-                run.window_name.clone(),
-                run.model.clone(),
-                run.vendor.clone(),
-            )
-        }) else {
+        let Some((run_model, run_vendor)) = self
+            .running_run()
+            .map(|run| (run.model.clone(), run.vendor.clone()))
+        else {
             return;
         };
-        if !self.active_run_exists(&run_window_name) {
+        if !self.active_run_exists(run_id) {
             return;
         }
         let Some(path) = self.live_summary_path.clone() else {
@@ -198,10 +194,9 @@ impl App {
         // Snapshot exactly the values we need before touching dashboard
         // helpers. Holding a borrow on `self.watchdog` across calls to
         // `append_system_message` would deadlock the borrow checker.
-        let Some((window_name, prompt_path, idle_minutes, remaining_minutes)) =
+        let Some((prompt_path, idle_minutes, remaining_minutes)) =
             self.watchdog.get_mut(run_id).map(|state| {
                 (
-                    state.window_name.clone(),
                     state.prompt_path.clone(),
                     state.idle_minutes_for_message(now),
                     state.warning_remaining_minutes,
@@ -214,9 +209,11 @@ impl App {
             .unwrap_or_else(|| super::watchdog::PROMPT_UNAVAILABLE_BODY.to_string());
         let warning_text =
             super::watchdog::warning_text(idle_minutes, remaining_minutes, &prompt_body);
-        let interrupt_sent = runner::force_interrupt_run_label(&window_name, warning_text);
+        let interrupt_sent = self
+            .runner_supervisor
+            .force_interrupt_run(run_id, warning_text);
         let _ = self.state.log_event(format!(
-            "watchdog_warning: run={run_id} window={window_name} idle_min={idle_minutes} \
+            "watchdog_warning: run={run_id} idle_min={idle_minutes} \
              interrupt_sent={interrupt_sent}"
         ));
         self.append_system_message(
@@ -230,12 +227,11 @@ impl App {
     }
 
     fn dispatch_watchdog_kill(&mut self, run_id: u64, now: std::time::Instant) {
-        let Some((window_name, idle_minutes)) = self.watchdog.get_mut(run_id).map(|state| {
-            (
-                state.window_name.clone(),
-                state.idle_minutes_for_message(now),
-            )
-        }) else {
+        let Some(idle_minutes) = self
+            .watchdog
+            .get_mut(run_id)
+            .map(|state| state.idle_minutes_for_message(now))
+        else {
             return;
         };
         // Drop the watchdog state immediately. The runner thread
@@ -244,9 +240,9 @@ impl App {
         // vendor failover (spec §3.5). `finalize_run_record` will also
         // call remove() but the duplicate is a no-op.
         self.watchdog.remove(run_id);
-        let terminate_sent = runner::terminate_run_label(&window_name);
+        let terminate_sent = self.runner_supervisor.terminate_run(run_id);
         let _ = self.state.log_event(format!(
-            "watchdog_kill: run={run_id} window={window_name} idle_min={idle_minutes} \
+            "watchdog_kill: run={run_id} idle_min={idle_minutes} \
              terminate_sent={terminate_sent}"
         ));
         self.append_system_message(

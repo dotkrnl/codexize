@@ -5,7 +5,6 @@ use crate::app::prompts::{
     coder_prompt, read_review_scope, task_effort_for, task_toml_for, write_review_scope_artifact,
 };
 use crate::app::{App, guard};
-use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 
@@ -108,6 +107,7 @@ impl App {
 
         let window_name =
             run_label_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         self.capture_run_guard(
             "coder",
             Some(task_id),
@@ -121,7 +121,8 @@ impl App {
             if let Some(result) = self.try_test_launch(None, &run_key, &artifacts_dir) {
                 result
             } else {
-                launch_noninteractive(
+                self.runner_supervisor.launch_noninteractive(
+                    run_id,
                     &window_name,
                     &run,
                     vendor_kind,

@@ -22,16 +22,14 @@ mod supervise;
 mod transport;
 
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
-pub use supervise::{
-    cancel_run_labels_matching, force_interrupt_run_label, interrupt_run_label_input,
-    request_run_label_exit, run_label_is_active, run_label_is_waiting_for_input,
-    send_run_label_input, shutdown_all_runs, terminate_run_label,
-};
+pub use supervise::{RunId, Supervisor};
 
 #[cfg(test)]
 pub use supervise::{
-    drain_test_cancel_receiver_for, drain_test_input_receiver_for,
-    request_run_label_active_for_test, request_run_label_interactive_input_for_test,
+    cancel_run_labels_matching, drain_test_cancel_receiver_for, drain_test_input_receiver_for,
+    force_interrupt_run_label, interrupt_run_label_input, request_run_label_active_for_test,
+    request_run_label_exit, request_run_label_interactive_input_for_test, run_label_is_active,
+    run_label_is_waiting_for_input, send_run_label_input, shutdown_all_runs, terminate_run_label,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -81,6 +79,86 @@ impl ChildLaunch {
 /// Launch an agent interactively inside the managed ACP runtime boundary.
 /// All agent child-process launches must route through the runner so that
 /// finish-stamp logic is guaranteed to run.
+impl Supervisor {
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_interactive(
+        &self,
+        run_id: RunId,
+        window_name: &str,
+        run: &AgentRun,
+        vendor: VendorKind,
+        run_key: &str,
+        artifacts_dir: &Path,
+        required_artifact: Option<&Path>,
+    ) -> Result<()> {
+        self.launch_managed(
+            run_id,
+            window_name,
+            run,
+            vendor,
+            run_key,
+            artifacts_dir,
+            required_artifact,
+            true,
+            AcpLaunchPolicy::default(),
+        )
+    }
+
+    /// Launch an agent non-interactively inside the managed ACP runtime boundary.
+    /// All agent child-process launches must route through the runner so that
+    /// finish-stamp logic is guaranteed to run.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_noninteractive(
+        &self,
+        run_id: RunId,
+        window_name: &str,
+        run: &AgentRun,
+        vendor: VendorKind,
+        run_key: &str,
+        artifacts_dir: &Path,
+        required_artifact: Option<&Path>,
+    ) -> Result<()> {
+        self.launch_managed(
+            run_id,
+            window_name,
+            run,
+            vendor,
+            run_key,
+            artifacts_dir,
+            required_artifact,
+            false,
+            AcpLaunchPolicy::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_noninteractive_with_policy(
+        &self,
+        run_id: RunId,
+        window_name: &str,
+        run: &AgentRun,
+        vendor: VendorKind,
+        run_key: &str,
+        artifacts_dir: &Path,
+        required_artifact: Option<&Path>,
+        policy: AcpLaunchPolicy,
+    ) -> Result<()> {
+        self.launch_managed(
+            run_id,
+            window_name,
+            run,
+            vendor,
+            run_key,
+            artifacts_dir,
+            required_artifact,
+            false,
+            policy,
+        )
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
@@ -89,21 +167,20 @@ pub fn launch_interactive(
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
 ) -> Result<()> {
-    supervise::launch_managed(
+    let run_id = supervise::assign_test_run_id(window_name);
+    supervise::test_supervisor().launch_interactive(
+        run_id,
         window_name,
         run,
         vendor,
         run_key,
         artifacts_dir,
         required_artifact,
-        true,
-        AcpLaunchPolicy::default(),
     )
 }
 
-/// Launch an agent non-interactively inside the managed ACP runtime boundary.
-/// All agent child-process launches must route through the runner so that
-/// finish-stamp logic is guaranteed to run.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
@@ -112,18 +189,20 @@ pub fn launch_noninteractive(
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
 ) -> Result<()> {
-    supervise::launch_managed(
+    let run_id = supervise::assign_test_run_id(window_name);
+    supervise::test_supervisor().launch_noninteractive(
+        run_id,
         window_name,
         run,
         vendor,
         run_key,
         artifacts_dir,
         required_artifact,
-        false,
-        AcpLaunchPolicy::default(),
     )
 }
 
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 pub fn launch_noninteractive_with_policy(
     window_name: &str,
     run: &AgentRun,
@@ -133,14 +212,15 @@ pub fn launch_noninteractive_with_policy(
     required_artifact: Option<&Path>,
     policy: AcpLaunchPolicy,
 ) -> Result<()> {
-    supervise::launch_managed(
+    let run_id = supervise::assign_test_run_id(window_name);
+    supervise::test_supervisor().launch_noninteractive_with_policy(
+        run_id,
         window_name,
         run,
         vendor,
         run_key,
         artifacts_dir,
         required_artifact,
-        false,
         policy,
     )
 }

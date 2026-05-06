@@ -69,6 +69,14 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("codexize-runtime")
+        .build()?;
+    runtime.block_on(try_main_async())
+}
+
+async fn try_main_async() -> Result<()> {
     let cli = Cli::parse();
 
     let plan = plan_launch(&cli)?;

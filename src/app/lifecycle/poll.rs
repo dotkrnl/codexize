@@ -71,7 +71,7 @@ impl App {
             self.pending_drain_deadline = None;
             return;
         };
-        if self.active_run_exists(&run.window_name) {
+        if self.active_run_exists(run.id) {
             self.maybe_issue_yolo_exit(&run);
             self.pending_drain_deadline = None;
             return;

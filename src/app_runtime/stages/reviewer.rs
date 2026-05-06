@@ -7,7 +7,6 @@ use crate::app::prompts::{
 };
 use crate::app::{App, guard};
 use crate::review;
-use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
@@ -121,6 +120,7 @@ impl App {
             vendor_kind,
             effort,
         );
+        let run_id = self.state.next_agent_run_id();
         let dirty = self.capture_run_guard(
             "reviewer",
             Some(task_id),
@@ -135,7 +135,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

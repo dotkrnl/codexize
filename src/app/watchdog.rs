@@ -73,6 +73,7 @@ pub(crate) enum WatchdogDecision {
 pub(crate) struct WatchdogState {
     #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
     pub(super) run_id: RunId,
+    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
     pub(super) window_name: String,
     pub(super) prompt_path: PathBuf,
     #[allow(dead_code)] // retained for Debug logs and future operator-visible diagnostics

@@ -3,7 +3,7 @@ use std::fs;
 use std::time::Duration;
 
 use crate::app::App;
-use crate::app::prompts::{cancel_run_label, restore_artifacts};
+use crate::app::prompts::restore_artifacts;
 use crate::app::tree::node_at_path;
 use crate::artifacts::ArtifactKind;
 use crate::logic::rules::retry_phase_for_stage;
@@ -14,6 +14,16 @@ use super::{
 };
 
 impl App {
+    fn cancel_run_label(&self, base: &str) {
+        let prefix = format!("{base} ");
+        for run in self.state.agent_runs.iter().filter(|run| {
+            run.status == RunStatus::Running
+                && (run.window_name == base || run.window_name.starts_with(&prefix))
+        }) {
+            self.runner_supervisor.cancel_run(run.id);
+        }
+    }
+
     pub(crate) fn selected_retry_target(&self) -> Option<RetryTarget> {
         let row = self.visible_rows.get(self.selected)?;
         for depth in (1..=row.path.len()).rev() {
@@ -114,7 +124,7 @@ impl App {
             .collect::<BTreeSet<_>>();
         for run in &removed_runs {
             if run.status == RunStatus::Running {
-                cancel_run_label(&run.window_name);
+                self.cancel_run_label(&run.window_name);
             }
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
@@ -221,7 +231,7 @@ impl App {
             .collect::<BTreeSet<_>>();
         for run in removed_runs {
             if run.status == RunStatus::Running {
-                cancel_run_label(&run.window_name);
+                self.cancel_run_label(&run.window_name);
             }
             let _ = fs::remove_file(self.live_summary_path_for(run));
             let _ = fs::remove_file(self.finish_stamp_path_for(run));
@@ -254,7 +264,7 @@ impl App {
                 .find(|r| r.id == run_id)
                 .cloned();
             if let Some(run) = running {
-                cancel_run_label(&run.window_name);
+                self.cancel_run_label(&run.window_name);
                 if run.status == crate::state::RunStatus::Running {
                     self.finalize_run_record(run_id, false, Some("aborted by user".to_string()));
                 }
@@ -263,14 +273,14 @@ impl App {
 
         match self.state.current_phase {
             Phase::BrainstormRunning => {
-                cancel_run_label("[Brainstorm]");
+                self.cancel_run_label("[Brainstorm]");
                 let _ = fs::remove_file(artifacts.join("spec.md"));
                 let _ = fs::remove_file(prompts.join("brainstorm.md"));
                 self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::IdeaInput);
             }
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
-                cancel_run_label("[Spec Review]");
+                self.cancel_run_label("[Spec Review]");
                 let _ = fs::remove_file(artifacts.join("spec-review-1.md"));
                 let _ = fs::remove_file(prompts.join("spec-review-1.md"));
                 // TODO(Task 2): clean up all review artifacts by RunRecord instead of the
@@ -278,12 +288,12 @@ impl App {
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::PlanningRunning => {
-                cancel_run_label("[Planning]");
+                self.cancel_run_label("[Planning]");
                 let _ = fs::remove_file(artifacts.join("plan.md"));
                 let _ = self.transition_to_phase(Phase::SpecReviewRunning);
             }
             Phase::PlanReviewRunning => {
-                cancel_run_label("[Plan Review 1]");
+                self.cancel_run_label("[Plan Review 1]");
                 let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
                 let _ = fs::remove_file(prompts.join("plan-review-1.md"));
                 let plan_backup = artifacts.join("plan.pre-review-1.md");
@@ -311,7 +321,7 @@ impl App {
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::ShardingRunning => {
-                cancel_run_label("[Sharding]");
+                self.cancel_run_label("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
                 // TODO(Task 2): remove sharding launch metadata from RunRecord instead of the
@@ -319,7 +329,7 @@ impl App {
                 let _ = self.transition_to_phase(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {
-                cancel_run_label(&format!("[Builder r{r}]"));
+                self.cancel_run_label(&format!("[Builder r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let prev = if r <= 1 {
                     if self.state.skip_to_impl_rationale.is_some() {
@@ -334,29 +344,29 @@ impl App {
                 let _ = self.transition_to_phase(prev);
             }
             Phase::ReviewRound(r) => {
-                cancel_run_label(&format!("[Review r{r}]"));
+                self.cancel_run_label(&format!("[Review r{r}]"));
                 let _ = fs::remove_dir_all(session_dir.join("rounds").join(format!("{r:03}")));
                 let _ = self.transition_to_phase(Phase::ImplementationRound(r));
             }
             Phase::BuilderRecovery(r) => {
-                cancel_run_label("[Recovery]");
+                self.cancel_run_label("[Recovery]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-r{r}.md")));
                 // Recovery is builder-only and should not be rewound into coder/reviewer; go back to
                 // the triggering review round so the operator can intervene.
                 let _ = self.transition_to_phase(Phase::ReviewRound(r));
             }
             Phase::BuilderRecoveryPlanReview(r) => {
-                cancel_run_label("[Recovery Plan Review]");
+                self.cancel_run_label("[Recovery Plan Review]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-plan-review-r{r}.md")));
                 let _ = self.transition_to_phase(Phase::BuilderRecovery(r));
             }
             Phase::BuilderRecoverySharding(r) => {
-                cancel_run_label("[Recovery Sharding]");
+                self.cancel_run_label("[Recovery Sharding]");
                 let _ = fs::remove_file(prompts.join(format!("recovery-sharding-r{r}.md")));
                 let _ = self.transition_to_phase(Phase::BuilderRecoveryPlanReview(r));
             }
             Phase::SkipToImplPending => {
-                cancel_run_label("[Skip Confirm]");
+                self.cancel_run_label("[Skip Confirm]");
                 let _ = fs::remove_file(artifacts.join(ArtifactKind::SkipToImpl.filename()));
                 session_state::transitions::clear_skip_to_impl_proposal(&mut self.state);
                 self.clear_agent_error();
@@ -374,7 +384,7 @@ impl App {
                 // via existing transitions, but the default rewind target is the
                 // matching review round to preserve per-task review history.
                 if let Phase::FinalValidation(r) = self.state.current_phase {
-                    cancel_run_label("[FinalValidation]");
+                    self.cancel_run_label("[FinalValidation]");
                     let target = if r >= 1 {
                         Phase::ReviewRound(r)
                     } else {
@@ -388,7 +398,7 @@ impl App {
                 // matching ReviewRound to drop back into the loop on round >= 1
                 // or to ImplementationRound(1) on the skip-to-impl path.
                 if let Phase::Simplification(r) = self.state.current_phase {
-                    cancel_run_label("[Simplifier]");
+                    self.cancel_run_label("[Simplifier]");
                     let target = if r >= 1 {
                         Phase::ReviewRound(r)
                     } else {

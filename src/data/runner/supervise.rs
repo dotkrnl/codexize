@@ -1,5 +1,5 @@
 //! Supervises managed ACP runs: builds launch contexts, drives the per-run
-//! polling loop on a tokio runtime owned by the supervisor, owns the keyed
+//! polling adapter on the App-owned tokio runtime, owns the keyed
 //! run registry, and exposes the public control surface the orchestrator uses
 //! to start, interrupt, and tear down agent runs.
 //!
@@ -18,14 +18,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use dashmap::DashMap;
 use parking_lot::Mutex as PlMutex;
 use std::collections::VecDeque;
-use std::{
-    fs,
-    path::Path,
-    sync::{Arc, OnceLock},
-    thread,
-};
+use std::{fs, path::Path, sync::Arc, thread};
 use tokio::{
-    runtime::Runtime,
+    runtime::Handle,
     sync::{mpsc, watch},
     task::JoinHandle,
 };
@@ -51,6 +46,8 @@ struct ManagedAcpOutcome {
 /// wake should result in `Terminate` (kill) or `Complete` (graceful close +
 /// artifact validate). One signal is observable; subsequent calls are no-ops
 /// so a `Complete` cannot be silently downgraded by a stray late `Terminate`.
+pub type RunId = u64;
+
 #[derive(Debug)]
 struct CancelSignal {
     token: CancellationToken,
@@ -58,9 +55,9 @@ struct CancelSignal {
 }
 
 impl CancelSignal {
-    fn new() -> Self {
+    fn new(token: CancellationToken) -> Self {
         Self {
-            token: CancellationToken::new(),
+            token,
             reason: PlMutex::new(None),
         }
     }
@@ -92,6 +89,8 @@ impl CancelSignal {
 /// fixture-only entries registered by `request_run_label_*_for_test`.
 #[derive(Debug)]
 struct RunHandle {
+    #[cfg_attr(not(test), allow(dead_code))]
+    window_name: String,
     cancel: Arc<CancelSignal>,
     input_tx: mpsc::UnboundedSender<AcpInput>,
     waiting_for_input: watch::Receiver<bool>,
@@ -109,26 +108,26 @@ impl RunHandle {
     }
 }
 
-/// Process-supervision root. Owns the keyed `RunHandle` registry plus the
-/// dedicated tokio runtime that drives every per-run `spawn_blocking` task.
-/// Currently surfaced through the module-level `supervisor()` accessor as a
-/// process-global `OnceLock<Supervisor>`; the next concurrency seam will fold
-/// this value into `App` so the runtime is a single tree-rooted `tokio` env.
-pub(in crate::data::runner) struct Supervisor {
-    runtime: Arc<Runtime>,
-    runs: DashMap<String, RunHandle>,
+/// Process-supervision root owned by `App`. The registry is keyed by the
+/// persisted run id so cancellation/input/status target the durable run
+/// identity rather than the human-readable window label.
+pub struct Supervisor {
+    handle: Option<Handle>,
+    root_token: CancellationToken,
+    runs: DashMap<RunId, RunHandle>,
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Supervisor {
-    fn new() -> Self {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .thread_name("codexize-runner")
-            .build()
-            .expect("failed to build runner supervisor tokio runtime");
+    pub fn new() -> Self {
         Self {
-            runtime: Arc::new(runtime),
+            handle: Handle::try_current().ok().or_else(test_runtime_handle),
+            root_token: CancellationToken::new(),
             runs: DashMap::new(),
         }
     }
@@ -137,41 +136,106 @@ impl Supervisor {
     /// joining their tasks so resources release deterministically before the
     /// next public-control-surface call inspects the map.
     fn cleanup_finished(&self) {
-        let finished_keys: Vec<String> = self
+        let finished_keys: Vec<RunId> = self
             .runs
             .iter()
             .filter(|entry| entry.value().is_finished())
-            .map(|entry| entry.key().clone())
+            .map(|entry| *entry.key())
             .collect();
-        for key in finished_keys {
-            if let Some((_, mut run)) = self.runs.remove(&key)
-                && let Some(join) = run.join.take()
-            {
-                let _ = self.runtime.block_on(join);
-            }
+        for run_id in finished_keys {
+            self.remove_and_join(run_id);
         }
     }
 
-    fn label_is_active(&self, window_name: &str) -> bool {
-        self.runs
-            .get(window_name)
-            .is_some_and(|run| !run.is_finished())
+    pub fn run_is_active(&self, run_id: RunId) -> bool {
+        self.runs.get(&run_id).is_some_and(|run| !run.is_finished())
     }
 
-    fn label_is_waiting(&self, window_name: &str) -> bool {
+    pub fn run_is_waiting_for_input(&self, run_id: RunId) -> bool {
+        self.cleanup_finished();
         self.runs
-            .get(window_name)
+            .get(&run_id)
             .is_some_and(|run| !run.is_finished() && run.is_waiting_for_input())
     }
 
     fn any_run_unfinished(&self) -> bool {
         self.runs.iter().any(|entry| !entry.value().is_finished())
     }
+
+    fn child_cancel_signal(&self) -> Arc<CancelSignal> {
+        Arc::new(CancelSignal::new(self.root_token.child_token()))
+    }
+
+    fn spawn_blocking(&self, task: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>> {
+        let Some(handle) = &self.handle else {
+            bail!("runner supervisor requires an active tokio runtime");
+        };
+        Ok(handle.spawn_blocking(task))
+    }
+
+    fn join(&self, join: JoinHandle<()>) {
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                let _ = handle.block_on(join);
+            });
+        } else {
+            let _ = handle.block_on(join);
+        }
+    }
+
+    fn remove_and_join(&self, run_id: RunId) -> Option<RunHandle> {
+        let removed = self.runs.remove(&run_id).map(|(_, run)| run);
+        if let Some(mut run) = removed {
+            if let Some(join) = run.join.take() {
+                self.join(join);
+            }
+            Some(run)
+        } else {
+            None
+        }
+    }
+
+    fn take_run(&self, run_id: RunId) -> Option<RunHandle> {
+        self.runs.remove(&run_id).map(|(_, run)| run)
+    }
+
+    #[cfg(test)]
+    fn matching_label_run_ids(&self, base: &str) -> Vec<RunId> {
+        let prefix = format!("{base} ");
+        self.runs
+            .iter()
+            .filter(|entry| {
+                let name = &entry.value().window_name;
+                name == base || name.starts_with(&prefix)
+            })
+            .map(|entry| *entry.key())
+            .collect()
+    }
 }
 
-pub(in crate::data::runner) fn supervisor() -> &'static Supervisor {
-    static SUPERVISOR: OnceLock<Supervisor> = OnceLock::new();
-    SUPERVISOR.get_or_init(Supervisor::new)
+#[cfg(not(test))]
+fn test_runtime_handle() -> Option<Handle> {
+    None
+}
+
+#[cfg(test)]
+fn test_runtime_handle() -> Option<Handle> {
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    Some(
+        RUNTIME
+            .get_or_init(|| {
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .thread_name("codexize-runner-test")
+                    .build()
+                    .expect("failed to build runner test runtime")
+            })
+            .handle()
+            .clone(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -450,6 +514,9 @@ fn run_managed_acp_launch(
 /// keeps the runner product code off the banned blocking-poll primitive
 /// while preserving the coarse poll cadence.
 fn poll_park() {
+    // The ACP connector is still a synchronous adapter; parking is bounded by
+    // the transport poll interval until the ACP actor migration makes updates
+    // awaitable without a blocking bridge.
     thread::park_timeout(ACP_POLL_INTERVAL);
 }
 
@@ -480,27 +547,32 @@ fn finalize_managed_acp_launch(
     let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "");
 }
 
-fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Result<()> {
-    let supervisor = supervisor();
+fn launch_managed_acp_window(
+    supervisor: &Supervisor,
+    run_id: RunId,
+    window_name: &str,
+    launch: ManagedAcpLaunch,
+) -> Result<()> {
     supervisor.cleanup_finished();
     if supervisor.any_run_unfinished() {
         bail!("codexize only supports one active ACP run at a time");
     }
 
-    let cancel = Arc::new(CancelSignal::new());
+    let cancel = supervisor.child_cancel_signal();
     let (input_tx, input_rx) = mpsc::unbounded_channel::<AcpInput>();
     let (waiting_tx, waiting_rx) = watch::channel(false);
     let (finished_tx, finished_rx) = watch::channel(false);
 
     let cancel_for_task = Arc::clone(&cancel);
-    let join = supervisor.runtime.spawn_blocking(move || {
+    let join = supervisor.spawn_blocking(move || {
         finalize_managed_acp_launch(launch, cancel_for_task, input_rx, waiting_tx);
         let _ = finished_tx.send(true);
-    });
+    })?;
 
     supervisor.runs.insert(
-        window_name.to_string(),
+        run_id,
         RunHandle {
+            window_name: window_name.to_string(),
             cancel,
             input_tx,
             waiting_for_input: waiting_rx,
@@ -511,179 +583,145 @@ fn launch_managed_acp_window(window_name: &str, launch: ManagedAcpLaunch) -> Res
     Ok(())
 }
 
-pub fn run_label_is_active(window_name: &str) -> bool {
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor.label_is_active(window_name)
-}
-
-pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor.label_is_waiting(window_name)
-}
-
-fn take_run(window_name: &str) -> Option<RunHandle> {
-    let supervisor = supervisor();
+impl Supervisor {
     #[cfg(test)]
-    {
-        test_input_observers().remove(window_name);
-    }
-    supervisor.runs.remove(window_name).map(|(_, run)| run)
-}
-
-pub fn cancel_run_labels_matching(base: &str) {
-    let supervisor = supervisor();
-    let prefix = format!("{base} ");
-    let matching: Vec<String> = supervisor
-        .runs
-        .iter()
-        .map(|entry| entry.key().clone())
-        .filter(|name| name == base || name.starts_with(&prefix))
-        .collect();
-
-    for window_name in matching {
-        if let Some(mut run) = take_run(&window_name) {
-            run.cancel.signal(AcpCancelReason::Terminate);
-            if let Some(join) = run.join.take() {
-                let _ = supervisor.runtime.block_on(join);
+    pub fn cancel_runs_matching_label(&self, base: &str) {
+        for run_id in self.matching_label_run_ids(base) {
+            if let Some(mut run) = self.take_run(run_id) {
+                run.cancel.signal(AcpCancelReason::Terminate);
+                if let Some(join) = run.join.take() {
+                    self.join(join);
+                }
             }
         }
     }
-}
 
-pub fn request_run_label_exit(window_name: &str) {
-    let supervisor = supervisor();
-    if let Some(mut run) = take_run(window_name) {
-        run.cancel.signal(AcpCancelReason::Complete);
-        if let Some(join) = run.join.take() {
-            let _ = supervisor.runtime.block_on(join);
+    pub fn request_run_exit(&self, run_id: RunId) {
+        if let Some(mut run) = self.take_run(run_id) {
+            run.cancel.signal(AcpCancelReason::Complete);
+            if let Some(join) = run.join.take() {
+                self.join(join);
+            }
         }
     }
-}
 
-pub fn send_run_label_input(window_name: &str, text: String) -> bool {
-    if text.trim().is_empty() {
-        return false;
+    pub fn cancel_run(&self, run_id: RunId) {
+        if let Some(mut run) = self.take_run(run_id) {
+            run.cancel.signal(AcpCancelReason::Terminate);
+            if let Some(join) = run.join.take() {
+                self.join(join);
+            }
+        }
     }
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor
-        .runs
-        .get(window_name)
-        .filter(|run| !run.is_finished() && run.is_waiting_for_input())
-        .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
-}
 
-pub fn interrupt_run_label_input(window_name: &str, text: String) -> bool {
-    if text.trim().is_empty() {
-        return false;
-    }
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor.runs.get(window_name).is_some_and(|run| {
-        if run.is_finished() {
+    pub fn send_run_input(&self, run_id: RunId, text: String) -> bool {
+        if text.trim().is_empty() {
             return false;
         }
-        let input = if run.is_waiting_for_input() {
-            AcpInput::Prompt(text)
-        } else {
-            AcpInput::Interrupt(text)
+        self.cleanup_finished();
+        self.runs
+            .get(&run_id)
+            .filter(|run| !run.is_finished() && run.is_waiting_for_input())
+            .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
+    }
+
+    pub fn interrupt_run_input(&self, run_id: RunId, text: String) -> bool {
+        if text.trim().is_empty() {
+            return false;
+        }
+        self.cleanup_finished();
+        self.runs.get(&run_id).is_some_and(|run| {
+            if run.is_finished() {
+                return false;
+            }
+            let input = if run.is_waiting_for_input() {
+                AcpInput::Prompt(text)
+            } else {
+                AcpInput::Interrupt(text)
+            };
+            run.input_tx.send(input).is_ok()
+        })
+    }
+
+    /// Push an `AcpInput::Interrupt(text)` onto the run's input channel
+    /// regardless of whether the runner reports it is waiting for input. Used
+    /// by the watchdog warning path where cancelling the in-flight ACP turn is
+    /// required before queueing the warning as the next prompt.
+    pub fn force_interrupt_run(&self, run_id: RunId, text: String) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+        self.cleanup_finished();
+        self.runs.get(&run_id).is_some_and(|run| {
+            if run.is_finished() {
+                return false;
+            }
+            run.input_tx.send(AcpInput::Interrupt(text)).is_ok()
+        })
+    }
+
+    /// Best-effort `AcpCancelReason::Terminate` for the run id (spec §3.5).
+    /// The handle stays registered until the task exits so `poll_agent_run`
+    /// observes the normal transition from active to finished and routes the
+    /// non-zero exit through existing vendor failover.
+    pub fn terminate_run(&self, run_id: RunId) -> bool {
+        self.cleanup_finished();
+        self.runs.get(&run_id).is_some_and(|run| {
+            if run.is_finished() {
+                return false;
+            }
+            run.cancel.signal(AcpCancelReason::Terminate);
+            true
+        })
+    }
+
+    pub fn shutdown_all_runs(&self) {
+        let runs: Vec<(RunId, RunHandle)> = {
+            let keys: Vec<RunId> = self.runs.iter().map(|entry| *entry.key()).collect();
+            keys.into_iter()
+                .filter_map(|key| self.runs.remove(&key))
+                .collect()
         };
-        run.input_tx.send(input).is_ok()
-    })
-}
-
-/// Push an `AcpInput::Interrupt(text)` onto the run's input channel
-/// regardless of whether the runner reports it is waiting for input. Used
-/// by the watchdog warning path (spec §3.4) where the spec requires
-/// cancelling the in-flight ACP turn and queueing the warning as the next
-/// prompt — converting to `Prompt` (as `interrupt_run_label_input` would
-/// when waiting) would skip the cancel_prompt() side effect.
-pub fn force_interrupt_run_label(window_name: &str, text: String) -> bool {
-    if text.is_empty() {
-        return false;
-    }
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor.runs.get(window_name).is_some_and(|run| {
-        if run.is_finished() {
-            return false;
+        #[cfg(test)]
+        {
+            test_run_ids().clear();
+            test_input_observers().clear();
+            test_cancel_observers().clear();
         }
-        run.input_tx.send(AcpInput::Interrupt(text)).is_ok()
-    })
-}
 
-/// Best-effort `AcpCancelReason::Terminate` for the named run (spec §3.5).
-/// Unlike `cancel_run_labels_matching`, this does not remove the run from
-/// the registry or join the runner task — the existing `poll_agent_run`
-/// finalize path observes `!run_label_is_active` once the runner task exits
-/// and routes the non-zero exit through the standard failed-run vendor
-/// failover. Returns `false` if no such run is active.
-pub fn terminate_run_label(window_name: &str) -> bool {
-    let supervisor = supervisor();
-    supervisor.cleanup_finished();
-    supervisor.runs.get(window_name).is_some_and(|run| {
-        if run.is_finished() {
-            return false;
-        }
-        run.cancel.signal(AcpCancelReason::Terminate);
-        true
-    })
-}
-
-pub fn shutdown_all_runs() {
-    let supervisor = supervisor();
-    let runs: Vec<(String, RunHandle)> = {
-        let keys: Vec<String> = supervisor
-            .runs
-            .iter()
-            .map(|entry| entry.key().clone())
-            .collect();
-        keys.into_iter()
-            .filter_map(|key| supervisor.runs.remove(&key))
-            .collect()
-    };
-    #[cfg(test)]
-    {
-        test_input_observers().clear();
-        test_cancel_observers().clear();
-    }
-
-    for (_, mut run) in runs {
-        run.cancel.signal(AcpCancelReason::Terminate);
-        if let Some(join) = run.join.take() {
-            let _ = supervisor.runtime.block_on(join);
+        for (_, mut run) in runs {
+            run.cancel.signal(AcpCancelReason::Terminate);
+            if let Some(join) = run.join.take() {
+                self.join(join);
+            }
         }
     }
-}
 
-/// Build a managed launch context and register it on the supervisor's run
-/// registry. The runner-root module exposes the public `launch_interactive`
-/// /`launch_noninteractive` entrypoints that wrap this; callers outside the
-/// `runner` module tree should not route through it directly.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::data::runner) fn launch_managed(
-    window_name: &str,
-    run: &AgentRun,
-    vendor: VendorKind,
-    run_key: &str,
-    artifacts_dir: &Path,
-    required_artifact: Option<&Path>,
-    interactive: bool,
-    policy: AcpLaunchPolicy,
-) -> Result<()> {
-    let launch = build_managed_acp_launch(
-        window_name,
-        vendor,
-        run,
-        run_key,
-        artifacts_dir,
-        required_artifact,
-        interactive,
-        policy,
-    )?;
-    launch_managed_acp_window(window_name, launch)
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_managed(
+        &self,
+        run_id: RunId,
+        window_name: &str,
+        run: &AgentRun,
+        vendor: VendorKind,
+        run_key: &str,
+        artifacts_dir: &Path,
+        required_artifact: Option<&Path>,
+        interactive: bool,
+        policy: AcpLaunchPolicy,
+    ) -> Result<()> {
+        let launch = build_managed_acp_launch(
+            window_name,
+            vendor,
+            run,
+            run_key,
+            artifacts_dir,
+            required_artifact,
+            interactive,
+            policy,
+        )?;
+        launch_managed_acp_window(self, run_id, window_name, launch)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -691,9 +729,22 @@ pub(in crate::data::runner) fn launch_managed(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+pub(in crate::data::runner) fn test_supervisor() -> &'static Supervisor {
+    static SUPERVISOR: std::sync::OnceLock<Supervisor> = std::sync::OnceLock::new();
+    SUPERVISOR.get_or_init(Supervisor::new)
+}
+
+#[cfg(test)]
+fn test_run_ids() -> &'static DashMap<String, RunId> {
+    static RUN_IDS: std::sync::OnceLock<DashMap<String, RunId>> = std::sync::OnceLock::new();
+    RUN_IDS.get_or_init(DashMap::new)
+}
+
+#[cfg(test)]
 fn test_input_observers() -> &'static DashMap<String, PlMutex<mpsc::UnboundedReceiver<AcpInput>>> {
-    static OBSERVERS: OnceLock<DashMap<String, PlMutex<mpsc::UnboundedReceiver<AcpInput>>>> =
-        OnceLock::new();
+    static OBSERVERS: std::sync::OnceLock<
+        DashMap<String, PlMutex<mpsc::UnboundedReceiver<AcpInput>>>,
+    > = std::sync::OnceLock::new();
     OBSERVERS.get_or_init(DashMap::new)
 }
 
@@ -704,7 +755,8 @@ fn test_input_observers() -> &'static DashMap<String, PlMutex<mpsc::UnboundedRec
 /// the supervisor has removed the run from its registry.
 #[cfg(test)]
 fn test_cancel_observers() -> &'static DashMap<String, Arc<CancelSignal>> {
-    static OBSERVERS: OnceLock<DashMap<String, Arc<CancelSignal>>> = OnceLock::new();
+    static OBSERVERS: std::sync::OnceLock<DashMap<String, Arc<CancelSignal>>> =
+        std::sync::OnceLock::new();
     OBSERVERS.get_or_init(DashMap::new)
 }
 
@@ -720,8 +772,9 @@ pub fn request_run_label_active_for_test(window_name: &str) {
 
 #[cfg(test)]
 fn register_test_run_label(window_name: &str, waiting: bool) {
-    let supervisor = supervisor();
-    let cancel = Arc::new(CancelSignal::new());
+    let supervisor = test_supervisor();
+    let run_id = assign_test_run_id(window_name);
+    let cancel = supervisor.child_cancel_signal();
     let (input_tx, input_rx) = mpsc::unbounded_channel::<AcpInput>();
     let (_waiting_tx, waiting_rx) = watch::channel(waiting);
     let (_finished_tx, finished_rx) = watch::channel(false);
@@ -730,8 +783,9 @@ fn register_test_run_label(window_name: &str, waiting: bool) {
     test_input_observers().insert(window_name.to_string(), PlMutex::new(input_rx));
 
     supervisor.runs.insert(
-        window_name.to_string(),
+        run_id,
         RunHandle {
+            window_name: window_name.to_string(),
             cancel,
             input_tx,
             waiting_for_input: waiting_rx,
@@ -739,6 +793,79 @@ fn register_test_run_label(window_name: &str, waiting: bool) {
             join: None,
         },
     );
+}
+
+#[cfg(test)]
+fn test_run_id_for_label(window_name: &str) -> Option<RunId> {
+    test_run_ids().get(window_name).map(|entry| *entry.value())
+}
+
+#[cfg(test)]
+pub(in crate::data::runner) fn assign_test_run_id(window_name: &str) -> RunId {
+    test_run_ids()
+        .get(window_name)
+        .map(|entry| *entry.value())
+        .unwrap_or_else(|| {
+            let next = test_run_ids().len() as RunId + 1;
+            test_run_ids().insert(window_name.to_string(), next);
+            next
+        })
+}
+
+#[cfg(test)]
+pub fn run_label_is_active(window_name: &str) -> bool {
+    let Some(run_id) = test_run_id_for_label(window_name) else {
+        return false;
+    };
+    test_supervisor().run_is_active(run_id)
+}
+
+#[cfg(test)]
+pub fn run_label_is_waiting_for_input(window_name: &str) -> bool {
+    let Some(run_id) = test_run_id_for_label(window_name) else {
+        return false;
+    };
+    test_supervisor().run_is_waiting_for_input(run_id)
+}
+
+#[cfg(test)]
+pub fn cancel_run_labels_matching(base: &str) {
+    test_supervisor().cancel_runs_matching_label(base);
+}
+
+#[cfg(test)]
+pub fn request_run_label_exit(window_name: &str) {
+    if let Some(run_id) = test_run_id_for_label(window_name) {
+        test_supervisor().request_run_exit(run_id);
+    }
+}
+
+#[cfg(test)]
+pub fn send_run_label_input(window_name: &str, text: String) -> bool {
+    test_run_id_for_label(window_name)
+        .is_some_and(|run_id| test_supervisor().send_run_input(run_id, text))
+}
+
+#[cfg(test)]
+pub fn interrupt_run_label_input(window_name: &str, text: String) -> bool {
+    test_run_id_for_label(window_name)
+        .is_some_and(|run_id| test_supervisor().interrupt_run_input(run_id, text))
+}
+
+#[cfg(test)]
+pub fn force_interrupt_run_label(window_name: &str, text: String) -> bool {
+    test_run_id_for_label(window_name)
+        .is_some_and(|run_id| test_supervisor().force_interrupt_run(run_id, text))
+}
+
+#[cfg(test)]
+pub fn terminate_run_label(window_name: &str) -> bool {
+    test_run_id_for_label(window_name).is_some_and(|run_id| test_supervisor().terminate_run(run_id))
+}
+
+#[cfg(test)]
+pub fn shutdown_all_runs() {
+    test_supervisor().shutdown_all_runs();
 }
 
 /// Test-only: drain queued `AcpInput` messages on the per-window observer
@@ -779,4 +906,48 @@ pub fn drain_test_cancel_receiver_for(window_name: &str) -> Vec<&'static str> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn insert_fixture_run(
+        supervisor: &Supervisor,
+        run_id: RunId,
+        window_name: &str,
+        waiting: bool,
+    ) -> mpsc::UnboundedReceiver<AcpInput> {
+        let cancel = supervisor.child_cancel_signal();
+        let (input_tx, input_rx) = mpsc::unbounded_channel::<AcpInput>();
+        let (_waiting_tx, waiting_rx) = watch::channel(waiting);
+        let (_finished_tx, finished_rx) = watch::channel(false);
+        supervisor.runs.insert(
+            run_id,
+            RunHandle {
+                window_name: window_name.to_string(),
+                cancel,
+                input_tx,
+                waiting_for_input: waiting_rx,
+                finished: finished_rx,
+                join: None,
+            },
+        );
+        input_rx
+    }
+
+    #[test]
+    fn supervisor_targets_input_by_run_id_when_labels_match() {
+        let supervisor = Supervisor::new();
+        let mut first_rx = insert_fixture_run(&supervisor, 10, "[Duplicate]", true);
+        let mut second_rx = insert_fixture_run(&supervisor, 11, "[Duplicate]", true);
+
+        assert!(supervisor.send_run_input(11, "second".to_string()));
+
+        assert!(first_rx.try_recv().is_err());
+        match second_rx.try_recv().expect("second run input") {
+            AcpInput::Prompt(text) => assert_eq!(text, "second"),
+            other => panic!("expected prompt input, got {other:?}"),
+        }
+    }
 }

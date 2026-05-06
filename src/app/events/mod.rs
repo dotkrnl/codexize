@@ -19,7 +19,7 @@ impl App {
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
     }
 
-    fn request_termination(&mut self, pending: PendingTermination, window_name: String) {
+    fn request_termination(&mut self, pending: PendingTermination, _window_name: String) {
         if let Some(existing) = self.pending_termination.as_ref()
             && existing.run_id == pending.run_id
         {
@@ -45,7 +45,7 @@ impl App {
         }
         self.pending_quit_confirmation_run_id = None;
         self.pending_termination = Some(pending.clone());
-        crate::app::prompts::cancel_run_label(&window_name);
+        self.runner_supervisor.cancel_run(pending.run_id);
         self.push_status(
             pending.intent.in_progress_status().to_string(),
             Severity::Warn,

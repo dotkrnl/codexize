@@ -185,7 +185,7 @@ impl App {
         let _ = self
             .state
             .log_event(format!("yolo_auto_approved: gate={gate}"));
-        crate::runner::request_run_label_exit(&run.window_name);
+        self.runner_supervisor.request_run_exit(run.id);
     }
 
     pub(crate) fn yolo_exit_artifact_ready(&self, run: &RunRecord) -> bool {

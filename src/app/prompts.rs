@@ -70,10 +70,6 @@ impl PromptCtx {
         prompt_template!(LIVE_SUMMARY_INTERACTIVE_TEMPLATE, path = &path)
     }
 }
-pub(crate) fn cancel_run_label(base: &str) {
-    crate::runner::cancel_run_labels_matching(base);
-}
-
 pub(crate) fn restore_artifacts(pairs: &[(&std::path::Path, &std::path::Path)]) {
     for (backup, target) in pairs {
         if backup.exists() {

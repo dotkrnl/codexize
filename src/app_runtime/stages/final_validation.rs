@@ -5,7 +5,6 @@ use crate::app::models::vendor_tag;
 use crate::app::prompts::final_validation_prompt;
 use crate::app::{App, guard};
 use crate::final_validation::{self, ValidationStatus};
-use crate::runner::launch_noninteractive_with_policy;
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
@@ -115,6 +114,7 @@ impl App {
             guard::GuardMode::AutoReset,
         );
         let window_name = run_label_with_model("[FinalValidation]", &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("final-validation", None, round, attempt);
         let artifacts_dir = artifacts.clone();
         let launch_result = if let Some(result) =
@@ -122,7 +122,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive_with_policy(
+            self.runner_supervisor.launch_noninteractive_with_policy(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

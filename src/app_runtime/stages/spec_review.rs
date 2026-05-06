@@ -4,7 +4,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::spec_review_prompt;
 use crate::app::{App, guard};
-use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, MessageKind, Phase, RunStatus};
 
@@ -94,6 +93,7 @@ impl App {
             vendor_kind,
             effort,
         );
+        let run_id = self.state.next_agent_run_id();
         let dirty = self.capture_run_guard(
             "spec-review",
             None,
@@ -108,7 +108,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

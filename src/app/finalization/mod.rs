@@ -61,12 +61,12 @@ impl App {
             .any(|run| run.status == RunStatus::Running)
     }
 
-    pub(crate) fn active_run_exists(&self, window_name: &str) -> bool {
+    pub(crate) fn active_run_exists(&self, run_id: u64) -> bool {
         #[cfg(test)]
         if self.test_launch_harness.is_some() {
             return false;
         }
-        crate::runner::run_label_is_active(window_name)
+        self.runner_supervisor.run_is_active(run_id)
     }
 
     pub(crate) fn retry_key_for_run(run: &crate::state::RunRecord) -> (String, Option<u32>, u32) {

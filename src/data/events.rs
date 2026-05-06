@@ -86,11 +86,11 @@ pub enum DataRequest {
     DrainLiveSummary { path: PathBuf },
     /// Read a prompt-body file (used to compose watchdog warnings).
     ReadPromptBody { path: PathBuf },
-    /// Best-effort interrupt of the named ACP run with `text` queued as the
+    /// Best-effort interrupt of the ACP run with `text` queued as the
     /// next prompt (spec §3.4 watchdog warning).
-    InterruptRun { window_name: String, text: String },
-    /// Best-effort terminate of the named ACP run (spec §3.5 watchdog kill).
-    TerminateRun { window_name: String },
+    InterruptRun { run_id: u64, text: String },
+    /// Best-effort terminate of the ACP run (spec §3.5 watchdog kill).
+    TerminateRun { run_id: u64 },
 }
 
 /// Typed outcome returned by [`dispatch`] for each request variant.
@@ -125,12 +125,8 @@ pub fn dispatch(request: DataRequest) -> DataOutcome {
         DataRequest::ReadPromptBody { path } => {
             DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(&path))
         }
-        DataRequest::InterruptRun { window_name, text } => DataOutcome::Interrupted(
-            crate::data::runner::force_interrupt_run_label(&window_name, text),
-        ),
-        DataRequest::TerminateRun { window_name } => {
-            DataOutcome::Terminated(crate::data::runner::terminate_run_label(&window_name))
-        }
+        DataRequest::InterruptRun { .. } => DataOutcome::Interrupted(false),
+        DataRequest::TerminateRun { .. } => DataOutcome::Terminated(false),
     }
 }
 
@@ -190,9 +186,8 @@ mod tests {
 
     #[test]
     fn dispatch_interrupt_returns_false_when_no_active_run() {
-        // No managed ACP run is registered for this window name in tests.
         let outcome = dispatch(DataRequest::InterruptRun {
-            window_name: "codexize-events-test-no-such-window".to_string(),
+            run_id: 999,
             text: "warn".to_string(),
         });
         assert_eq!(outcome, DataOutcome::Interrupted(false));
@@ -200,9 +195,7 @@ mod tests {
 
     #[test]
     fn dispatch_terminate_returns_false_when_no_active_run() {
-        let outcome = dispatch(DataRequest::TerminateRun {
-            window_name: "codexize-events-test-no-such-window".to_string(),
-        });
+        let outcome = dispatch(DataRequest::TerminateRun { run_id: 999 });
         assert_eq!(outcome, DataOutcome::Terminated(false));
     }
 }

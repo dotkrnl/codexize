@@ -4,7 +4,6 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
 use crate::app::{App, guard};
-use crate::runner::launch_noninteractive_with_policy;
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
@@ -126,6 +125,7 @@ impl App {
             guard::GuardMode::AutoReset,
         );
         let window_name = run_label_with_model("[Simplifier]", &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("simplifier", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -133,7 +133,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive_with_policy(
+            self.runner_supervisor.launch_noninteractive_with_policy(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::sharding_prompt;
 use crate::app::{App, guard};
-use crate::runner::launch_noninteractive;
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase};
 use crate::tasks;
@@ -70,6 +69,7 @@ impl App {
         let dirty =
             self.capture_run_guard("sharding", None, 1, attempt, guard::GuardMode::AutoReset);
         let window_name = run_label_with_model("[Sharding]", &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("sharding", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -77,7 +77,8 @@ impl App {
         {
             result
         } else {
-            launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

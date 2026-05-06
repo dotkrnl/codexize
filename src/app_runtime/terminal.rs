@@ -58,6 +58,8 @@ impl TerminalRuntime {
         app.poll_live_summary_fallback();
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn route_command(
         &mut self,
         command: AppCommand,
@@ -97,9 +99,7 @@ impl TerminalRuntime {
                     .iter()
                     .filter(|run| run.status == RunStatus::Running)
                 {
-                    let _ = dispatch(DataRequest::TerminateRun {
-                        window_name: run.window_name.to_string(),
-                    });
+                    let _ = dispatch(DataRequest::TerminateRun { run_id: run.id });
                 }
                 TerminalCommandOutcome::HandledExit
             }
@@ -133,15 +133,22 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         app.on_frame_drawn();
 
         if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)? {
-            match runtime.route_command(command, &view) {
+            let outcome =
+                runtime.route_command_with_dispatch(command, &view, |request| match request {
+                    DataRequest::TerminateRun { run_id } => {
+                        DataOutcome::Terminated(app.runner_supervisor.terminate_run(run_id))
+                    }
+                    other => crate::data::events::dispatch(other),
+                });
+            match outcome {
                 TerminalCommandOutcome::HandledContinue => {}
                 TerminalCommandOutcome::HandledExit => {
-                    crate::runner::shutdown_all_runs();
+                    app.runner_supervisor.shutdown_all_runs();
                     return Ok(());
                 }
                 TerminalCommandOutcome::Legacy(command) => {
                     if app.handle_app_command(command) {
-                        crate::runner::shutdown_all_runs();
+                        app.runner_supervisor.shutdown_all_runs();
                         return Ok(());
                     }
                 }
@@ -194,12 +201,7 @@ mod tests {
             });
 
         assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
-        assert_eq!(
-            requests,
-            vec![DataRequest::TerminateRun {
-                window_name: "codexize-run-7-planning".to_string(),
-            }]
-        );
+        assert_eq!(requests, vec![DataRequest::TerminateRun { run_id: 7 }]);
     }
 
     #[test]
@@ -225,12 +227,7 @@ mod tests {
         });
 
         assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
-        assert_eq!(
-            requests,
-            vec![DataRequest::TerminateRun {
-                window_name: "codexize-run-7-planning".to_string(),
-            }]
-        );
+        assert_eq!(requests, vec![DataRequest::TerminateRun { run_id: 7 }]);
     }
 
     #[test]

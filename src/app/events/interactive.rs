@@ -23,7 +23,7 @@ impl App {
             run.id == run_id
                 && run.status == RunStatus::Running
                 && run.modes.interactive
-                && crate::runner::run_label_is_waiting_for_input(&run.window_name)
+                && self.runner_supervisor.run_is_waiting_for_input(run_id)
         })
     }
 
@@ -31,10 +31,10 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        if let Some(run) = self.state.agent_runs.iter().find(|run| run.id == run_id) {
+        if self.state.agent_runs.iter().any(|run| run.id == run_id) {
             // `/exit` is a local codexize control for interactive ACP runs,
-            // not agent prompt text, so the runner completes this run by label.
-            crate::runner::request_run_label_exit(&run.window_name);
+            // not agent prompt text, so the runner completes this run by id.
+            self.runner_supervisor.request_run_exit(run_id);
         }
     }
 
@@ -42,16 +42,10 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some(run) = self
-            .state
-            .agent_runs
-            .iter()
-            .find(|run| run.id == run_id)
-            .cloned()
-        else {
+        if !self.state.agent_runs.iter().any(|run| run.id == run_id) {
             return;
         };
-        if crate::runner::send_run_label_input(&run.window_name, input.clone()) {
+        if self.runner_supervisor.send_run_input(run_id, input.clone()) {
             let message = Message {
                 ts: chrono::Utc::now(),
                 run_id,
@@ -107,16 +101,13 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some(run) = self
-            .state
-            .agent_runs
-            .iter()
-            .find(|run| run.id == run_id)
-            .cloned()
-        else {
+        if !self.state.agent_runs.iter().any(|run| run.id == run_id) {
             return;
         };
-        if crate::runner::interrupt_run_label_input(&run.window_name, trimmed.clone()) {
+        if self
+            .runner_supervisor
+            .interrupt_run_input(run_id, trimmed.clone())
+        {
             self.append_user_input_message(run_id, trimmed);
         } else {
             self.push_status(

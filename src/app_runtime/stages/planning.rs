@@ -3,7 +3,6 @@ use anyhow::Result;
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::prompts::planning_prompt;
 use crate::app::{App, guard};
-use crate::runner::{launch_interactive, launch_noninteractive};
 use crate::selection::CachedModel;
 use crate::state::{self as session_state, Phase, RunStatus};
 
@@ -95,6 +94,7 @@ impl App {
         };
         let dirty = self.capture_run_guard("planning", None, 1, attempt, guard_mode);
         let window_name = run_label_with_model("[Planning]", &model, vendor_kind, effort);
+        let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("planning", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
         let launch_result = if let Some(result) =
@@ -102,7 +102,8 @@ impl App {
         {
             result
         } else if interactive {
-            launch_interactive(
+            self.runner_supervisor.launch_interactive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,
@@ -111,7 +112,8 @@ impl App {
                 Some(&plan_path),
             )
         } else {
-            launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive(
+                run_id,
                 &window_name,
                 &run,
                 vendor_kind,

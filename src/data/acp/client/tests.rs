@@ -6,7 +6,6 @@ use super::handshake::{
 };
 use super::*;
 use crate::data::acp_support::tool_call::TOOL_CALL_MAP_CAP;
-use std::path::PathBuf;
 
 #[test]
 fn parse_prompt_result_marks_failure_stop_reasons() {

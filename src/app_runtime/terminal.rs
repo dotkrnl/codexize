@@ -65,7 +65,10 @@ impl TerminalRuntime {
         command: AppCommand,
         view: &AppView,
     ) -> TerminalCommandOutcome {
-        self.route_command_with_dispatch(command, view, crate::data::events::dispatch)
+        let supervisor = crate::runner::Supervisor::shared_for_test();
+        self.route_command_with_dispatch(command, view, |request| {
+            crate::data::events::dispatch(request, &supervisor)
+        })
     }
 
     pub(crate) fn route_command_with_dispatch<F>(
@@ -133,13 +136,9 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
         app.on_frame_drawn();
 
         if let Some(command) = crate::ui::tui::poll_command(app.event_poll_duration(), &view)? {
-            let outcome =
-                runtime.route_command_with_dispatch(command, &view, |request| match request {
-                    DataRequest::TerminateRun { run_id } => {
-                        DataOutcome::Terminated(app.runner_supervisor.terminate_run(run_id))
-                    }
-                    other => crate::data::events::dispatch(other),
-                });
+            let outcome = runtime.route_command_with_dispatch(command, &view, |request| {
+                crate::data::events::dispatch(request, &app.runner_supervisor)
+            });
             match outcome {
                 TerminalCommandOutcome::HandledContinue => {}
                 TerminalCommandOutcome::HandledExit => {

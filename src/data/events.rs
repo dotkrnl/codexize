@@ -111,7 +111,10 @@ pub enum DataOutcome {
 /// Dispatch a [`DataRequest`] to the appropriate data primitive. The runtime
 /// uses this as its only entry point for side effects so the surface stays
 /// small and reviewable.
-pub fn dispatch(request: DataRequest) -> DataOutcome {
+pub fn dispatch(
+    request: DataRequest,
+    runner_supervisor: &crate::runner::Supervisor,
+) -> DataOutcome {
     match request {
         DataRequest::ProbeLiveSummary { path } => {
             DataOutcome::LiveSummaryProbed(crate::data::observation::probe_live_summary(&path))
@@ -125,8 +128,12 @@ pub fn dispatch(request: DataRequest) -> DataOutcome {
         DataRequest::ReadPromptBody { path } => {
             DataOutcome::PromptBodyRead(crate::data::observation::read_prompt_body(&path))
         }
-        DataRequest::InterruptRun { .. } => DataOutcome::Interrupted(false),
-        DataRequest::TerminateRun { .. } => DataOutcome::Terminated(false),
+        DataRequest::InterruptRun { run_id, text } => {
+            DataOutcome::Interrupted(runner_supervisor.force_interrupt_run(run_id, text))
+        }
+        DataRequest::TerminateRun { run_id } => {
+            DataOutcome::Terminated(runner_supervisor.terminate_run(run_id))
+        }
     }
 }
 
@@ -139,9 +146,12 @@ mod tests {
     #[test]
     fn dispatch_probe_returns_missing_when_path_absent() {
         let dir = tempdir().expect("tempdir");
-        let outcome = dispatch(DataRequest::ProbeLiveSummary {
-            path: dir.path().join("nope.txt"),
-        });
+        let outcome = dispatch(
+            DataRequest::ProbeLiveSummary {
+                path: dir.path().join("nope.txt"),
+            },
+            &crate::runner::Supervisor::new(),
+        );
         assert_eq!(
             outcome,
             DataOutcome::LiveSummaryProbed(LiveSummaryProbe::Missing)
@@ -151,9 +161,12 @@ mod tests {
     #[test]
     fn dispatch_read_returns_none_when_path_absent() {
         let dir = tempdir().expect("tempdir");
-        let outcome = dispatch(DataRequest::ReadLiveSummary {
-            path: dir.path().join("nope.txt"),
-        });
+        let outcome = dispatch(
+            DataRequest::ReadLiveSummary {
+                path: dir.path().join("nope.txt"),
+            },
+            &crate::runner::Supervisor::new(),
+        );
         assert_eq!(outcome, DataOutcome::LiveSummaryRead(None));
     }
 
@@ -163,7 +176,10 @@ mod tests {
         let path = dir.path().join("live.txt");
         std::fs::write(&path, "draining payload").expect("seed");
 
-        let outcome = dispatch(DataRequest::DrainLiveSummary { path: path.clone() });
+        let outcome = dispatch(
+            DataRequest::DrainLiveSummary { path: path.clone() },
+            &crate::runner::Supervisor::new(),
+        );
         match outcome {
             DataOutcome::LiveSummaryDrained(Some(snapshot)) => {
                 assert_eq!(snapshot.content, "draining payload");
@@ -178,24 +194,49 @@ mod tests {
     #[test]
     fn dispatch_read_prompt_returns_none_when_missing() {
         let dir = tempdir().expect("tempdir");
-        let outcome = dispatch(DataRequest::ReadPromptBody {
-            path: dir.path().join("missing.prompt"),
-        });
+        let outcome = dispatch(
+            DataRequest::ReadPromptBody {
+                path: dir.path().join("missing.prompt"),
+            },
+            &crate::runner::Supervisor::new(),
+        );
         assert_eq!(outcome, DataOutcome::PromptBodyRead(None));
     }
 
     #[test]
     fn dispatch_interrupt_returns_false_when_no_active_run() {
-        let outcome = dispatch(DataRequest::InterruptRun {
-            run_id: 999,
-            text: "warn".to_string(),
-        });
+        let supervisor = crate::runner::Supervisor::new();
+        let outcome = dispatch(
+            DataRequest::InterruptRun {
+                run_id: 999,
+                text: "warn".to_string(),
+            },
+            &supervisor,
+        );
         assert_eq!(outcome, DataOutcome::Interrupted(false));
     }
 
     #[test]
     fn dispatch_terminate_returns_false_when_no_active_run() {
-        let outcome = dispatch(DataRequest::TerminateRun { run_id: 999 });
+        let supervisor = crate::runner::Supervisor::new();
+        let outcome = dispatch(DataRequest::TerminateRun { run_id: 999 }, &supervisor);
         assert_eq!(outcome, DataOutcome::Terminated(false));
+    }
+
+    #[test]
+    fn dispatch_terminate_routes_through_supervisor() {
+        let supervisor = crate::runner::Supervisor::shared_for_test();
+        supervisor.shutdown_all_runs();
+        let label = "dispatch-active-run";
+        crate::runner::register_test_run_id(label, 777);
+        crate::runner::request_run_label_active_for_test(label);
+
+        let outcome = dispatch(DataRequest::TerminateRun { run_id: 777 }, &supervisor);
+
+        assert_eq!(outcome, DataOutcome::Terminated(true));
+        assert_eq!(
+            crate::runner::drain_test_cancel_receiver_for(label),
+            vec!["terminate"]
+        );
     }
 }

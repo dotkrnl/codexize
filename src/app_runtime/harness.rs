@@ -149,9 +149,13 @@ impl HeadlessRuntime {
     }
 
     fn apply_live_summary_status(&mut self, fallback: &str) {
-        let outcome = dispatch(DataRequest::ReadLiveSummary {
-            path: self.live_summary_path.clone(),
-        });
+        let supervisor = crate::runner::Supervisor::new();
+        let outcome = dispatch(
+            DataRequest::ReadLiveSummary {
+                path: self.live_summary_path.clone(),
+            },
+            &supervisor,
+        );
         let DataOutcome::LiveSummaryRead(snapshot) = outcome else {
             // Keep this explicit so future DataRequest rewrites cannot
             // silently publish a status for the wrong side-effect outcome.

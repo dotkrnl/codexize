@@ -15,7 +15,8 @@
 
 use std::sync::Arc;
 
-use crate::logic::pipeline::{Phase, RunRecord, RunStatus};
+use crate::logic::pipeline::Phase;
+use crate::state::{RunRecord, RunStatus};
 
 /// Severity tag for a UI-neutral status message. The TUI maps each variant
 /// to a colour/style; a future web UI maps the same variants to its own
@@ -152,7 +153,7 @@ impl AppView {
 mod tests {
     use super::*;
     use crate::adapters::EffortLevel;
-    use crate::logic::pipeline::LaunchModes;
+    use crate::state::LaunchModes;
     use chrono::Utc;
 
     fn sample_run(id: u64, stage: &str, status: RunStatus) -> RunRecord {

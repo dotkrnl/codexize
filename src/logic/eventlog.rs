@@ -1,4 +1,4 @@
-use crate::logic::pipeline::{Event, Message};
+use crate::state::{Event, Message};
 use anyhow::Context;
 use serde::Deserialize;
 

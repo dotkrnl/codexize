@@ -1,4 +1,5 @@
-use crate::logic::pipeline::{Phase, RunRecord};
+use crate::logic::pipeline::Phase;
+use crate::state::RunRecord;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryTarget {

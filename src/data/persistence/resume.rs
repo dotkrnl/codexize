@@ -2,8 +2,7 @@
 
 use crate::artifacts::{ArtifactKind, SkipToImplProposal};
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::resume::{ResumeError, can_resume};
-use crate::logic::pipeline::state::{SessionState, session_dir};
+use crate::state::{ResumeError, SessionState, can_resume, session_dir};
 
 /// Resume a session, logging the resumption event.
 pub fn resume_session(state: &mut SessionState) -> Result<(), ResumeError> {
@@ -58,7 +57,7 @@ mod tests {
     use std::fs;
 
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::logic::pipeline::state::test_fs_lock()
+        let _guard = crate::state::test_fs_lock()
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();

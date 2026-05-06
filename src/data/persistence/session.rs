@@ -1,13 +1,13 @@
 //! Filesystem-backed `impl` block for [`SessionState`].
 //!
 //! Splitting the IO methods out of the type definition keeps
-//! [`crate::logic::pipeline::state`] free of `std::fs`, `std::process`, and
-//! direct clock reads. The struct itself lives in `logic/pipeline/state.rs`;
-//! this file extends it with another `impl` block.
+//! [`crate::state`] free of `std::fs`, `std::process`, and direct clock
+//! reads. The struct itself lives in `src/state/types.rs`; this file extends
+//! it with another `impl` block.
 
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::{
+use crate::state::{
     Event, EventsFile, LaunchModes, Message, MessageKind, MessageSender, MessagesFile, RunRecord,
     RunStatus, SectionPart, SessionState, session_dir,
 };

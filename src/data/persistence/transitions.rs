@@ -7,12 +7,10 @@
 
 use crate::adapters::EffortLevel;
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::{
-    BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState,
-};
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
+use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::Path;
@@ -371,9 +369,7 @@ mod section_path_capture_tests {
     use super::*;
     use crate::adapters::EffortLevel;
     use crate::logic::pipeline::phase::Phase;
-    use crate::logic::pipeline::state::{
-        LaunchModes, PipelineItem, PipelineItemStatus, SectionPart, SessionState,
-    };
+    use crate::state::{LaunchModes, PipelineItem, PipelineItemStatus, SectionPart, SessionState};
 
     #[test]
     fn coder_run_captures_iteration_loop_task_round_stage_path() {
@@ -526,7 +522,7 @@ mod tests {
     /// implicit `SessionState::save` writes into a temp directory that gets
     /// cleaned up.
     fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
-        let _guard = crate::logic::pipeline::state::test_fs_lock()
+        let _guard = crate::state::test_fs_lock()
             .lock()
             .unwrap_or_else(|err| err.into_inner());
         let temp = tempfile::TempDir::new().unwrap();

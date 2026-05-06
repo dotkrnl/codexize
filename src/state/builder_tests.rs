@@ -1,5 +1,5 @@
 use super::*;
-use crate::logic::pipeline::state::PipelineItemStatus;
+use crate::state::PipelineItemStatus;
 
 fn make_builder_with_tasks(task_ids: &[u32]) -> BuilderState {
     let mut builder = BuilderState::default();

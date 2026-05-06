@@ -1,5 +1,5 @@
 use super::BuilderState;
-use crate::logic::pipeline::state::{PipelineItem, PipelineItemStatus};
+use crate::state::{PipelineItem, PipelineItemStatus};
 
 impl BuilderState {
     pub(super) fn is_selectable_task_item(item: &PipelineItem) -> bool {

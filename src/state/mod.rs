@@ -1,27 +1,35 @@
 //! Flat `crate::state::*` public surface.
 //!
-//! Pipeline state lives canonically in [`crate::logic::pipeline`] (pure
-//! data + mutators) and [`crate::data::persistence`] (filesystem-backed
-//! save/load and persisting transition wrappers). This module flattens
-//! both halves into the single `crate::state::{transitions, resume, …}`
-//! shape consumed by `main.rs`, integration tests, and the future
-//! server-mode binary — it is the intentional public API surface, not a
-//! migration leftover. New logic/data callers should still prefer the
-//! layered names above.
+//! Canonical state/session data, stage IO contracts, and resume validation
+//! live here. The pipeline module only owns the phase graph and pure
+//! transition mutators.
 
-pub use crate::logic::pipeline::{
-    BRAINSTORM_IO, BlockOrigin, BuilderState, CODER_IO, Event, FinishedRunRecord, LaunchModes,
-    Message, MessageKind, MessageSender, Modes, Node, NodeKind, NodeStatus, PLAN_REVIEWER_IO,
-    PLANNER_IO, PendingGuardDecision, Phase, PipelineItem, PipelineItemStatus, RECOVERY_IO,
-    RECOVERY_PLAN_REVIEWER_IO, RECOVERY_SHARDER_IO, REVIEWER_IO, ResumeError, RunRecord, RunStatus,
-    SHARDER_IO, SIMPLIFIER_IO, SPEC_REVIEWER_IO, SectionPart, SessionState, StageIO,
-    TransitionError, can_resume, codexize_root, session_dir,
+mod builder;
+#[path = "resume.rs"]
+mod resume_logic;
+mod stage_io;
+#[path = "types.rs"]
+mod types_logic;
+
+pub use crate::logic::pipeline::{FinishedRunRecord, Phase, TransitionError};
+pub use builder::BuilderState;
+pub use resume_logic::{ResumeError, can_resume};
+pub use stage_io::{
+    BRAINSTORM_IO, CODER_IO, PLAN_REVIEWER_IO, PLANNER_IO, RECOVERY_IO, RECOVERY_PLAN_REVIEWER_IO,
+    RECOVERY_SHARDER_IO, REVIEWER_IO, SHARDER_IO, SIMPLIFIER_IO, SPEC_REVIEWER_IO, StageIO,
+    stage_io, stage_io_with_mode,
+};
+pub use types_logic::{
+    BlockOrigin, Event, LaunchModes, Message, MessageKind, MessageSender, Modes, Node, NodeKind,
+    NodeStatus, PendingGuardDecision, PipelineItem, PipelineItemStatus, RunRecord, RunStatus,
+    SectionPart, SessionState, codexize_root, session_dir,
 };
 
 pub use crate::data::persistence::resume_session;
 
 #[cfg(test)]
-pub(crate) use crate::logic::pipeline::test_fs_lock;
+pub(crate) use types_logic::test_fs_lock;
+pub(crate) use types_logic::{EventsFile, MessagesFile};
 
 /// Compatibility module mirroring the pre-refactor `crate::state::transitions`
 /// surface. Pure mutators are re-exported from
@@ -32,11 +40,6 @@ pub mod transitions {
         FinalValidationEntry, SimplificationEntry, block_with_origin, enter_final_validation,
         enter_simplification, execute_transition, finish_run_record, resume_running_runs,
         start_agent_run, start_agent_run_with_id, try_parse_toml_artifact,
-    };
-    pub use crate::logic::pipeline::stage_io::{
-        BRAINSTORM_IO, CODER_IO, PLAN_REVIEWER_IO, PLANNER_IO, RECOVERY_IO,
-        RECOVERY_PLAN_REVIEWER_IO, RECOVERY_SHARDER_IO, REVIEWER_IO, SHARDER_IO, SIMPLIFIER_IO,
-        SPEC_REVIEWER_IO, StageIO, stage_io, stage_io_with_mode,
     };
     pub use crate::logic::pipeline::transitions::{
         FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, TransitionError, VALIDATION_ATTEMPT_CAP,
@@ -54,13 +57,18 @@ pub mod transitions {
         set_cheap_mode, set_phase_for_operator_retry, set_retry_reset_run_id_cutoff, set_yolo_mode,
         take_pending_guard_decision, take_pending_refine_feedback, validate_transition,
     };
+    pub use crate::state::stage_io::{
+        BRAINSTORM_IO, CODER_IO, PLAN_REVIEWER_IO, PLANNER_IO, RECOVERY_IO,
+        RECOVERY_PLAN_REVIEWER_IO, RECOVERY_SHARDER_IO, REVIEWER_IO, SHARDER_IO, SIMPLIFIER_IO,
+        SPEC_REVIEWER_IO, StageIO, stage_io, stage_io_with_mode,
+    };
 }
 
 /// Compatibility module mirroring the pre-refactor `crate::state::resume`
 /// surface.
 pub mod resume {
     pub use crate::data::persistence::resume::resume_session;
-    pub use crate::logic::pipeline::resume::{ResumeError, can_resume};
+    pub use crate::state::resume_logic::{ResumeError, can_resume};
 }
 
 #[cfg(test)]

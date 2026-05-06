@@ -1,4 +1,4 @@
-use crate::logic::pipeline::state::PipelineItem;
+use crate::state::{PipelineItem, PipelineItemStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -149,28 +149,17 @@ impl BuilderState {
             .done
             .iter()
             .copied()
-            .map(|task_id| {
-                (
-                    task_id,
-                    crate::logic::pipeline::state::PipelineItemStatus::Approved,
-                    None,
-                )
-            })
+            .map(|task_id| (task_id, PipelineItemStatus::Approved, None))
             .chain(self.current_task.map(|task_id| {
                 let round = (self.iteration > 0).then_some(self.iteration);
-                (
-                    task_id,
-                    crate::logic::pipeline::state::PipelineItemStatus::Running,
-                    round,
-                )
+                (task_id, PipelineItemStatus::Running, round)
             }))
-            .chain(self.pending.iter().copied().map(|task_id| {
-                (
-                    task_id,
-                    crate::logic::pipeline::state::PipelineItemStatus::Pending,
-                    None,
-                )
-            }))
+            .chain(
+                self.pending
+                    .iter()
+                    .copied()
+                    .map(|task_id| (task_id, PipelineItemStatus::Pending, None)),
+            )
         {
             if !seen.insert(task_id) {
                 continue;

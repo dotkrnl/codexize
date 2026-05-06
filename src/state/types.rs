@@ -7,9 +7,9 @@
 //! with load/save/log helpers.
 
 use crate::adapters::EffortLevel;
-use crate::logic::pipeline::builder::BuilderState;
 use crate::logic::pipeline::phase::Phase;
 use crate::logic::selection::SelectionPhase;
+use crate::state::BuilderState;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 

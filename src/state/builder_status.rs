@@ -1,4 +1,4 @@
-use crate::logic::pipeline::state::PipelineItemStatus;
+use crate::state::PipelineItemStatus;
 
 impl PipelineItemStatus {
     pub fn is_lifecycle(self) -> bool {

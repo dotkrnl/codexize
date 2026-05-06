@@ -4,7 +4,7 @@
 //! `skip_proposal.toml`) lives in [`crate::data::persistence::resume`].
 
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::SessionState;
+use crate::state::SessionState;
 
 /// Errors that can occur when attempting to resume a session.
 #[derive(Debug, thiserror::Error)]

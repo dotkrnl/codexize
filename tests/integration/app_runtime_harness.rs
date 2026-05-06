@@ -66,7 +66,7 @@ fn channels_carry_a_full_command_view_round_trip() {
 fn agent_run_summary_is_constructible_from_public_surface() {
     use chrono::Utc;
     use codexize::adapters::EffortLevel;
-    use codexize::logic::pipeline::{LaunchModes, RunRecord, RunStatus};
+    use codexize::state::{LaunchModes, RunRecord, RunStatus};
 
     let run = RunRecord {
         id: 7,

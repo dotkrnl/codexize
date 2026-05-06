@@ -1,5 +1,6 @@
-use codexize::logic::pipeline::{Phase, RunRecord, RunStatus};
+use codexize::logic::pipeline::Phase;
 use codexize::logic::rules::{RetryTarget, retry_phase_for_stage, retry_target_for_run};
+use codexize::state::{RunRecord, RunStatus};
 
 #[test]
 fn retry_phase_for_stage_keeps_stage_to_phase_mapping_pure() {

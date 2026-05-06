@@ -1,5 +1,6 @@
 use codexize::logic::eventlog::{parse_messages_toml, parse_session_events_toml};
-use codexize::logic::pipeline::{MessageKind, Phase};
+use codexize::logic::pipeline::Phase;
+use codexize::state::MessageKind;
 
 #[test]
 fn parse_session_events_toml_reads_pure_event_slices() {

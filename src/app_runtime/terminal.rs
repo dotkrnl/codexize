@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use crate::app_runtime::{AppCommand, AppView, ModalKind};
 use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
-use crate::logic::pipeline::RunStatus;
+use crate::state::RunStatus;
 use crate::{app::App, tui::AppTerminal};
 
 /// Result of routing an [`AppCommand`] through the terminal runtime.
@@ -162,7 +162,7 @@ mod tests {
     use super::*;
     use crate::app_runtime::{AgentRunSummary, AppCommand, AppView, ModalKind};
     use crate::data::events::{DataEvent, DataOutcome, DataRequest, LiveSummaryEvents};
-    use crate::logic::pipeline::RunStatus;
+    use crate::state::RunStatus;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use std::sync::Arc;
     use tokio::sync::mpsc;

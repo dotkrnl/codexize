@@ -7,10 +7,10 @@
 //! [`crate::data::persistence::transitions`].
 
 use crate::adapters::EffortLevel;
-use crate::logic::pipeline::builder::BuilderState;
 use crate::logic::pipeline::phase::Phase;
-use crate::logic::pipeline::state::{
-    LaunchModes, Modes, PendingGuardDecision, PipelineItem, PipelineItemStatus, SessionState,
+use crate::state::{
+    BuilderState, LaunchModes, Modes, PendingGuardDecision, PipelineItem, PipelineItemStatus,
+    RunRecord, RunStatus, SessionState,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -471,7 +471,7 @@ pub fn create_run_record_in_memory(
     mount_device_id: Option<u64>,
 ) -> u64 {
     let id = state.next_agent_run_id();
-    let run = crate::logic::pipeline::state::RunRecord {
+    let run = RunRecord {
         id,
         stage,
         task_id,
@@ -482,7 +482,7 @@ pub fn create_run_record_in_memory(
         window_name,
         started_at,
         ended_at: None,
-        status: crate::logic::pipeline::state::RunStatus::Running,
+        status: RunStatus::Running,
         error: None,
         effort,
         modes,

@@ -20,9 +20,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 pub type AcpResult<T> = Result<T, AcpError>;
 
-#[rustfmt::skip]
-#[derive(thiserror::Error)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum AcpError {
     #[error("{0}")]
     HumanBlock(String),
@@ -33,16 +31,14 @@ pub enum AcpError {
 }
 
 impl AcpError {
-    pub fn human_block(message: impl Into<String>) -> Self {
-        Self::HumanBlock(message.into())
+    pub fn human_block(m: impl Into<String>) -> Self {
+        Self::HumanBlock(m.into())
     }
-
-    pub fn protocol(message: impl Into<String>) -> Self {
-        Self::Protocol(message.into())
+    pub fn protocol(m: impl Into<String>) -> Self {
+        Self::Protocol(m.into())
     }
-
-    pub fn io(message: impl Into<String>) -> Self {
-        Self::Io(message.into())
+    pub fn io(m: impl Into<String>) -> Self {
+        Self::Io(m.into())
     }
 }
 
@@ -97,14 +93,28 @@ impl AcpLaunchPolicy {
     ) -> Self {
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
-            shell_policy: AcpShellCommandPolicy::Allowlist(allowed_final_validation_commands()),
+            shell_policy: AcpShellCommandPolicy::Allowlist(
+                [
+                    "git status",
+                    "git log",
+                    "ls",
+                    "cat",
+                    "head",
+                    "tail",
+                    "wc",
+                    "file",
+                    "find",
+                    "pwd",
+                ]
+                .map(String::from)
+                .to_vec(),
+            ),
             enforce_readonly_workspace: true,
         }
     }
 
-    /// Simplifier ACP policy: code-producing (writes/commits repository
-    /// files), so workspace is not read-only and shell access is unrestricted;
-    /// required artifact writes are still listed for violation reporting.
+    /// Simplifier policy: writes/commits repo files; workspace not read-only,
+    /// shell unrestricted; required artifact writes still listed for violation reporting.
     pub fn simplifier(
         simplification_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
@@ -115,23 +125,6 @@ impl AcpLaunchPolicy {
             enforce_readonly_workspace: false,
         }
     }
-}
-
-fn allowed_final_validation_commands() -> Vec<String> {
-    [
-        "git status",
-        "git log",
-        "ls",
-        "cat",
-        "head",
-        "tail",
-        "wc",
-        "file",
-        "find",
-        "pwd",
-    ]
-    .map(str::to_string)
-    .to_vec()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

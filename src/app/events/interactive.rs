@@ -1,5 +1,6 @@
 use super::super::App;
 use super::super::status_line::Severity;
+use super::super::{PendingTermination, TerminationIntent};
 use crate::state::{Message, MessageKind, MessageSender, RunStatus};
 use std::time::Duration;
 impl App {
@@ -27,6 +28,18 @@ impl App {
             return;
         };
         if self.state.agent_runs.iter().any(|run| run.id == run_id) {
+            // Mark the run as operator-completed before signalling the runner.
+            // If the artifact validation that gates a graceful Complete fails
+            // (e.g., the operator typed `/exit` during human-blocked recovery
+            // before recovery.toml was written), the run finalises with
+            // exit_code=1 — without this marker, `handle_run_finalization_failure`
+            // routes through `maybe_auto_retry`, which silently relaunches a
+            // new agent instead of stopping. `StopOnly` short-circuits the
+            // retry path so the operator's stop sticks.
+            self.pending_termination = Some(PendingTermination {
+                run_id,
+                intent: TerminationIntent::StopOnly,
+            });
             // `/exit` is a local codexize control for interactive ACP runs,
             // not agent prompt text, so the runner completes this run by id.
             self.runner_supervisor.request_run_exit(run_id);
@@ -152,3 +165,6 @@ impl App {
         self.push_status(label.to_string(), Severity::Info, Duration::from_secs(3));
     }
 }
+#[cfg(test)]
+#[path = "interactive_tests.rs"]
+mod tests;

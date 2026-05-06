@@ -118,9 +118,9 @@ impl ToolCallDisplayState {
     }
 }
 
-/// Per-session map of `toolCallId` → merged display state, with FIFO-bounded
-/// capacity and overwrite-on-id-reuse for display, plus monotonic Start/Finish
-/// dedup sets that intentionally never decay (one-shot watchdog contract).
+/// `toolCallId` → merged display state. `entries` is FIFO-bounded with
+/// overwrite-on-id-reuse for display; `*_emitted` sets are monotonic for the
+/// session lifetime so the watchdog never sees duplicate Start/Finish.
 #[derive(Debug, Default)]
 pub(super) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,

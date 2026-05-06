@@ -170,7 +170,10 @@ impl BuilderState {
             }
             // Legacy queues only persisted done/current/pending membership; a
             // completed task maps to Approved because reviewer verdicts drove
-            // the historical `done` queue.
+            // the historical `done` queue. Done/Failed/HumanBlocked/AgentPivot
+            // never reached the legacy queues — they always lived only on
+            // pipeline_items — so the Approved mapping is total for sessions
+            // that need hydration.
             self.pipeline_items.push(PipelineItem {
                 id: next_pipeline_id,
                 stage: "coder".to_string(),

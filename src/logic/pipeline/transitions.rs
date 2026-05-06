@@ -33,11 +33,7 @@ pub fn validate_transition(from: &Phase, to: &Phase) -> Result<(), TransitionErr
         return Err(TransitionError::InvalidTransition {
             from: *from,
             to: *to,
-            reason: format!(
-                "Transition from {} to {} is not allowed",
-                from.display_name(),
-                to.display_name()
-            ),
+            reason: format!("Transition from {from} to {to} is not allowed"),
         });
     }
     Ok(())

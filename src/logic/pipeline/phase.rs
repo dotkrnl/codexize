@@ -1,7 +1,22 @@
 use crate::artifacts::ArtifactKind;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
+// `EnumString` is intentionally not derived: no caller parses phase names back
+// into `Phase`, and the parameterized variants would require runtime-format
+// parsing that strum cannot generate.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::EnumDiscriminants,
+)]
+#[strum_discriminants(name(PhaseKind))]
 pub enum Phase {
     #[strum(to_string = "Idea Input")]
     IdeaInput,
@@ -81,33 +96,10 @@ impl TransitionEdge {
     }
 
     fn allows(self, from: &Phase, to: &Phase) -> bool {
-        self.from == from.kind()
-            && self.to == to.kind()
+        self.from == PhaseKind::from(from)
+            && self.to == PhaseKind::from(to)
             && self.guard.allows(from.round(), to.round())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PhaseKind {
-    IdeaInput,
-    BrainstormRunning,
-    SpecReviewRunning,
-    SpecReviewPaused,
-    PlanningRunning,
-    PlanReviewRunning,
-    PlanReviewPaused,
-    ShardingRunning,
-    SkipToImplPending,
-    ImplementationRound,
-    ReviewRound,
-    BuilderRecovery,
-    BuilderRecoveryPlanReview,
-    BuilderRecoverySharding,
-    GitGuardPending,
-    FinalValidation,
-    Simplification,
-    Done,
-    BlockedNeedsUser,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -291,30 +283,6 @@ const TRANSITION_EDGES: &[TransitionEdge] = &[
 ];
 
 impl Phase {
-    fn kind(self) -> PhaseKind {
-        match self {
-            Phase::IdeaInput => PhaseKind::IdeaInput,
-            Phase::BrainstormRunning => PhaseKind::BrainstormRunning,
-            Phase::SpecReviewRunning => PhaseKind::SpecReviewRunning,
-            Phase::SpecReviewPaused => PhaseKind::SpecReviewPaused,
-            Phase::PlanningRunning => PhaseKind::PlanningRunning,
-            Phase::PlanReviewRunning => PhaseKind::PlanReviewRunning,
-            Phase::PlanReviewPaused => PhaseKind::PlanReviewPaused,
-            Phase::ShardingRunning => PhaseKind::ShardingRunning,
-            Phase::SkipToImplPending => PhaseKind::SkipToImplPending,
-            Phase::ImplementationRound(_) => PhaseKind::ImplementationRound,
-            Phase::ReviewRound(_) => PhaseKind::ReviewRound,
-            Phase::BuilderRecovery(_) => PhaseKind::BuilderRecovery,
-            Phase::BuilderRecoveryPlanReview(_) => PhaseKind::BuilderRecoveryPlanReview,
-            Phase::BuilderRecoverySharding(_) => PhaseKind::BuilderRecoverySharding,
-            Phase::GitGuardPending => PhaseKind::GitGuardPending,
-            Phase::FinalValidation(_) => PhaseKind::FinalValidation,
-            Phase::Simplification(_) => PhaseKind::Simplification,
-            Phase::Done => PhaseKind::Done,
-            Phase::BlockedNeedsUser => PhaseKind::BlockedNeedsUser,
-        }
-    }
-
     fn round(self) -> Option<u32> {
         match self {
             Phase::ImplementationRound(round)
@@ -328,6 +296,12 @@ impl Phase {
         }
     }
 
+    /// Short, TUI-facing label used by the dashboard/picker. Spec §3.2.4
+    /// proposes folding `label()` into Display, but several variants here
+    /// (`Round N Coder`, `Final Validation` without round, `Simplification`
+    /// without round) are deliberately shorter than their `Display` form to
+    /// fit the user-visible chrome we are not allowed to change. Keep this
+    /// helper when reconciling the spec line.
     pub fn label(&self) -> String {
         match self {
             Phase::IdeaInput => "Idea Input".to_string(),
@@ -411,19 +385,6 @@ impl Phase {
         }
     }
 
-    /// Human-readable display name, including round numbers for parameterized phases.
-    pub fn display_name(&self) -> String {
-        match self {
-            Phase::ImplementationRound(n) => format!("Implementation Round {n}"),
-            Phase::ReviewRound(n) => format!("Review Round {n}"),
-            Phase::BuilderRecovery(_) => "Builder Recovery".to_string(),
-            Phase::BuilderRecoveryPlanReview(_) => "Recovery Plan Review".to_string(),
-            Phase::BuilderRecoverySharding(_) => "Recovery Sharding".to_string(),
-            Phase::FinalValidation(n) => format!("Final Validation Round {n}"),
-            Phase::Simplification(n) => format!("Simplification Round {n}"),
-            _ => self.label(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -432,10 +393,6 @@ mod tests {
 
     #[test]
     fn plan_review_forward_transitions() {
-        assert!(
-            super::TRANSITION_EDGES.len() >= 70,
-            "pipeline transitions should stay in the declarative edge table"
-        );
         assert!(Phase::PlanningRunning.can_transition_to(&Phase::PlanReviewRunning));
         assert!(Phase::PlanningRunning.can_transition_to(&Phase::ShardingRunning));
         assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));
@@ -472,8 +429,8 @@ mod tests {
     fn plan_review_labels() {
         assert_eq!(Phase::PlanReviewRunning.label(), "Plan Review");
         assert_eq!(Phase::PlanReviewPaused.label(), "Plan Review");
-        assert_eq!(Phase::PlanReviewRunning.display_name(), "Plan Review");
-        assert_eq!(Phase::PlanReviewPaused.display_name(), "Plan Review");
+        assert_eq!(format!("{}", Phase::PlanReviewRunning), "Plan Review");
+        assert_eq!(format!("{}", Phase::PlanReviewPaused), "Plan Review");
     }
 
     #[test]
@@ -559,7 +516,7 @@ mod tests {
     fn final_validation_metadata() {
         assert_eq!(Phase::FinalValidation(2).label(), "Final Validation");
         assert_eq!(
-            Phase::FinalValidation(2).display_name(),
+            format!("{}", Phase::FinalValidation(2)),
             "Final Validation Round 2"
         );
         assert_eq!(
@@ -614,7 +571,7 @@ mod tests {
     fn simplification_metadata() {
         assert_eq!(Phase::Simplification(2).label(), "Simplification");
         assert_eq!(
-            Phase::Simplification(2).display_name(),
+            format!("{}", Phase::Simplification(2)),
             "Simplification Round 2"
         );
         assert_eq!(

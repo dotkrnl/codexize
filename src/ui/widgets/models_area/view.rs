@@ -315,119 +315,58 @@ fn render_full_table(
         ));
 
         match prob_col {
-            ProbColumn::IpbrVerbose => {
-                let idea_pct =
-                    probability_percent(weight_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct = probability_percent(
-                    weight_for(SelectionPhase::Planning, model),
-                    total_planning,
-                );
-                let build_pct =
-                    probability_percent(weight_for(SelectionPhase::Build, model), total_build);
-                let review_pct =
-                    probability_percent(weight_for(SelectionPhase::Review, model), total_review);
-
-                spans.push(Span::raw(" "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("Idea ")
-                } else {
-                    probability_span(
+            ProbColumn::IpbrVerbose | ProbColumn::Ipbr => {
+                // Long-label vs short-label rendering only differ in the per-cell
+                // label text and the inter-cell padding; everything else (the
+                // weights, ranks, and per-vendor failure handling) is shared.
+                let verbose = matches!(prob_col, ProbColumn::IpbrVerbose);
+                let separator = if verbose { "   " } else { " " };
+                let cells: [(&str, &str, SelectionPhase, f64, u8, bool); 4] = [
+                    (
                         "Idea ",
-                        idea_pct,
-                        max_idea,
-                        idea_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw("   "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("Plan ")
-                } else {
-                    probability_span(
-                        "Plan ",
-                        planning_pct,
-                        max_planning,
-                        planning_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw("   "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("Build ")
-                } else {
-                    probability_span(
-                        "Build ",
-                        build_pct,
-                        max_build,
-                        build_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw("   "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("Review ")
-                } else {
-                    probability_span(
-                        "Review ",
-                        review_pct,
-                        max_review,
-                        review_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-            }
-            ProbColumn::Ipbr => {
-                let idea_pct =
-                    probability_percent(weight_for(SelectionPhase::Idea, model), total_idea);
-                let planning_pct = probability_percent(
-                    weight_for(SelectionPhase::Planning, model),
-                    total_planning,
-                );
-                let build_pct =
-                    probability_percent(weight_for(SelectionPhase::Build, model), total_build);
-                let review_pct =
-                    probability_percent(weight_for(SelectionPhase::Review, model), total_review);
-
-                spans.push(Span::raw(" "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("I")
-                } else {
-                    probability_span(
                         "I",
-                        idea_pct,
+                        SelectionPhase::Idea,
+                        total_idea,
                         max_idea,
                         idea_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw(" "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("P")
-                } else {
-                    probability_span(
+                    ),
+                    (
+                        "Plan ",
                         "P",
-                        planning_pct,
+                        SelectionPhase::Planning,
+                        total_planning,
                         max_planning,
                         planning_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw(" "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("B")
-                } else {
-                    probability_span(
+                    ),
+                    (
+                        "Build ",
                         "B",
-                        build_pct,
+                        SelectionPhase::Build,
+                        total_build,
                         max_build,
                         build_ranks.get(&model.name) == Some(&1),
-                    )
-                });
-                spans.push(Span::raw(" "));
-                spans.push(if vendor_failed {
-                    probability_unavailable_span("R")
-                } else {
-                    probability_span(
+                    ),
+                    (
+                        "Review ",
                         "R",
-                        review_pct,
+                        SelectionPhase::Review,
+                        total_review,
                         max_review,
                         review_ranks.get(&model.name) == Some(&1),
-                    )
-                });
+                    ),
+                ];
+                for (idx, (long_label, short_label, phase, total, max, is_top)) in
+                    cells.iter().enumerate()
+                {
+                    spans.push(Span::raw(if idx == 0 { " " } else { separator }));
+                    let label = if verbose { *long_label } else { *short_label };
+                    let pct = probability_percent(weight_for(*phase, model), *total);
+                    spans.push(if vendor_failed {
+                        probability_unavailable_span(label)
+                    } else {
+                        probability_span(label, pct, *max, *is_top)
+                    });
+                }
             }
             ProbColumn::TopRank => {
                 spans.push(Span::raw(" "));

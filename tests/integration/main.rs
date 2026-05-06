@@ -11,6 +11,7 @@
 mod app_runtime_harness;
 mod layer_boundaries;
 mod smoke_baseline;
+mod support;
 
 use codexize::app_runtime::{
     AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId, channel_pair,
@@ -18,6 +19,7 @@ use codexize::app_runtime::{
 };
 use codexize::logic::pipeline::Phase;
 use tempfile::tempdir;
+use support::drain_views;
 
 #[test]
 fn full_pipeline_run_via_stubbed_ui() {
@@ -163,8 +165,4 @@ fn production_entrypoint_is_app_runtime_run_terminal_app() {
         &mut codexize::app::App,
         &mut codexize::ui::tui::AppTerminal,
     ) -> anyhow::Result<()> = codexize::app_runtime::run_terminal_app;
-}
-
-fn drain_views(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppView>) -> Vec<AppView> {
-    std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }

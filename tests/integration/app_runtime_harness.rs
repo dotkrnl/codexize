@@ -15,6 +15,8 @@ use codexize::app_runtime::{
 use codexize::logic::pipeline::Phase;
 use tempfile::tempdir;
 
+use crate::support::drain_views;
+
 #[test]
 fn channels_carry_a_full_command_view_round_trip() {
     let dir = tempdir().expect("tempdir");
@@ -115,8 +117,4 @@ fn runtime_harness_drains_commands_and_publishes_views_until_exit() {
     let second = ui.views_rx.blocking_recv().expect("second view");
     assert_eq!(first.session_id.as_ref(), "runtime-loop");
     assert_eq!(second.session_id.as_ref(), "runtime-loop");
-}
-
-fn drain_views(rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppView>) -> Vec<AppView> {
-    std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }

@@ -111,7 +111,12 @@ impl RunHandle {
 /// Process-supervision root owned by `App`. The registry is keyed by the
 /// persisted run id so cancellation/input/status target the durable run
 /// identity rather than the human-readable window label.
+#[derive(Clone)]
 pub struct Supervisor {
+    inner: Arc<SupervisorInner>,
+}
+
+struct SupervisorInner {
     handle: Option<Handle>,
     root_token: CancellationToken,
     runs: DashMap<RunId, RunHandle>,
@@ -126,10 +131,17 @@ impl Default for Supervisor {
 impl Supervisor {
     pub fn new() -> Self {
         Self {
-            handle: Handle::try_current().ok().or_else(test_runtime_handle),
-            root_token: CancellationToken::new(),
-            runs: DashMap::new(),
+            inner: Arc::new(SupervisorInner {
+                handle: Handle::try_current().ok().or_else(test_runtime_handle),
+                root_token: CancellationToken::new(),
+                runs: DashMap::new(),
+            }),
         }
+    }
+
+    #[cfg(test)]
+    pub fn shared_for_test() -> Self {
+        test_supervisor().clone()
     }
 
     /// Drain RunHandles whose inner task has signalled `finished=true`,
@@ -137,6 +149,7 @@ impl Supervisor {
     /// next public-control-surface call inspects the map.
     fn cleanup_finished(&self) {
         let finished_keys: Vec<RunId> = self
+            .inner
             .runs
             .iter()
             .filter(|entry| entry.value().is_finished())
@@ -148,33 +161,40 @@ impl Supervisor {
     }
 
     pub fn run_is_active(&self, run_id: RunId) -> bool {
-        self.runs.get(&run_id).is_some_and(|run| !run.is_finished())
+        self.inner
+            .runs
+            .get(&run_id)
+            .is_some_and(|run| !run.is_finished())
     }
 
     pub fn run_is_waiting_for_input(&self, run_id: RunId) -> bool {
         self.cleanup_finished();
-        self.runs
+        self.inner
+            .runs
             .get(&run_id)
             .is_some_and(|run| !run.is_finished() && run.is_waiting_for_input())
     }
 
     fn any_run_unfinished(&self) -> bool {
-        self.runs.iter().any(|entry| !entry.value().is_finished())
+        self.inner
+            .runs
+            .iter()
+            .any(|entry| !entry.value().is_finished())
     }
 
     fn child_cancel_signal(&self) -> Arc<CancelSignal> {
-        Arc::new(CancelSignal::new(self.root_token.child_token()))
+        Arc::new(CancelSignal::new(self.inner.root_token.child_token()))
     }
 
     fn spawn_blocking(&self, task: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>> {
-        let Some(handle) = &self.handle else {
+        let Some(handle) = &self.inner.handle else {
             bail!("runner supervisor requires an active tokio runtime");
         };
         Ok(handle.spawn_blocking(task))
     }
 
     fn join(&self, join: JoinHandle<()>) {
-        let Some(handle) = &self.handle else {
+        let Some(handle) = &self.inner.handle else {
             return;
         };
         if Handle::try_current().is_ok() {
@@ -187,7 +207,7 @@ impl Supervisor {
     }
 
     fn remove_and_join(&self, run_id: RunId) -> Option<RunHandle> {
-        let removed = self.runs.remove(&run_id).map(|(_, run)| run);
+        let removed = self.inner.runs.remove(&run_id).map(|(_, run)| run);
         if let Some(mut run) = removed {
             if let Some(join) = run.join.take() {
                 self.join(join);
@@ -199,13 +219,14 @@ impl Supervisor {
     }
 
     fn take_run(&self, run_id: RunId) -> Option<RunHandle> {
-        self.runs.remove(&run_id).map(|(_, run)| run)
+        self.inner.runs.remove(&run_id).map(|(_, run)| run)
     }
 
     #[cfg(test)]
     fn matching_label_run_ids(&self, base: &str) -> Vec<RunId> {
         let prefix = format!("{base} ");
-        self.runs
+        self.inner
+            .runs
             .iter()
             .filter(|entry| {
                 let name = &entry.value().window_name;
@@ -569,7 +590,7 @@ fn launch_managed_acp_window(
         let _ = finished_tx.send(true);
     })?;
 
-    supervisor.runs.insert(
+    supervisor.inner.runs.insert(
         run_id,
         RunHandle {
             window_name: window_name.to_string(),
@@ -619,7 +640,8 @@ impl Supervisor {
             return false;
         }
         self.cleanup_finished();
-        self.runs
+        self.inner
+            .runs
             .get(&run_id)
             .filter(|run| !run.is_finished() && run.is_waiting_for_input())
             .is_some_and(|run| run.input_tx.send(AcpInput::Prompt(text)).is_ok())
@@ -630,7 +652,7 @@ impl Supervisor {
             return false;
         }
         self.cleanup_finished();
-        self.runs.get(&run_id).is_some_and(|run| {
+        self.inner.runs.get(&run_id).is_some_and(|run| {
             if run.is_finished() {
                 return false;
             }
@@ -652,7 +674,7 @@ impl Supervisor {
             return false;
         }
         self.cleanup_finished();
-        self.runs.get(&run_id).is_some_and(|run| {
+        self.inner.runs.get(&run_id).is_some_and(|run| {
             if run.is_finished() {
                 return false;
             }
@@ -666,7 +688,7 @@ impl Supervisor {
     /// non-zero exit through existing vendor failover.
     pub fn terminate_run(&self, run_id: RunId) -> bool {
         self.cleanup_finished();
-        self.runs.get(&run_id).is_some_and(|run| {
+        self.inner.runs.get(&run_id).is_some_and(|run| {
             if run.is_finished() {
                 return false;
             }
@@ -677,9 +699,9 @@ impl Supervisor {
 
     pub fn shutdown_all_runs(&self) {
         let runs: Vec<(RunId, RunHandle)> = {
-            let keys: Vec<RunId> = self.runs.iter().map(|entry| *entry.key()).collect();
+            let keys: Vec<RunId> = self.inner.runs.iter().map(|entry| *entry.key()).collect();
             keys.into_iter()
-                .filter_map(|key| self.runs.remove(&key))
+                .filter_map(|key| self.inner.runs.remove(&key))
                 .collect()
         };
         #[cfg(test)]
@@ -782,7 +804,7 @@ fn register_test_run_label(window_name: &str, waiting: bool) {
     test_cancel_observers().insert(window_name.to_string(), Arc::clone(&cancel));
     test_input_observers().insert(window_name.to_string(), PlMutex::new(input_rx));
 
-    supervisor.runs.insert(
+    supervisor.inner.runs.insert(
         run_id,
         RunHandle {
             window_name: window_name.to_string(),
@@ -810,6 +832,17 @@ pub(in crate::data::runner) fn assign_test_run_id(window_name: &str) -> RunId {
             test_run_ids().insert(window_name.to_string(), next);
             next
         })
+}
+
+#[cfg(test)]
+pub fn register_test_run_id(window_name: &str, run_id: RunId) {
+    let previous = test_run_ids().insert(window_name.to_string(), run_id);
+    if let Some(previous) = previous
+        && previous != run_id
+        && let Some((_, run)) = test_supervisor().inner.runs.remove(&previous)
+    {
+        test_supervisor().inner.runs.insert(run_id, run);
+    }
 }
 
 #[cfg(test)]
@@ -922,7 +955,7 @@ mod tests {
         let (input_tx, input_rx) = mpsc::unbounded_channel::<AcpInput>();
         let (_waiting_tx, waiting_rx) = watch::channel(waiting);
         let (_finished_tx, finished_rx) = watch::channel(false);
-        supervisor.runs.insert(
+        supervisor.inner.runs.insert(
             run_id,
             RunHandle {
                 window_name: window_name.to_string(),

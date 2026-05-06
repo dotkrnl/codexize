@@ -23,7 +23,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         .filter(|row| row.is_expandable())
         .map(|row| (row.key.clone(), super::super::ExpansionOverride::Expanded))
         .collect();
-    App {
+    let app = App {
         state,
         nodes,
         visible_rows,
@@ -72,7 +72,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: std::collections::HashSet::new(),
         yolo_exit_observations: HashMap::new(),
-        runner_supervisor: crate::runner::Supervisor::new(),
+        runner_supervisor: crate::runner::Supervisor::shared_for_test(),
         watchdog: super::super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages,
@@ -82,7 +82,16 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         prev_models_mode: super::super::models_area::ModelsAreaMode::default(),
         palette: super::super::palette::PaletteState::default(),
         command_return_target: None,
+    };
+    for run in app
+        .state
+        .agent_runs
+        .iter()
+        .filter(|run| run.status == RunStatus::Running)
+    {
+        crate::runner::register_test_run_id(&run.window_name, run.id);
     }
+    app
 }
 
 fn run_record(id: u64, status: RunStatus) -> RunRecord {

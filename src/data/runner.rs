@@ -12,10 +12,12 @@ use crate::adapters::AgentRun;
 use crate::selection::VendorKind;
 use anyhow::{Context, Result};
 use std::{
+    future::Future,
     path::Path,
-    process::{Command, ExitStatus, Stdio},
-    time::{Duration, Instant},
+    process::{ExitStatus, Stdio},
+    time::Duration,
 };
+use tokio::process::Command;
 
 mod exit;
 mod supervise;
@@ -24,11 +26,24 @@ mod transport;
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
 pub use supervise::{RunId, Supervisor};
 
+pub(super) fn block_on_runner_future<F: Future>(future: F) -> F::Output {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(future))
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build runner helper runtime")
+            .block_on(future)
+    }
+}
+
 #[cfg(test)]
 pub use supervise::{
     cancel_run_labels_matching, drain_test_cancel_receiver_for, drain_test_input_receiver_for,
-    force_interrupt_run_label, interrupt_run_label_input, request_run_label_active_for_test,
-    request_run_label_exit, request_run_label_interactive_input_for_test, run_label_is_active,
+    force_interrupt_run_label, interrupt_run_label_input, register_test_run_id,
+    request_run_label_active_for_test, request_run_label_exit,
+    request_run_label_interactive_input_for_test, run_label_is_active,
     run_label_is_waiting_for_input, send_run_label_input, shutdown_all_runs, terminate_run_label,
 };
 
@@ -229,6 +244,13 @@ pub fn run_child_with_timeout(
     launch: &ChildLaunch,
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
+    block_on_runner_future(run_child_with_timeout_async(launch, timeout))
+}
+
+async fn run_child_with_timeout_async(
+    launch: &ChildLaunch,
+    timeout: Duration,
+) -> Result<Option<ExitStatus>> {
     let mut command = Command::new(&launch.program);
     command.args(&launch.args);
     for (key, value) in &launch.envs {
@@ -247,17 +269,13 @@ pub fn run_child_with_timeout(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn: {:?}", launch))?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(Some(status));
+    match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(status) => Ok(Some(status?)),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            Ok(None)
         }
-        if Instant::now() >= deadline {
-            child.kill()?;
-            let _ = child.wait();
-            return Ok(None);
-        }
-        std::thread::park_timeout(Duration::from_millis(100));
     }
 }
 

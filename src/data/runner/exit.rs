@@ -11,7 +11,6 @@ use std::{
     fs,
     path::Path,
     process::Command,
-    thread,
     time::{Duration, Instant},
 };
 
@@ -115,18 +114,22 @@ fn stamp_stabilize_interval() -> Duration {
 }
 
 pub(super) fn wait_for_stable_head() -> (String, String) {
+    super::block_on_runner_future(wait_for_stable_head_async())
+}
+
+async fn wait_for_stable_head_async() -> (String, String) {
     let budget = stamp_stabilize_budget();
     let interval = stamp_stabilize_interval();
     let deadline = Instant::now() + budget;
 
     loop {
         let lock_path = Path::new(".git").join("index.lock");
-        while lock_path.exists() && Instant::now() < deadline {
-            thread::park_timeout(Duration::from_millis(50));
+        while tokio::fs::metadata(&lock_path).await.is_ok() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
         let first = git_rev_parse_head().unwrap_or_default();
-        thread::park_timeout(interval);
+        tokio::time::sleep(interval).await;
         let second = git_rev_parse_head().unwrap_or_default();
         if first == second {
             return (second, "stable".to_string());

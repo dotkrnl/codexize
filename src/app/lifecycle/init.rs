@@ -94,7 +94,7 @@ impl App {
             pending_app_exit: false,
             current_run_id: None,
             failed_models,
-            runner_supervisor: crate::runner::Supervisor::new(),
+            runner_supervisor: app_runner_supervisor(),
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),
@@ -224,7 +224,26 @@ impl App {
                 }
             }
         }
+        #[cfg(test)]
+        for run in app
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.status == crate::state::RunStatus::Running)
+        {
+            crate::runner::register_test_run_id(&run.window_name, run.id);
+        }
         let _ = app.setup_watcher();
         app
     }
+}
+
+#[cfg(test)]
+fn app_runner_supervisor() -> crate::runner::Supervisor {
+    crate::runner::Supervisor::shared_for_test()
+}
+
+#[cfg(not(test))]
+fn app_runner_supervisor() -> crate::runner::Supervisor {
+    crate::runner::Supervisor::new()
 }

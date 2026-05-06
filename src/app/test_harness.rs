@@ -115,6 +115,17 @@ pub(crate) fn coder_round_state(session_id: &str) -> SessionState {
     state
 }
 
+fn seed_runner_fixture_ids(app: &App) {
+    for run in app
+        .state
+        .agent_runs
+        .iter()
+        .filter(|run| run.status == RunStatus::Running)
+    {
+        crate::runner::register_test_run_id(&run.window_name, run.id);
+    }
+}
+
 pub(crate) fn mk_app(state: SessionState) -> App {
     let nodes = build_tree(&state);
     let current = current_node_index(&nodes);
@@ -168,7 +179,9 @@ pub(crate) fn mk_app(state: SessionState) -> App {
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: HashSet::new(),
         yolo_exit_observations: HashMap::new(),
-        runner_supervisor: crate::runner::Supervisor::new(),
+        // Keep App-side control paths and legacy label fixture helpers on the
+        // same registry until the chunked harness is rewritten around RunId.
+        runner_supervisor: crate::runner::Supervisor::shared_for_test(),
         watchdog: super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),
@@ -177,6 +190,7 @@ pub(crate) fn mk_app(state: SessionState) -> App {
         palette: palette::PaletteState::default(),
         command_return_target: None,
     };
+    seed_runner_fixture_ids(&app);
     app.rebuild_visible_rows();
     app.restore_selection(app.selected_key.clone(), app.selected);
     app
@@ -478,7 +492,9 @@ pub(crate) fn idle_app(state: SessionState) -> App {
         pending_yolo_toggle_gate: None,
         yolo_exit_issued: HashSet::new(),
         yolo_exit_observations: HashMap::new(),
-        runner_supervisor: crate::runner::Supervisor::new(),
+        // Keep App-side control paths and legacy label fixture helpers on the
+        // same registry until the chunked harness is rewritten around RunId.
+        runner_supervisor: crate::runner::Supervisor::shared_for_test(),
         watchdog: super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),
@@ -487,6 +503,7 @@ pub(crate) fn idle_app(state: SessionState) -> App {
         palette: palette::PaletteState::default(),
         command_return_target: None,
     };
+    seed_runner_fixture_ids(&app);
     app.rebuild_visible_rows();
     app.restore_selection(app.selected_key.clone(), app.selected);
     app

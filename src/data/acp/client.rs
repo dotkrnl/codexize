@@ -1,22 +1,10 @@
 //! ACP JSON-RPC stdio client.
 //!
-//! Wire transport is a tokio actor (`actor`) that owns the spawned child's
-//! stdio, the framed line reader, the outstanding-request map, and notification
+//! Wire transport is a tokio actor (`actor`) owning the spawned child's
+//! stdio, framed line reader, outstanding-request map, and notification
 //! dispatch. The synchronous [`AcpSession`] facade ([`SubprocessSession`])
-//! keeps the existing trait shape so callers that have not yet been ported to
-//! async can drive prompt turns by polling — internally the polls hit
-//! non-blocking `try_recv` on tokio channels and `block_on` on tokio
-//! `oneshot::Receiver`s rather than the previous reader thread and sync
-//! request-correlation map.
-//!
-//! The bulk of the implementation lives in three submodules:
-//!
-//! * [`actor`] — `RpcClient` + `actor_loop` (transport, framing, server
-//!   request handling, shutdown).
-//! * [`dispatch`] — translation of `session/update` payloads into
-//!   `ClientUpdate`s, including text-boundary classification.
-//! * [`handshake`] — `initialize` / `session/new` / config-option negotiation
-//!   and prompt-request shape.
+//! lets sync callers drive prompt turns by polling — `try_recv` on tokio
+//! channels and `block_on` on `oneshot::Receiver`s.
 
 mod actor;
 mod dispatch;
@@ -51,10 +39,6 @@ pub trait AcpConnector {
 }
 
 /// Blocking RPC seam used by the legacy `apply_session_config` test stub.
-/// Production callers reach the same wire protocol through `RpcClient`'s
-/// async `call_async`; the synchronous trait survives only so the existing
-/// table-driven test for `apply_session_config` can replace the transport
-/// without standing up a tokio runtime.
 #[cfg(test)]
 trait RpcCaller {
     fn call(&mut self, method: &str, params: Value) -> AcpResult<Value>;
@@ -138,16 +122,13 @@ impl AcpSession for SubprocessSession {
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
-        // Drain queued visible updates before pulling more wire messages so a
-        // single `tool_call` payload that yields both invocation and result
-        // lines surfaces across two successive calls.
         if let Some(queued) = self.pending_updates.pop_front() {
             return Ok(Some(queued));
         }
 
-        // Non-terminal `tool_call_update` events are silently absorbed into
-        // merge state; keep pulling wire messages until either a visible
-        // update is queued or the channel runs dry.
+        // Drain wire messages until either a visible update is queued or the
+        // channel runs dry. Non-terminal `tool_call_update`s are merged in
+        // silently.
         loop {
             match self.rpc.try_next_update() {
                 Ok(Some(value)) => {
@@ -217,27 +198,19 @@ impl AcpSession for SubprocessSession {
                 "ACP prompt turn is still running".to_string(),
             ));
         }
-        // Starting a new prompt turn must clear any stale continuation cache
-        // before the server can reuse a prior turn's messageId on its first
-        // chunk. The conservative reset avoids cross-turn gluing.
         self.boundary_state.reset_for_prompt_turn();
         let prompt_params = prompt_request_params(
             &self.session_id,
             &super::PromptPayload::Text(text.to_string()),
         )?;
-        let prompt_response = self.rpc.start_request("session/prompt", prompt_params)?;
-        self.prompt_response = Some(prompt_response);
+        self.prompt_response = Some(self.rpc.start_request("session/prompt", prompt_params)?);
         self.prompt_finished = false;
         Ok(())
     }
 
     fn cancel_prompt(&mut self) -> AcpResult<()> {
-        self.rpc.notify(
-            "session/cancel",
-            json!({
-                "sessionId": self.session_id,
-            }),
-        )
+        self.rpc
+            .notify("session/cancel", json!({ "sessionId": self.session_id }))
     }
 
     fn close(&mut self) -> AcpResult<()> {
@@ -250,29 +223,22 @@ impl AcpSession for SubprocessSession {
         self.prompt_response = None;
 
         if self.supports_close {
-            // Best-effort graceful close — ignore the receiver so we never
-            // block the sync caller waiting on a server that has already
-            // disconnected.
+            // Best-effort graceful close — drop the receiver so we never block
+            // a sync caller waiting on a server that has already disconnected.
             let _ = self
                 .rpc
                 .start_request("session/close", json!({ "sessionId": self.session_id }));
         }
 
-        let mut child = match self.child.take() {
-            Some(child) => child,
-            None => {
-                self.rpc.shutdown_blocking_no_child();
-                return Ok(());
-            }
+        let Some(mut child) = self.child.take() else {
+            self.rpc.shutdown_blocking_no_child();
+            return Ok(());
         };
 
         // Close the writer half so the actor sees a clean shutdown via
         // command-channel drop, then wait for the actor to drain.
         self.rpc.shutdown_async(&self.runtime);
 
-        // Reap the child after the actor has released stdin. `try_wait` is a
-        // sync syscall on tokio's `Child`; only `kill`/`wait` need the
-        // executor.
         match child.try_wait() {
             Ok(Some(_)) => {}
             Ok(None) => {

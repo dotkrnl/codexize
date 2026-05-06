@@ -1,10 +1,5 @@
 //! ACP handshake: spawn the agent, perform `initialize` / `session/new`,
 //! apply config options, and start the first prompt turn.
-//!
-//! Production code drives `apply_session_config_async` directly inside the
-//! actor's runtime; the synchronous `apply_session_config` kept under
-//! `cfg(test)` exists so the table-driven unit test can replace the transport
-//! without standing up a tokio runtime.
 
 use super::super::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
 use super::actor::RpcClient;
@@ -81,10 +76,7 @@ pub(super) async fn handshake(
             json!({
                 "protocolVersion": 1,
                 "clientCapabilities": {
-                    "fs": {
-                        "readTextFile": false,
-                        "writeTextFile": false
-                    },
+                    "fs": { "readTextFile": false, "writeTextFile": false },
                     "terminal": false
                 },
                 "clientInfo": {
@@ -106,10 +98,7 @@ pub(super) async fn handshake(
     let new_session = rpc
         .call_async(
             "session/new",
-            json!({
-                "cwd": launch.session.cwd,
-                "mcpServers": []
-            }),
+            json!({ "cwd": launch.session.cwd, "mcpServers": [] }),
         )
         .await?;
     let mut session = parse_new_session_result(new_session)?;
@@ -192,16 +181,7 @@ pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> 
         .get("stopReason")
         .and_then(Value::as_str)
         .ok_or_else(|| AcpError::protocol("ACP prompt response missing stopReason"))?;
-    if is_failed_stop_reason(stop_reason) {
-        return Ok(PromptTurnOutcome::Failed {
-            message: format!("ACP prompt turn failed with stopReason={stop_reason}"),
-        });
-    }
-    Ok(PromptTurnOutcome::Finished)
-}
-
-fn is_failed_stop_reason(stop_reason: &str) -> bool {
-    matches!(
+    if matches!(
         stop_reason,
         "cancelled"
             | "canceled"
@@ -211,10 +191,15 @@ fn is_failed_stop_reason(stop_reason: &str) -> bool {
             | "failed"
             | "timeout"
             | "timed_out"
-    )
+    ) {
+        return Ok(PromptTurnOutcome::Failed {
+            message: format!("ACP prompt turn failed with stopReason={stop_reason}"),
+        });
+    }
+    Ok(PromptTurnOutcome::Finished)
 }
 
-fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
+pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
     let text = match prompt {
         PromptPayload::Text(text) => text.clone(),
         PromptPayload::File(path) => std::fs::read_to_string(path).map_err(|err| {
@@ -224,17 +209,10 @@ fn prompt_blocks(prompt: &PromptPayload) -> AcpResult<Vec<Value>> {
             ))
         })?,
     };
-    Ok(vec![json!({
-        "type": "text",
-        "text": text
-    })])
-}
-
-pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
     Ok(json!({
         "sessionId": session_id,
         "messageId": uuid::Uuid::new_v4().to_string(),
-        "prompt": prompt_blocks(prompt)?,
+        "prompt": [{ "type": "text", "text": text }],
     }))
 }
 
@@ -260,8 +238,7 @@ async fn apply_session_config_async(
     Ok(())
 }
 
-/// Synchronous entry preserved for the `RpcCaller`-based unit tests; production
-/// code drives `apply_session_config_async` directly inside the actor's runtime.
+/// Synchronous entry preserved for `RpcCaller`-based unit tests.
 #[cfg(test)]
 pub(super) fn apply_session_config(
     rpc: &mut impl super::RpcCaller,
@@ -283,11 +260,9 @@ pub(super) fn apply_session_config(
     Ok(())
 }
 
-/// Pure planner: pick the (category, option, desired value) tuples to apply
-/// against `config_options` for `session`. ACP standardizes categories, not
-/// concrete option values, so this mirrors the legacy ask/code convention and
-/// falls back to the codexize env contract when an agent exposes different
-/// labels.
+/// Pick (category, option, desired value) tuples to apply against
+/// `config_options` for `session`. ACP standardizes categories not values, so
+/// this mirrors the ask/code convention with a fallback to env-contract names.
 fn selected_config_updates(
     session: &AcpSessionSpec,
     config_options: &[ConfigOption],
@@ -327,15 +302,17 @@ fn absorb_config_response(
     match response {
         Ok(response) => match parse_config_options_response(response) {
             Ok(updated) => *config_options = updated,
-            Err(err) => debug_protocol(format!(
+            Err(err) => tracing::debug!(
+                target: "codexize::acp",
                 "session/set_config_option response parse failed for category={category} id={}: {err}",
                 option.id
-            )),
+            ),
         },
-        Err(err) => debug_protocol(format!(
+        Err(err) => tracing::debug!(
+            target: "codexize::acp",
             "session/set_config_option failed for category={category} id={} value={value}: {err}",
             option.id
-        )),
+        ),
     }
 }
 
@@ -345,19 +322,10 @@ fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
         #[serde(rename = "configOptions", default)]
         config_options: Vec<ConfigOption>,
     }
-
     let response: ConfigOptionsResponse = serde_json::from_value(value).map_err(|err| {
         AcpError::protocol(format!(
             "failed to parse ACP session/set_config_option response: {err}"
         ))
     })?;
     Ok(response.config_options)
-}
-
-fn debug_protocol(message: impl AsRef<str>) {
-    tracing::debug!(
-        target: "codexize::acp",
-        message = message.as_ref(),
-        "ACP protocol diagnostic"
-    );
 }

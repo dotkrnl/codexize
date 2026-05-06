@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
 
 /// Logical-message boundary signal: `Continue` appends to the current live
-/// block; `StartNewMessage` finalizes the live block first. The dispatcher
-/// only emits `StartNewMessage` at explicit boundaries (session start,
-/// prompt-turn reset, tool-call interleave, identity change).
+/// block; `StartNewMessage` finalizes the live block first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpTextBoundary {
     Continue,
@@ -27,9 +25,7 @@ pub enum ClientUpdate {
         boundary: AcpTextBoundary,
         identity: Option<String>,
     },
-    /// At most one `Start` (first non-terminal observation) and one `Finish`
-    /// (first terminal observation) per `tool_call_id`. Runner stamps the
-    /// time on receipt so consumers see arrival-ordered events.
+    /// At most one `Start`/`Finish` per `tool_call_id`. Runner stamps time on receipt.
     ToolCallActivity {
         tool_call_id: String,
         kind: ToolCallActivityKind,
@@ -57,9 +53,6 @@ pub enum AcpRuntimeEvent {
     Lifecycle(AcpLifecycleEvent),
     Text(AcpTextEvent),
     Completion(AcpCompletionEvent),
-    /// Runner-observable transition: at most once per id per kind. Runner
-    /// stamps `Instant::now()` on consumption so the idle clock pauses at
-    /// arrival, not at the App's next poll.
     ToolCallActivity {
         tool_call_id: String,
         kind: ToolCallActivityKind,
@@ -111,7 +104,7 @@ impl AcpTextAccumulator {
     pub fn push(&mut self, chunk: &str) -> Option<String> {
         if !chunk.is_empty() {
             self.buffer.push_str(chunk);
-            self.flush_ready_blocks();
+            self.flush_ready();
         }
         self.ready.pop_front()
     }
@@ -125,29 +118,28 @@ impl AcpTextAccumulator {
     }
 
     pub fn finish_prompt_turn(&mut self) -> Option<String> {
-        if let Some(ready) = self.ready.pop_front() {
-            return Some(ready);
-        }
-        (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer))
+        self.ready
+            .pop_front()
+            .or_else(|| (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer)))
     }
 
-    fn flush_ready_blocks(&mut self) {
-        while let Some(split_at) = self.buffer.find("\n\n") {
-            let block = self.buffer[..split_at].to_string();
-            self.buffer = self.buffer[split_at + 2..].to_string();
+    fn flush_ready(&mut self) {
+        while let Some(at) = self.buffer.find("\n\n") {
+            let block = self.buffer[..at].to_string();
+            self.buffer = self.buffer[at + 2..].to_string();
             if !block.is_empty() {
                 self.ready.push_back(block);
             }
         }
         while self.buffer.chars().count() >= self.max_chars {
-            let split_at = self
+            let at = self
                 .buffer
                 .char_indices()
                 .nth(self.max_chars)
-                .map(|(idx, _)| idx)
+                .map(|(i, _)| i)
                 .unwrap_or(self.buffer.len());
-            let block = self.buffer[..split_at].to_string();
-            self.buffer = self.buffer[split_at..].to_string();
+            let block = self.buffer[..at].to_string();
+            self.buffer = self.buffer[at..].to_string();
             self.ready.push_back(block);
         }
     }
@@ -160,7 +152,7 @@ impl Default for AcpTextAccumulator {
 }
 
 pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRuntimeEvent> {
-    let text_event = |text: String, thought: bool, boundary, identity| {
+    let text = |text: String, thought, boundary, identity| {
         AcpRuntimeEvent::Text(AcpTextEvent {
             text,
             interactive,
@@ -169,36 +161,38 @@ pub fn translate_update(update: ClientUpdate, interactive: bool) -> Option<AcpRu
             identity,
         })
     };
-    match update {
+    Some(match update {
         ClientUpdate::AgentMessageText {
-            text,
+            text: t,
             boundary,
             identity,
-        } => Some(text_event(text, false, boundary, identity)),
+        } => text(t, false, boundary, identity),
         ClientUpdate::AgentThoughtText {
-            text,
+            text: t,
             boundary,
             identity,
-        } => Some(text_event(text, true, boundary, identity)),
+        } => text(t, true, boundary, identity),
         ClientUpdate::ToolCallText {
-            text,
+            text: t,
             boundary,
             identity,
-        } => Some(text_event(format!("{text}\n\n"), true, boundary, identity)),
+        } => text(format!("{t}\n\n"), true, boundary, identity),
         ClientUpdate::ToolCallActivity { tool_call_id, kind } => {
-            Some(AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind })
+            AcpRuntimeEvent::ToolCallActivity { tool_call_id, kind }
         }
-        ClientUpdate::SessionInfoUpdate { title } => title.map(|title| {
-            AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
-        }),
-        ClientUpdate::PromptTurnFinished => Some(AcpRuntimeEvent::Completion(
-            AcpCompletionEvent::PromptTurnFinished,
-        )),
-        ClientUpdate::PromptTurnFailed { message } => Some(AcpRuntimeEvent::Completion(
-            AcpCompletionEvent::PromptTurnFailed { message },
-        )),
-        ClientUpdate::Unknown { .. } => None,
-    }
+        ClientUpdate::SessionInfoUpdate { title } => {
+            return title.map(|title| {
+                AcpRuntimeEvent::Lifecycle(AcpLifecycleEvent::SessionTitleUpdated { title })
+            });
+        }
+        ClientUpdate::PromptTurnFinished => {
+            AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)
+        }
+        ClientUpdate::PromptTurnFailed { message } => {
+            AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { message })
+        }
+        ClientUpdate::Unknown { .. } => return None,
+    })
 }
 
 #[cfg(test)]

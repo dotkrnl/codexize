@@ -25,6 +25,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use super::exit::{
     enforce_readonly_workspace_policy, git_rev_parse_head, git_status_porcelain,
@@ -643,10 +644,24 @@ fn launch_managed_acp_window(
     let (finished_tx, finished_rx) = watch::channel(false);
 
     let cancel_for_task = Arc::clone(&cancel);
-    let join = supervisor.spawn(async move {
-        finalize_managed_acp_launch(launch, cancel_for_task, input_rx, waiting_tx).await;
-        let _ = finished_tx.send(true);
-    })?;
+    let task = async move {
+        let span = tracing::debug_span!(
+            "agent_run",
+            run_id,
+            window_name = %launch.window_name,
+            interactive = launch.resolved.interactive,
+            vendor = ?launch.resolved.vendor
+        );
+        async move {
+            tracing::debug!("managed ACP run started");
+            finalize_managed_acp_launch(launch, cancel_for_task, input_rx, waiting_tx).await;
+            tracing::debug!("managed ACP run finished");
+            let _ = finished_tx.send(true);
+        }
+        .instrument(span)
+        .await;
+    };
+    let join = supervisor.spawn(task)?;
 
     supervisor.inner.runs.insert(
         run_id,

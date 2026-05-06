@@ -161,6 +161,15 @@ impl App {
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
         modes.interactive = self.run_is_interactive(stage, round, modes);
+        let stage_span = tracing::debug_span!(
+            "stage",
+            stage,
+            task_id,
+            round,
+            attempt,
+            interactive = modes.interactive
+        );
+        let _stage_enter = stage_span.enter();
         let run_id = session_state::transitions::start_agent_run_with_id(
             &mut self.state,
             run_id,
@@ -183,6 +192,13 @@ impl App {
         else {
             return;
         };
+        tracing::debug!(
+            run_id = run.id,
+            model = %run.model,
+            vendor = %run.vendor,
+            window_name = %run.window_name,
+            "agent run tracking started"
+        );
         if run.modes.interactive {
             self.open_split_target(crate::app::split::SplitTarget::Run(run_id));
         } else {

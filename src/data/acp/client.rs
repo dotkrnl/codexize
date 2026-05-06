@@ -1424,7 +1424,11 @@ fn append_raw_acp_update_trace(path: Option<&Path>, update: &Value) {
 }
 
 fn debug_protocol(message: impl AsRef<str>) {
-    eprintln!("[codexize][acp][debug] {}", message.as_ref());
+    tracing::debug!(
+        target: "codexize::acp",
+        message = message.as_ref(),
+        "ACP protocol diagnostic"
+    );
 }
 
 async fn apply_session_config_async(

@@ -103,16 +103,12 @@ impl App {
                     .to_string();
                 self.notification_context(stage, None, phase_round(phase), None, None)
             }
-            Phase::SpecReviewPaused => {
-                self.notification_context("spec-review".to_string(), None, None, None, None)
-            }
-            Phase::PlanReviewPaused => {
-                self.notification_context("plan-review".to_string(), None, None, None, None)
-            }
+            Phase::SpecReviewPaused => self.notification_context_for_stage("spec-review"),
+            Phase::PlanReviewPaused => self.notification_context_for_stage("plan-review"),
             Phase::SkipToImplPending => {
                 // Skip confirmation is a modal rather than a RunRecord stage;
                 // a stable pseudo-stage keeps its dedupe identity reviewable.
-                self.notification_context("skip-to-impl".to_string(), None, None, None, None)
+                self.notification_context_for_stage("skip-to-impl")
             }
             Phase::GitGuardPending => {
                 if let Some(decision) = &self.state.pending_guard_decision {
@@ -124,7 +120,7 @@ impl App {
                         Some(decision.run_id),
                     )
                 } else {
-                    self.notification_context("git-guard".to_string(), None, None, None, None)
+                    self.notification_context_for_stage("git-guard")
                 }
             }
             _ => self.notification_context(
@@ -138,7 +134,7 @@ impl App {
     }
 
     fn notification_context_for_done(&self) -> NotificationContext {
-        self.notification_context("pipeline".to_string(), None, None, None, None)
+        self.notification_context_for_stage("pipeline")
     }
 
     fn notification_context_for_run(&self, run: &RunRecord) -> NotificationContext {
@@ -149,6 +145,10 @@ impl App {
             Some(run.attempt),
             Some(run.id),
         )
+    }
+
+    fn notification_context_for_stage(&self, stage: &str) -> NotificationContext {
+        self.notification_context(stage.to_string(), None, None, None, None)
     }
 
     fn notification_context(

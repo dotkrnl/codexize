@@ -285,10 +285,10 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
-        modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
         section_path: None,
+        modes: crate::state::LaunchModes::default(),
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
@@ -304,13 +304,8 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                requested_effort: crate::adapters::EffortLevel::Normal,
-                effective_effort: crate::adapters::EffortLevel::Normal,
                 reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
                 permission_mode: crate::acp::AcpPermissionMode::Ask,
-                interactive: true,
-                modes: crate::state::LaunchModes::default(),
-                required_artifacts: Vec::new(),
                 policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
@@ -357,13 +352,8 @@ fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> Man
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                requested_effort: crate::adapters::EffortLevel::Normal,
-                effective_effort: crate::adapters::EffortLevel::Normal,
                 reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
                 permission_mode: crate::acp::AcpPermissionMode::Ask,
-                interactive: true,
-                modes: crate::state::LaunchModes::default(),
-                required_artifacts: Vec::new(),
                 policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },
@@ -392,10 +382,10 @@ fn seed_stream_session(session_id: &str, window_name: &str) {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
-        modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
         section_path: None,
+        modes: crate::state::LaunchModes::default(),
     });
     state.save().unwrap();
 }
@@ -998,10 +988,10 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
-        modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
         section_path: None,
+        modes: crate::state::LaunchModes::default(),
     });
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
@@ -1017,13 +1007,8 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
                 cwd: std::env::current_dir().unwrap(),
                 prompt: PromptPayload::Text("prompt".to_string()),
                 model: "model".to_string(),
-                requested_effort: crate::adapters::EffortLevel::Normal,
-                effective_effort: crate::adapters::EffortLevel::Normal,
                 reasoning_effort: crate::acp::AcpReasoningEffort::Medium,
                 permission_mode: crate::acp::AcpPermissionMode::Ask,
-                interactive: true,
-                modes: crate::state::LaunchModes::default(),
-                required_artifacts: Vec::new(),
                 policy: crate::acp::AcpLaunchPolicy::default(),
                 metadata: std::collections::BTreeMap::new(),
             },

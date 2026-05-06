@@ -17,7 +17,7 @@ pub(in crate::data) const TOOL_CALL_MAP_CAP: usize = 256;
 const TRUNCATE_SUFFIX: &str = "...";
 
 #[derive(Debug, Default, Clone)]
-pub(in crate::data) struct ToolCallPayload {
+pub(in crate::data) struct ToolCallDisplayState {
     pub(in crate::data) tool_call_id: Option<String>,
     pub(in crate::data) title: Option<String>,
     pub(in crate::data) kind: Option<String>,
@@ -28,7 +28,7 @@ pub(in crate::data) struct ToolCallPayload {
     pub(in crate::data) content: Vec<Value>,
 }
 
-impl ToolCallPayload {
+impl ToolCallDisplayState {
     pub(in crate::data) fn from_value(value: &Value) -> Self {
         let non_empty_string = |key: &str| {
             value
@@ -65,35 +65,10 @@ impl ToolCallPayload {
             content,
         }
     }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(in crate::data) struct ToolCallDisplayState {
-    pub(in crate::data) title: Option<String>,
-    pub(in crate::data) kind: Option<String>,
-    pub(in crate::data) status: Option<String>,
-    pub(in crate::data) locations: Vec<PathBuf>,
-    pub(in crate::data) raw_input: Value,
-    pub(in crate::data) raw_output: Value,
-    pub(in crate::data) content: Vec<Value>,
-}
-
-impl ToolCallDisplayState {
-    pub(in crate::data) fn from_payload(payload: &ToolCallPayload) -> Self {
-        Self {
-            title: payload.title.clone(),
-            kind: payload.kind.clone(),
-            status: payload.status.clone(),
-            locations: payload.locations.clone(),
-            raw_input: payload.raw_input.clone(),
-            raw_output: payload.raw_output.clone(),
-            content: payload.content.clone(),
-        }
-    }
 
     /// Merge non-empty fields from `payload`. Absent / null values never erase
     /// previously-known state.
-    pub(in crate::data) fn merge(&mut self, payload: &ToolCallPayload) {
+    pub(in crate::data) fn merge(&mut self, payload: &ToolCallDisplayState) {
         if payload.title.is_some() {
             self.title = payload.title.clone();
         }
@@ -161,7 +136,7 @@ impl ToolCallMap {
     pub(in crate::data) fn merge(
         &mut self,
         id: &str,
-        payload: &ToolCallPayload,
+        payload: &ToolCallDisplayState,
     ) -> Option<&ToolCallDisplayState> {
         let entry = self.entries.get_mut(id)?;
         entry.merge(payload);

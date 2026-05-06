@@ -15,7 +15,6 @@ fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
             cheap: true,
             interactive: false,
         },
-        required_artifacts: vec![PathBuf::from("artifacts/summary.toml")],
         policy: acp::AcpLaunchPolicy::default(),
     }
 }
@@ -79,8 +78,6 @@ fn launch_translation_preserves_model_and_cheap_derived_effort() {
         ]
     );
     assert_eq!(resolved.session.model, "gpt-5.5");
-    assert_eq!(resolved.session.requested_effort, EffortLevel::Normal);
-    assert_eq!(resolved.session.effective_effort, EffortLevel::Low);
     assert_eq!(resolved.session.reasoning_effort, AcpReasoningEffort::Low);
     assert_eq!(
         resolved

@@ -7,7 +7,6 @@ use super::handshake::{
 };
 use super::*;
 use crate::data::acp_support::tool_call::TOOL_CALL_MAP_CAP;
-use crate::{adapters::EffortLevel, state::LaunchModes};
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Default)]
@@ -33,13 +32,8 @@ fn sample_session() -> super::super::AcpSessionSpec {
         cwd: PathBuf::from("/tmp/project"),
         prompt: PromptPayload::Text("ship it".to_string()),
         model: "model-next".to_string(),
-        requested_effort: EffortLevel::Normal,
-        effective_effort: EffortLevel::Normal,
         reasoning_effort: super::super::AcpReasoningEffort::High,
         permission_mode: super::super::AcpPermissionMode::Code,
-        interactive: false,
-        modes: LaunchModes::default(),
-        required_artifacts: Vec::new(),
         policy: super::super::AcpLaunchPolicy::default(),
         metadata: BTreeMap::new(),
     }

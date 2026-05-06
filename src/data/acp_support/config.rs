@@ -62,11 +62,6 @@ impl AcpConfig {
         }
 
         let cwd = absolutize(&request.cwd)?;
-        let required_artifacts = request
-            .required_artifacts
-            .iter()
-            .map(|path| absolutize(path))
-            .collect::<AcpResult<Vec<_>>>()?;
         let policy = absolutize_policy(&request.policy)?;
         let reasoning_effort = match request.effective_effort {
             crate::adapters::EffortLevel::Low => AcpReasoningEffort::Low,
@@ -81,7 +76,7 @@ impl AcpConfig {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let entries: [(&str, String); 11] = [
+        let entries: [(&str, String); 12] = [
             ("vendor", vendor_kind_to_str(request.vendor).to_string()),
             ("model", request.model.clone()),
             (
@@ -105,6 +100,10 @@ impl AcpConfig {
                 "allowed_shell_commands",
                 shell_policy_commands(&policy.shell_policy).join("\n"),
             ),
+            (
+                "enforce_readonly_workspace",
+                policy.enforce_readonly_workspace.to_string(),
+            ),
         ];
         let mut env = agent.env.clone();
         let mut metadata = BTreeMap::new();
@@ -115,14 +114,6 @@ impl AcpConfig {
             );
             metadata.insert(format!("codexize.{suffix}"), value.clone());
         }
-        env.insert(
-            "CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE".to_string(),
-            policy.enforce_readonly_workspace.to_string(),
-        );
-        metadata.insert(
-            "codexize.enforce_readonly_workspace".to_string(),
-            policy.enforce_readonly_workspace.to_string(),
-        );
 
         Ok(AcpResolvedLaunch {
             vendor: request.vendor,
@@ -136,28 +127,12 @@ impl AcpConfig {
                 cwd,
                 prompt: request.prompt.clone(),
                 model: request.model.clone(),
-                requested_effort: request.requested_effort,
-                effective_effort: request.effective_effort,
                 reasoning_effort,
                 permission_mode,
-                interactive: request.interactive,
-                modes: request.modes,
-                required_artifacts,
                 policy,
                 metadata,
             },
         })
-    }
-}
-
-impl Default for AcpAgentDefinition {
-    fn default() -> Self {
-        Self {
-            vendor: VendorKind::Codex,
-            program: String::new(),
-            args: Vec::new(),
-            env: BTreeMap::new(),
-        }
     }
 }
 
@@ -205,27 +180,27 @@ pub fn claude_acp_local_program() -> PathBuf {
 }
 
 pub fn claude_acp_is_available() -> bool {
-    path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp")
+    local_or_path_program_is_available(&claude_acp_local_program(), "claude-agent-acp")
 }
 
 pub fn claude_cli_is_available() -> bool {
-    program_is_executable("claude")
+    program_is_executable(CLAUDE_CLI)
 }
 
 pub fn should_offer_claude_acp_install() -> bool {
-    claude_cli_is_available() && !claude_acp_is_available()
+    should_offer_install(CLAUDE_CLI, claude_acp_is_available())
 }
 
 pub fn codex_acp_is_available() -> bool {
-    program_is_executable("codex-acp")
+    program_is_executable(CODEX_ACP_CLI)
 }
 
 pub fn codex_cli_is_available() -> bool {
-    program_is_executable("codex")
+    program_is_executable(CODEX_CLI)
 }
 
 pub fn should_offer_codex_acp_install() -> bool {
-    codex_cli_is_available() && !codex_acp_is_available()
+    should_offer_install(CODEX_CLI, codex_acp_is_available())
 }
 
 fn default_claude_acp_program() -> String {
@@ -235,6 +210,18 @@ fn default_claude_acp_program() -> String {
     } else {
         "claude-agent-acp".to_string()
     }
+}
+
+const CLAUDE_CLI: &str = "claude";
+const CODEX_CLI: &str = "codex";
+const CODEX_ACP_CLI: &str = "codex-acp";
+
+fn local_or_path_program_is_available(local: &Path, path_program: &str) -> bool {
+    path_is_executable(local) || program_is_executable(path_program)
+}
+
+fn should_offer_install(source_cli: &str, bridge_available: bool) -> bool {
+    program_is_executable(source_cli) && !bridge_available
 }
 
 fn default_agent_definition(

@@ -1,4 +1,3 @@
-use crate::selection::VendorKind;
 use std::collections::VecDeque;
 
 /// Logical-message boundary signal: `Continue` appends to the current live
@@ -69,13 +68,7 @@ pub enum AcpRuntimeEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpLifecycleEvent {
-    SessionReady {
-        session_id: String,
-        vendor: VendorKind,
-    },
-    SessionTitleUpdated {
-        title: String,
-    },
+    SessionTitleUpdated { title: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

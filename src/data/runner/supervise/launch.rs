@@ -30,10 +30,6 @@ pub(super) fn build_managed_acp_launch(
         effective_effort: run.effort,
         interactive,
         modes: run.modes,
-        required_artifacts: required_artifact
-            .into_iter()
-            .map(Path::to_path_buf)
-            .collect(),
         policy,
     };
     let mut resolved = AcpConfig::default()

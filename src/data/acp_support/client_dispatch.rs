@@ -8,7 +8,7 @@
 
 use crate::data::acp::{AcpTextBoundary, ClientUpdate, ToolCallActivityKind};
 use crate::data::acp_support::tool_call::{
-    ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line, format_result_line,
+    ToolCallDisplayState, ToolCallMap, format_invocation_line, format_result_line,
     is_terminal_status,
 };
 use serde_json::Value;
@@ -111,11 +111,11 @@ pub(super) fn dispatch_update(
             // A tool-call invocation interleaves the visible stream and acts
             // as a hard boundary for both agent and thought streams.
             boundary_state.reset_for_tool_call();
-            handle_tool_call(ToolCallPayload::from_value(value), cwd, map, out);
+            handle_tool_call(ToolCallDisplayState::from_value(value), cwd, map, out);
         }
         "tool_call_update" => {
             boundary_state.reset_for_tool_call();
-            handle_tool_call_update(ToolCallPayload::from_value(value), map, out);
+            handle_tool_call_update(ToolCallDisplayState::from_value(value), map, out);
         }
         other => out.push_back(ClientUpdate::Unknown {
             kind: other.to_string(),
@@ -184,12 +184,11 @@ fn extract_message_identity(value: &Value) -> Option<String> {
 }
 
 fn handle_tool_call(
-    payload: ToolCallPayload,
+    state: ToolCallDisplayState,
     cwd: &Path,
     map: &mut ToolCallMap,
     out: &mut VecDeque<ClientUpdate>,
 ) {
-    let state = ToolCallDisplayState::from_payload(&payload);
     let terminal = state
         .status
         .as_deref()
@@ -198,7 +197,7 @@ fn handle_tool_call(
 
     let invocation = format_invocation_line(&state, cwd);
 
-    let Some(id) = payload.tool_call_id.clone() else {
+    let Some(id) = state.tool_call_id.clone() else {
         // Missing toolCallId: best-effort output only, never stored.
         out.push_back(tool_call_text(invocation));
         if terminal {
@@ -209,29 +208,21 @@ fn handle_tool_call(
 
     map.insert(id.clone(), state.clone());
     out.push_back(tool_call_text(invocation));
-    // Watchdog activity: emit Start the first time a non-terminal id is seen
-    // (pause the idle clock); emit Finish once on the first terminal payload.
     if terminal {
         out.push_back(tool_call_text(format_result_line(&state)));
         if !map.terminal_emitted(&id) {
-            out.push_back(ClientUpdate::ToolCallActivity {
-                tool_call_id: id.clone(),
-                kind: ToolCallActivityKind::Finish,
-            });
+            out.push_back(activity(&id, ToolCallActivityKind::Finish));
             map.mark_terminal_emitted(&id);
         }
         map.evict(&id);
     } else if !map.start_emitted(&id) {
-        out.push_back(ClientUpdate::ToolCallActivity {
-            tool_call_id: id.clone(),
-            kind: ToolCallActivityKind::Start,
-        });
+        out.push_back(activity(&id, ToolCallActivityKind::Start));
         map.mark_start_emitted(&id);
     }
 }
 
 fn handle_tool_call_update(
-    payload: ToolCallPayload,
+    payload: ToolCallDisplayState,
     map: &mut ToolCallMap,
     out: &mut VecDeque<ClientUpdate>,
 ) {
@@ -249,8 +240,7 @@ fn handle_tool_call_update(
 
     let Some(id) = payload.tool_call_id.clone() else {
         if terminal {
-            let state = ToolCallDisplayState::from_payload(&payload);
-            out.push_back(tool_call_text(format_result_line(&state)));
+            out.push_back(tool_call_text(format_result_line(&payload)));
         }
         return;
     };
@@ -259,31 +249,28 @@ fn handle_tool_call_update(
         if terminal {
             out.push_back(tool_call_text(format_result_line(state)));
             if !map.terminal_emitted(&id) {
-                out.push_back(ClientUpdate::ToolCallActivity {
-                    tool_call_id: id.clone(),
-                    kind: ToolCallActivityKind::Finish,
-                });
+                out.push_back(activity(&id, ToolCallActivityKind::Finish));
                 map.mark_terminal_emitted(&id);
             }
             map.evict(&id);
         } else if active && !map.start_emitted(&id) {
-            out.push_back(ClientUpdate::ToolCallActivity {
-                tool_call_id: id.clone(),
-                kind: ToolCallActivityKind::Start,
-            });
+            out.push_back(activity(&id, ToolCallActivityKind::Start));
             map.mark_start_emitted(&id);
         }
     } else if terminal {
         if map.terminal_emitted(&id) {
             return;
         }
-        let state = ToolCallDisplayState::from_payload(&payload);
-        out.push_back(tool_call_text(format_result_line(&state)));
-        out.push_back(ClientUpdate::ToolCallActivity {
-            tool_call_id: id.clone(),
-            kind: ToolCallActivityKind::Finish,
-        });
+        out.push_back(tool_call_text(format_result_line(&payload)));
+        out.push_back(activity(&id, ToolCallActivityKind::Finish));
         map.mark_terminal_emitted(&id);
+    }
+}
+
+fn activity(id: &str, kind: ToolCallActivityKind) -> ClientUpdate {
+    ClientUpdate::ToolCallActivity {
+        tool_call_id: id.to_string(),
+        kind,
     }
 }
 

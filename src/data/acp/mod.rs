@@ -20,12 +20,12 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 pub type AcpResult<T> = Result<T, AcpError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[rustfmt::skip]
+#[derive(thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpError {
     #[error("{0}")]
     HumanBlock(String),
-    #[error("{0}")]
-    Busy(String),
     #[error("{0}")]
     Io(String),
     #[error("{0}")]
@@ -35,10 +35,6 @@ pub enum AcpError {
 impl AcpError {
     pub fn human_block(message: impl Into<String>) -> Self {
         Self::HumanBlock(message.into())
-    }
-
-    pub fn busy(message: impl Into<String>) -> Self {
-        Self::Busy(message.into())
     }
 
     pub fn protocol(message: impl Into<String>) -> Self {
@@ -99,23 +95,9 @@ impl AcpLaunchPolicy {
         verdict_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
     ) -> Self {
-        let allowed = [
-            "git status",
-            "git log",
-            "ls",
-            "cat",
-            "head",
-            "tail",
-            "wc",
-            "file",
-            "find",
-            "pwd",
-        ];
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
-            shell_policy: AcpShellCommandPolicy::Allowlist(
-                allowed.iter().map(|s| s.to_string()).collect(),
-            ),
+            shell_policy: AcpShellCommandPolicy::Allowlist(allowed_final_validation_commands()),
             enforce_readonly_workspace: true,
         }
     }
@@ -135,6 +117,23 @@ impl AcpLaunchPolicy {
     }
 }
 
+fn allowed_final_validation_commands() -> Vec<String> {
+    [
+        "git status",
+        "git log",
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "file",
+        "find",
+        "pwd",
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
     pub vendor: VendorKind,
@@ -145,7 +144,6 @@ pub struct AcpLaunchRequest {
     pub effective_effort: EffortLevel,
     pub interactive: bool,
     pub modes: LaunchModes,
-    pub required_artifacts: Vec<PathBuf>,
     pub policy: AcpLaunchPolicy,
 }
 
@@ -161,13 +159,8 @@ pub struct AcpSessionSpec {
     pub cwd: PathBuf,
     pub prompt: PromptPayload,
     pub model: String,
-    pub requested_effort: EffortLevel,
-    pub effective_effort: EffortLevel,
     pub reasoning_effort: AcpReasoningEffort,
     pub permission_mode: AcpPermissionMode,
-    pub interactive: bool,
-    pub modes: LaunchModes,
-    pub required_artifacts: Vec<PathBuf>,
     pub policy: AcpLaunchPolicy,
     pub metadata: BTreeMap<String, String>,
 }
@@ -179,116 +172,3 @@ pub struct AcpResolvedLaunch {
     pub spawn: AcpSpawnSpec,
     pub session: AcpSessionSpec,
 }
-
-pub struct AcpRuntime<C = SubprocessConnector> {
-    config: AcpConfig,
-    connector: C,
-    active_session_id: Option<String>,
-}
-
-impl AcpRuntime<SubprocessConnector> {
-    pub fn new(config: AcpConfig) -> Self {
-        Self::with_connector(config, SubprocessConnector)
-    }
-}
-
-impl<C> AcpRuntime<C> {
-    pub fn with_connector(config: AcpConfig, connector: C) -> Self {
-        Self {
-            config,
-            connector,
-            active_session_id: None,
-        }
-    }
-
-    pub fn is_busy(&self) -> bool {
-        self.active_session_id.is_some()
-    }
-
-    pub fn prepare_launch(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
-        self.config.resolve(request)
-    }
-}
-
-impl<C: AcpConnector> AcpRuntime<C> {
-    pub fn start_run<'runtime>(
-        &'runtime mut self,
-        request: AcpLaunchRequest,
-    ) -> AcpResult<AcpActiveRun<'runtime, C>> {
-        if self.active_session_id.is_some() {
-            return Err(AcpError::busy(
-                "codexize only supports one active ACP run at a time",
-            ));
-        }
-
-        let resolved = self.prepare_launch(&request)?;
-        let session = self.connector.connect(&resolved)?;
-        self.active_session_id = Some(session.session_id().to_string());
-        Ok(AcpActiveRun {
-            runtime: self,
-            session: Some(session),
-            resolved,
-            emitted_ready: false,
-        })
-    }
-}
-
-pub struct AcpActiveRun<'runtime, C> {
-    runtime: &'runtime mut AcpRuntime<C>,
-    session: Option<Box<dyn AcpSession>>,
-    resolved: AcpResolvedLaunch,
-    emitted_ready: bool,
-}
-
-impl<C> AcpActiveRun<'_, C> {
-    pub fn session_id(&self) -> &str {
-        self.session
-            .as_ref()
-            .expect("session available")
-            .session_id()
-    }
-
-    pub fn resolved_launch(&self) -> &AcpResolvedLaunch {
-        &self.resolved
-    }
-
-    pub fn next_event(&mut self) -> AcpResult<Option<AcpRuntimeEvent>> {
-        if !self.emitted_ready {
-            self.emitted_ready = true;
-            return Ok(Some(AcpRuntimeEvent::Lifecycle(
-                AcpLifecycleEvent::SessionReady {
-                    session_id: self.session_id().to_string(),
-                    vendor: self.resolved.vendor,
-                },
-            )));
-        }
-
-        let update = self
-            .session
-            .as_mut()
-            .expect("session available")
-            .try_next_update()?;
-        Ok(update.and_then(|item| translate_update(item, self.resolved.interactive)))
-    }
-
-    pub fn close(mut self) -> AcpResult<()> {
-        if let Some(mut session) = self.session.take() {
-            session.close()?;
-        }
-        self.runtime.active_session_id = None;
-        Ok(())
-    }
-}
-
-impl<C> Drop for AcpActiveRun<'_, C> {
-    fn drop(&mut self) {
-        if let Some(mut session) = self.session.take() {
-            let _ = session.close();
-        }
-        self.runtime.active_session_id = None;
-    }
-}
-
-#[cfg(test)]
-#[path = "runtime_tests.rs"]
-mod runtime_tests;

@@ -2,12 +2,12 @@ use super::*;
 use serde_json::json;
 
 fn state_from_payload(value: &Value) -> ToolCallDisplayState {
-    ToolCallDisplayState::from_payload(&ToolCallPayload::from_value(value))
+    ToolCallDisplayState::from_value(value)
 }
 
 #[test]
 fn parses_observed_codex_read_payload() {
-    let payload = ToolCallPayload::from_value(&json!({
+    let payload = ToolCallDisplayState::from_value(&json!({
         "sessionUpdate": "tool_call",
         "toolCallId": "call_1",
         "title": "Read Cargo.toml",
@@ -283,7 +283,7 @@ fn merge_preserves_fields_from_earlier_payload() {
         "title": "Read Cargo.toml",
         "locations": [{ "path": "/work/project/Cargo.toml" }],
     }));
-    let update = ToolCallPayload::from_value(&json!({
+    let update = ToolCallDisplayState::from_value(&json!({
         "status": "completed",
         "rawOutput": { "exit_code": 0, "stdout": "ok" }
     }));
@@ -300,7 +300,7 @@ fn merge_does_not_erase_fields_with_null_payload() {
         "kind": "read",
         "title": "first"
     }));
-    let update = ToolCallPayload::from_value(&json!({
+    let update = ToolCallDisplayState::from_value(&json!({
         "title": null,
         "kind": null,
         "status": "completed"
@@ -363,7 +363,7 @@ fn tool_call_map_overwrite_on_id_reuse_replaces_state_and_refreshes_position() {
 #[test]
 fn tool_call_map_merge_returns_none_for_missing_entry() {
     let mut map = ToolCallMap::new();
-    let payload = ToolCallPayload::from_value(&json!({ "status": "completed" }));
+    let payload = ToolCallDisplayState::from_value(&json!({ "status": "completed" }));
     assert!(map.merge("nope", &payload).is_none());
 }
 
@@ -376,7 +376,7 @@ fn tool_call_map_merge_applies_to_existing_entry() {
     }));
     map.insert("id-x".to_string(), initial);
 
-    let update = ToolCallPayload::from_value(&json!({
+    let update = ToolCallDisplayState::from_value(&json!({
         "status": "completed",
         "rawOutput": { "exit_code": 0, "stdout": "ok" }
     }));

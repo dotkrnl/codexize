@@ -75,20 +75,21 @@ pub enum VerifyResult {
     },
 }
 
+fn git_stdout(args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git").args(args).output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 fn git_head() -> Option<String> {
     #[cfg(test)]
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!s.is_empty()).then_some(s)
+    let trimmed = git_stdout(&["rev-parse", "HEAD"])?.trim().to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 pub fn git_status_dirty() -> bool {
@@ -100,25 +101,11 @@ fn git_status() -> Option<String> {
     let _guard = crate::state::test_fs_lock()
         .lock()
         .unwrap_or_else(|err| err.into_inner());
-    let output = std::process::Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+    git_stdout(&["status", "--porcelain"])
 }
 
 fn git_diff_head() -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["diff", "HEAD"])
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).to_string())
+    git_stdout(&["diff", "HEAD"])
 }
 
 fn git_working_tree_baseline() -> Option<String> {
@@ -261,26 +248,20 @@ fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
     }
 
     if head_changed {
-        match snap.mode {
+        return match snap.mode {
             GuardMode::AutoReset => {
-                let _ = std::process::Command::new("git")
-                    .args(["reset", "--hard", &snap.head])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .output();
-                return VerifyResult::HardError {
+                let _ = reset_hard_to(&snap.head);
+                VerifyResult::HardError {
                     reason: Reason::ForbiddenHeadAdvance.to_string(),
                     warnings,
-                };
+                }
             }
-            GuardMode::AskOperator => {
-                return VerifyResult::PendingDecision {
-                    captured_head: snap.head.clone(),
-                    current_head,
-                    warnings,
-                };
-            }
-        }
+            GuardMode::AskOperator => VerifyResult::PendingDecision {
+                captured_head: snap.head.clone(),
+                current_head,
+                warnings,
+            },
+        };
     }
 
     if let Some(expected) = &snap.working_tree_baseline {

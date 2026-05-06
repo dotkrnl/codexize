@@ -322,9 +322,9 @@ impl NotificationRuntime {
                 let _ = handle.await;
             }
         };
-        let completed = tokio::time::timeout(timeout, wait_all).await.is_ok();
-        let _ = self.poll_publish_failures();
-        completed
+        // Leave completed publish reports queued for the app-level poller so
+        // shutdown failures use the same event-log and status-warning path.
+        tokio::time::timeout(timeout, wait_all).await.is_ok()
     }
 
     #[cfg(test)]

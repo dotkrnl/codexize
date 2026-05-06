@@ -1,15 +1,31 @@
 use crate::app::test_support::mk_app;
-use crate::data::notifications::{NotificationEventKind, NotificationReason};
+use crate::data::notifications::{
+    NotificationEventKind, NotificationReason, NotificationRuntime, NtfyConfig, NtfyDetailMode,
+    NtfyPublishPolicy,
+};
 use crate::state::{
     BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
     SessionState,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn state_in_phase(phase: Phase) -> SessionState {
     static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let mut state = SessionState::new(format!("notify-session-{id}"));
+    state.current_phase = phase;
+    state.title = Some("Readable Session".to_string());
+    state
+}
+
+fn unique_state_in_phase(phase: Phase, label: &str) -> SessionState {
+    let mut state = SessionState::new(format!(
+        "notify-{label}-{}",
+        chrono::Utc::now().timestamp_nanos_opt().expect("timestamp")
+    ));
     state.current_phase = phase;
     state.title = Some("Readable Session".to_string());
     state
@@ -227,4 +243,99 @@ fn notification_publish_failures_surface_warning_without_changing_phase() {
         .expect("warning status")
         .to_string();
     assert!(status.contains("ntfy notification failed"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_phase() {
+    let server = FailingNtfyServer::spawn(500).await;
+    let mut app = mk_app(unique_state_in_phase(
+        Phase::FinalValidation(1),
+        "shutdown-drain",
+    ));
+    app.notification_runtime = NotificationRuntime::from_config_for_test(
+        Some(test_ntfy_config(&server.url())),
+        NtfyPublishPolicy::for_test(1, Duration::ZERO),
+    );
+
+    app.transition_to_phase(Phase::Done)
+        .expect("done transition succeeds");
+    app.drain_notifications_for_shutdown();
+
+    assert_eq!(app.state.current_phase, Phase::Done);
+    let events_path = crate::state::session_dir(&app.state.session_id).join("events.toml");
+    let events = std::fs::read_to_string(events_path).expect("events log");
+    assert!(events.contains("notification_publish_failed"));
+    assert!(events.contains("500"));
+    let status = app
+        .status_line
+        .borrow()
+        .render()
+        .expect("warning status")
+        .to_string();
+    assert!(status.contains("ntfy notification failed"));
+}
+
+fn test_ntfy_config(server: &str) -> NtfyConfig {
+    NtfyConfig {
+        version: 1,
+        server: server.to_string(),
+        topic: "topic-test".to_string(),
+        enabled: true,
+        detail_mode: NtfyDetailMode::Minimal,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    }
+}
+
+struct FailingNtfyServer {
+    url: String,
+}
+
+impl FailingNtfyServer {
+    async fn spawn(status: u16) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let url = format!("http://{}", listener.local_addr().expect("addr"));
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            read_http_request(&mut stream).await;
+            let body = "mock";
+            let wire = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(wire.as_bytes()).await.expect("write");
+        });
+        Self { url }
+    }
+
+    fn url(&self) -> String {
+        self.url.clone()
+    }
+}
+
+async fn read_http_request(stream: &mut tokio::net::TcpStream) {
+    let mut buf = Vec::new();
+    let header_end = loop {
+        let mut chunk = [0_u8; 1024];
+        let n = stream.read(&mut chunk).await.expect("read");
+        assert!(n > 0, "request stream closed before headers");
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
+            break pos;
+        }
+    };
+    let headers = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let content_length = headers
+        .split("\r\n")
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let body_start = header_end + 4;
+    while buf.len() < body_start + content_length {
+        let mut chunk = [0_u8; 1024];
+        let n = stream.read(&mut chunk).await.expect("read body");
+        assert!(n > 0, "request stream closed before body");
+        buf.extend_from_slice(&chunk[..n]);
+    }
 }

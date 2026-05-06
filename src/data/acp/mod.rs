@@ -101,31 +101,30 @@ impl AcpLaunchPolicy {
         verdict_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
     ) -> Self {
+        let allowed = [
+            "git status",
+            "git log",
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "wc",
+            "file",
+            "find",
+            "pwd",
+        ];
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
-            shell_policy: AcpShellCommandPolicy::Allowlist(vec![
-                "git status".to_string(),
-                "git log".to_string(),
-                "ls".to_string(),
-                "cat".to_string(),
-                "head".to_string(),
-                "tail".to_string(),
-                "wc".to_string(),
-                "file".to_string(),
-                "find".to_string(),
-                "pwd".to_string(),
-            ]),
+            shell_policy: AcpShellCommandPolicy::Allowlist(
+                allowed.iter().map(|s| s.to_string()).collect(),
+            ),
             enforce_readonly_workspace: true,
         }
     }
 
-    /// ACP policy for the simplifier stage. Unlike final validation, the
-    /// simplifier is code-producing: it edits and commits repository files,
-    /// so the workspace is not read-only and shell access is unrestricted
-    /// (matching coder/reviewer). The mandatory artifact writes — the
-    /// simplification TOML and the live summary — are still listed
-    /// explicitly so the runtime can surface "you wrote outside the allowed
-    /// paths for *required* outputs" violations.
+    /// Simplifier ACP policy: code-producing (writes/commits repository
+    /// files), so workspace is not read-only and shell access is unrestricted;
+    /// required artifact writes are still listed for violation reporting.
     pub fn simplifier(
         simplification_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
@@ -254,9 +253,7 @@ impl<C> AcpActiveRun<'_, C> {
     pub fn resolved_launch(&self) -> &AcpResolvedLaunch {
         &self.resolved
     }
-}
 
-impl<C> AcpActiveRun<'_, C> {
     pub fn next_event(&mut self) -> AcpResult<Option<AcpRuntimeEvent>> {
         if !self.emitted_ready {
             self.emitted_ready = true;
@@ -297,4 +294,3 @@ impl<C> Drop for AcpActiveRun<'_, C> {
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod runtime_tests;
-

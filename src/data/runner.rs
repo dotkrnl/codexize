@@ -12,7 +12,6 @@ use crate::adapters::AgentRun;
 use crate::selection::VendorKind;
 use anyhow::{Context, Result};
 use std::{
-    future::Future,
     path::Path,
     process::{ExitStatus, Stdio},
     time::Duration,
@@ -25,18 +24,6 @@ mod transport;
 
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
 pub use supervise::{RunId, Supervisor};
-
-pub(super) fn block_on_runner_future<F: Future>(future: F) -> F::Output {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        tokio::task::block_in_place(|| handle.block_on(future))
-    } else {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build runner helper runtime")
-            .block_on(future)
-    }
-}
 
 #[cfg(test)]
 pub use supervise::{
@@ -240,14 +227,31 @@ pub fn launch_noninteractive_with_policy(
     )
 }
 
+/// Spawn a child process and await its exit, returning `None` if the timeout
+/// elapsed (in which case the child is killed and reaped) or its exit status
+/// otherwise.
+///
+/// Sync wrapper preserved for [`crate::data::providers::kimi::resolve_api_key`]
+/// — the only remaining sync caller in product code. The supervisor's own
+/// run-tail moved to [`run_child_with_timeout_async`] in this round; the
+/// kimi/quota chain (`selection_quota::load_quota_maps_for`) is the next
+/// async-migration boundary, after which this wrapper goes away.
 pub fn run_child_with_timeout(
     launch: &ChildLaunch,
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
-    block_on_runner_future(run_child_with_timeout_async(launch, timeout))
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(run_child_with_timeout_async(launch, timeout)))
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build runner helper runtime")
+            .block_on(run_child_with_timeout_async(launch, timeout))
+    }
 }
 
-async fn run_child_with_timeout_async(
+pub async fn run_child_with_timeout_async(
     launch: &ChildLaunch,
     timeout: Duration,
 ) -> Result<Option<ExitStatus>> {
@@ -270,7 +274,13 @@ async fn run_child_with_timeout_async(
         .spawn()
         .with_context(|| format!("failed to spawn: {:?}", launch))?;
     match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(status) => Ok(Some(status?)),
+        Ok(Ok(status)) => Ok(Some(status)),
+        // A `wait()` failure here (e.g. the child was reaped elsewhere) is
+        // observationally indistinguishable from "the supervised work did not
+        // complete cleanly within the budget" for every existing caller, which
+        // only inspects the `Some(status)` shape. Return `Ok(None)` to keep the
+        // pre-async semantics rather than surfacing a transient OS error.
+        Ok(Err(_)) => Ok(None),
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;

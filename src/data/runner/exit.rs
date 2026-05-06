@@ -113,11 +113,12 @@ fn stamp_stabilize_interval() -> Duration {
         .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_STABILIZE_INTERVAL_MS))
 }
 
-pub(super) fn wait_for_stable_head() -> (String, String) {
-    super::block_on_runner_future(wait_for_stable_head_async())
-}
-
-async fn wait_for_stable_head_async() -> (String, String) {
+/// Wait for `git HEAD` to stabilise after a managed ACP run, returning the
+/// final SHA plus a label describing whether the budget was exhausted.
+///
+/// Async-only: callers must drive this from a tokio runtime so the post-loop
+/// supervisor finalisation owns the await rather than crossing a sync bridge.
+pub(super) async fn wait_for_stable_head() -> (String, String) {
     let budget = stamp_stabilize_budget();
     let interval = stamp_stabilize_interval();
     let deadline = Instant::now() + budget;
@@ -143,13 +144,13 @@ async fn wait_for_stable_head_async() -> (String, String) {
 /// Compose a finish stamp from a completed managed-run outcome and persist it
 /// to disk. The supervisor passes its `ManagedAcpOutcome` fields as primitives
 /// so this module does not need to depend on the supervisor's types.
-pub(super) fn write_finish_stamp_for_outcome(
+pub(super) async fn write_finish_stamp_for_outcome(
     stamp_path: &Path,
     head_before: String,
     exit_code: i32,
     signal_received: &str,
 ) -> Result<()> {
-    let (head_after, head_state) = wait_for_stable_head();
+    let (head_after, head_state) = wait_for_stable_head().await;
     let stamp = FinishStamp {
         finished_at: chrono::Utc::now().to_rfc3339(),
         exit_code,

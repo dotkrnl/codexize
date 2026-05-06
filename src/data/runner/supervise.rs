@@ -186,11 +186,14 @@ impl Supervisor {
         Arc::new(CancelSignal::new(self.inner.root_token.child_token()))
     }
 
-    fn spawn_blocking(&self, task: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>> {
+    fn spawn<F>(&self, task: F) -> Result<JoinHandle<()>>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
         let Some(handle) = &self.inner.handle else {
             bail!("runner supervisor requires an active tokio runtime");
         };
-        Ok(handle.spawn_blocking(task))
+        Ok(handle.spawn(task))
     }
 
     fn join(&self, join: JoinHandle<()>) {
@@ -354,23 +357,51 @@ pub(in crate::data::runner) fn append_launch_cause(path: &Path, cause: &str) {
     let _ = fs::write(path, text);
 }
 
+/// Sync output of the per-run loop. Holds everything `finalize_managed_acp_launch`
+/// needs to apply enforcement and write the finish stamp on the async tail
+/// without re-snapshotting git state.
+struct ManagedAcpRunResult {
+    outcome: Result<ManagedAcpOutcome>,
+    head_before: String,
+    git_status_before: Option<String>,
+    enforce_readonly: bool,
+}
+
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel: &CancelSignal,
     input_rx: &mut mpsc::UnboundedReceiver<AcpInput>,
     waiting_for_input: &watch::Sender<bool>,
-) -> Result<ManagedAcpOutcome> {
+) -> ManagedAcpRunResult {
     let head_before = git_rev_parse_head().unwrap_or_default();
+    let enforce_readonly = launch.resolved.session.policy.enforce_readonly_workspace;
     // Final validation is allowed to update its ignored artifact files, so the
     // ACP-side write allowlist carries those exact paths while the runner
     // enforces that no git-visible workspace state changes during the run.
-    let git_status_before = launch
-        .resolved
-        .session
-        .policy
-        .enforce_readonly_workspace
-        .then(git_status_porcelain)
-        .transpose()?;
+    let git_status_before_result = enforce_readonly.then(git_status_porcelain).transpose();
+    let git_status_before = git_status_before_result.as_ref().ok().cloned().flatten();
+
+    // The inner closure keeps the original `?`-propagating shape so the loop
+    // body is unchanged below; the wrapping result carries the data the async
+    // finalisation needs (`head_before`, `git_status_before`, policy flag) so
+    // the supervisor's blocking section never crosses an await boundary.
+    let outcome = git_status_before_result
+        .and_then(|_| run_managed_acp_loop(&launch, cancel, input_rx, waiting_for_input));
+
+    ManagedAcpRunResult {
+        outcome,
+        head_before,
+        git_status_before,
+        enforce_readonly,
+    }
+}
+
+fn run_managed_acp_loop(
+    launch: &ManagedAcpLaunch,
+    cancel: &CancelSignal,
+    input_rx: &mut mpsc::UnboundedReceiver<AcpInput>,
+    waiting_for_input: &watch::Sender<bool>,
+) -> Result<ManagedAcpOutcome> {
     let connector = SubprocessConnector;
     let mut session = connector
         .connect(&launch.resolved)
@@ -384,8 +415,8 @@ fn run_managed_acp_launch(
     let outcome = loop {
         if let Some(reason) = cancel.pending_reason() {
             let _ = waiting_for_input.send_replace(false);
-            thought_text.finish_turn(&launch, MessageKind::AgentThought);
-            agent_text.finish_turn(&launch, MessageKind::AgentText);
+            thought_text.finish_turn(launch, MessageKind::AgentThought);
+            agent_text.finish_turn(launch, MessageKind::AgentText);
             session.close().map_err(|err| anyhow!("{err}"))?;
             match reason {
                 AcpCancelReason::Terminate => {
@@ -436,8 +467,8 @@ fn run_managed_acp_launch(
 
         match event {
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFinished)) => {
-                thought_text.finish_turn(&launch, MessageKind::AgentThought);
-                agent_text.finish_turn(&launch, MessageKind::AgentText);
+                thought_text.finish_turn(launch, MessageKind::AgentThought);
+                agent_text.finish_turn(launch, MessageKind::AgentText);
                 if launch.resolved.interactive {
                     if let Some(text) = pending_input.pop_front() {
                         let _ = waiting_for_input.send_replace(false);
@@ -465,8 +496,8 @@ fn run_managed_acp_launch(
                 };
             }
             Some(AcpRuntimeEvent::Completion(AcpCompletionEvent::PromptTurnFailed { .. })) => {
-                thought_text.finish_turn(&launch, MessageKind::AgentThought);
-                agent_text.finish_turn(&launch, MessageKind::AgentText);
+                thought_text.finish_turn(launch, MessageKind::AgentThought);
+                agent_text.finish_turn(launch, MessageKind::AgentText);
                 if launch.resolved.interactive && interrupting_turn {
                     if let Some(text) = pending_input.pop_front() {
                         let _ = waiting_for_input.send_replace(false);
@@ -491,18 +522,18 @@ fn run_managed_acp_launch(
                 };
             }
             Some(AcpRuntimeEvent::Text(text_event)) => {
-                append_acp_text_trace(&launch, &text_event);
+                append_acp_text_trace(launch, &text_event);
                 let text = text_event.text;
                 if text_event.thought {
                     thought_text.push_text_boundary(
-                        &launch,
+                        launch,
                         &text,
                         MessageKind::AgentThought,
                         text_event.boundary,
                     );
                 } else {
                     agent_text.push_text_boundary(
-                        &launch,
+                        launch,
                         &text,
                         MessageKind::AgentText,
                         text_event.boundary,
@@ -516,17 +547,6 @@ fn run_managed_acp_launch(
         }
     };
 
-    enforce_readonly_workspace_policy(
-        launch.resolved.session.policy.enforce_readonly_workspace,
-        &head_before,
-        git_status_before.as_deref(),
-    )?;
-    write_finish_stamp_for_outcome(
-        &launch.stamp_path,
-        head_before,
-        outcome.exit_code,
-        &outcome.signal_received,
-    )?;
     Ok(outcome)
 }
 
@@ -541,31 +561,71 @@ fn poll_park() {
     thread::park_timeout(ACP_POLL_INTERVAL);
 }
 
-fn finalize_managed_acp_launch(
+async fn finalize_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel: Arc<CancelSignal>,
-    mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
+    input_rx: mpsc::UnboundedReceiver<AcpInput>,
     waiting_for_input: watch::Sender<bool>,
 ) {
-    match run_managed_acp_launch(
-        launch.clone(),
-        cancel.as_ref(),
-        &mut input_rx,
-        &waiting_for_input,
-    ) {
-        Ok(_) => {
+    let launch_for_loop = launch.clone();
+    let waiting_for_loop = waiting_for_input.clone();
+    let blocking_result = tokio::task::spawn_blocking(move || {
+        let mut input_rx = input_rx;
+        run_managed_acp_launch(
+            launch_for_loop,
+            cancel.as_ref(),
+            &mut input_rx,
+            &waiting_for_loop,
+        )
+    })
+    .await;
+
+    let result = match blocking_result {
+        Ok(result) => result,
+        Err(err) => {
+            // The blocking section is the sync ACP poll loop; if it panics we
+            // can't recover its in-flight git snapshot, so synthesise a worst-
+            // case finalisation that records the failure.
+            let _ = waiting_for_input.send_replace(false);
+            let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
+            let fallback_head_before = git_rev_parse_head().unwrap_or_default();
+            let _ =
+                write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "")
+                    .await;
+            return;
+        }
+    };
+
+    let outcome = result.outcome.and_then(|outcome| {
+        enforce_readonly_workspace_policy(
+            result.enforce_readonly,
+            &result.head_before,
+            result.git_status_before.as_deref(),
+        )
+        .map(|()| outcome)
+    });
+
+    match outcome {
+        Ok(outcome) => {
+            let _ = write_finish_stamp_for_outcome(
+                &launch.stamp_path,
+                result.head_before,
+                outcome.exit_code,
+                &outcome.signal_received,
+            )
+            .await;
             let _ = waiting_for_input.send_replace(false);
             let _ = fs::remove_file(&launch.cause_path);
-            return;
         }
         Err(err) => {
             let _ = waiting_for_input.send_replace(false);
             let _ = write_launch_cause(&launch.cause_path, &format!("{err:#}"));
+            let fallback_head_before = git_rev_parse_head().unwrap_or_default();
+            let _ =
+                write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "")
+                    .await;
         }
     }
-
-    let fallback_head_before = git_rev_parse_head().unwrap_or_default();
-    let _ = write_finish_stamp_for_outcome(&launch.stamp_path, fallback_head_before, 1, "");
 }
 
 fn launch_managed_acp_window(
@@ -585,8 +645,8 @@ fn launch_managed_acp_window(
     let (finished_tx, finished_rx) = watch::channel(false);
 
     let cancel_for_task = Arc::clone(&cancel);
-    let join = supervisor.spawn_blocking(move || {
-        finalize_managed_acp_launch(launch, cancel_for_task, input_rx, waiting_tx);
+    let join = supervisor.spawn(async move {
+        finalize_managed_acp_launch(launch, cancel_for_task, input_rx, waiting_tx).await;
         let _ = finished_tx.send(true);
     })?;
 

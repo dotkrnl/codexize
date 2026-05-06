@@ -106,39 +106,22 @@ fn choose_layout(
         (QuotaColumn::Narrow, ProbColumn::None),
     ];
 
-    if width >= VERY_WIDE_THRESHOLD {
-        for &(quota, prob) in &layouts {
-            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
-                >= max_req_name_width
-            {
-                return (quota, prob, ResetColumn::Shown);
+    for &min_budget in &[max_req_name_width, name_width_min()] {
+        if width >= VERY_WIDE_THRESHOLD {
+            for &(quota, prob) in &layouts {
+                if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
+                    >= min_budget
+                {
+                    return (quota, prob, ResetColumn::Shown);
+                }
             }
         }
-    }
-
-    for &(quota, prob) in &layouts {
-        if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden)
-            >= max_req_name_width
-        {
-            return (quota, prob, ResetColumn::Hidden);
-        }
-    }
-
-    if width >= VERY_WIDE_THRESHOLD {
         for &(quota, prob) in &layouts {
-            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
-                >= name_width_min()
+            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden)
+                >= min_budget
             {
-                return (quota, prob, ResetColumn::Shown);
+                return (quota, prob, ResetColumn::Hidden);
             }
-        }
-    }
-
-    for &(quota, prob) in &layouts {
-        if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden)
-            >= name_width_min()
-        {
-            return (quota, prob, ResetColumn::Hidden);
         }
     }
 
@@ -314,52 +297,20 @@ fn render_full_table(
             name_width,
         ));
 
+        let phase_data = [
+            ("Idea ", "I", SelectionPhase::Idea, total_idea, max_idea, idea_ranks.get(&model.name) == Some(&1)),
+            ("Plan ", "P", SelectionPhase::Planning, total_planning, max_planning, planning_ranks.get(&model.name) == Some(&1)),
+            ("Build ", "B", SelectionPhase::Build, total_build, max_build, build_ranks.get(&model.name) == Some(&1)),
+            ("Review ", "R", SelectionPhase::Review, total_review, max_review, review_ranks.get(&model.name) == Some(&1)),
+        ];
+
         match prob_col {
             ProbColumn::IpbrVerbose | ProbColumn::Ipbr => {
-                // Long-label vs short-label rendering only differ in the per-cell
-                // label text and the inter-cell padding; everything else (the
-                // weights, ranks, and per-vendor failure handling) is shared.
                 let verbose = matches!(prob_col, ProbColumn::IpbrVerbose);
-                let separator = if verbose { "   " } else { " " };
-                let cells: [(&str, &str, SelectionPhase, f64, u8, bool); 4] = [
-                    (
-                        "Idea ",
-                        "I",
-                        SelectionPhase::Idea,
-                        total_idea,
-                        max_idea,
-                        idea_ranks.get(&model.name) == Some(&1),
-                    ),
-                    (
-                        "Plan ",
-                        "P",
-                        SelectionPhase::Planning,
-                        total_planning,
-                        max_planning,
-                        planning_ranks.get(&model.name) == Some(&1),
-                    ),
-                    (
-                        "Build ",
-                        "B",
-                        SelectionPhase::Build,
-                        total_build,
-                        max_build,
-                        build_ranks.get(&model.name) == Some(&1),
-                    ),
-                    (
-                        "Review ",
-                        "R",
-                        SelectionPhase::Review,
-                        total_review,
-                        max_review,
-                        review_ranks.get(&model.name) == Some(&1),
-                    ),
-                ];
-                for (idx, (long_label, short_label, phase, total, max, is_top)) in
-                    cells.iter().enumerate()
-                {
-                    spans.push(Span::raw(if idx == 0 { " " } else { separator }));
-                    let label = if verbose { *long_label } else { *short_label };
+                let sep = if verbose { "   " } else { " " };
+                for (idx, (long, short, phase, total, max, is_top)) in phase_data.iter().enumerate() {
+                    spans.push(Span::raw(if idx == 0 { " " } else { sep }));
+                    let label = if verbose { *long } else { *short };
                     let pct = probability_percent(weight_for(*phase, model), *total);
                     spans.push(if vendor_failed {
                         probability_unavailable_span(label)
@@ -371,24 +322,10 @@ fn render_full_table(
             ProbColumn::TopRank => {
                 spans.push(Span::raw(" "));
                 spans.push(top_rank_prob_span(
-                    model,
                     vendor_failed,
-                    weight_for(SelectionPhase::Idea, model),
-                    weight_for(SelectionPhase::Planning, model),
-                    weight_for(SelectionPhase::Build, model),
-                    weight_for(SelectionPhase::Review, model),
-                    total_idea,
-                    total_planning,
-                    total_build,
-                    total_review,
-                    max_idea,
-                    max_planning,
-                    max_build,
-                    max_review,
-                    idea_ranks.get(&model.name) == Some(&1),
-                    planning_ranks.get(&model.name) == Some(&1),
-                    build_ranks.get(&model.name) == Some(&1),
-                    review_ranks.get(&model.name) == Some(&1),
+                    &phase_data.map(|(_, short, phase, total, max, is_top)| {
+                        (is_top, short, probability_percent(weight_for(phase, model), total), max)
+                    }),
                 ));
             }
             ProbColumn::None => {}
@@ -486,72 +423,13 @@ fn vendor_column_width() -> usize {
     6
 }
 
-#[allow(clippy::too_many_arguments)]
-fn top_rank_prob_span(
-    _model: &CachedModel,
-    vendor_failed: bool,
-    p_idea: f64,
-    p_plan: f64,
-    p_build: f64,
-    p_review: f64,
-    total_idea: f64,
-    total_plan: f64,
-    total_build: f64,
-    total_review: f64,
-    max_idea: u8,
-    max_plan: u8,
-    max_build: u8,
-    max_review: u8,
-    rank1_idea: bool,
-    rank1_plan: bool,
-    rank1_build: bool,
-    rank1_review: bool,
-) -> Span<'static> {
+fn top_rank_prob_span(vendor_failed: bool, candidates: &[(bool, &str, u8, u8)]) -> Span<'static> {
     if vendor_failed {
-        // Prefer the "P" letter when probabilities are unavailable so the
-        // column reads as a single 3-col `P--` rather than guessing a phase.
         return probability_unavailable_span("P");
     }
-
-    // Pick the phase where this row is rank-1; that is the cell shown.
-    // If the row is not rank-1 anywhere, pick the phase with the highest
-    // percentage so the column still carries a useful signal.
-    let candidates: [(bool, &str, u8, u8, bool); 4] = [
-        (
-            rank1_idea,
-            "I",
-            probability_percent(p_idea, total_idea),
-            max_idea,
-            true,
-        ),
-        (
-            rank1_plan,
-            "P",
-            probability_percent(p_plan, total_plan),
-            max_plan,
-            true,
-        ),
-        (
-            rank1_build,
-            "B",
-            probability_percent(p_build, total_build),
-            max_build,
-            true,
-        ),
-        (
-            rank1_review,
-            "R",
-            probability_percent(p_review, total_review),
-            max_review,
-            true,
-        ),
-    ];
-
-    if let Some((_, label, pct, max, _)) = candidates.iter().find(|c| c.0) {
+    if let Some((_, label, pct, max)) = candidates.iter().find(|c| c.0) {
         return probability_span(label, *pct, *max, true);
     }
-
-    // No rank-1 phase: surface the row's strongest cell, unbolded.
     let (label, pct, max) = candidates
         .iter()
         .map(|c| (c.1, c.2, c.3))
@@ -597,23 +475,20 @@ fn render_compact_quota(
         }
     }
 
-    let mut expanded_width = 0;
-    for (i, (vendor, model)) in vendors_to_render.iter().enumerate() {
-        if i > 0 {
-            expanded_width += 3; // " · "
-        }
-        let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
-        let label = vendor_label(*vendor);
-        let quota_str_len = if vendor_failed {
-            2 // "--"
-        } else {
-            match model.quota_percent {
-                Some(v) => format!("{v}%").width(),
-                None => 2,
-            }
-        };
-        expanded_width += label.width() + 1 + 6 + quota_str_len; // label + sp + "Quota " + quota
-    }
+    let expanded_width: usize = vendors_to_render
+        .iter()
+        .map(|(vendor, model)| {
+            let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
+            let label = vendor_label(*vendor);
+            let quota_str_len = if vendor_failed {
+                2
+            } else {
+                model.quota_percent.map_or(2, |v| format!("{v}%").width())
+            };
+            label.width() + 1 + 6 + quota_str_len
+        })
+        .sum::<usize>()
+        + (vendors_to_render.len().saturating_sub(1) * 3);
 
     let use_expanded_quota = expanded_width <= width as usize;
 

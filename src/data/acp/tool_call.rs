@@ -1,6 +1,5 @@
 //! Pure parsers and formatters for ACP `tool_call` / `tool_call_update`
-//! payloads, plus the per-session merge map that turns those wire messages
-//! into the two-block invocation/result transcript contract.
+//! payloads, plus the per-session merge map.
 
 use serde_json::Value;
 use std::{
@@ -13,10 +12,6 @@ pub(super) const INVOCATION_LINE_MAX: usize = 200;
 pub(super) const RESULT_LINE_MAX: usize = 200;
 pub(super) const INVOCATION_PREFIX: &str = "tool: ";
 pub(super) const RESULT_PREFIX: &str = "result: ";
-
-/// Hard ceiling on tracked tool-call entries per session. Defends against
-/// pathological agents that emit an unbounded stream of `tool_call`s without
-/// terminal updates.
 pub(super) const TOOL_CALL_MAP_CAP: usize = 256;
 
 const TRUNCATE_SUFFIX: &str = "...";
@@ -72,9 +67,6 @@ impl ToolCallPayload {
     }
 }
 
-/// Merged view of one tool call across `tool_call` / `tool_call_update`
-/// messages. Distinct from [`ToolCallPayload`], which is a snapshot of a
-/// single wire message.
 #[derive(Debug, Default, Clone)]
 pub(super) struct ToolCallDisplayState {
     pub(super) title: Option<String>,
@@ -100,7 +92,7 @@ impl ToolCallDisplayState {
     }
 
     /// Merge non-empty fields from `payload`. Absent / null values never erase
-    /// previously-known state per spec §State Lifecycle.
+    /// previously-known state.
     pub(super) fn merge(&mut self, payload: &ToolCallPayload) {
         if payload.title.is_some() {
             self.title = payload.title.clone();
@@ -127,27 +119,12 @@ impl ToolCallDisplayState {
 }
 
 /// Per-session map of `toolCallId` → merged display state, with FIFO-bounded
-/// capacity and overwrite-on-id-reuse semantics per spec §State Lifecycle.
+/// capacity and overwrite-on-id-reuse for display, plus monotonic Start/Finish
+/// dedup sets that intentionally never decay (one-shot watchdog contract).
 #[derive(Debug, Default)]
 pub(super) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,
     insertion_order: VecDeque<String>,
-    // Watchdog Start/Finish dedup is monotonic for the lifetime of the session
-    // (a session corresponds to one managed-ACP run). Once a Start has been
-    // emitted for an id, no later payload — including a repeated `tool_call`
-    // that re-creates the display entry under the same id — may emit another
-    // Start. Same one-shot rule applies to Finish. This intentionally diverges
-    // from the display-side `entries` map, which is allowed to overwrite on
-    // id reuse: the activity stream feeds a per-run state machine that must
-    // never double-count pause windows or pause-resume transitions.
-    //
-    // Storage is an unbounded `BTreeSet<String>` rather than the FIFO+cap
-    // discipline used for `entries`. The cap on `entries` exists to bound
-    // display-state memory for pathological agents; for activity dedup an
-    // FIFO eviction policy would silently re-arm Start/Finish once an old id
-    // ages out, breaking the one-shot watchdog contract. We pay the (small)
-    // unbounded-id-string cost — bounded by the count of distinct tool-call
-    // ids the agent emits during one run — to preserve correctness.
     start_emitted: BTreeSet<String>,
     terminal_emitted: BTreeSet<String>,
 }
@@ -167,13 +144,6 @@ impl ToolCallMap {
         self.entries.get(id)
     }
 
-    /// Insert or replace display state for `id`. A reused id is treated as a
-    /// fresh invocation for display purposes: the previous entry is dropped
-    /// and the new one takes the most-recent FIFO slot. When the map is at
-    /// the 256-entry cap, the oldest entry is dropped first.
-    ///
-    /// Watchdog `start_emitted` / `terminal_emitted` markers are intentionally
-    /// **not** cleared here; see the field comment above for why.
     pub(super) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() {
             self.insertion_order.retain(|existing| existing != &id);
@@ -188,8 +158,6 @@ impl ToolCallMap {
         self.entries.insert(id, state);
     }
 
-    /// Merge non-empty fields from `payload` into the existing entry for
-    /// `id`. Returns the merged state, or `None` when no entry exists.
     pub(super) fn merge(
         &mut self,
         id: &str,
@@ -239,15 +207,9 @@ fn is_success_status(status: &str) -> bool {
     matches!(status, "completed" | "success" | "succeeded" | "ok")
 }
 
-/// Sanitize a raw output snippet per spec §Result Formatting:
-/// 1. Strip ANSI CSI / OSC escapes and bare `ESC X` sequences (via the `vte`
-///    parser inside `strip-ansi-escapes`, which handles every dispatched
-///    sequence the hand-rolled state machine recognised plus the long tail
-///    we did not cover).
-/// 2. Replace control chars (except `\t`, `\n`, `\r`) and `0x7F` with a space.
-/// 3. Replace tabs / newlines / runs of whitespace with a single space; trim.
-///
-/// Truncation is intentionally *not* applied here.
+/// Sanitize a raw output snippet: strip ANSI / OSC escapes via `vte`,
+/// replace control chars and tabs/newlines with single spaces, then trim.
+/// Truncation is applied separately.
 pub(super) fn sanitize_snippet(input: &str) -> String {
     let stripped = strip_ansi_escapes::strip_str(input);
     let mut out = String::with_capacity(stripped.len());
@@ -267,8 +229,8 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
     out.trim().to_string()
 }
 
-/// Truncate `text` so its char count does not exceed `max`, appending `...`
-/// if any characters were dropped. Never splits a UTF-8 code point.
+/// Truncate `text` to `max` chars, appending `...` if any chars dropped. Never
+/// splits a UTF-8 code point.
 pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
@@ -313,38 +275,36 @@ fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)>
     let status = state.status.as_deref();
     let success = status.map(is_success_status).unwrap_or(true);
 
+    let cleaned_non_empty = |text: &str| {
+        let cleaned = sanitize_snippet(text);
+        (!cleaned.is_empty()).then_some(cleaned)
+    };
+
     if let Some(map) = state.raw_output.as_object() {
-        if !success && let Some(text) = map.get("stderr").and_then(Value::as_str) {
-            let cleaned = sanitize_snippet(text);
-            if !cleaned.is_empty() {
-                return Some((SnippetKind::Stderr, cleaned));
-            }
+        if !success
+            && let Some(text) = map.get("stderr").and_then(Value::as_str)
+            && let Some(cleaned) = cleaned_non_empty(text)
+        {
+            return Some((SnippetKind::Stderr, cleaned));
         }
         for key in ["formatted_output", "aggregated_output", "stdout"] {
-            if let Some(text) = map.get(key).and_then(Value::as_str) {
-                let cleaned = sanitize_snippet(text);
-                if !cleaned.is_empty() {
-                    return Some((SnippetKind::Output, cleaned));
-                }
-            }
-        }
-    } else if let Some(text) = state.raw_output.as_str() {
-        let cleaned = sanitize_snippet(text);
-        if !cleaned.is_empty() {
-            return Some((SnippetKind::Output, cleaned));
-        }
-    }
-
-    for block in &state.content {
-        if let Some(text) = block.get("text").and_then(Value::as_str) {
-            let cleaned = sanitize_snippet(text);
-            if !cleaned.is_empty() {
+            if let Some(text) = map.get(key).and_then(Value::as_str)
+                && let Some(cleaned) = cleaned_non_empty(text)
+            {
                 return Some((SnippetKind::Output, cleaned));
             }
         }
-        if let Some(text) = block.pointer("/content/text").and_then(Value::as_str) {
-            let cleaned = sanitize_snippet(text);
-            if !cleaned.is_empty() {
+    } else if let Some(text) = state.raw_output.as_str()
+        && let Some(cleaned) = cleaned_non_empty(text)
+    {
+        return Some((SnippetKind::Output, cleaned));
+    }
+
+    for block in &state.content {
+        for pointer in ["/text", "/content/text"] {
+            if let Some(text) = block.pointer(pointer).and_then(Value::as_str)
+                && let Some(cleaned) = cleaned_non_empty(text)
+            {
                 return Some((SnippetKind::Output, cleaned));
             }
         }
@@ -401,8 +361,6 @@ fn extract_command(raw_input: &Value) -> Option<String> {
 
 fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> {
     let kind = state.kind.as_deref();
-
-    // Rule 1: `read` with locations.
     if kind == Some("read") && !state.locations.is_empty() {
         let head = shorten_path(&state.locations[0], cwd);
         return Some(if state.locations.len() == 1 {
@@ -411,40 +369,27 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
             format!("read({head}, +{} more)", state.locations.len() - 1)
         });
     }
-
-    // Rules 2 & 3: `execute` kind or recognized raw-command input.
     if let Some(cmd) = extract_command(&state.raw_input) {
         return Some(format!("exec({cmd})"));
     }
-    if kind == Some("execute") {
-        // No command extractable; fall through to title / fallback rules.
-    }
-
-    // Rule 4: other kind with at least one location.
     if let (Some(kind), Some(loc)) = (kind, state.locations.first())
         && kind != "read"
         && kind != "execute"
     {
-        let path = shorten_path(loc, cwd);
-        return Some(format!("{kind}({path})"));
+        return Some(format!("{kind}({})", shorten_path(loc, cwd)));
     }
-
-    // Rule 5: verbatim title (sanitized only, never reshaped).
     if let Some(title) = state.title.as_deref() {
         let cleaned = sanitize_snippet(title);
         if !cleaned.is_empty() {
             return Some(cleaned);
         }
     }
-
-    // Rule 6: literal `tool` handled by the caller.
     None
 }
 
 pub(super) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {
     let body = invocation_label(state, cwd).unwrap_or_else(|| "tool".to_string());
-    let assembled = format!("{INVOCATION_PREFIX}{body}");
-    let collapsed = collapse_line_whitespace(&assembled);
+    let collapsed = collapse_line_whitespace(&format!("{INVOCATION_PREFIX}{body}"));
     truncate_with_ellipsis(&collapsed, INVOCATION_LINE_MAX)
 }
 

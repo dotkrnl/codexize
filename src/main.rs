@@ -6,6 +6,7 @@ use codexize::{
     tui,
 };
 use std::process::ExitCode;
+use tracing::{warn, warn_span};
 #[derive(Parser)]
 #[command(name = "codexize")]
 #[command(about = "Agentic development orchestrator", long_about = None)]
@@ -60,8 +61,10 @@ fn main() -> ExitCode {
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            // This crate does not install a tracing subscriber today, so
-            // stderr is the existing non-interactive boundary-error sink.
+            // By the time we reach this point we should no longer be in an
+            // alternate-screen / raw-mode terminal session (see `TerminalGuard`
+            // in `try_main_async`). Stderr remains the non-interactive boundary
+            // sink for fatal errors before per-session tracing is initialized.
             eprintln!("{err:#}");
             ExitCode::FAILURE
         }
@@ -80,37 +83,72 @@ async fn try_main_async() -> Result<()> {
     let cli = Cli::parse();
 
     let plan = plan_launch(&cli)?;
-    let mut terminal = tui::start()?;
+    struct TerminalGuard {
+        terminal: Option<tui::AppTerminal>,
+    }
 
-    if preflight::check(&mut terminal)? == preflight::PreflightOutcome::Exit {
+    impl TerminalGuard {
+        fn start() -> Result<Self> {
+            Ok(Self {
+                terminal: Some(tui::start()?),
+            })
+        }
+
+        fn terminal_mut(&mut self) -> &mut tui::AppTerminal {
+            self.terminal
+                .as_mut()
+                .expect("terminal already taken from TerminalGuard")
+        }
+
+        fn into_terminal(mut self) -> tui::AppTerminal {
+            self.terminal
+                .take()
+                .expect("terminal already taken from TerminalGuard")
+        }
+    }
+
+    impl Drop for TerminalGuard {
+        fn drop(&mut self) {
+            if let Some(mut terminal) = self.terminal.take() {
+                let _ = tui::stop(&mut terminal);
+            }
+        }
+    }
+
+    let mut terminal_guard = TerminalGuard::start()?;
+
+    if preflight::check(terminal_guard.terminal_mut())? == preflight::PreflightOutcome::Exit {
+        let mut terminal = terminal_guard.into_terminal();
         tui::stop(&mut terminal)?;
         return Ok(());
     }
 
-    let (session_id, startup_origin) = match plan {
+    let (session_id, startup_origin, resume_warnings) = match plan {
         LaunchPlan::DirectCreate { idea, modes } => {
             // Direct creation always produces a fresh session, so the
             // resume-ignored warnings do not apply here.
             (
                 picker::create_session(&idea, modes)?,
                 app::AppStartupOrigin::Default,
+                Vec::new(),
             )
         }
         LaunchPlan::Picker { create_modes } => {
             let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
-            let selection = match picker.run(&mut terminal)? {
+            let selection = match picker.run(terminal_guard.terminal_mut())? {
                 Some(selection) => selection,
                 None => {
+                    let mut terminal = terminal_guard.into_terminal();
                     tui::stop(&mut terminal)?;
                     return Ok(());
                 }
             };
 
-            if !selection.created {
-                for warning in resume_ignored_mode_warnings(create_modes) {
-                    eprintln!("{warning}");
-                }
-            }
+            let resume_warnings = if !selection.created {
+                resume_ignored_mode_warnings(create_modes)
+            } else {
+                Vec::new()
+            };
             (
                 selection.session_id,
                 if selection.created {
@@ -118,14 +156,24 @@ async fn try_main_async() -> Result<()> {
                 } else {
                     app::AppStartupOrigin::Default
                 },
+                resume_warnings,
             )
         }
     };
+
+    codexize::diagnostics::init_session_tracing(&session_id)?;
+    if !resume_warnings.is_empty() {
+        let _span = warn_span!("resume_warnings", session_id = %session_id).entered();
+        for warning in resume_warnings {
+            warn!("{warning}");
+        }
+    }
 
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume::resume_session(&mut state);
 
     let mut app = app::App::new_with_startup_origin(state, startup_origin);
+    let mut terminal = terminal_guard.into_terminal();
     let result = app_runtime::run_terminal_app(&mut app, &mut terminal);
     tui::stop(&mut terminal)?;
     result

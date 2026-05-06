@@ -28,7 +28,7 @@ tokio = { version = "1.39.1", features = ["macros", "rt-multi-thread", "io-util"
 tokio-util = "0.7"
 toml = "1.1.2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["chrono", "env-filter", "fmt", "json"] }
 unicode-width = "0.2.2"
 pulldown-cmark = "0.13.3"
 uuid = { version = "1.18.1", features = ["v4"] }

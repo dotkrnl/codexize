@@ -5,6 +5,7 @@ use std::io::{self, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use tracing::warn;
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -26,9 +27,12 @@ pub fn with_lock<T>(path: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
         (Ok(_), Err(release_err)) => Err(release_err),
         (Err(work_err), Ok(())) => Err(work_err),
         (Err(work_err), Err(release_err)) => {
-            eprintln!(
-                "warning: failed to release lock at {} after closure error: {release_err:#}",
-                path.display()
+            // TUI runs must not print to stderr; surface this via tracing so it
+            // lands in the session diagnostics log when enabled.
+            warn!(
+                lock_path = %path.display(),
+                error = %release_err,
+                "failed to release cache lock after closure error"
             );
             Err(work_err)
         }

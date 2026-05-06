@@ -1,5 +1,5 @@
-//! ACP handshake: spawn the agent, perform `initialize` / `session/new`,
-//! apply config options, and start the first prompt turn.
+//! Spawn the ACP agent, perform `initialize` / `session/new`, apply config
+//! options, and start the first prompt turn.
 
 use super::actor::RpcClient;
 use super::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
@@ -51,8 +51,10 @@ pub(super) async fn spawn_actor(
         .stdin
         .take()
         .ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;
-    let rpc = RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin);
-    Ok((rpc, child))
+    Ok((
+        RpcClient::start(runtime.clone(), BufReader::new(stdout), stdin),
+        child,
+    ))
 }
 
 pub(super) struct HandshakeOutput {
@@ -89,16 +91,17 @@ pub(super) async fn handshake(
             init.protocol_version
         )));
     }
-    let new_session = rpc
-        .call_async(
+    let mut session: NewSessionResult = serde_json::from_value(
+        rpc.call_async(
             "session/new",
             json!({ "cwd": launch.session.cwd, "mcpServers": [] }),
         )
-        .await?;
-    let mut session: NewSessionResult = serde_json::from_value(new_session).map_err(|err| {
+        .await?,
+    )
+    .map_err(|err| {
         AcpError::protocol(format!("failed to parse ACP session/new response: {err}"))
     })?;
-    apply_session_config_async(
+    apply_session_config(
         rpc,
         &session.session_id,
         &launch.session,
@@ -114,12 +117,6 @@ pub(super) async fn handshake(
         supports_close: init.supports_close,
         prompt_response,
     })
-}
-
-#[derive(Debug)]
-pub(super) struct InitializeOutcome {
-    pub(super) protocol_version: u64,
-    pub(super) supports_close: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,6 +143,12 @@ pub(super) struct ConfigChoice {
     pub(super) value: String,
 }
 
+#[derive(Debug)]
+pub(super) struct InitializeOutcome {
+    pub(super) protocol_version: u64,
+    pub(super) supports_close: bool,
+}
+
 pub(super) fn parse_initialize_result(value: Value) -> AcpResult<InitializeOutcome> {
     Ok(InitializeOutcome {
         protocol_version: value
@@ -170,25 +173,13 @@ pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> 
         .get("stopReason")
         .and_then(Value::as_str)
         .ok_or_else(|| AcpError::protocol("ACP prompt response missing stopReason"))?;
-    Ok(
-        if matches!(
-            stop,
-            "cancelled"
-                | "canceled"
-                | "interrupted"
-                | "error"
-                | "errored"
-                | "failed"
-                | "timeout"
-                | "timed_out"
-        ) {
-            PromptTurnOutcome::Failed {
-                message: format!("ACP prompt turn failed with stopReason={stop}"),
-            }
-        } else {
-            PromptTurnOutcome::Finished
+    Ok(match stop {
+        "cancelled" | "canceled" | "interrupted" | "error" | "errored" | "failed" | "timeout"
+        | "timed_out" => PromptTurnOutcome::Failed {
+            message: format!("ACP prompt turn failed with stopReason={stop}"),
         },
-    )
+        _ => PromptTurnOutcome::Finished,
+    })
 }
 
 pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) -> AcpResult<Value> {
@@ -208,22 +199,49 @@ pub(super) fn prompt_request_params(session_id: &str, prompt: &PromptPayload) ->
     }))
 }
 
-async fn apply_session_config_async(
+async fn apply_session_config(
     rpc: &mut RpcClient,
     session_id: &str,
     session: &AcpSessionSpec,
-    config_options: &mut Vec<ConfigOption>,
+    options: &mut Vec<ConfigOption>,
 ) {
-    for (category, option, value) in selected_config_updates(session, config_options) {
-        let response = rpc
+    let desired = [
+        ("mode", session.permission_mode.to_string()),
+        ("model", session.model.clone()),
+        ("thought_level", session.reasoning_effort.to_string()),
+    ];
+    for (category, value) in desired {
+        let Some(option) = options
+            .iter()
+            .find(|o| o.category.as_deref() == Some(category) || o.id == category)
+            .cloned()
+        else {
+            continue;
+        };
+        if option.current_value.as_deref() == Some(value.as_str())
+            || (!option.options.is_empty() && !option.options.iter().any(|c| c.value == value))
+        {
+            continue;
+        }
+        match rpc
             .call_async(
                 "session/set_config_option",
                 json!({ "sessionId": session_id, "configId": option.id, "value": value }),
             )
             .await
-            .and_then(parse_config_options_response);
-        match response {
-            Ok(updated) => *config_options = updated,
+            .and_then(|v| {
+                serde_json::from_value::<NewSessionResult>(json!({
+                    "sessionId": session_id,
+                    "configOptions": v.get("configOptions").cloned().unwrap_or(json!([])),
+                }))
+                .map(|w| w.config_options)
+                .map_err(|err| {
+                    AcpError::protocol(format!(
+                        "failed to parse ACP session/set_config_option response: {err}"
+                    ))
+                })
+            }) {
+            Ok(updated) => *options = updated,
             Err(err) => tracing::debug!(
                 target: "codexize::acp",
                 "session/set_config_option failed for category={category} id={} value={value}: {err}",
@@ -231,48 +249,4 @@ async fn apply_session_config_async(
             ),
         }
     }
-}
-
-/// Pick (category, option, desired value) tuples to apply against
-/// `config_options` for `session`.
-fn selected_config_updates(
-    session: &AcpSessionSpec,
-    config_options: &[ConfigOption],
-) -> Vec<(&'static str, ConfigOption, String)> {
-    let desired = [
-        ("mode", session.permission_mode.to_string()),
-        ("model", session.model.clone()),
-        ("thought_level", session.reasoning_effort.to_string()),
-    ];
-    let baseline = config_options.to_vec();
-    desired
-        .into_iter()
-        .filter_map(|(category, value)| {
-            let option = baseline
-                .iter()
-                .find(|o| o.category.as_deref() == Some(category) || o.id == category)?;
-            if option.current_value.as_deref() == Some(value.as_str()) {
-                return None;
-            }
-            if !option.options.is_empty() && !option.options.iter().any(|c| c.value == value) {
-                return None;
-            }
-            Some((category, option.clone(), value))
-        })
-        .collect()
-}
-
-fn parse_config_options_response(value: Value) -> AcpResult<Vec<ConfigOption>> {
-    #[derive(Deserialize)]
-    struct Wrap {
-        #[serde(rename = "configOptions", default)]
-        config_options: Vec<ConfigOption>,
-    }
-    serde_json::from_value::<Wrap>(value)
-        .map(|w| w.config_options)
-        .map_err(|err| {
-            AcpError::protocol(format!(
-                "failed to parse ACP session/set_config_option response: {err}"
-            ))
-        })
 }

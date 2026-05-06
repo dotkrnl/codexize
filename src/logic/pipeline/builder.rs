@@ -1,9 +1,10 @@
 use crate::logic::pipeline::state::{PipelineItem, PipelineItemStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// Tracks the builder loop — which tasks are pending, done, what iteration
 /// we're on, and enough state to resume a killed session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct BuilderState {
     #[serde(default)]
     pub pipeline_items: Vec<PipelineItem>,
@@ -60,6 +61,68 @@ pub struct BuilderState {
     pub next_iteration_for_recovery: Option<u32>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct BuilderStateWire {
+    #[serde(default)]
+    pipeline_items: Vec<PipelineItem>,
+    #[serde(default)]
+    pending: Vec<u32>,
+    #[serde(default)]
+    done: Vec<u32>,
+    #[serde(default)]
+    current_task: Option<u32>,
+    #[serde(default)]
+    iteration: u32,
+    #[serde(default)]
+    last_verdict: Option<String>,
+    #[serde(default)]
+    pending_refine_feedback: Vec<String>,
+    #[serde(default)]
+    recovery_trigger_task_id: Option<u32>,
+    #[serde(default)]
+    recovery_prev_max_task_id: Option<u32>,
+    #[serde(default)]
+    recovery_prev_task_ids: Vec<u32>,
+    #[serde(default)]
+    recovery_trigger_summary: Option<String>,
+    #[serde(default)]
+    retry_reset_run_id_cutoff: Option<u64>,
+    #[serde(default)]
+    recovery_cycle_count: u32,
+    #[serde(default)]
+    task_titles: std::collections::BTreeMap<u32, String>,
+    #[serde(default)]
+    next_iteration_for_recovery: Option<u32>,
+}
+
+impl<'de> Deserialize<'de> for BuilderState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = BuilderStateWire::deserialize(deserializer)?;
+        let mut state = Self {
+            pipeline_items: wire.pipeline_items,
+            pending: wire.pending,
+            done: wire.done,
+            current_task: wire.current_task,
+            iteration: wire.iteration,
+            last_verdict: wire.last_verdict,
+            pending_refine_feedback: wire.pending_refine_feedback,
+            recovery_trigger_task_id: wire.recovery_trigger_task_id,
+            recovery_prev_max_task_id: wire.recovery_prev_max_task_id,
+            recovery_prev_task_ids: wire.recovery_prev_task_ids,
+            recovery_trigger_summary: wire.recovery_trigger_summary,
+            retry_reset_run_id_cutoff: wire.retry_reset_run_id_cutoff,
+            recovery_cycle_count: wire.recovery_cycle_count,
+            task_titles: wire.task_titles,
+            next_iteration_for_recovery: wire.next_iteration_for_recovery,
+        };
+        state.hydrate_legacy_pipeline_items();
+        Ok(state)
+    }
+}
+
 impl PipelineItemStatus {
     pub fn is_lifecycle(self) -> bool {
         self.is_pending() || self.is_running() || self.is_done() || self.is_failed()
@@ -75,6 +138,56 @@ impl PipelineItemStatus {
 }
 
 impl BuilderState {
+    fn hydrate_legacy_pipeline_items(&mut self) {
+        if !self.pipeline_items.is_empty() {
+            self.sync_legacy_queue_views();
+            return;
+        }
+        if self.done.is_empty() && self.current_task.is_none() && self.pending.is_empty() {
+            return;
+        }
+
+        let mut seen = BTreeSet::new();
+        let mut next_pipeline_id = 1;
+        for (task_id, status, round) in self
+            .done
+            .iter()
+            .copied()
+            .map(|task_id| (task_id, PipelineItemStatus::Approved, None))
+            .chain(self.current_task.map(|task_id| {
+                let round = (self.iteration > 0).then_some(self.iteration);
+                (task_id, PipelineItemStatus::Running, round)
+            }))
+            .chain(
+                self.pending
+                    .iter()
+                    .copied()
+                    .map(|task_id| (task_id, PipelineItemStatus::Pending, None)),
+            )
+        {
+            if !seen.insert(task_id) {
+                continue;
+            }
+            // Legacy queues only persisted done/current/pending membership; a
+            // completed task maps to Approved because reviewer verdicts drove
+            // the historical `done` queue.
+            self.pipeline_items.push(PipelineItem {
+                id: next_pipeline_id,
+                stage: "coder".to_string(),
+                task_id: Some(task_id),
+                round,
+                status,
+                title: self.task_titles.get(&task_id).cloned(),
+                mode: None,
+                trigger: None,
+                interactive: None,
+                iteration: 1,
+            });
+            next_pipeline_id += 1;
+        }
+        self.sync_legacy_queue_views();
+    }
+
     fn is_selectable_task_item(item: &PipelineItem) -> bool {
         matches!(item.status, PipelineItemStatus::Pending)
             || (item.status == PipelineItemStatus::Revise
@@ -439,6 +552,75 @@ mod tests {
     fn test_max_task_id_empty() {
         let builder = BuilderState::default();
         assert_eq!(builder.max_task_id(), 0);
+    }
+
+    #[test]
+    fn legacy_queue_deserialize_hydrates_pipeline_items() {
+        let builder: BuilderState = toml::from_str(
+            r#"
+pending = [3, 4]
+done = [1]
+current_task = 2
+iteration = 7
+"#,
+        )
+        .expect("legacy builder state should deserialize");
+
+        let task_ids = builder
+            .pipeline_items
+            .iter()
+            .map(|item| (item.task_id, item.status, item.round))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            task_ids,
+            vec![
+                (Some(1), PipelineItemStatus::Approved, None),
+                (Some(2), PipelineItemStatus::Running, Some(7)),
+                (Some(3), PipelineItemStatus::Pending, None),
+                (Some(4), PipelineItemStatus::Pending, None),
+            ]
+        );
+        assert_eq!(builder.done_task_ids(), vec![1]);
+        assert_eq!(builder.current_task_id(), Some(2));
+        assert_eq!(builder.pending_task_ids(), vec![3, 4]);
+    }
+
+    #[test]
+    fn pipeline_items_deserialize_overwrites_stale_legacy_views() {
+        let builder: BuilderState = toml::from_str(
+            r#"
+pending = [99]
+done = [98]
+current_task = 97
+
+[[pipeline_items]]
+id = 1
+stage = "coder"
+task_id = 1
+status = "approved"
+iteration = 1
+
+[[pipeline_items]]
+id = 2
+stage = "coder"
+task_id = 2
+round = 5
+status = "running"
+iteration = 1
+
+[[pipeline_items]]
+id = 3
+stage = "coder"
+task_id = 3
+status = "pending"
+iteration = 1
+"#,
+        )
+        .expect("builder state should deserialize");
+
+        assert_eq!(builder.done, vec![1]);
+        assert_eq!(builder.current_task, Some(2));
+        assert_eq!(builder.pending, vec![3]);
     }
 
     #[test]

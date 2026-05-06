@@ -132,16 +132,12 @@ pub struct NotificationRuntime {
     config: Option<NtfyConfig>,
     client: Option<Client>,
     policy: NtfyPublishPolicy,
-    report_tx: mpsc::UnboundedSender<NotificationPublishReport>,
-    report_rx: mpsc::UnboundedReceiver<NotificationPublishReport>,
+    report_tx: mpsc::UnboundedSender<String>,
+    report_rx: mpsc::UnboundedReceiver<String>,
     pending_sends: Vec<JoinHandle<()>>,
     occurrence: u64,
     seen: HashSet<NotificationDedupeKey>,
     events: Vec<NotificationEvent>,
-}
-
-struct NotificationPublishReport {
-    failure: Option<String>,
 }
 
 impl Default for NotificationRuntime {
@@ -278,35 +274,31 @@ impl NotificationRuntime {
             return;
         };
         let Some(client) = self.client.clone() else {
-            let _ = self.report_tx.send(NotificationPublishReport {
-                failure: Some("failed to build ntfy HTTP client".to_string()),
-            });
+            let _ = self
+                .report_tx
+                .send("failed to build ntfy HTTP client".to_string());
             return;
         };
         if tokio::runtime::Handle::try_current().is_err() {
-            let _ = self.report_tx.send(NotificationPublishReport {
-                failure: Some("no Tokio runtime available for ntfy publish".to_string()),
-            });
+            let _ = self
+                .report_tx
+                .send("no Tokio runtime available for ntfy publish".to_string());
             return;
         }
         let tx = self.report_tx.clone();
         let policy = self.policy;
         let handle = tokio::spawn(async move {
-            let failure = send_ntfy_with_policy(&client, &config, &event, policy)
-                .await
-                .err()
-                .map(|err| format!("{err:#}"));
-            let _ = tx.send(NotificationPublishReport { failure });
+            if let Err(err) = send_ntfy_with_policy(&client, &config, &event, policy).await {
+                let _ = tx.send(format!("{err:#}"));
+            }
         });
         self.pending_sends.push(handle);
     }
 
     pub(crate) fn poll_publish_failures(&mut self) -> Vec<String> {
         let mut failures = Vec::new();
-        while let Ok(report) = self.report_rx.try_recv() {
-            if let Some(failure) = report.failure {
-                failures.push(failure);
-            }
+        while let Ok(failure) = self.report_rx.try_recv() {
+            failures.push(failure);
         }
         self.pending_sends.retain(|handle| !handle.is_finished());
         failures
@@ -335,9 +327,7 @@ impl NotificationRuntime {
 
     #[cfg(test)]
     pub(crate) fn push_publish_failure_for_test(&mut self, failure: &str) {
-        let _ = self.report_tx.send(NotificationPublishReport {
-            failure: Some(failure.to_string()),
-        });
+        let _ = self.report_tx.send(failure.to_string());
     }
 }
 

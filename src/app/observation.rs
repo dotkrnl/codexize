@@ -123,7 +123,7 @@ impl App {
         // gates (spec §3.7). Empty/duplicate writes still count — the
         // operator-stated heartbeat is the file write itself.
         if let Some(state) = self.watchdog.get_mut(run_id) {
-            state.on_live_summary_event(std::time::Instant::now());
+            state.on_live_summary_event(tokio::time::Instant::now());
         }
         let Some(LiveSummarySnapshot { content, mtime }) = observation::read_live_summary(&path)
         else {
@@ -175,7 +175,7 @@ impl App {
         if self.watchdog.is_empty() {
             return;
         }
-        let now = std::time::Instant::now();
+        let now = tokio::time::Instant::now();
         let decisions = self.watchdog.evaluate_all(now);
         for (run_id, decision) in decisions {
             match decision {
@@ -190,7 +190,7 @@ impl App {
         }
     }
 
-    fn dispatch_watchdog_warning(&mut self, run_id: u64, now: std::time::Instant) {
+    fn dispatch_watchdog_warning(&mut self, run_id: u64, now: tokio::time::Instant) {
         // Snapshot exactly the values we need before touching dashboard
         // helpers. Holding a borrow on `self.watchdog` across calls to
         // `append_system_message` would deadlock the borrow checker.
@@ -226,7 +226,7 @@ impl App {
         );
     }
 
-    fn dispatch_watchdog_kill(&mut self, run_id: u64, now: std::time::Instant) {
+    fn dispatch_watchdog_kill(&mut self, run_id: u64, now: tokio::time::Instant) {
         let Some(idle_minutes) = self
             .watchdog
             .get_mut(run_id)

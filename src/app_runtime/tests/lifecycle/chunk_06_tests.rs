@@ -113,7 +113,7 @@ fn watchdog_warning_does_not_re_arm_after_summary_recovery() {
         // Stage 2: the agent writes one summary — clock resets, but the
         // `warned` flag stays true (operator answer 5: no re-arm).
         if let Some(s) = app.watchdog.get_mut(run.id) {
-            s.on_live_summary_event(std::time::Instant::now());
+            s.on_live_summary_event(tokio::time::Instant::now());
             assert!(
                 s.warned,
                 "AC6: warned flag must persist across summary writes"
@@ -181,37 +181,24 @@ fn watchdog_warning_falls_back_when_prompt_cannot_be_read() {
     });
 }
 
-#[test]
-fn watchdog_register_uses_compressed_threshold_from_env() {
-    with_temp_root(|| {
-        // SAFETY: `with_temp_root` serializes test-global env mutations via
-        // `test_fs_lock`, so this set/unset window is visible only to this
-        // test's `WatchdogRegistry::from_env()` call.
-        let prev = std::env::var_os(super::watchdog::SCALE_ENV_VAR);
-        unsafe {
-            std::env::set_var(super::watchdog::SCALE_ENV_VAR, "1000000");
-        }
-        let registry = super::watchdog::WatchdogRegistry::from_env();
-        let mut registry = registry;
-        let now = Instant::now();
-        registry.register(
-            1,
-            EffortLevel::Normal,
-            "[scaled]".to_string(),
-            std::path::PathBuf::from("/p"),
-            now,
-        );
-        let state = registry.get(1).expect("registered");
-        // 600 simulated seconds × 1_000_000 ns/s = 600 ms real wall clock.
-        assert_eq!(state.warn_threshold, Duration::from_millis(600));
-        assert_eq!(state.kill_threshold, Duration::from_millis(1200));
-        assert_eq!(state.warning_remaining_minutes, 10);
-
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var(super::watchdog::SCALE_ENV_VAR, v),
-                None => std::env::remove_var(super::watchdog::SCALE_ENV_VAR),
-            }
-        }
-    });
+#[tokio::test(start_paused = true)]
+async fn watchdog_register_uses_paused_tokio_time() {
+    let mut registry = super::watchdog::WatchdogRegistry::from_env();
+    let now = tokio::time::Instant::now();
+    registry.register(
+        1,
+        EffortLevel::Normal,
+        "[paused]".to_string(),
+        std::path::PathBuf::from("/p"),
+        now,
+    );
+    let state = registry.get(1).expect("registered");
+    assert_eq!(state.warn_threshold, super::watchdog::WARN_AFTER_NORMAL);
+    assert_eq!(state.kill_threshold, super::watchdog::KILL_AFTER_NORMAL);
+    assert_eq!(state.warning_remaining_minutes, 10);
+    tokio::time::advance(super::watchdog::WARN_AFTER_NORMAL).await;
+    assert_eq!(
+        registry.evaluate_all(tokio::time::Instant::now())[0].1,
+        super::watchdog::WatchdogDecision::EmitWarning
+    );
 }

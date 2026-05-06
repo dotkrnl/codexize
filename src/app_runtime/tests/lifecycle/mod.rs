@@ -83,7 +83,7 @@ pub(super) fn install_watchdog_run(
         effort,
         window_name.to_string(),
         prompt_path,
-        std::time::Instant::now(),
+        tokio::time::Instant::now(),
     );
 }
 
@@ -92,7 +92,7 @@ pub(super) fn fast_forward_idle(app: &mut App, run_id: u64, shift: Duration) {
         .watchdog
         .get_mut(run_id)
         .expect("watchdog state registered");
-    state.last_live_summary_event = std::time::Instant::now() - shift - Duration::from_millis(1);
+    state.last_live_summary_event = tokio::time::Instant::now() - shift - Duration::from_millis(1);
 }
 
 mod chunk_00_tests;

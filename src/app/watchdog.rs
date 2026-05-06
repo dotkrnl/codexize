@@ -7,11 +7,8 @@
 //! `EmitWarning` or `EmitKill`.
 
 use crate::adapters::EffortLevel;
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
+use tokio::time::Instant;
 
 /// Identifier used by the watchdog to key per-run state. Mirrors the App's
 /// existing `u64` run id (see `state::RunRecord::id`).
@@ -23,15 +20,6 @@ pub(crate) const WARN_AFTER_NORMAL: Duration = Duration::from_secs(10 * 60);
 pub(crate) const KILL_AFTER_NORMAL: Duration = Duration::from_secs(20 * 60);
 pub(crate) const WARN_AFTER_TOUGH: Duration = Duration::from_secs(15 * 60);
 pub(crate) const KILL_AFTER_TOUGH: Duration = Duration::from_secs(30 * 60);
-
-/// Test-only env var that compresses the watchdog clock (spec §3.1, §6).
-/// Production is implicit `1_000_000_000` ns per simulated second (real
-/// time). Smaller values shrink real-time thresholds proportionally so the
-/// integration tests can drive AC1–AC6 in sub-second wall clock without
-/// changing the unscaled spec constants.
-pub(crate) const SCALE_ENV_VAR: &str = "CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC";
-
-const PRODUCTION_NS_PER_SEC: u64 = 1_000_000_000;
 
 /// Idle-adjusted warn threshold for a run with the given effort level
 /// (unscaled — production wall-clock duration).
@@ -80,9 +68,8 @@ pub(crate) struct WatchdogState {
     pub(super) started_at: Instant,
     pub(super) last_live_summary_event: Instant,
     pub(super) warned: bool,
+    #[allow(dead_code)] // retained for Debug logs and registry round-trip in tests
     pub(super) effort: EffortLevel,
-    /// Scaled threshold (real wall-clock duration). Equal to `warn_after`
-    /// in production; smaller under clock compression.
     pub(super) warn_threshold: Duration,
     pub(super) kill_threshold: Duration,
     /// Unscaled remaining-minutes value used in the warning preamble. Always
@@ -163,37 +150,17 @@ impl WatchdogState {
         WatchdogDecision::Idle
     }
 
-    /// Idle minutes since the last live-summary mtime advance, projected
-    /// back onto the unscaled (simulated) minute axis. Used in the
-    /// `SummaryWarn` text and warning preamble so the agent-visible numbers
-    /// match the spec wording independent of clock compression.
+    /// Idle minutes since the last live-summary mtime advance. Used in the
+    /// `SummaryWarn` text and warning preamble.
     pub(crate) fn idle_minutes_for_message(&self, now: Instant) -> u64 {
-        let elapsed_ns = self.idle_elapsed(now).as_nanos();
-        let warn_unscaled = warn_after(self.effort).as_nanos();
-        let warn_scaled = self.warn_threshold.as_nanos().max(1);
-        let simulated_ns = elapsed_ns.saturating_mul(warn_unscaled) / warn_scaled;
-        let simulated_secs = (simulated_ns / 1_000_000_000u128) as u64;
-        simulated_secs / 60
+        self.idle_elapsed(now).as_secs() / 60
     }
 }
 
-/// Per-run keyed registry of `WatchdogState`. Owns the clock-compression
-/// scale once per App so all registered runs share a single policy.
-#[derive(Debug)]
+/// Per-run keyed registry of `WatchdogState`.
+#[derive(Debug, Default)]
 pub(crate) struct WatchdogRegistry {
     states: HashMap<RunId, WatchdogState>,
-    /// Number of real-time nanoseconds that represent one simulated second.
-    /// Production = 1e9; tests may override via `SCALE_ENV_VAR`.
-    scale_ns_per_sec: u64,
-}
-
-impl Default for WatchdogRegistry {
-    fn default() -> Self {
-        Self {
-            states: HashMap::new(),
-            scale_ns_per_sec: PRODUCTION_NS_PER_SEC,
-        }
-    }
 }
 
 impl WatchdogRegistry {
@@ -205,52 +172,18 @@ impl WatchdogRegistry {
         Self::default()
     }
 
-    /// Build a registry whose threshold scale is read from
-    /// `CODEXIZE_WATCHDOG_SCALE_NS_PER_SEC` if present and `> 0`.
-    /// Production callers should use this so unset env always means
-    /// unscaled (1e9 ns / s) — matches spec §3.1, §6.
+    /// Build the production registry. Tests use Tokio's paused clock instead
+    /// of compressing thresholds through environment state.
     pub(crate) fn from_env() -> Self {
-        let scale_ns_per_sec = std::env::var(SCALE_ENV_VAR)
-            .ok()
-            .and_then(|raw| raw.parse::<u64>().ok())
-            .filter(|n| *n > 0)
-            .unwrap_or(PRODUCTION_NS_PER_SEC);
-        Self {
-            states: HashMap::new(),
-            scale_ns_per_sec,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_scale_ns_per_sec(scale_ns_per_sec: u64) -> Self {
-        Self {
-            states: HashMap::new(),
-            scale_ns_per_sec: scale_ns_per_sec.max(1),
-        }
-    }
-
-    /// Apply the active clock scale to an unscaled `base` duration.
-    fn scale(&self, base: Duration) -> Duration {
-        if self.scale_ns_per_sec == PRODUCTION_NS_PER_SEC {
-            return base;
-        }
-        // Convert simulated seconds (`base`) into real wall-clock
-        // nanoseconds. `u128` keeps the multiplication safe for any
-        // realistic spec threshold.
-        let secs = u128::from(base.as_secs());
-        let sub_nanos = u128::from(base.subsec_nanos());
-        let ns_per_sec = u128::from(self.scale_ns_per_sec);
-        let scaled_ns = secs.saturating_mul(ns_per_sec)
-            + sub_nanos.saturating_mul(ns_per_sec) / 1_000_000_000u128;
-        Duration::from_nanos(scaled_ns.min(u128::from(u64::MAX)) as u64)
+        Self::default()
     }
 
     pub(crate) fn warn_threshold(&self, effort: EffortLevel) -> Duration {
-        self.scale(warn_after(effort))
+        warn_after(effort)
     }
 
     pub(crate) fn kill_threshold(&self, effort: EffortLevel) -> Duration {
-        self.scale(kill_after(effort))
+        kill_after(effort)
     }
 
     /// Insert a fresh watchdog state for a run. Idempotent at the App layer
@@ -318,11 +251,9 @@ impl WatchdogRegistry {
 }
 
 /// Build the warning interrupt payload. The remaining-minutes value comes
-/// from the unscaled spec constants so the agent-facing text is identical
-/// between production and clock-compressed tests. `idle_minutes` is the
-/// (unscaled) wall-clock minutes since the last live-summary mtime
-/// advance, already mapped onto the spec axis by
-/// `WatchdogState::idle_minutes_for_message`.
+/// from the spec constants. `idle_minutes` is the wall-clock minutes since
+/// the last live-summary mtime advance, using Tokio's clock so paused-time
+/// tests can drive the thresholds deterministically.
 pub(crate) fn warning_text(idle_minutes: u64, remaining_minutes: u64, prompt_body: &str) -> String {
     format!(
         "\u{26a0} Liveness warning from codexize watchdog \u{26a0}\n\n\
@@ -348,6 +279,7 @@ pub(crate) const PROMPT_UNAVAILABLE_BODY: &str =
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time::{Instant, advance};
 
     fn fresh(effort: EffortLevel) -> (Instant, WatchdogState) {
         let now = Instant::now();
@@ -508,9 +440,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn registry_compresses_thresholds_under_test_scale() {
-        let mut registry = WatchdogRegistry::with_scale_ns_per_sec(1_000_000);
+    #[tokio::test(start_paused = true)]
+    async fn registry_uses_paused_tokio_time_for_thresholds() {
+        let mut registry = WatchdogRegistry::new();
         let now = Instant::now();
         registry.register(
             1,
@@ -519,12 +451,16 @@ mod tests {
             PathBuf::from("/p"),
             now,
         );
-        let state = registry.get(1).expect("registered");
-        // 600s simulated × 1_000_000 ns/s = 600_000_000 ns = 600 ms real.
-        assert_eq!(state.warn_threshold, Duration::from_millis(600));
-        assert_eq!(state.kill_threshold, Duration::from_millis(1200));
-        // Warning preamble must still report unscaled minutes.
-        assert_eq!(state.warning_remaining_minutes, 10);
+        advance(WARN_AFTER_NORMAL - Duration::from_secs(1)).await;
+        assert_eq!(
+            registry.evaluate_all(Instant::now())[0].1,
+            WatchdogDecision::Idle
+        );
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(
+            registry.evaluate_all(Instant::now())[0].1,
+            WatchdogDecision::EmitWarning
+        );
     }
 
     #[test]
@@ -570,9 +506,9 @@ mod tests {
         assert!(text[start..end].contains(body));
     }
 
-    #[test]
-    fn idle_minutes_for_message_reports_unscaled_minutes_under_compression() {
-        let mut registry = WatchdogRegistry::with_scale_ns_per_sec(1_000_000);
+    #[tokio::test(start_paused = true)]
+    async fn idle_minutes_for_message_tracks_paused_tokio_time() {
+        let mut registry = WatchdogRegistry::new();
         let now = Instant::now();
         registry.register(
             1,
@@ -582,8 +518,7 @@ mod tests {
             now,
         );
         let state = registry.get_mut(1).expect("registered");
-        // 660 ms real wall clock should map back to ~11 simulated minutes.
-        let advanced = now + Duration::from_millis(660);
-        assert!(state.idle_minutes_for_message(advanced) >= 11);
+        advance(Duration::from_secs(11 * 60)).await;
+        assert_eq!(state.idle_minutes_for_message(Instant::now()), 11);
     }
 }

@@ -192,7 +192,7 @@ impl App {
                 run.effort,
                 run.window_name.clone(),
                 prompt_path,
-                std::time::Instant::now(),
+                tokio::time::Instant::now(),
             );
         }
         self.prime_yolo_exit_tracking(&run);

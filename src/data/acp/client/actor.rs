@@ -1,12 +1,4 @@
 //! Tokio actor that owns the spawned ACP child's stdio.
-//!
-//! `RpcClient` is the synchronous handle exposed to the rest of `client.rs`.
-//! Internally it routes outbound requests/notifications and inbound responses
-//! through `actor_loop`, which owns the framed line reader, the
-//! outstanding-request map, and the writer half. The actor terminates on any
-//! of: explicit `Shutdown` command, command-channel close, cancel token,
-//! reader EOF, or transport error — at which point it broadcasts the failure
-//! to outstanding requests so the synchronous facade unblocks.
 
 use super::super::{AcpError, AcpResult};
 use serde_json::{Value, json};
@@ -42,8 +34,8 @@ pub(super) enum RpcCommand {
 }
 
 /// Synchronous handle wrapping the tokio actor task. Threads through the
-/// per-session runtime so that legacy sync callers (`AcpSession`) can keep
-/// driving prompt turns by polling without yielding into an executor.
+/// per-session runtime so legacy sync callers can drive prompt turns by
+/// polling without yielding into an executor.
 pub(super) struct RpcClient {
     runtime: Arc<Runtime>,
     cancel: CancellationToken,
@@ -79,16 +71,12 @@ impl RpcClient {
         }
     }
 
-    fn allocate_id(&self) -> u64 {
-        self.next_request_id.fetch_add(1, Ordering::Relaxed)
-    }
-
     pub(super) fn start_request(
         &self,
         method: &str,
         params: Value,
     ) -> AcpResult<oneshot::Receiver<AcpResult<Value>>> {
-        let id = self.allocate_id();
+        let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let (respond, rx) = oneshot::channel();
         self.commands
             .send(RpcCommand::Request {
@@ -128,13 +116,14 @@ impl RpcClient {
         match self.updates.try_recv() {
             Ok(Ok(value)) => Ok(Some(value)),
             Ok(Err(err)) => Err(err),
-            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
-            Err(mpsc::error::TryRecvError::Disconnected) => Ok(None),
+            Err(mpsc::error::TryRecvError::Empty | mpsc::error::TryRecvError::Disconnected) => {
+                Ok(None)
+            }
         }
     }
 
-    /// Cooperative shutdown when a child process has already been reaped or
-    /// was never spawned. Cancels the actor and waits for it to exit.
+    /// Cooperative shutdown when no `Child` is owned. Cancels the actor and
+    /// waits for it to exit.
     pub(super) fn shutdown_blocking_no_child(&mut self) {
         self.cancel.cancel();
         if let Some(actor) = self.actor.take() {
@@ -142,23 +131,17 @@ impl RpcClient {
         }
     }
 
-    /// Cooperative shutdown when the caller already owns the `Child`. Queue a
-    /// shutdown command after any best-effort close request so prior commands
-    /// can flush before the actor exits; the runtime is needed to await the
-    /// join handle on a sync stack.
+    /// Graceful shutdown: queue a `Shutdown` after any pending close request,
+    /// then await the actor on `runtime`.
     pub(super) fn shutdown_async(&mut self, runtime: &Runtime) {
-        // Intentional FIFO shutdown: cancellation is for aggressive teardown,
-        // while graceful close should let queued `session/close` reach stdin.
         let _ = self.commands.send(RpcCommand::Shutdown);
         if let Some(actor) = self.actor.take() {
             let _ = runtime.block_on(actor);
         }
     }
 
-    /// Aggressive shutdown used during connect-time failures: kill the actor
-    /// and reap the child immediately. The caller is on the connector's
-    /// hot path; protocol diagnostics already surfaced as the returned
-    /// error, so we drop the child silently.
+    /// Aggressive shutdown for connect-time failures: kill the actor and
+    /// reap the child immediately.
     pub(super) fn shutdown_blocking(&mut self, mut child: Child) {
         self.cancel.cancel();
         if let Some(actor) = self.actor.take() {
@@ -184,20 +167,17 @@ async fn actor_loop<R, W>(
     let mut pending: HashMap<u64, oneshot::Sender<AcpResult<Value>>> = HashMap::new();
     let mut line_buf = Vec::new();
     let mut writer_open = true;
-    loop {
+    // After commands is closed we keep draining inbound messages so late
+    // notifications still reach the consumer; cancel is the explicit kill.
+    let mut commands_closed = false;
+    'outer: loop {
         tokio::select! {
             biased;
-            _ = cancel.cancelled() => {
-                break;
-            }
-            cmd = commands.recv() => {
+            _ = cancel.cancelled() => break,
+            cmd = commands.recv(), if !commands_closed => {
                 let Some(cmd) = cmd else {
-                    // No further commands will arrive; keep draining inbound
-                    // messages until the server side closes stdout so any
-                    // late notifications still reach the consumer. The cancel
-                    // token is the explicit termination signal.
-                    drain_until_eof(&mut reader, &mut writer, &mut pending, &updates, &cancel).await;
-                    break;
+                    commands_closed = true;
+                    continue;
                 };
                 if matches!(cmd, RpcCommand::Shutdown) {
                     break;
@@ -207,26 +187,25 @@ async fn actor_loop<R, W>(
                     break;
                 }
             }
-            result = read_line(&mut reader, &mut line_buf) => {
-                match result {
+            outcome = read_line(&mut reader, &mut line_buf) => {
+                match outcome {
                     ReadOutcome::Eof => {
-                        broadcast_transport_error(
-                            &mut pending,
-                            &updates,
-                            AcpError::protocol(
-                                "ACP agent closed stdout before the prompt turn finished",
-                            ),
-                        );
-                        break;
+                        if !commands_closed {
+                            broadcast_transport_error(
+                                &mut pending,
+                                &updates,
+                                AcpError::protocol(
+                                    "ACP agent closed stdout before the prompt turn finished",
+                                ),
+                            );
+                        }
+                        break 'outer;
                     }
-                    ReadOutcome::Empty => {
-                        line_buf.clear();
-                        continue;
-                    }
+                    ReadOutcome::Empty => line_buf.clear(),
                     ReadOutcome::Line => {
-                        match decode_line(&line_buf) {
+                        let res = match decode_line(&line_buf) {
                             Ok(line) => {
-                                if let Err(err) = handle_inbound_line(
+                                handle_inbound_line(
                                     line,
                                     &mut writer,
                                     &mut pending,
@@ -234,31 +213,24 @@ async fn actor_loop<R, W>(
                                     &mut writer_open,
                                 )
                                 .await
-                                {
-                                    broadcast_transport_error(&mut pending, &updates, err);
-                                    break;
-                                }
                             }
-                            Err(err) => {
-                                line_buf.clear();
-                                broadcast_transport_error(&mut pending, &updates, err);
-                                break;
-                            }
-                        }
+                            Err(err) => Err(err),
+                        };
                         line_buf.clear();
+                        if let Err(err) = res {
+                            broadcast_transport_error(&mut pending, &updates, err);
+                            break 'outer;
+                        }
                     }
                     ReadOutcome::Error(err) => {
                         line_buf.clear();
                         broadcast_transport_error(&mut pending, &updates, err);
-                        break;
+                        break 'outer;
                     }
                 }
             }
         }
     }
-    // Best-effort writer flush before exit — we want any in-flight responses
-    // to client-side requests (e.g. session/request_permission) to make it
-    // back to the agent before stdin closes.
     if writer_open {
         let _ = writer.flush().await;
         let _ = writer.shutdown().await;
@@ -289,56 +261,6 @@ where
 fn decode_line(buf: &[u8]) -> AcpResult<&str> {
     std::str::from_utf8(buf)
         .map_err(|err| AcpError::protocol(format!("invalid ACP UTF-8 message: {err}")))
-}
-
-async fn drain_until_eof<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    pending: &mut HashMap<u64, oneshot::Sender<AcpResult<Value>>>,
-    updates: &mpsc::UnboundedSender<AcpResult<Value>>,
-    cancel: &CancellationToken,
-) where
-    R: AsyncBufRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let mut writer_open = true;
-    let mut buf = Vec::new();
-    loop {
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => return,
-            outcome = read_line(reader, &mut buf) => match outcome {
-                ReadOutcome::Eof => return,
-                ReadOutcome::Empty => {
-                    buf.clear();
-                    continue;
-                }
-                ReadOutcome::Line => {
-                    match decode_line(&buf) {
-                        Ok(line) => {
-                            if let Err(err) =
-                                handle_inbound_line(line, writer, pending, updates, &mut writer_open).await
-                            {
-                                broadcast_transport_error(pending, updates, err);
-                                return;
-                            }
-                        }
-                        Err(err) => {
-                            buf.clear();
-                            broadcast_transport_error(pending, updates, err);
-                            return;
-                        }
-                    }
-                    buf.clear();
-                }
-                ReadOutcome::Error(err) => {
-                    buf.clear();
-                    broadcast_transport_error(pending, updates, err);
-                    return;
-                }
-            }
-        }
-    }
 }
 
 async fn handle_command<W>(
@@ -417,8 +339,7 @@ where
 
     if let Some(method) = value.get("method").and_then(Value::as_str) {
         if method == "session/update" {
-            // Forward the inner `update` field unchanged; the consumer owns
-            // the per-session state needed to translate it. Null signals
+            // Forward the inner `update` field unchanged. Null signals
             // "session/update without an update field" so the dispatcher can
             // emit Unknown { kind: "session/update" }.
             let update_value = value

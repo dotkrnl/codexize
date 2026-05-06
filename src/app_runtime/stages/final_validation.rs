@@ -2,10 +2,10 @@ use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
 use crate::app::models::vendor_tag;
 use crate::app::prompts::final_validation_prompt;
 use crate::app::{App, guard};
-use crate::final_validation::{self, ValidationStatus};
+use crate::final_validation::{self, DreamRecommendation, ValidationStatus};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
-use crate::state::{self as session_state, Phase};
+use crate::state::{self as session_state, DreamingDecision, DreamingDecisionKind, Phase};
 use anyhow::{Context, Result};
 impl App {
     pub(crate) fn launch_final_validation(&mut self) {
@@ -162,9 +162,29 @@ impl App {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
         match verdict.status {
-            ValidationStatus::GoalMet => {
-                self.transition_to_phase(Phase::Done)?;
-            }
+            ValidationStatus::GoalMet => match verdict.dream_recommendation {
+                Some(DreamRecommendation::Skip) => {
+                    self.state.dreaming_decision = Some(DreamingDecision {
+                        kind: DreamingDecisionKind::ValidatorSkipped,
+                        round,
+                        reason: None,
+                    });
+                    self.state.save()?;
+                    self.transition_to_phase(Phase::Done)?;
+                }
+                Some(DreamRecommendation::Suggest) => {
+                    self.state.dreaming_decision = Some(DreamingDecision {
+                        kind: DreamingDecisionKind::Pending,
+                        round,
+                        reason: verdict.dream_reason,
+                    });
+                    self.state.save()?;
+                    self.transition_to_phase(Phase::DreamingPending)?;
+                }
+                None => {
+                    anyhow::bail!("goal_met verdict missing dream_recommendation");
+                }
+            },
             ValidationStatus::GoalGap => {
                 let verdict_artifact = format!("artifacts/final_validation_{round}.toml");
                 let new_tasks = final_validation::normalize_gap_tasks(
@@ -180,5 +200,164 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::EffortLevel;
+    use crate::app::test_support::{key, mk_app};
+    use crate::state::{
+        DreamingDecision, DreamingDecisionKind, LaunchModes, RunRecord, RunStatus, SessionState,
+    };
+    use crossterm::event::KeyCode;
+
+    fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::state::test_fs_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let temp = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var_os("CODEXIZE_ROOT");
+        // SAFETY: serialized by test_fs_lock and restored before returning.
+        unsafe {
+            std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+                None => std::env::remove_var("CODEXIZE_ROOT"),
+            }
+        }
+        result.unwrap()
+    }
+
+    fn run_record(id: u64, round: u32) -> RunRecord {
+        RunRecord {
+            id,
+            stage: "final-validation".to_string(),
+            task_id: None,
+            round,
+            attempt: 1,
+            model: "test-model".to_string(),
+            vendor: "test-vendor".to_string(),
+            window_name: "[FinalValidation] test-model".to_string(),
+            started_at: chrono::Utc::now(),
+            ended_at: None,
+            status: RunStatus::Running,
+            error: None,
+            effort: EffortLevel::Normal,
+            modes: LaunchModes::default(),
+            hostname: None,
+            mount_device_id: None,
+            section_path: None,
+        }
+    }
+
+    fn write_verdict(session_id: &str, round: u32, body: &str) {
+        let dir = session_state::session_dir(session_id).join("artifacts");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("final_validation_{round}.toml")), body).unwrap();
+    }
+
+    #[test]
+    fn goal_met_skip_finishes_and_persists_validator_skip() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-skip".to_string());
+            state.current_phase = Phase::FinalValidation(1);
+            let run = run_record(10, 1);
+            state.agent_runs.push(run.clone());
+            write_verdict(
+                &state.session_id,
+                1,
+                r#"status = "goal_met"
+summary = "Ready to ship"
+findings = []
+dream_recommendation = "skip"
+"#,
+            );
+            let mut app = mk_app(state);
+
+            app.finalize_final_validation_success(&run, 1).unwrap();
+
+            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(
+                app.state.dreaming_decision,
+                Some(DreamingDecision {
+                    kind: DreamingDecisionKind::ValidatorSkipped,
+                    round: 1,
+                    reason: None,
+                })
+            );
+            assert!(app.active_modal().is_none());
+        });
+    }
+
+    #[test]
+    fn goal_met_suggest_enters_persisted_decision_prompt() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-suggest".to_string());
+            state.current_phase = Phase::FinalValidation(2);
+            let run = run_record(20, 2);
+            state.agent_runs.push(run.clone());
+            write_verdict(
+                &state.session_id,
+                2,
+                r#"status = "goal_met"
+summary = "Ready after memory updates"
+findings = []
+dream_recommendation = "suggest"
+dream_reason = "Several memory lessons should be consolidated."
+"#,
+            );
+            let mut app = mk_app(state);
+
+            app.finalize_final_validation_success(&run, 2).unwrap();
+
+            assert_eq!(app.state.current_phase, Phase::DreamingPending);
+            assert_eq!(
+                app.state.dreaming_decision,
+                Some(DreamingDecision {
+                    kind: DreamingDecisionKind::Pending,
+                    round: 2,
+                    reason: Some("Several memory lessons should be consolidated.".to_string()),
+                })
+            );
+            assert_eq!(
+                app.active_modal(),
+                Some(crate::app::ModalKind::DreamingDecision)
+            );
+        });
+    }
+
+    #[test]
+    fn skip_decision_persists_and_finishes_without_reoffering() {
+        with_temp_root(|| {
+            let mut state = SessionState::new("fv-operator-skip".to_string());
+            state.current_phase = Phase::DreamingPending;
+            state.dreaming_decision = Some(DreamingDecision {
+                kind: DreamingDecisionKind::Pending,
+                round: 3,
+                reason: Some("Memory changed enough to consolidate.".to_string()),
+            });
+            let mut app = mk_app(state);
+
+            app.handle_modal_key(
+                crate::app::ModalKind::DreamingDecision,
+                key(KeyCode::Char('s')),
+            );
+
+            assert_eq!(app.state.current_phase, Phase::Done);
+            assert_eq!(
+                app.state.dreaming_decision,
+                Some(DreamingDecision {
+                    kind: DreamingDecisionKind::OperatorSkipped,
+                    round: 3,
+                    reason: Some("Memory changed enough to consolidate.".to_string()),
+                })
+            );
+            assert!(app.active_modal().is_none());
+        });
     }
 }

@@ -6,6 +6,7 @@ use crate::ui::render::frame_cache::{
     PipelineLine, PipelineLineKind, cached_pipeline_lines, cached_pipeline_lines_filtered,
     cached_row_body,
 };
+use itertools::Itertools;
 use std::rc::Rc;
 
 pub(crate) struct PipelineWidget<'a> {
@@ -15,6 +16,16 @@ pub(crate) struct PipelineWidget<'a> {
 pub(crate) struct RunningTailLine {
     pub(super) line: Line<'static>,
     kind: PipelineLineKind,
+}
+
+fn into_pipeline(lines: Vec<Line<'static>>) -> Vec<PipelineLine> {
+    lines
+        .into_iter()
+        .map(|line| PipelineLine {
+            line,
+            kind: PipelineLineKind::Other,
+        })
+        .collect()
 }
 
 fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style {
@@ -188,18 +199,12 @@ impl App {
             .is_empty()
     }
 
-    /// Return the trailing tail line for a split-panel transcript.
-    ///
-    /// Always renders a transcript-leaf shape (`HH:MM:SS ⠋ <title>`), never the
-    /// tree container placeholder produced for pipeline rows. Suppression mirrors
-    /// `running_tail_for_row` exactly so the split tail honors the same
-    /// interactive-waiting guard the main panel uses; only the shape diverges.
-    pub(crate) fn split_transcript_tail_line(&self, run: &RunRecord) -> Option<Line<'static>> {
+    fn should_suppress_tail(&self, run: &RunRecord) -> bool {
         if run.status != RunStatus::Running {
-            return None;
+            return true;
         }
         if !self.live_agent_spinner_active() {
-            return None;
+            return true;
         }
         if run.modes.interactive
             && self.interactive_run_waiting_for_input()
@@ -218,6 +223,19 @@ impl App {
                 })
                 .is_some_and(|message| message.kind == crate::state::MessageKind::AgentText)
         {
+            return true;
+        }
+        false
+    }
+
+    /// Return the trailing tail line for a split-panel transcript.
+    ///
+    /// Always renders a transcript-leaf shape (`HH:MM:SS ⠋ <title>`), never the
+    /// tree container placeholder produced for pipeline rows. Suppression mirrors
+    /// `running_tail_for_row` exactly so the split tail honors the same
+    /// interactive-waiting guard the main panel uses; only the shape diverges.
+    pub(crate) fn split_transcript_tail_line(&self, run: &RunRecord) -> Option<Line<'static>> {
+        if self.should_suppress_tail(run) {
             return None;
         }
         let phase_label = self.state.current_phase.label();
@@ -277,10 +295,9 @@ impl App {
         }
 
         let dim = Style::default().fg(Color::DarkGray);
-        let color_block_style = match status_highlight_bg(node.status) {
-            Some(bg) => Style::default().bg(bg),
-            None => Style::default(),
-        };
+        let color_block_style = status_highlight_bg(node.status)
+            .map(|bg| Style::default().bg(bg))
+            .unwrap_or_default();
 
         let mut spans = vec![
             Span::styled(" ", color_block_style),
@@ -327,73 +344,65 @@ impl App {
             return Vec::new();
         };
 
-        if let Some(id) = node.run_id.or(node.leaf_run_id)
-            && let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id)
-        {
-            // Main panel restores the system/status/user transcript surface
-            // for both interactive and non-interactive runs. ACP output
-            // (`AgentText`) and thought/tool text (`AgentThought`) stay in
-            // the split panel — the visibility decision is centralized in
-            // `run_main_panel_message_visible`.
-            let msgs: Vec<_> = self
-                .messages
-                .iter()
-                .filter(|m| m.run_id == id)
-                .filter(|m| {
-                    run_main_panel_message_visible(run, m.kind, self.state.show_thinking_texts)
-                })
-                .cloned()
-                .collect();
-            let running_tail =
-                self.running_tail_for_row(index, run, &WallClock::new(), suppressed_container_runs);
-            let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
-            let has_end = msgs
-                .iter()
-                .any(|m| m.kind == crate::state::MessageKind::End);
-            let mut lines: Vec<_> = chat_widget::message_lines(
-                &msgs,
-                run,
-                local_offset,
-                running_tail.map(|tail| tail.line),
-                available_width,
-                0,
-                false,
-            )
-            .into_iter()
-            .map(|line| PipelineLine {
-                line,
-                kind: PipelineLineKind::Other,
-            })
-            .collect();
-            if run.status == RunStatus::Running
-                && !has_end
-                && let Some(kind) = tail_kind
-                && let Some(last) = lines.last_mut()
-            {
-                last.kind = kind;
-            }
-            if run.stage == "final-validation" {
-                let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
-                let indent = format!(" {} ", "│ ".repeat(depth));
-                for report_line in
-                    self.final_validation_report_lines_for_run(run, &indent, available_width)
-                {
-                    lines.push(PipelineLine {
-                        line: report_line,
-                        kind: PipelineLineKind::Other,
-                    });
-                }
-            }
-            return lines;
-        }
+        let Some(id) = node.run_id.or(node.leaf_run_id) else {
+            return into_pipeline(self.render_compact_node(node, index));
+        };
+        let Some(run) = self.state.agent_runs.iter().find(|r| r.id == id) else {
+            return into_pipeline(self.render_compact_node(node, index));
+        };
 
-        self.render_compact_node(node, index)
-            .into_iter()
-            .map(|line| PipelineLine {
-                line,
-                kind: PipelineLineKind::Other,
+        // Main panel restores the system/status/user transcript surface
+        // for both interactive and non-interactive runs. ACP output
+        // (`AgentText`) and thought/tool text (`AgentThought`) stay in
+        // the split panel — the visibility decision is centralized in
+        // `run_main_panel_message_visible`.
+        let msgs: Vec<_> = self
+            .messages
+            .iter()
+            .filter(|m| m.run_id == id)
+            .filter(|m| {
+                run_main_panel_message_visible(run, m.kind, self.state.show_thinking_texts)
             })
-            .collect()
+            .cloned()
+            .collect();
+        let running_tail =
+            self.running_tail_for_row(index, run, &WallClock::new(), suppressed_container_runs);
+        let tail_kind = running_tail.as_ref().map(|tail| tail.kind);
+        let has_end = msgs
+            .iter()
+            .any(|m| m.kind == crate::state::MessageKind::End);
+        let mut lines = into_pipeline(chat_widget::message_lines(
+            &msgs,
+            run,
+            local_offset,
+            running_tail.map(|tail| tail.line),
+            available_width,
+            0,
+            false,
+        ));
+        if run.status == RunStatus::Running
+            && !has_end
+            && let Some(kind) = tail_kind
+            && let Some(last) = lines.last_mut()
+        {
+            last.kind = kind;
+        }
+        if run.stage == "final-validation" {
+            let depth = self.visible_rows.get(index).map_or(0, |r| r.depth);
+            let indent = format!(" {} ", "│ ".repeat(depth));
+            lines.extend(into_pipeline(
+                self.final_validation_report_lines_for_run(run, &indent, available_width),
+            ));
+        }
+        lines
+    }
+
+    fn spinner_state(&self) -> (&'static str, &'static str) {
+        if self.live_agent_progress_recent() {
+            (spinner_frame(self.spinner_tick), "running")
+        } else {
+            (spinner_frame(0), "stalled")
+        }
     }
 
     /// Choose the trailing line that closes a still-running transcript body.
@@ -409,29 +418,7 @@ impl App {
         clock: &C,
         suppressed_container_runs: &BTreeSet<u64>,
     ) -> Option<RunningTailLine> {
-        if run.status != RunStatus::Running {
-            return None;
-        }
-        if !self.live_agent_spinner_active() {
-            return None;
-        }
-        if run.modes.interactive
-            && self.interactive_run_waiting_for_input()
-            && self
-                .messages
-                .iter()
-                .rev()
-                .find(|message| {
-                    message.run_id == run.id
-                        && matches!(
-                            message.kind,
-                            crate::state::MessageKind::AgentText
-                                | crate::state::MessageKind::AgentThought
-                                | crate::state::MessageKind::UserInput
-                        )
-                })
-                .is_some_and(|message| message.kind == crate::state::MessageKind::AgentText)
-        {
+        if self.should_suppress_tail(run) {
             return None;
         }
         let row = self.visible_rows.get(index)?;
@@ -439,13 +426,7 @@ impl App {
             if suppressed_container_runs.contains(&run.id) {
                 return None;
             }
-            let recent = self.live_agent_progress_recent();
-            let spin = if recent {
-                spinner_frame(self.spinner_tick)
-            } else {
-                spinner_frame(0)
-            };
-            let label = if recent { "running" } else { "stalled" };
+            let (spin, label) = self.spinner_state();
             let dim = Style::default().fg(Color::DarkGray);
             let gutter = "│ ".repeat(row.depth);
             return Some(RunningTailLine {
@@ -513,13 +494,7 @@ impl App {
             && self.run_launched
             && self.live_agent_spinner_active()
         {
-            let recent = self.live_agent_progress_recent();
-            let spin = if recent {
-                spinner_frame(self.spinner_tick)
-            } else {
-                spinner_frame(0)
-            };
-            let label = if recent { "running" } else { "stalled" };
+            let (spin, label) = self.spinner_state();
             lines.push(Line::from(vec![
                 Span::styled(format!(" {gutter}  "), dim),
                 Span::styled(
@@ -533,10 +508,11 @@ impl App {
         }
         if !node.children.is_empty() {
             lines.push(Line::from(""));
-            let child_count = node.children.len();
-            for (i, child) in node.children.iter().enumerate() {
-                let is_last = i == child_count - 1;
-                let branch = if is_last { "└─" } else { "├─" };
+            for (pos, child) in node.children.iter().with_position() {
+                let branch = match pos {
+                    itertools::Position::Last | itertools::Position::Only => "└─",
+                    _ => "├─",
+                };
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {gutter}  {branch} "), dim),
                     Span::styled(

@@ -196,5 +196,5 @@ pub fn drain_test_cancel_receiver_for(window_name: &str) -> Vec<&'static str> {
 }
 
 #[cfg(test)]
-#[path = "test_support_tests.rs"]
+#[path = "tests_support_tests.rs"]
 mod tests;

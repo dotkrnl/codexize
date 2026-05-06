@@ -10,6 +10,7 @@
 mod launch;
 mod runtime;
 #[cfg(test)]
+#[path = "supervise/tests_support.rs"]
 mod test_support;
 
 use crate::acp::AcpLaunchPolicy;

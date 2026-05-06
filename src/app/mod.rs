@@ -30,6 +30,7 @@ pub use crate::ui::split;
 mod state;
 pub use crate::ui::status_line;
 #[cfg(test)]
+#[path = "tests_support.rs"]
 mod test_support;
 // The private app suites live in layer-owned directories, but remain declared
 // here so they can exercise App internals without widening production APIs.

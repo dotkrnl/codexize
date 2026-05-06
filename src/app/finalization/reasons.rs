@@ -34,6 +34,9 @@ impl App {
             .replace("{round:03}", &format!("{round:03}"))
             .replace("{round}", &round.to_string())
     }
+    fn round_dir(session_dir: &std::path::Path, round: u32) -> std::path::PathBuf {
+        session_dir.join("rounds").join(format!("{:03}", round))
+    }
     fn invalid_artifact(err: impl std::fmt::Display) -> String {
         Reason::ArtifactInvalid(err.to_string()).to_string()
     }
@@ -42,9 +45,7 @@ impl App {
         stage: &str,
         round: u32,
     ) -> Option<String> {
-        let templates = Self::ARTIFACT_REASON_TABLE
-            .iter()
-            .find_map(|(candidate, templates)| (*candidate == stage).then_some(*templates))?;
+        let (_, templates) = Self::ARTIFACT_REASON_TABLE.iter().find(|(c, _)| *c == stage)?;
         templates
             .iter()
             .map(|template| session_dir.join(Self::render_artifact_template(template, round)))
@@ -74,9 +75,8 @@ impl App {
         if !Self::artifact_present(&scope_file) {
             return Some(Reason::BaseMissing.to_string());
         }
-        let base = match read_review_scope_base_sha(&scope_file) {
-            Ok(s) => s,
-            Err(_) => return Some(Reason::BaseMissing.to_string()),
+        let Ok(base) = read_review_scope_base_sha(&scope_file) else {
+            return Some(Reason::BaseMissing.to_string());
         };
         if base.is_empty() {
             return Some(Reason::BaseMissing.to_string());
@@ -88,14 +88,11 @@ impl App {
                 "missing finish stamp",
             ));
         }
-        let stamp = match crate::runner::read_finish_stamp(&stamp_path) {
-            Ok(stamp) => stamp,
-            Err(_) => {
-                return Some(Self::failed_unverified_reason(
-                    &stamp_path,
-                    "malformed finish stamp",
-                ));
-            }
+        let Ok(stamp) = crate::runner::read_finish_stamp(&stamp_path) else {
+            return Some(Self::failed_unverified_reason(
+                &stamp_path,
+                "malformed finish stamp",
+            ));
         };
         if stamp.head_state != "stable" {
             return Some(Self::failed_unverified_reason(
@@ -117,9 +114,8 @@ impl App {
         }
         let summary_path = round_dir.join("coder_summary.toml");
         if summary_path.exists() {
-            let summary = match coder_summary::validate(&summary_path) {
-                Ok(summary) => summary,
-                Err(_) => return Some(Reason::InvalidCoderSummary.to_string()),
+            let Ok(summary) = coder_summary::validate(&summary_path) else {
+                return Some(Reason::InvalidCoderSummary.to_string());
             };
             return match summary.status {
                 coder_summary::CoderStatus::Done => None,
@@ -163,88 +159,62 @@ impl App {
             ),
             "sharding" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-                let reason = if let Some(reason) =
-                    Self::missing_artifact_reasons(&session_dir, "sharding", run.round)
-                {
-                    Some(reason)
-                } else {
-                    tasks::validate(&tasks_path)
-                        .err()
-                        .map(Self::invalid_artifact)
-                };
+                let reason = Self::missing_artifact_reasons(&session_dir, "sharding", run.round)
+                    .or_else(|| tasks::validate(&tasks_path).err().map(Self::invalid_artifact));
                 (true, reason)
             }
             "recovery" => {
                 let tasks_path = session_dir.join("artifacts").join("tasks.toml");
-                let reason = if let Some(reason) =
-                    Self::missing_artifact_reasons(&session_dir, "recovery", run.round)
-                {
-                    Some(reason)
-                } else if let Err(err) =
-                    validate_stage_toml_writes(&session_dir, "recovery", run.round)
-                {
-                    Some(Self::invalid_artifact(err))
-                } else {
-                    let recovery_path = session_dir
-                        .join("rounds")
-                        .join(format!("{:03}", run.round))
-                        .join("recovery.toml");
-                    match tasks::validate(&tasks_path) {
-                        Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
-                        Err(err) => Some(Self::invalid_artifact(err)),
-                    }
-                };
+                let reason = Self::missing_artifact_reasons(&session_dir, "recovery", run.round)
+                    .or_else(|| {
+                        validate_stage_toml_writes(&session_dir, "recovery", run.round)
+                            .err()
+                            .map(Self::invalid_artifact)
+                    })
+                    .or_else(|| {
+                        let recovery_path =
+                            Self::round_dir(&session_dir, run.round).join("recovery.toml");
+                        match tasks::validate(&tasks_path) {
+                            Ok(_) => self.recovery_artifact_failure_reason(&recovery_path),
+                            Err(err) => Some(Self::invalid_artifact(err)),
+                        }
+                    });
                 (true, reason)
             }
             "coder" => {
-                let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
+                let round_dir = Self::round_dir(&session_dir, run.round);
                 (false, self.coder_gate_reason(run, &round_dir))
             }
             "reviewer" => {
-                let review_path = session_dir
-                    .join("rounds")
-                    .join(format!("{:03}", run.round))
-                    .join("review.toml");
-                let reason = if let Some(reason) =
-                    Self::missing_artifact_reasons(&session_dir, "reviewer", run.round)
-                {
-                    Some(reason)
-                } else {
-                    review::validate(&review_path)
-                        .err()
-                        .map(Self::invalid_artifact)
-                };
+                let review_path = Self::round_dir(&session_dir, run.round).join("review.toml");
+                let reason = Self::missing_artifact_reasons(&session_dir, "reviewer", run.round)
+                    .or_else(|| review::validate(&review_path).err().map(Self::invalid_artifact));
                 (true, reason)
             }
             "final-validation" => {
                 let verdict_path = session_dir
                     .join("artifacts")
                     .join(format!("final_validation_{}.toml", run.round));
-                let reason = if let Some(reason) =
+                let reason =
                     Self::missing_artifact_reasons(&session_dir, "final-validation", run.round)
-                {
-                    Some(reason)
-                } else {
-                    final_validation::validate(&verdict_path)
-                        .err()
-                        .map(Self::invalid_artifact)
-                };
+                        .or_else(|| {
+                            final_validation::validate(&verdict_path)
+                                .err()
+                                .map(Self::invalid_artifact)
+                        });
                 (true, reason)
             }
             "simplifier" => {
-                let simplification_path = session_dir
-                    .join("rounds")
-                    .join(format!("{:03}", run.round))
-                    .join("simplification.toml");
-                let reason = if let Some(reason) =
+                let simplification_path =
+                    Self::round_dir(&session_dir, run.round).join("simplification.toml");
+                let reason =
                     Self::missing_artifact_reasons(&session_dir, "simplifier", run.round)
-                {
-                    Some(reason)
-                } else if let Err(err) = crate::simplification::validate(&simplification_path) {
-                    Some(Self::invalid_artifact(err))
-                } else {
-                    self.simplifier_dirty_tree_reason(run)
-                };
+                        .or_else(|| {
+                            crate::simplification::validate(&simplification_path)
+                                .err()
+                                .map(Self::invalid_artifact)
+                        })
+                        .or_else(|| self.simplifier_dirty_tree_reason(run));
                 (true, reason)
             }
             _ => (false, None),
@@ -317,15 +287,15 @@ impl App {
                     "run {} ({}) exited {code}: signal_received={signal_received}{log_suffix}",
                     run.id, run.stage
                 ));
-                if let Some(marker) = operator_marker {
-                    return Ok(Some(match marker {
-                        OperatorTerminationMarker::Stopped => Reason::OperatorKilled.to_string(),
-                        OperatorTerminationMarker::RetryRequested => {
-                            Reason::UserForcedRetry.to_string()
-                        }
-                    }));
-                }
-                return Ok(Some(Reason::Killed { signal_num, detail }.to_string()));
+                return Ok(Some(match operator_marker {
+                    Some(OperatorTerminationMarker::Stopped) => {
+                        Reason::OperatorKilled.to_string()
+                    }
+                    Some(OperatorTerminationMarker::RetryRequested) => {
+                        Reason::UserForcedRetry.to_string()
+                    }
+                    None => Reason::Killed { signal_num, detail }.to_string(),
+                }));
             }
             return Ok(Some(Reason::ExitCode(code).to_string()));
         }
@@ -417,19 +387,18 @@ impl App {
         if let Some(trigger) = requested_trigger {
             self.update_running_recovery_trigger(trigger);
         }
+        let summary = artifact.summary.trim().to_string();
         match artifact.status {
             RecoveryStatus::Approved => None,
-            RecoveryStatus::Revise => Some(
-                Reason::RecoveryRequestedRevise(artifact.summary.trim().to_string()).to_string(),
-            ),
-            RecoveryStatus::HumanBlocked => Some(
-                Reason::RecoveryRequestedHumanBlocked(artifact.summary.trim().to_string())
-                    .to_string(),
-            ),
-            RecoveryStatus::AgentPivot => Some(
-                Reason::RecoveryRequestedAgentPivot(artifact.summary.trim().to_string())
-                    .to_string(),
-            ),
+            RecoveryStatus::Revise => {
+                Some(Reason::RecoveryRequestedRevise(summary).to_string())
+            }
+            RecoveryStatus::HumanBlocked => {
+                Some(Reason::RecoveryRequestedHumanBlocked(summary).to_string())
+            }
+            RecoveryStatus::AgentPivot => {
+                Some(Reason::RecoveryRequestedAgentPivot(summary).to_string())
+            }
         }
     }
     fn update_running_recovery_trigger(&mut self, trigger: &str) {
@@ -439,17 +408,18 @@ impl App {
         } else {
             "Agent pivot recovery"
         };
-        if let Some(item) = self
+        let Some(item) = self
             .state
             .builder
             .pipeline_items
             .iter_mut()
             .rev()
             .find(|item| item.stage == "recovery" && item.status == PipelineItemStatus::Running)
-        {
-            item.trigger = Some(trigger.to_string());
-            item.interactive = Some(interactive);
-            item.title = Some(title.to_string());
-        }
+        else {
+            return;
+        };
+        item.trigger = Some(trigger.to_string());
+        item.interactive = Some(interactive);
+        item.title = Some(title.to_string());
     }
 }

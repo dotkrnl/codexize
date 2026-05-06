@@ -1,6 +1,18 @@
 // observation.rs
 use super::*;
 #[cfg(test)]
+#[path = "observation_tests.rs"]
+mod tests;
+/// Pure helper: decide whether a freshly-sanitized live-summary payload
+/// represents real operator progress (i.e. should reset the watchdog idle
+/// clock) given the last cached payload. Empty or duplicate payloads return
+/// false — a bare mtime touch with no semantic delta must not be treated as
+/// a heartbeat, otherwise an agent that periodically re-flushes the same
+/// summary while actually hung slips past the warn threshold.
+pub(crate) fn live_summary_advances_content(sanitized: &str, cached: &str) -> bool {
+    !sanitized.is_empty() && sanitized != cached
+}
+#[cfg(test)]
 use crate::data::events::LiveSummaryEvents;
 use crate::data::observation::{
     self, LiveSummaryProbe, LiveSummarySnapshot, LiveSummaryWatcher, build_live_summary_watcher,
@@ -92,8 +104,7 @@ impl App {
         };
         // Cheap mtime probe before reading content: avoids the disk read when
         // the file is missing, stale, or unchanged since the last cached
-        // mtime. The watchdog still observes the mtime advance below so an
-        // unchanged-content write resets the idle clock per spec §3.7.
+        // mtime.
         let mtime = match observation::probe_live_summary(&path) {
             LiveSummaryProbe::Fresh { mtime } => mtime,
             LiveSummaryProbe::Missing | LiveSummaryProbe::Stale => return,
@@ -103,23 +114,22 @@ impl App {
         {
             return;
         }
-        // Reset the watchdog idle clock as soon as we observe a real mtime
-        // advance, before any later content-staleness or duplicate-content
-        // gates (spec §3.7). Empty/duplicate writes still count — the
-        // operator-stated heartbeat is the file write itself.
-        if let Some(state) = self.watchdog.get_mut(run_id) {
-            state.on_live_summary_event(tokio::time::Instant::now());
-        }
         let Some(LiveSummarySnapshot { content, mtime }) = observation::read_live_summary(&path)
         else {
             return;
         };
         let sanitized = render::sanitize_live_summary(&content);
-        if sanitized.is_empty() {
+        // A bare mtime touch with empty or duplicate content does NOT signal
+        // operator progress, so it must not reset the watchdog idle clock —
+        // an agent that re-flushes the same summary while hung would
+        // otherwise slip past the warn threshold. Update cached_mtime
+        // either way so we don't re-read on every tick.
+        if !live_summary_advances_content(&sanitized, &self.live_summary_cached_text) {
+            self.live_summary_cached_mtime = Some(mtime);
             return;
         }
-        if sanitized == self.live_summary_cached_text {
-            return;
+        if let Some(state) = self.watchdog.get_mut(run_id) {
+            state.on_live_summary_event(tokio::time::Instant::now());
         }
         let msg = Message {
             ts: chrono::Utc::now(),

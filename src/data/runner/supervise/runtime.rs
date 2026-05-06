@@ -1,6 +1,8 @@
 use super::launch::write_launch_cause;
 use super::{CancelSignal, ManagedAcpOutcome};
-use crate::acp::{AcpConnector, AcpRuntimeEvent, AcpSession, SubprocessConnector, translate_update};
+use crate::acp::{
+    AcpConnector, AcpRuntimeEvent, AcpSession, SubprocessConnector, translate_update,
+};
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;
@@ -134,10 +136,10 @@ fn drive_acp_session(
         // failure paths instead of hanging on `Ok(None)` polls forever.
         let event = match event {
             Some(e) => Some(e),
-            None => match session.dead_reason().map_err(|err| anyhow!("{err}"))? {
-                Some(message) => Some(AcpRuntimeEvent::PromptTurnFailed { message }),
-                None => None,
-            },
+            None => session
+                .dead_reason()
+                .map_err(|err| anyhow!("{err}"))?
+                .map(|message| AcpRuntimeEvent::PromptTurnFailed { message }),
         };
         match event {
             Some(AcpRuntimeEvent::PromptTurnFinished) => {

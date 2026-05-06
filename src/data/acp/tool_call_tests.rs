@@ -411,13 +411,13 @@ fn tool_call_map_activity_dedup_markers_are_unbounded_per_session() {
     let overflow_count = TOOL_CALL_MAP_CAP * 4;
     for i in 0..overflow_count {
         let id = format!("id-{i}");
-        map.mark_start_emitted(&id);
-        map.mark_terminal_emitted(&id);
+        map.mark_emitted(&id, false);
+        map.mark_emitted(&id, true);
     }
     for i in 0..overflow_count {
         let id = format!("id-{i}");
-        assert!(map.start_emitted(&id), "start marker missing for {id}");
-        assert!(map.terminal_emitted(&id), "finish marker missing for {id}");
+        assert!(map.was_emitted(&id, false), "start marker missing for {id}");
+        assert!(map.was_emitted(&id, true), "finish marker missing for {id}");
     }
 }
 
@@ -428,15 +428,18 @@ fn tool_call_map_insert_preserves_watchdog_dedup_markers() {
     // session so a second `tool_call` payload for an already-tracked id
     // cannot resurrect either transition.
     let mut map = ToolCallMap::new();
-    map.mark_start_emitted("id-x");
-    map.mark_terminal_emitted("id-x");
-    assert!(map.start_emitted("id-x"));
-    assert!(map.terminal_emitted("id-x"));
+    map.mark_emitted("id-x", false);
+    map.mark_emitted("id-x", true);
+    assert!(map.was_emitted("id-x", false));
+    assert!(map.was_emitted("id-x", true));
 
     map.insert("id-x".to_string(), ToolCallDisplayState::default());
-    assert!(map.start_emitted("id-x"), "start dedup must survive insert");
     assert!(
-        map.terminal_emitted("id-x"),
+        map.was_emitted("id-x", false),
+        "start dedup must survive insert"
+    );
+    assert!(
+        map.was_emitted("id-x", true),
         "finish dedup must survive insert"
     );
 }

@@ -49,11 +49,18 @@ pub enum ToolCallActivityKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpRuntimeEvent {
-    SessionTitleUpdated { title: String },
+    SessionTitleUpdated {
+        title: String,
+    },
     Text(AcpTextEvent),
     PromptTurnFinished,
-    PromptTurnFailed { message: String },
-    ToolCallActivity { tool_call_id: String, kind: ToolCallActivityKind },
+    PromptTurnFailed {
+        message: String,
+    },
+    ToolCallActivity {
+        tool_call_id: String,
+        kind: ToolCallActivityKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

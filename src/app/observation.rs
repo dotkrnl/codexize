@@ -13,9 +13,10 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 impl App {
     pub(crate) fn setup_watcher(&mut self) -> Result<()> {
+        self.live_summary_watcher = None;
+        self.live_summary_change_events = None;
+
         let Some(path) = self.live_summary_path.clone() else {
-            self.live_summary_watcher = None;
-            self.live_summary_change_events = None;
             return Ok(());
         };
 
@@ -23,15 +24,12 @@ impl App {
         // failures still surface as boundary errors with the watcher disabled.
         if let Err(reason) = ensure_live_summary_watch_dir(&path) {
             self.surface_boundary_error(reason, false);
-            self.live_summary_watcher = None;
-            self.live_summary_change_events = None;
             return Ok(());
         }
 
         #[cfg(test)]
         if !Self::test_uses_real_live_summary_watcher() {
             let (_tx, rx) = mpsc::unbounded_channel();
-            self.live_summary_watcher = None;
             self.live_summary_change_events = Some(LiveSummaryEvents::new(rx));
             return Ok(());
         }
@@ -43,13 +41,8 @@ impl App {
             }
             LiveSummaryWatcher::PollOnly { reason } => {
                 self.surface_boundary_error(reason, false);
-                self.live_summary_watcher = None;
-                self.live_summary_change_events = None;
             }
-            LiveSummaryWatcher::Disabled => {
-                self.live_summary_watcher = None;
-                self.live_summary_change_events = None;
-            }
+            LiveSummaryWatcher::Disabled => {}
         }
         Ok(())
     }

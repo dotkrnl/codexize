@@ -530,11 +530,7 @@ fn stage_status_from_runs(
         return NodeStatus::Failed;
     }
     if phase_matches && !runs.is_empty() && runs.iter().all(|r| r.status == RunStatus::Done) {
-        return match (stage_key, state.current_phase) {
-            ("spec-review", Phase::SpecReviewPaused) => NodeStatus::WaitingUser,
-            ("plan-review", Phase::PlanReviewPaused) => NodeStatus::WaitingUser,
-            _ => NodeStatus::WaitingUser,
-        };
+        return NodeStatus::WaitingUser;
     }
     if phase_matches {
         if runs.is_empty() {

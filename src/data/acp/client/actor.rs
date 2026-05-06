@@ -272,56 +272,49 @@ async fn handle_command<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    match cmd {
+    let (kind, id, method, params, respond) = match cmd {
         RpcCommand::Request {
             id,
             method,
             params,
             respond,
-        } => {
-            let message = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": method,
-                "params": params
-            });
-            if !*writer_open {
-                let _ = respond.send(Err(AcpError::io(format!(
-                    "failed to write ACP request {method}: writer closed"
-                ))));
-                return Ok(());
-            }
-            if let Err(err) = write_json_rpc_line(writer, &message).await {
-                *writer_open = false;
-                let _ = respond.send(Err(AcpError::io(format!(
-                    "failed to write ACP request {method}: {err}"
-                ))));
-                return Ok(());
-            }
-            pending.insert(id, respond);
-            Ok(())
-        }
+        } => ("request", Some(id), method, params, Some(respond)),
         RpcCommand::Notify { method, params } => {
-            if !*writer_open {
-                return Err(AcpError::io(format!(
-                    "failed to write ACP notification {method}: writer closed"
-                )));
-            }
-            let message = json!({
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": params
-            });
-            if let Err(err) = write_json_rpc_line(writer, &message).await {
-                *writer_open = false;
-                return Err(AcpError::io(format!(
-                    "failed to write ACP notification {method}: {err}"
-                )));
-            }
-            Ok(())
+            ("notification", None, method, params, None)
         }
-        RpcCommand::Shutdown => Ok(()),
+        RpcCommand::Shutdown => return Ok(()),
+    };
+    let report_failure = |err: AcpError, respond: Option<oneshot::Sender<AcpResult<Value>>>| {
+        if let Some(respond) = respond {
+            let _ = respond.send(Err(err));
+            None
+        } else {
+            Some(err)
+        }
+    };
+    if !*writer_open {
+        let err = AcpError::io(format!("failed to write ACP {kind} {method}: writer closed"));
+        return match report_failure(err, respond) {
+            Some(err) => Err(err),
+            None => Ok(()),
+        };
     }
+    let mut message = json!({ "jsonrpc": "2.0", "method": method, "params": params });
+    if let Some(id) = id {
+        message["id"] = json!(id);
+    }
+    if let Err(err) = write_json_rpc_line(writer, &message).await {
+        *writer_open = false;
+        let err = AcpError::io(format!("failed to write ACP {kind} {method}: {err}"));
+        return match report_failure(err, respond) {
+            Some(err) => Err(err),
+            None => Ok(()),
+        };
+    }
+    if let (Some(id), Some(respond)) = (id, respond) {
+        pending.insert(id, respond);
+    }
+    Ok(())
 }
 
 async fn handle_inbound_line<W>(
@@ -339,12 +332,9 @@ where
 
     if let Some(method) = value.get("method").and_then(Value::as_str) {
         if method == "session/update" {
-            // Forward the inner `update` field unchanged. Null signals
-            // "session/update without an update field" so the dispatcher can
-            // emit Unknown { kind: "session/update" }.
+            // Forward inner `update` unchanged; null = no update field.
             let update_value = value
-                .get("params")
-                .and_then(|params| params.get("update"))
+                .pointer("/params/update")
                 .cloned()
                 .unwrap_or(Value::Null);
             let _ = updates.send(Ok(update_value));
@@ -352,26 +342,20 @@ where
         }
 
         if let Some(id) = value.get("id") {
-            let response = value
+            let result = value
                 .get("params")
-                .and_then(|params| client_request_response(method, params))
-                .map(|result| {
-                    json!({
-                        "jsonrpc": "2.0",
-                        "id": id.clone(),
-                        "result": result,
-                    })
-                })
-                .unwrap_or_else(|| {
-                    json!({
-                        "jsonrpc": "2.0",
-                        "id": id.clone(),
-                        "error": {
-                            "code": -32601,
-                            "message": format!("codexize client does not implement method {method}"),
-                        }
-                    })
-                });
+                .and_then(|p| client_request_response(method, p));
+            let response = match result {
+                Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                None => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {
+                        "code": -32601,
+                        "message": format!("codexize client does not implement method {method}"),
+                    }
+                }),
+            };
             if *writer_open && let Err(err) = write_json_rpc_line(writer, &response).await {
                 *writer_open = false;
                 return Err(AcpError::io(format!(
@@ -385,20 +369,21 @@ where
     if let Some(id) = value.get("id").and_then(Value::as_u64)
         && let Some(sender) = pending.remove(&id)
     {
-        if let Some(error) = value.get("error") {
+        let result = if let Some(error) = value.get("error") {
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("ACP request failed")
                 .to_string();
-            let _ = sender.send(Err(AcpError::protocol(message)));
+            Err(AcpError::protocol(message))
         } else if let Some(result) = value.get("result") {
-            let _ = sender.send(Ok(result.clone()));
+            Ok(result.clone())
         } else {
-            let _ = sender.send(Err(AcpError::protocol(
+            Err(AcpError::protocol(
                 "ACP response was missing both result and error".to_string(),
-            )));
-        }
+            ))
+        };
+        let _ = sender.send(result);
     }
     Ok(())
 }

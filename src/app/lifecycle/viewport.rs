@@ -12,15 +12,6 @@ impl App {
         current_node_index(&self.nodes)
     }
 
-    #[cfg(test)]
-    pub(crate) fn current_row(&self) -> usize {
-        let current = self.current_node();
-        self.visible_rows
-            .iter()
-            .position(|row| row.depth == 0 && row.path.first().copied() == Some(current))
-            .unwrap_or(0)
-    }
-
     pub(crate) fn node_for_row(&self, index: usize) -> Option<&Node> {
         let row = self.visible_rows.get(index)?;
         node_at_path(&self.nodes, &row.path)

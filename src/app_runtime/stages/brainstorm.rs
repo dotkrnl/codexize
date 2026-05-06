@@ -222,13 +222,4 @@ impl App {
         }
         Ok(())
     }
-
-    #[cfg(test)]
-    pub(crate) fn select_brainstorm_model(models: &[CachedModel]) -> Option<&CachedModel> {
-        crate::selection::selection::pick_for_phase(
-            models,
-            crate::selection::config::SelectionPhase::Idea,
-            None,
-        )
-    }
 }

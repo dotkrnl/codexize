@@ -23,7 +23,7 @@ pub use crate::ui::split;
 mod state;
 pub use crate::ui::status_line;
 #[cfg(test)]
-mod test_harness;
+mod test_support;
 // The private app suites live in layer-owned directories, but remain declared
 // here so they can exercise App internals without widening production APIs.
 #[cfg(test)]
@@ -183,14 +183,6 @@ pub(crate) struct PendingTermination {
 }
 
 impl PendingTermination {
-    #[cfg(test)]
-    fn new_stop_only(run_id: u64) -> Self {
-        Self {
-            run_id,
-            intent: TerminationIntent::StopOnly,
-        }
-    }
-
     fn marker(&self) -> &'static str {
         match self.intent {
             TerminationIntent::StopOnly | TerminationIntent::StopAndQuit => "agent_stopped_by_user",

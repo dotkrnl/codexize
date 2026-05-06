@@ -1,6 +1,6 @@
 use crate::adapters::EffortLevel;
 use crate::app::split::SplitTarget;
-use crate::app::test_harness::{key, mk_app};
+use crate::app::test_support::{key, mk_app};
 use crate::state::{LaunchModes, Phase, RunRecord, RunStatus, SessionState};
 
 #[test]

@@ -1,13 +1,16 @@
-// Re-organized from tests_prompts.rs — see commit history.
+//! Prompt rendering snapshot suite.
+//!
+//! Each prompt builder is rendered against fixed-path fixtures so the
+//! `insta` snapshots pin the agent-visible body. The test runs under
+//! `with_temp_root_and_cwd` because `prompts::project_doc_instr` walks the
+//! current working directory for `CLAUDE.md` / `AGENTS.md`, and we need the
+//! cwd to be the empty tempdir so the snapshot is stable regardless of what
+//! the host repo carries.
 
-use super::{prompts::*, test_harness::*};
-use crate::{
-    adapters::EffortLevel,
-    state::{self as session_state, Phase, PipelineItemStatus, RunRecord, RunStatus, SessionState},
-    tasks,
-};
+use super::test_support::with_temp_root_and_cwd;
+use crate::app::prompts::*;
 
-pub(super) fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
+fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
     insta::with_settings!({
         description => "Prompt output snapshot",
         omit_expression => true,
@@ -16,5 +19,220 @@ pub(super) fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
     });
 }
 
-mod chunk_00_tests;
-mod chunk_01_tests;
+#[test]
+fn prompt_insta_snapshots_match_fixtures() {
+    use std::path::{Path, PathBuf};
+    with_temp_root_and_cwd(|_root| {
+        let session_dir = PathBuf::from("/tmp/codexize-prompt-fixture/session");
+        let artifacts = session_dir.join("artifacts");
+        let round1 = session_dir.join("rounds/001");
+        let round3 = session_dir.join("rounds/003");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        std::fs::create_dir_all(&round1).unwrap();
+        std::fs::create_dir_all(&round3).unwrap();
+
+        let spec = artifacts.join("spec.md");
+        let plan = artifacts.join("plan.md");
+        let tasks_path = artifacts.join("tasks.toml");
+        let summary = artifacts.join("session_summary.toml");
+        let live = artifacts.join("live_summary.txt");
+        let recovery = round1.join("recovery.toml");
+        let task_file_r1 = round1.join("task.toml");
+        let task_file_r3 = round3.join("task.toml");
+        let review_scope_r1 = round1.join("review_scope.toml");
+        let review_scope_r3 = round3.join("review_scope.toml");
+        let simplification = round1.join("simplification.toml");
+        let review_r1 = round1.join("review.toml");
+        let review_r3 = round3.join("review.toml");
+        let final_verdict_r3 = round3.join("final_validation_3.toml");
+        let spec_review_out = artifacts.join("spec-review-1.md");
+        let plan_review_r1_out = artifacts.join("plan-review-1.md");
+        let plan_review_r3_out = artifacts.join("plan-review-3.md");
+
+        assert_prompt_insta_snapshot(
+            "live_summary",
+            &live_summary_instruction(&session_dir.join("artifacts/live_summary.txt")),
+        );
+        assert_prompt_insta_snapshot(
+            "live_summary_interactive",
+            &live_summary_instruction_interactive(Path::new(
+                "/tmp/codexize-prompt-fixture/session/artifacts/live_summary.interactive.txt",
+            )),
+        );
+        assert_prompt_insta_snapshot(
+            "spec_review",
+            &spec_review_prompt(
+                &spec.display().to_string(),
+                &spec_review_out.display().to_string(),
+                &live.display().to_string(),
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "plan_review_round1",
+            &plan_review_prompt(
+                &spec.display().to_string(),
+                &plan.display().to_string(),
+                &plan_review_r1_out.display().to_string(),
+                1,
+                &live.display().to_string(),
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "plan_review_round3",
+            &plan_review_prompt(
+                &spec.display().to_string(),
+                &plan.display().to_string(),
+                &plan_review_r3_out.display().to_string(),
+                3,
+                &live.display().to_string(),
+            ),
+        );
+
+        let idea = "fictional idea text used only to pin the snapshot";
+        assert_prompt_insta_snapshot(
+            "brainstorm_interactive",
+            &brainstorm_prompt(
+                idea,
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                false,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "brainstorm_yolo",
+            &brainstorm_prompt(
+                idea,
+                &spec.display().to_string(),
+                &summary.display().to_string(),
+                &live.display().to_string(),
+                true,
+            ),
+        );
+
+        let spec_reviews = vec![
+            artifacts.join("spec-review-1.md"),
+            artifacts.join("spec-review-2.md"),
+        ];
+        assert_prompt_insta_snapshot(
+            "planning_interactive",
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, false),
+        );
+        assert_prompt_insta_snapshot(
+            "planning_yolo",
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, true),
+        );
+        assert_prompt_insta_snapshot(
+            "sharding",
+            &sharding_prompt(&spec, &plan, &tasks_path, &live),
+        );
+        assert_prompt_insta_snapshot(
+            "final_validation",
+            &final_validation_prompt(
+                "fictional idea body — pinned for snapshot",
+                "# Spec\n\n## User-stated requirements (authoritative)\n- pinned\n\n## Out of scope\n- pinned\n",
+                &final_verdict_r3,
+                &live,
+                None,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "recovery_interactive",
+            &recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2, 3],
+                &[1, 2, 3, 4, 5],
+                &live,
+                &recovery,
+                true,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "recovery_noninteractive",
+            &recovery_prompt(
+                &spec,
+                &plan,
+                &tasks_path,
+                Some(7),
+                Some("reviewer flagged Y"),
+                &[1, 2, 3],
+                &[1, 2, 3, 4, 5],
+                &live,
+                &recovery,
+                false,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "recovery_plan_review",
+            &recovery_plan_review_prompt(
+                &spec,
+                &plan,
+                &review_r1,
+                &recovery,
+                &live,
+                &plan_review_r1_out,
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "recovery_sharding",
+            &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
+        );
+        assert_prompt_insta_snapshot(
+            "coder_round1",
+            &coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]),
+        );
+        let prev_review_path = session_dir.join("rounds/002/review.toml");
+        std::fs::create_dir_all(prev_review_path.parent().unwrap()).unwrap();
+        std::fs::write(&prev_review_path, "status = \"refine\"\n").unwrap();
+        assert_prompt_insta_snapshot(
+            "coder_round3_with_carryover",
+            &coder_prompt(
+                &session_dir,
+                7,
+                3,
+                &task_file_r3,
+                &live,
+                true,
+                &[
+                    "carry-1: prefer streaming reads".to_string(),
+                    "carry-2: tighten error handling".to_string(),
+                ],
+            ),
+        );
+        assert_prompt_insta_snapshot(
+            "reviewer_round1",
+            &reviewer_prompt(ReviewerPromptInputs {
+                session_dir: &session_dir,
+                task_id: 7,
+                round: 1,
+                task_file: &task_file_r1,
+                review_scope_file: &review_scope_r1,
+                coder_summary_file: None,
+                review_file: &review_r1,
+                live_summary_path: &live,
+            }),
+        );
+        let coder_summary_path = round3.join("coder_summary.toml");
+        assert_prompt_insta_snapshot(
+            "reviewer_round3_with_summary",
+            &reviewer_prompt(ReviewerPromptInputs {
+                session_dir: &session_dir,
+                task_id: 7,
+                round: 3,
+                task_file: &task_file_r3,
+                review_scope_file: &review_scope_r3,
+                coder_summary_file: Some(&coder_summary_path),
+                review_file: &review_r3,
+                live_summary_path: &live,
+            }),
+        );
+        assert_prompt_insta_snapshot(
+            "simplifier",
+            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live),
+        );
+    });
+}

@@ -1,20 +1,38 @@
 use super::*;
+use itertools::Itertools;
 use std::collections::BTreeSet;
+
+fn node(
+    label: impl Into<String>,
+    kind: NodeKind,
+    status: NodeStatus,
+    summary: impl Into<String>,
+    children: Vec<Node>,
+) -> Node {
+    Node {
+        label: label.into(),
+        kind,
+        status,
+        summary: summary.into(),
+        children,
+        run_id: None,
+        leaf_run_id: None,
+    }
+}
 
 /// Boundary rounds — the rounds at which final-validation has run, sorted
 /// ascending and deduplicated. Iteration N's round range is bounded above
 /// by `iteration_boundaries(state)[N - 1]` (when present); when absent the
 /// iteration is "open" and accepts every round from its start onward.
 fn iteration_boundaries(state: &SessionState) -> Vec<u32> {
-    let mut bounds: Vec<u32> = state
+    state
         .agent_runs
         .iter()
         .filter(|r| r.stage == "final-validation")
         .map(|r| r.round)
-        .collect();
-    bounds.sort_unstable();
-    bounds.dedup();
-    bounds
+        .sorted()
+        .dedup()
+        .collect()
 }
 
 /// Inclusive (start, optional end) round range for the given outer
@@ -72,21 +90,14 @@ pub(super) fn iteration_label(base: &str, iteration: u32) -> String {
 
 /// Task ids that belong to the requested iteration (in pipeline order).
 pub(super) fn task_ids_for_iteration(state: &SessionState, iteration: u32) -> Vec<u32> {
-    let mut ids = Vec::new();
-    let mut seen = BTreeSet::new();
-    for item in state
+    state
         .builder
         .pipeline_items
         .iter()
         .filter(|item| item.stage == "coder" && item.iteration == iteration)
-    {
-        if let Some(task_id) = item.task_id
-            && seen.insert(task_id)
-        {
-            ids.push(task_id);
-        }
-    }
-    ids
+        .filter_map(|item| item.task_id)
+        .unique()
+        .collect()
 }
 
 pub(super) fn build_idea_node(state: &SessionState) -> Node {
@@ -94,15 +105,7 @@ pub(super) fn build_idea_node(state: &SessionState) -> Node {
         Phase::IdeaInput => (NodeStatus::WaitingUser, "waiting for idea".to_string()),
         _ => (NodeStatus::Done, "idea captured".to_string()),
     };
-    Node {
-        label: "Idea".to_string(),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children: Vec::new(),
-        run_id: None,
-        leaf_run_id: None,
-    }
+    node("Idea", NodeKind::Stage, status, summary, Vec::new())
 }
 
 pub(super) fn build_simple_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
@@ -116,19 +119,8 @@ pub(super) fn build_simple_stage(state: &SessionState, stage_key: &str, label: &
     let latest = latest_attempts(&runs);
     let status = stage_status_from_runs(&latest, state, stage_key);
     let summary = stage_summary(state, stage_key, label, &latest);
-    let mut children = Vec::new();
-    for run in runs {
-        children.push(agent_run_node(run));
-    }
-    Node {
-        label: label.to_string(),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children,
-        run_id: None,
-        leaf_run_id: None,
-    }
+    let children = runs.iter().map(|run| agent_run_node(run)).collect();
+    node(label, NodeKind::Stage, status, summary, children)
 }
 
 pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &str) -> Node {
@@ -142,37 +134,23 @@ pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &
     let latest = latest_attempts(&runs);
     let status = stage_status_from_runs(&latest, state, stage_key);
     let summary = stage_summary(state, stage_key, label, &latest);
-    let mut rounds: std::collections::BTreeMap<u32, Vec<&RunRecord>> =
-        std::collections::BTreeMap::new();
+    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
     for run in &runs {
         rounds.entry(run.round).or_default().push(*run);
     }
-    let mut children = Vec::new();
-    for (round_num, round_runs) in rounds {
-        let mut round_children = Vec::new();
-        for run in &round_runs {
-            round_children.push(agent_run_node(run));
-        }
-        let round_status = rollup_status(&round_runs);
-        children.push(Node {
-            label: format!("Round {}", round_num),
-            kind: NodeKind::Round,
-            status: round_status,
-            summary: String::new(),
-            children: round_children,
-            run_id: None,
-            leaf_run_id: None,
-        });
-    }
-    Node {
-        label: label.to_string(),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children,
-        run_id: None,
-        leaf_run_id: None,
-    }
+    let children = rounds
+        .into_iter()
+        .map(|(round_num, round_runs)| {
+            node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&round_runs),
+                "",
+                round_runs.iter().map(|r| agent_run_node(r)).collect(),
+            )
+        })
+        .collect();
+    node(label, NodeKind::Stage, status, summary, children)
 }
 
 pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node {
@@ -216,56 +194,32 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
     let status = if is_open_iteration {
         builder_status(state, &coder_runs, &reviewer_runs, &recovery_runs)
     } else {
-        // A closed iteration (its FV has run) reports a static rollup —
-        // the global builder phase machinery only describes the *current*
-        // iteration, so reusing it for older trios would mis-color them.
-        if recovery_runs.iter().any(|r| r.status == RunStatus::Running)
-            || coder_runs.iter().any(|r| r.status == RunStatus::Running)
-            || reviewer_runs.iter().any(|r| r.status == RunStatus::Running)
-        {
-            NodeStatus::Running
-        } else if coder_runs.is_empty() && reviewer_runs.is_empty() && recovery_runs.is_empty() {
-            NodeStatus::Pending
-        } else if coder_runs
-            .iter()
-            .chain(reviewer_runs.iter())
-            .all(|r| r.status == RunStatus::Done)
-        {
-            NodeStatus::Done
-        } else if coder_runs
-            .iter()
-            .chain(reviewer_runs.iter())
-            .chain(recovery_runs.iter())
-            .any(|r| matches!(r.status, RunStatus::Failed | RunStatus::FailedUnverified))
-        {
-            NodeStatus::Failed
-        } else {
-            NodeStatus::Pending
-        }
+        per_iteration_terminal_status(
+            &coder_runs
+                .iter()
+                .chain(reviewer_runs.iter())
+                .chain(recovery_runs.iter())
+                .copied()
+                .collect::<Vec<_>>(),
+        )
     };
     let summary = if iteration <= 1 {
         builder_summary(state, &recovery_runs)
     } else {
         String::new()
     };
-    let task_ids_in_iteration = task_ids_for_iteration(state, iteration);
-    let task_id_set = task_ids_in_iteration
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let ordered_task_ids = task_ids_in_iteration.clone();
-    let task_status_by_id = state
+    let ordered_task_ids = task_ids_for_iteration(state, iteration);
+    let task_id_set: BTreeSet<u32> = ordered_task_ids.iter().copied().collect();
+    let task_status_by_id: BTreeMap<u32, PipelineItemStatus> = state
         .builder
         .pipeline_items
         .iter()
-        .filter(|item| {
-            item.stage == "coder"
-                && item
-                    .task_id
-                    .is_some_and(|task_id| task_id_set.contains(&task_id))
+        .filter(|item| item.stage == "coder")
+        .filter_map(|item| {
+            let id = item.task_id?;
+            task_id_set.contains(&id).then_some((id, item.status))
         })
-        .filter_map(|item| item.task_id.map(|task_id| (task_id, item.status)))
-        .collect::<BTreeMap<_, _>>();
+        .collect();
 
     // Group runs into chronological round segments. A "segment" is one
     // contiguous streak of same-(task_id, round) runs in global id order,
@@ -307,16 +261,11 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
 
     let mut children = Vec::new();
     for &task_id in &ordered_task_ids {
-        let task_coder: Vec<&RunRecord> = coder_runs
+        let is_tough = coder_runs
             .iter()
             .filter(|r| r.task_id == Some(task_id))
-            .copied()
-            .collect();
-        let task_reviewer: Vec<&RunRecord> = reviewer_runs
-            .iter()
-            .filter(|r| r.task_id == Some(task_id))
-            .copied()
-            .collect();
+            .chain(reviewer_runs.iter().filter(|r| r.task_id == Some(task_id)))
+            .any(|r| r.effort == crate::adapters::EffortLevel::Tough);
         let mut segments: Vec<RoundSegment<'_>> =
             segments_by_task.remove(&task_id).unwrap_or_default();
         if segments.is_empty() {
@@ -326,50 +275,28 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         }
         let mut round_nodes = Vec::new();
         for (round_num, c_runs, r_runs) in segments {
-            let mut mode_nodes = Vec::new();
             let mut combined: Vec<&RunRecord> = Vec::new();
-            if !c_runs.is_empty() {
-                let mut coder_children = Vec::new();
-                for run in &c_runs {
-                    coder_children.push(attempt_run_node(run));
-                    combined.push(*run);
+            let mut mode_nodes = Vec::new();
+            for (label, runs) in [("Builder", &c_runs), ("Reviewer", &r_runs)] {
+                if runs.is_empty() {
+                    continue;
                 }
-                mode_nodes.push(Node {
-                    label: "Builder".to_string(),
-                    kind: NodeKind::Mode,
-                    status: rollup_status(&c_runs),
-                    summary: String::new(),
-                    children: coder_children,
-                    run_id: None,
-                    leaf_run_id: None,
-                });
+                combined.extend(runs.iter().copied());
+                mode_nodes.push(node(
+                    label,
+                    NodeKind::Mode,
+                    rollup_status(runs),
+                    "",
+                    runs.iter().map(|r| attempt_run_node(r)).collect(),
+                ));
             }
-            if !r_runs.is_empty() {
-                let mut reviewer_children = Vec::new();
-                for run in &r_runs {
-                    reviewer_children.push(attempt_run_node(run));
-                    combined.push(*run);
-                }
-                mode_nodes.push(Node {
-                    label: "Reviewer".to_string(),
-                    kind: NodeKind::Mode,
-                    status: rollup_status(&r_runs),
-                    summary: String::new(),
-                    children: reviewer_children,
-                    run_id: None,
-                    leaf_run_id: None,
-                });
-            }
-            let round_status = rollup_status(&combined);
-            round_nodes.push(Node {
-                label: format!("Round {}", round_num),
-                kind: NodeKind::Round,
-                status: round_status,
-                summary: String::new(),
-                children: mode_nodes,
-                run_id: None,
-                leaf_run_id: None,
-            });
+            round_nodes.push(node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&combined),
+                "",
+                mode_nodes,
+            ));
         }
         let task_status = match task_status_by_id.get(&task_id).copied() {
             Some(PipelineItemStatus::Running) => NodeStatus::Running,
@@ -392,10 +319,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 }
             }
         };
-        let is_tough = task_coder
-            .iter()
-            .chain(task_reviewer.iter())
-            .any(|r| r.effort == crate::adapters::EffortLevel::Tough);
+
         let base_label = match state.builder.task_titles.get(&task_id) {
             Some(title) if !title.trim().is_empty() => {
                 format!("Task {}: {}", task_id, title.trim())
@@ -407,15 +331,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         } else {
             base_label
         };
-        children.push(Node {
-            label,
-            kind: NodeKind::Task,
-            status: task_status,
-            summary: String::new(),
-            children: round_nodes,
-            run_id: None,
-            leaf_run_id: None,
-        });
+        children.push(node(label, NodeKind::Task, task_status, "", round_nodes));
     }
     let in_recovery_phase = matches!(
         state.current_phase,
@@ -444,8 +360,8 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         let recovery_anchor_round = rounds.keys().next().copied();
         let mut round_nodes = Vec::new();
         for (round_num, (rec_runs, pr_runs, sh_runs)) in rounds {
-            let mut mode_nodes = Vec::new();
             let mut combined: Vec<&RunRecord> = Vec::new();
+            let mut mode_nodes = Vec::new();
             for (label, runs_for_mode) in [
                 ("Recovery", &rec_runs),
                 ("Plan Review", &pr_runs),
@@ -454,31 +370,22 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
                 if runs_for_mode.is_empty() {
                     continue;
                 }
-                let mut children = Vec::new();
-                for run in runs_for_mode {
-                    children.push(attempt_run_node(run));
-                    combined.push(*run);
-                }
-                mode_nodes.push(Node {
-                    label: label.to_string(),
-                    kind: NodeKind::Mode,
-                    status: rollup_status(runs_for_mode),
-                    summary: String::new(),
-                    children,
-                    run_id: None,
-                    leaf_run_id: None,
-                });
+                combined.extend(runs_for_mode.iter().copied());
+                mode_nodes.push(node(
+                    label,
+                    NodeKind::Mode,
+                    rollup_status(runs_for_mode),
+                    "",
+                    runs_for_mode.iter().map(|r| attempt_run_node(r)).collect(),
+                ));
             }
-            let round_status = rollup_status(&combined);
-            round_nodes.push(Node {
-                label: format!("Round {}", round_num),
-                kind: NodeKind::Round,
-                status: round_status,
-                summary: String::new(),
-                children: mode_nodes,
-                run_id: None,
-                leaf_run_id: None,
-            });
+            round_nodes.push(node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&combined),
+                "",
+                mode_nodes,
+            ));
         }
         let recovery_status = if in_recovery_phase {
             if state.agent_error.is_some() {
@@ -493,15 +400,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         } else {
             NodeStatus::Pending
         };
-        let recovery_node = Node {
-            label: "Builder Recovery".to_string(),
-            kind: NodeKind::Task,
-            status: recovery_status,
-            summary: String::new(),
-            children: round_nodes,
-            run_id: None,
-            leaf_run_id: None,
-        };
+        let recovery_node = node("Builder Recovery", NodeKind::Task, recovery_status, "", round_nodes);
         let target_task_id = state
             .builder
             .recovery_trigger_task_id
@@ -527,15 +426,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
             children.insert(fallback_pos, recovery_node);
         }
     }
-    Node {
-        label: iteration_label("Loop", iteration),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children,
-        run_id: None,
-        leaf_run_id: None,
-    }
+    node(iteration_label("Loop", iteration), NodeKind::Stage, status, summary, children)
 }
 
 pub(super) fn build_simplification_stage(state: &SessionState, iteration: u32) -> Node {
@@ -577,25 +468,17 @@ fn build_per_iteration_stage(
     }
     let children = rounds
         .into_iter()
-        .map(|(round_num, round_runs)| Node {
-            label: format!("Round {}", round_num),
-            kind: NodeKind::Round,
-            status: rollup_status(&round_runs),
-            summary: String::new(),
-            children: round_runs.iter().map(|r| agent_run_node(r)).collect(),
-            run_id: None,
-            leaf_run_id: None,
+        .map(|(round_num, round_runs)| {
+            node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&round_runs),
+                "",
+                round_runs.iter().map(|r| agent_run_node(r)).collect(),
+            )
         })
         .collect();
-    Node {
-        label: iteration_label(label, iteration),
-        kind: NodeKind::Stage,
-        status,
-        summary,
-        children,
-        run_id: None,
-        leaf_run_id: None,
-    }
+    node(iteration_label(label, iteration), NodeKind::Stage, status, summary, children)
 }
 
 /// Roll up the per-iteration Simplification / Final Validation status when

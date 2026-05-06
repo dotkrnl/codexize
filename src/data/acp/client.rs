@@ -1,10 +1,8 @@
 //! ACP JSON-RPC stdio client.
 //!
 //! Wire transport is a tokio actor (`actor`) owning the spawned child's
-//! stdio, framed line reader, outstanding-request map, and notification
-//! dispatch. The synchronous [`AcpSession`] facade ([`SubprocessSession`])
-//! lets sync callers drive prompt turns by polling — `try_recv` on tokio
-//! channels and `block_on` on `oneshot::Receiver`s.
+//! stdio and outstanding-request map. The synchronous [`AcpSession`] facade
+//! lets sync callers drive prompt turns by polling.
 
 mod actor;
 #[path = "../acp_support/client_dispatch.rs"]
@@ -49,7 +47,7 @@ impl AcpConnector for SubprocessConnector {
         let runtime = Arc::new(build_session_runtime()?);
         let (mut rpc, child) = runtime.block_on(spawn_actor(&runtime, launch))?;
         let session = match runtime.block_on(handshake(&mut rpc, launch)) {
-            Ok(session) => session,
+            Ok(s) => s,
             Err(err) => {
                 rpc.shutdown_blocking(child);
                 return Err(err);
@@ -79,19 +77,19 @@ struct SubprocessSession {
 
 impl SubprocessSession {
     fn new(
-        handshake: HandshakeOutput,
+        h: HandshakeOutput,
         rpc: RpcClient,
         child: Child,
         runtime: Arc<Runtime>,
         launch: &AcpResolvedLaunch,
     ) -> Self {
         Self {
-            session_id: handshake.session_id,
+            session_id: h.session_id,
             rpc,
             child: Some(child),
             runtime,
-            supports_close: handshake.supports_close,
-            prompt_response: Some(handshake.prompt_response),
+            supports_close: h.supports_close,
+            prompt_response: Some(h.prompt_response),
             prompt_finished: false,
             closed: false,
             cwd: launch.session.cwd.clone(),
@@ -111,6 +109,11 @@ impl SubprocessSession {
         self.prompt_response = None;
         self.boundary_state.reset_for_prompt_turn();
     }
+
+    fn fail_turn(&mut self, message: String) -> ClientUpdate {
+        self.finish_prompt_turn();
+        ClientUpdate::PromptTurnFailed { message }
+    }
 }
 
 impl AcpSession for SubprocessSession {
@@ -119,13 +122,9 @@ impl AcpSession for SubprocessSession {
     }
 
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
-        if let Some(queued) = self.pending_updates.pop_front() {
-            return Ok(Some(queued));
+        if let Some(q) = self.pending_updates.pop_front() {
+            return Ok(Some(q));
         }
-
-        // Drain wire messages until either a visible update is queued or the
-        // channel runs dry. Non-terminal `tool_call_update`s are merged in
-        // silently.
         loop {
             match self.rpc.try_next_update() {
                 Ok(Some(value)) => {
@@ -137,32 +136,24 @@ impl AcpSession for SubprocessSession {
                         &mut self.boundary_state,
                         &mut self.pending_updates,
                     );
-                    if let Some(queued) = self.pending_updates.pop_front() {
-                        return Ok(Some(queued));
+                    if let Some(q) = self.pending_updates.pop_front() {
+                        return Ok(Some(q));
                     }
                 }
                 Ok(None) => break,
-                Err(err) => {
-                    self.finish_prompt_turn();
-                    return Ok(Some(ClientUpdate::PromptTurnFailed {
-                        message: err.to_string(),
-                    }));
-                }
+                Err(err) => return Ok(Some(self.fail_turn(err.to_string()))),
             }
         }
-
         if self.prompt_finished {
             return Ok(None);
         }
-
-        let Some(prompt_response) = self.prompt_response.as_mut() else {
+        let Some(rx) = self.prompt_response.as_mut() else {
             return Ok(None);
         };
-
-        match prompt_response.try_recv() {
+        Ok(Some(match rx.try_recv() {
             Ok(Ok(result)) => {
                 self.finish_prompt_turn();
-                let update = match parse_prompt_result(result) {
+                match parse_prompt_result(result) {
                     Ok(PromptTurnOutcome::Finished) => ClientUpdate::PromptTurnFinished,
                     Ok(PromptTurnOutcome::Failed { message }) => {
                         ClientUpdate::PromptTurnFailed { message }
@@ -170,23 +161,14 @@ impl AcpSession for SubprocessSession {
                     Err(err) => ClientUpdate::PromptTurnFailed {
                         message: err.to_string(),
                     },
-                };
-                Ok(Some(update))
+                }
             }
-            Ok(Err(err)) => {
-                self.finish_prompt_turn();
-                Ok(Some(ClientUpdate::PromptTurnFailed {
-                    message: err.to_string(),
-                }))
-            }
-            Err(oneshot::error::TryRecvError::Empty) => Ok(None),
+            Ok(Err(err)) => self.fail_turn(err.to_string()),
+            Err(oneshot::error::TryRecvError::Empty) => return Ok(None),
             Err(oneshot::error::TryRecvError::Closed) => {
-                self.finish_prompt_turn();
-                Ok(Some(ClientUpdate::PromptTurnFailed {
-                    message: "ACP prompt turn channel disconnected".to_string(),
-                }))
+                self.fail_turn("ACP prompt turn channel disconnected".to_string())
             }
-        }
+        }))
     }
 
     fn submit_prompt(&mut self, text: &str) -> AcpResult<()> {
@@ -196,11 +178,11 @@ impl AcpSession for SubprocessSession {
             ));
         }
         self.boundary_state.reset_for_prompt_turn();
-        let prompt_params = prompt_request_params(
+        let params = prompt_request_params(
             &self.session_id,
             &super::PromptPayload::Text(text.to_string()),
         )?;
-        self.prompt_response = Some(self.rpc.start_request("session/prompt", prompt_params)?);
+        self.prompt_response = Some(self.rpc.start_request("session/prompt", params)?);
         self.prompt_finished = false;
         Ok(())
     }
@@ -218,39 +200,29 @@ impl AcpSession for SubprocessSession {
         self.pending_updates.clear();
         self.tool_calls = ToolCallMap::new();
         self.prompt_response = None;
-
         if self.supports_close {
-            // Best-effort graceful close — drop the receiver so we never block
-            // a sync caller waiting on a server that has already disconnected.
             let _ = self
                 .rpc
                 .start_request("session/close", json!({ "sessionId": self.session_id }));
         }
-
         let Some(mut child) = self.child.take() else {
             self.rpc.shutdown_blocking_no_child();
             return Ok(());
         };
-
-        // Close the writer half so the actor sees a clean shutdown via
-        // command-channel drop, then wait for the actor to drain.
         self.rpc.shutdown_async(&self.runtime);
-
         match child.try_wait() {
-            Ok(Some(_)) => {}
+            Ok(Some(_)) => Ok(()),
             Ok(None) => {
                 let _ = self.runtime.block_on(async {
                     let _ = child.kill().await;
                     child.wait().await
                 });
+                Ok(())
             }
-            Err(err) => {
-                return Err(AcpError::io(format!(
-                    "failed to inspect ACP child process: {err}"
-                )));
-            }
+            Err(err) => Err(AcpError::io(format!(
+                "failed to inspect ACP child process: {err}"
+            ))),
         }
-        Ok(())
     }
 }
 
@@ -290,10 +262,10 @@ pub fn client_updates_from_session_updates_for_test(
     cwd: &Path,
 ) -> Vec<ClientUpdate> {
     let mut map = ToolCallMap::new();
-    let mut boundary_state = AcpBoundaryState::new();
+    let mut boundary = AcpBoundaryState::new();
     let mut out = VecDeque::new();
     for value in values {
-        dispatch_update(&value, cwd, &mut map, &mut boundary_state, &mut out);
+        dispatch_update(&value, cwd, &mut map, &mut boundary, &mut out);
     }
     out.into_iter().collect()
 }

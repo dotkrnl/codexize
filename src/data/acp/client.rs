@@ -7,10 +7,13 @@
 //! channels and `block_on` on `oneshot::Receiver`s.
 
 mod actor;
+#[path = "../acp_support/client_dispatch.rs"]
 mod dispatch;
+#[path = "../acp_support/client_handshake.rs"]
 mod handshake;
 
-use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate, tool_call::ToolCallMap};
+use super::{AcpError, AcpResolvedLaunch, AcpResult, ClientUpdate};
+use crate::data::acp_support::tool_call::ToolCallMap;
 use actor::RpcClient;
 use dispatch::{AcpBoundaryState, dispatch_update};
 use handshake::{

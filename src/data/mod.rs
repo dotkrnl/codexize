@@ -1,6 +1,7 @@
 //! Canonical home for persistence, process supervision, and provider IO.
 
 pub mod acp;
+pub(crate) mod acp_support;
 pub mod adapters;
 pub mod artifacts;
 pub(crate) mod async_bridge;

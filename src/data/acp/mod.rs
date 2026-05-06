@@ -1,7 +1,5 @@
 mod client;
-mod config;
-mod events;
-mod tool_call;
+use super::acp_support::{config, events};
 
 #[cfg(test)]
 pub use client::client_updates_from_session_updates_for_test;

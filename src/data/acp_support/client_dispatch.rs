@@ -6,12 +6,10 @@
 //! events without stable ids, so no-identity mid-stream chunks default to
 //! `Continue` rather than over-splitting one streamed response.
 
-use super::super::{
-    AcpTextBoundary, ClientUpdate, ToolCallActivityKind,
-    tool_call::{
-        ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line,
-        format_result_line, is_terminal_status,
-    },
+use crate::data::acp::{AcpTextBoundary, ClientUpdate, ToolCallActivityKind};
+use crate::data::acp_support::tool_call::{
+    ToolCallDisplayState, ToolCallMap, ToolCallPayload, format_invocation_line, format_result_line,
+    is_terminal_status,
 };
 use serde_json::Value;
 use std::{collections::VecDeque, path::Path};

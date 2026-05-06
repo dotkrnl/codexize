@@ -1,11 +1,11 @@
 use super::*;
-use crate::{adapters::EffortLevel, state::LaunchModes};
+use crate::{acp, adapters::EffortLevel, state::LaunchModes};
 
 fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
         vendor,
         cwd: PathBuf::from("workspace"),
-        prompt: super::super::PromptPayload::Text("prompt".to_string()),
+        prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: "gpt-5.5".to_string(),
         requested_effort: EffortLevel::Normal,
         effective_effort: EffortLevel::Low,
@@ -16,7 +16,7 @@ fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
             interactive: false,
         },
         required_artifacts: vec![PathBuf::from("artifacts/summary.toml")],
-        policy: super::super::AcpLaunchPolicy::default(),
+        policy: acp::AcpLaunchPolicy::default(),
     }
 }
 
@@ -142,7 +142,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
         .join("artifacts/live_summary.final-validation-r1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: super::super::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
+        policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
         ..sample_request(VendorKind::Codex)
     };
 
@@ -158,7 +158,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
     assert!(resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
         resolved.session.policy.shell_policy,
-        super::super::AcpShellCommandPolicy::Allowlist(_)
+        acp::AcpShellCommandPolicy::Allowlist(_)
     ));
     assert_eq!(
         resolved
@@ -222,7 +222,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
         .join("artifacts/live_summary.simplifier-stage-r1-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: super::super::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
+        policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
         ..sample_request(VendorKind::Codex)
     };
 
@@ -236,7 +236,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
     assert!(!resolved.session.policy.enforce_readonly_workspace);
     assert!(matches!(
         resolved.session.policy.shell_policy,
-        super::super::AcpShellCommandPolicy::FullAccess
+        acp::AcpShellCommandPolicy::FullAccess
     ));
     // Mandatory write paths still advertised so the runtime can surface
     // misrouted required-output writes.

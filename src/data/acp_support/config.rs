@@ -1,6 +1,6 @@
-use super::{
-    AcpError, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort, AcpResolvedLaunch,
-    AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
+use crate::data::acp::{
+    AcpError, AcpLaunchPolicy, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort,
+    AcpResolvedLaunch, AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
 };
 use crate::selection::{VendorKind, vendor::vendor_kind_to_str};
 use std::{
@@ -283,8 +283,8 @@ fn absolutize(path: &Path) -> AcpResult<PathBuf> {
     }
 }
 
-fn absolutize_policy(policy: &super::AcpLaunchPolicy) -> AcpResult<super::AcpLaunchPolicy> {
-    Ok(super::AcpLaunchPolicy {
+fn absolutize_policy(policy: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
+    Ok(AcpLaunchPolicy {
         allowed_write_paths: policy
             .allowed_write_paths
             .iter()
@@ -346,4 +346,5 @@ fn effort_to_str(effort: crate::adapters::EffortLevel) -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "config_tests.rs"]
 mod tests_mod;

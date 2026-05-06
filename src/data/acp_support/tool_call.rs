@@ -7,29 +7,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) const SNIPPET_MAX_CHARS: usize = 160;
-pub(super) const INVOCATION_LINE_MAX: usize = 200;
-pub(super) const RESULT_LINE_MAX: usize = 200;
-pub(super) const INVOCATION_PREFIX: &str = "tool: ";
-pub(super) const RESULT_PREFIX: &str = "result: ";
-pub(super) const TOOL_CALL_MAP_CAP: usize = 256;
+pub(in crate::data) const SNIPPET_MAX_CHARS: usize = 160;
+pub(in crate::data) const INVOCATION_LINE_MAX: usize = 200;
+pub(in crate::data) const RESULT_LINE_MAX: usize = 200;
+pub(in crate::data) const INVOCATION_PREFIX: &str = "tool: ";
+pub(in crate::data) const RESULT_PREFIX: &str = "result: ";
+pub(in crate::data) const TOOL_CALL_MAP_CAP: usize = 256;
 
 const TRUNCATE_SUFFIX: &str = "...";
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct ToolCallPayload {
-    pub(super) tool_call_id: Option<String>,
-    pub(super) title: Option<String>,
-    pub(super) kind: Option<String>,
-    pub(super) status: Option<String>,
-    pub(super) locations: Vec<PathBuf>,
-    pub(super) raw_input: Value,
-    pub(super) raw_output: Value,
-    pub(super) content: Vec<Value>,
+pub(in crate::data) struct ToolCallPayload {
+    pub(in crate::data) tool_call_id: Option<String>,
+    pub(in crate::data) title: Option<String>,
+    pub(in crate::data) kind: Option<String>,
+    pub(in crate::data) status: Option<String>,
+    pub(in crate::data) locations: Vec<PathBuf>,
+    pub(in crate::data) raw_input: Value,
+    pub(in crate::data) raw_output: Value,
+    pub(in crate::data) content: Vec<Value>,
 }
 
 impl ToolCallPayload {
-    pub(super) fn from_value(value: &Value) -> Self {
+    pub(in crate::data) fn from_value(value: &Value) -> Self {
         let non_empty_string = |key: &str| {
             value
                 .get(key)
@@ -68,18 +68,18 @@ impl ToolCallPayload {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(super) struct ToolCallDisplayState {
-    pub(super) title: Option<String>,
-    pub(super) kind: Option<String>,
-    pub(super) status: Option<String>,
-    pub(super) locations: Vec<PathBuf>,
-    pub(super) raw_input: Value,
-    pub(super) raw_output: Value,
-    pub(super) content: Vec<Value>,
+pub(in crate::data) struct ToolCallDisplayState {
+    pub(in crate::data) title: Option<String>,
+    pub(in crate::data) kind: Option<String>,
+    pub(in crate::data) status: Option<String>,
+    pub(in crate::data) locations: Vec<PathBuf>,
+    pub(in crate::data) raw_input: Value,
+    pub(in crate::data) raw_output: Value,
+    pub(in crate::data) content: Vec<Value>,
 }
 
 impl ToolCallDisplayState {
-    pub(super) fn from_payload(payload: &ToolCallPayload) -> Self {
+    pub(in crate::data) fn from_payload(payload: &ToolCallPayload) -> Self {
         Self {
             title: payload.title.clone(),
             kind: payload.kind.clone(),
@@ -93,7 +93,7 @@ impl ToolCallDisplayState {
 
     /// Merge non-empty fields from `payload`. Absent / null values never erase
     /// previously-known state.
-    pub(super) fn merge(&mut self, payload: &ToolCallPayload) {
+    pub(in crate::data) fn merge(&mut self, payload: &ToolCallPayload) {
         if payload.title.is_some() {
             self.title = payload.title.clone();
         }
@@ -122,7 +122,7 @@ impl ToolCallDisplayState {
 /// overwrite-on-id-reuse for display; `*_emitted` sets are monotonic for the
 /// session lifetime so the watchdog never sees duplicate Start/Finish.
 #[derive(Debug, Default)]
-pub(super) struct ToolCallMap {
+pub(in crate::data) struct ToolCallMap {
     entries: BTreeMap<String, ToolCallDisplayState>,
     insertion_order: VecDeque<String>,
     start_emitted: BTreeSet<String>,
@@ -130,21 +130,21 @@ pub(super) struct ToolCallMap {
 }
 
 impl ToolCallMap {
-    pub(super) fn new() -> Self {
+    pub(in crate::data) fn new() -> Self {
         Self::default()
     }
 
     #[cfg(test)]
-    pub(super) fn len(&self) -> usize {
+    pub(in crate::data) fn len(&self) -> usize {
         self.entries.len()
     }
 
     #[cfg(test)]
-    pub(super) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
+    pub(in crate::data) fn get(&self, id: &str) -> Option<&ToolCallDisplayState> {
         self.entries.get(id)
     }
 
-    pub(super) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
+    pub(in crate::data) fn insert(&mut self, id: String, state: ToolCallDisplayState) {
         if self.entries.remove(&id).is_some() {
             self.insertion_order.retain(|existing| existing != &id);
         }
@@ -158,7 +158,7 @@ impl ToolCallMap {
         self.entries.insert(id, state);
     }
 
-    pub(super) fn merge(
+    pub(in crate::data) fn merge(
         &mut self,
         id: &str,
         payload: &ToolCallPayload,
@@ -168,35 +168,35 @@ impl ToolCallMap {
         Some(entry)
     }
 
-    pub(super) fn evict(&mut self, id: &str) {
+    pub(in crate::data) fn evict(&mut self, id: &str) {
         if self.entries.remove(id).is_some() {
             self.insertion_order.retain(|existing| existing != id);
         }
     }
 
-    pub(super) fn mark_start_emitted(&mut self, id: &str) {
+    pub(in crate::data) fn mark_start_emitted(&mut self, id: &str) {
         self.start_emitted.insert(id.to_string());
     }
 
-    pub(super) fn start_emitted(&self, id: &str) -> bool {
+    pub(in crate::data) fn start_emitted(&self, id: &str) -> bool {
         self.start_emitted.contains(id)
     }
 
-    pub(super) fn mark_terminal_emitted(&mut self, id: &str) {
+    pub(in crate::data) fn mark_terminal_emitted(&mut self, id: &str) {
         self.terminal_emitted.insert(id.to_string());
     }
 
-    pub(super) fn terminal_emitted(&self, id: &str) -> bool {
+    pub(in crate::data) fn terminal_emitted(&self, id: &str) -> bool {
         self.terminal_emitted.contains(id)
     }
 
     #[cfg(test)]
-    pub(super) fn contains(&self, id: &str) -> bool {
+    pub(in crate::data) fn contains(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }
 }
 
-pub(super) fn is_terminal_status(status: &str) -> bool {
+pub(in crate::data) fn is_terminal_status(status: &str) -> bool {
     matches!(
         status,
         "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error"
@@ -210,7 +210,7 @@ fn is_success_status(status: &str) -> bool {
 /// Sanitize a raw output snippet: strip ANSI / OSC escapes via `vte`,
 /// replace control chars and tabs/newlines with single spaces, then trim.
 /// Truncation is applied separately.
-pub(super) fn sanitize_snippet(input: &str) -> String {
+pub(in crate::data) fn sanitize_snippet(input: &str) -> String {
     let stripped = strip_ansi_escapes::strip_str(input);
     let mut out = String::with_capacity(stripped.len());
     for c in stripped.chars() {
@@ -231,7 +231,7 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
 
 /// Truncate `text` to `max` chars, appending `...` if any chars dropped. Never
 /// splits a UTF-8 code point.
-pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
+pub(in crate::data) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }
@@ -266,7 +266,7 @@ fn collapse_line_whitespace(text: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SnippetKind {
+pub(in crate::data) enum SnippetKind {
     Output,
     Stderr,
 }
@@ -387,13 +387,13 @@ fn invocation_label(state: &ToolCallDisplayState, cwd: &Path) -> Option<String> 
     None
 }
 
-pub(super) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {
+pub(in crate::data) fn format_invocation_line(state: &ToolCallDisplayState, cwd: &Path) -> String {
     let body = invocation_label(state, cwd).unwrap_or_else(|| "tool".to_string());
     let collapsed = collapse_line_whitespace(&format!("{INVOCATION_PREFIX}{body}"));
     truncate_with_ellipsis(&collapsed, INVOCATION_LINE_MAX)
 }
 
-pub(super) fn format_result_line(state: &ToolCallDisplayState) -> String {
+pub(in crate::data) fn format_result_line(state: &ToolCallDisplayState) -> String {
     let status = state
         .status
         .as_deref()
@@ -424,4 +424,5 @@ pub(super) fn format_result_line(state: &ToolCallDisplayState) -> String {
 }
 
 #[cfg(test)]
+#[path = "tool_call_tests.rs"]
 mod tests_mod;

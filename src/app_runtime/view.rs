@@ -10,14 +10,10 @@
 //! migrated (top-rule mode badges read [`AppView::modes`], the terminal
 //! loop publishes the view each tick) while a few legacy surfaces still
 //! read state directly from [`crate::app::App`]. The view types remain
-//! authoritative for the runtime/UI seam and are exercised by
-//! [`crate::app_runtime::harness`].
-
-use std::sync::Arc;
-
+//! authoritative for the runtime/UI seam.
 use crate::logic::pipeline::Phase;
 use crate::state::{RunRecord, RunStatus};
-
+use std::sync::Arc;
 /// Severity tag for a UI-neutral status message. The TUI maps each variant
 /// to a colour/style; a future web UI maps the same variants to its own
 /// presentation primitives.
@@ -27,14 +23,12 @@ pub enum StatusSeverity {
     Warn,
     Error,
 }
-
 /// Single line of operator-facing status text. Owned and immutable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusMessage {
     pub text: Arc<str>,
     pub severity: StatusSeverity,
 }
-
 /// Pipeline stage identifier used by stage-scoped modals and commands.
 ///
 /// Distinct from [`Phase`] because phases include intermediate states
@@ -52,7 +46,6 @@ pub enum StageId {
     Implementation,
     Review,
 }
-
 /// Modal kinds the runtime asks the UI to render. The UI decides the
 /// rendering, but cannot invent modals — only the runtime can transition
 /// in/out of these states because they are rooted in pipeline + guard
@@ -68,7 +61,6 @@ pub enum ModalKind {
     StageError(StageId),
     FinalValidationBlocked,
 }
-
 /// Compact run summary for tree rows. The full [`RunRecord`] is also
 /// available in [`AppView::agent_runs`]; this projection exists so a
 /// future server-mode UI can render lists without re-deriving the
@@ -80,7 +72,6 @@ pub struct AgentRunSummary {
     pub window_name: Arc<str>,
     pub status: RunStatus,
 }
-
 impl AgentRunSummary {
     pub fn from_record(run: &RunRecord) -> Self {
         Self {
@@ -91,7 +82,6 @@ impl AgentRunSummary {
         }
     }
 }
-
 /// UI-neutral mirror of the operator-toggleable mode flags. Mirrors
 /// [`crate::logic::pipeline::Modes`] without dragging the persistence-shaped
 /// type across the seam.
@@ -100,7 +90,6 @@ pub struct ModeFlags {
     pub yolo: bool,
     pub cheap: bool,
 }
-
 /// Immutable, UI-neutral derived snapshot for any UI to render.
 ///
 /// The view is built from the runtime's authoritative state and shipped
@@ -131,7 +120,6 @@ pub struct AppView {
     /// and any UI surface that conditions on launch policy.
     pub modes: ModeFlags,
 }
-
 impl AppView {
     /// Empty view used by the harness and as a starting point before the
     /// runtime publishes its first real snapshot.
@@ -148,7 +136,6 @@ impl AppView {
         }
     }
 }
-
 #[cfg(test)]
 #[path = "view_tests.rs"]
 mod tests;

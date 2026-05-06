@@ -8,14 +8,15 @@
 //! contracts so subsequent slices cannot quietly break the stubbed-UI path.
 
 use codexize::app_runtime::{
-    AgentRunSummary, AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId,
-    StatusSeverity, channel_pair, headless_runtime_for_live_summary, run_harness_until_exit,
-    run_headless_until_exit,
+    AgentRunSummary, AppCommand, AppView, ModalKind, StageId, StatusSeverity,
 };
 use codexize::logic::pipeline::Phase;
 use tempfile::tempdir;
 
-use crate::support::drain_views;
+use crate::support::{
+    RuntimeControl, RuntimeHarness, channel_pair, drain_views, headless_runtime_for_live_summary,
+    run_harness_until_exit, run_headless_until_exit,
+};
 
 #[test]
 fn channels_carry_a_full_command_view_round_trip() {

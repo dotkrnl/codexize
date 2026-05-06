@@ -13,12 +13,12 @@ mod layer_boundaries;
 mod smoke_baseline;
 mod support;
 
-use codexize::app_runtime::{
-    AppCommand, AppView, ModalKind, RuntimeControl, RuntimeHarness, StageId, channel_pair,
-    headless_runtime_for_live_summary, run_harness_until_exit, run_headless_until_exit,
-};
+use codexize::app_runtime::{AppCommand, AppView, ModalKind, StageId};
 use codexize::logic::pipeline::Phase;
-use support::drain_views;
+use support::{
+    RuntimeControl, RuntimeHarness, channel_pair, drain_views, headless_runtime_for_live_summary,
+    run_harness_until_exit, run_headless_until_exit,
+};
 use tempfile::tempdir;
 
 #[test]

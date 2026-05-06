@@ -19,22 +19,14 @@
 //! cache handles. [`harness`] proves the seam by wiring a stubbed UI to
 //! the runtime side without touching the terminal — the same shape a
 //! future server-mode binary or web frontend will reuse.
-
 pub mod command;
-pub mod harness;
 pub(crate) mod stages;
 pub mod terminal;
 pub mod view;
-
+pub use crate::app::App;
+pub use crate::app::AppStartupOrigin;
 pub use command::{AppCommand, UiKey, UiKeyCode};
-pub use harness::{
-    HeadlessRuntime, RuntimeChannels, RuntimeControl, RuntimeHarness, UiChannels, channel_pair,
-    headless_runtime_for_live_summary, run_harness_until_exit, run_headless_until_exit,
-};
 pub use terminal::run_terminal_app;
 pub use view::{
     AgentRunSummary, AppView, ModalKind, ModeFlags, StageId, StatusMessage, StatusSeverity,
 };
-
-pub use crate::app::App;
-pub use crate::app::AppStartupOrigin;

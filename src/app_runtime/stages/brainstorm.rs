@@ -133,6 +133,7 @@ impl App {
                 );
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
                 self.start_run_tracking(
+                    run_id,
                     "brainstorm",
                     None,
                     1,

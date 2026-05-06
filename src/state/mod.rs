@@ -31,7 +31,7 @@ pub mod transitions {
     pub use crate::data::persistence::transitions::{
         FinalValidationEntry, SimplificationEntry, block_with_origin, enter_final_validation,
         enter_simplification, execute_transition, finish_run_record, resume_running_runs,
-        start_agent_run, try_parse_toml_artifact,
+        start_agent_run, start_agent_run_with_id, try_parse_toml_artifact,
     };
     pub use crate::logic::pipeline::transitions::{
         BRAINSTORM_IO, CODER_IO, FinishedRunRecord, PLAN_REVIEWER_IO, PLANNER_IO, RECOVERY_IO,

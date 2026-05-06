@@ -276,8 +276,39 @@ pub fn start_agent_run(
     effort: EffortLevel,
     modes: LaunchModes,
 ) -> u64 {
+    let run_id = state.next_agent_run_id();
+    start_agent_run_with_id(
+        state,
+        run_id,
+        stage,
+        task_id,
+        round,
+        attempt,
+        model,
+        vendor,
+        window_name,
+        effort,
+        modes,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn start_agent_run_with_id(
+    state: &mut SessionState,
+    run_id: u64,
+    stage: String,
+    task_id: Option<u32>,
+    round: u32,
+    attempt: u32,
+    model: String,
+    vendor: String,
+    window_name: String,
+    effort: EffortLevel,
+    modes: LaunchModes,
+) -> u64 {
     let path = compute_section_path(state, &stage, task_id, round, attempt);
-    state.create_run_record(
+    state.create_run_record_with_id(
+        run_id,
         stage,
         task_id,
         round,

@@ -148,6 +148,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn start_run_tracking(
         &mut self,
+        run_id: u64,
         stage: &str,
         task_id: Option<u32>,
         round: u32,
@@ -160,8 +161,9 @@ impl App {
     ) {
         let attempt = self.attempt_for(stage, task_id, round);
         modes.interactive = self.run_is_interactive(stage, round, modes);
-        let run_id = session_state::transitions::start_agent_run(
+        let run_id = session_state::transitions::start_agent_run_with_id(
             &mut self.state,
+            run_id,
             stage.to_string(),
             task_id,
             round,

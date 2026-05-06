@@ -19,8 +19,10 @@ fn interactive_launch_opens_matching_run_split_immediately() {
         state.current_phase = Phase::BrainstormRunning;
         let mut app = idle_app(state);
         app.split_target = Some(super::split::SplitTarget::Idea);
+        let run_id = app.state.next_agent_run_id();
 
         app.start_run_tracking(
+            run_id,
             "brainstorm",
             None,
             1,

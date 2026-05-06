@@ -90,6 +90,7 @@ impl App {
         match launch_result {
             Ok(()) => {
                 self.start_run_tracking(
+                    run_id,
                     "sharding",
                     None,
                     1,

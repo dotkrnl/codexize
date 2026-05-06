@@ -28,12 +28,14 @@ fn watchdog_does_not_arm_for_interactive_runs() {
         )));
 
         crate::runner::request_run_label_interactive_input_for_test(&window_name);
+        let run_id = app.state.next_agent_run_id();
 
         // Drive `start_run_tracking` for an interactive launch and assert
         // the registry stays empty (AC5). The path mirrors the brainstorm
         // launch — start_run_tracking is the only non-test entry point that
         // registers the watchdog.
         app.start_run_tracking(
+            run_id,
             "planning",
             None,
             1,

@@ -176,6 +176,37 @@ impl SessionState {
         section_path: Option<Vec<SectionPart>>,
     ) -> u64 {
         let id = self.next_agent_run_id();
+        self.create_run_record_with_id(
+            id,
+            stage,
+            task_id,
+            round,
+            attempt,
+            model,
+            vendor,
+            window_name,
+            effort,
+            modes,
+            section_path,
+        )
+    }
+
+    /// Create a RunRecord with an id already reserved by the launch path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_run_record_with_id(
+        &mut self,
+        id: u64,
+        stage: String,
+        task_id: Option<u32>,
+        round: u32,
+        attempt: u32,
+        model: String,
+        vendor: String,
+        window_name: String,
+        effort: EffortLevel,
+        modes: LaunchModes,
+        section_path: Option<Vec<SectionPart>>,
+    ) -> u64 {
         let hostname = capture_hostname();
         let mount_device_id = capture_mount_device_id();
         let run = RunRecord {

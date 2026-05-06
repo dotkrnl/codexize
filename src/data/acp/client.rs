@@ -41,12 +41,6 @@ pub trait AcpConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>>;
 }
 
-/// Blocking RPC seam used by the legacy `apply_session_config` test stub.
-#[cfg(test)]
-trait RpcCaller {
-    fn call(&mut self, method: &str, params: Value) -> AcpResult<Value>;
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct SubprocessConnector;
 

@@ -2,56 +2,11 @@ use super::super::{AcpTextBoundary, PromptPayload, ToolCallActivityKind};
 use super::actor::{RpcClient, client_request_response};
 use super::dispatch::{AcpBoundaryState, dispatch_update};
 use super::handshake::{
-    ConfigChoice, ConfigOption, PromptTurnOutcome, apply_session_config, parse_initialize_result,
-    parse_prompt_result, prompt_request_params,
+    PromptTurnOutcome, parse_initialize_result, parse_prompt_result, prompt_request_params,
 };
 use super::*;
 use crate::data::acp_support::tool_call::TOOL_CALL_MAP_CAP;
-use std::{collections::BTreeMap, path::PathBuf};
-
-#[derive(Default)]
-struct StubRpcCaller {
-    calls: Vec<(String, Value)>,
-    responses: Vec<AcpResult<Value>>,
-}
-
-impl RpcCaller for StubRpcCaller {
-    fn call(&mut self, method: &str, params: Value) -> AcpResult<Value> {
-        self.calls.push((method.to_string(), params));
-        if self.responses.is_empty() {
-            return Err(AcpError::protocol(
-                "stub RPC missing response for session/set_config_option",
-            ));
-        }
-        self.responses.remove(0)
-    }
-}
-
-fn sample_session() -> super::super::AcpSessionSpec {
-    super::super::AcpSessionSpec {
-        cwd: PathBuf::from("/tmp/project"),
-        prompt: PromptPayload::Text("ship it".to_string()),
-        model: "model-next".to_string(),
-        reasoning_effort: super::super::AcpReasoningEffort::High,
-        permission_mode: super::super::AcpPermissionMode::Code,
-        policy: super::super::AcpLaunchPolicy::default(),
-        metadata: BTreeMap::new(),
-    }
-}
-
-fn configurable_option(id: &str, category: &str, current: &str, choices: &[&str]) -> ConfigOption {
-    ConfigOption {
-        id: id.to_string(),
-        category: Some(category.to_string()),
-        current_value: Some(current.to_string()),
-        options: choices
-            .iter()
-            .map(|choice| ConfigChoice {
-                value: (*choice).to_string(),
-            })
-            .collect(),
-    }
-}
+use std::path::PathBuf;
 
 #[test]
 fn parse_prompt_result_marks_failure_stop_reasons() {
@@ -1268,63 +1223,6 @@ fn permission_request_selects_approve_option() {
             }
         })
     );
-}
-
-#[test]
-fn apply_session_config_uses_baseline_option_snapshot() {
-    let mut rpc = StubRpcCaller {
-        responses: vec![
-            Ok(json!({
-                "configOptions": [{
-                    "id": "mode",
-                    "category": "mode",
-                    "currentValue": "code"
-                }]
-            })),
-            Ok(json!({
-                "configOptions": [{
-                    "id": "model",
-                    "category": "model",
-                    "currentValue": "model-next"
-                }]
-            })),
-            Ok(json!({
-                "configOptions": [{
-                    "id": "thought_level",
-                    "category": "thought_level",
-                    "currentValue": "high"
-                }]
-            })),
-        ],
-        ..Default::default()
-    };
-    let session = sample_session();
-    let mut config_options = vec![
-        configurable_option("mode", "mode", "ask", &["ask", "code"]),
-        configurable_option("model", "model", "model-old", &["model-old", "model-next"]),
-        configurable_option(
-            "thought_level",
-            "thought_level",
-            "medium",
-            &["medium", "high"],
-        ),
-    ];
-
-    apply_session_config(&mut rpc, "sess-test", &session, &mut config_options)
-        .expect("session config applies");
-
-    assert_eq!(rpc.calls.len(), 3);
-    let config_ids = rpc
-        .calls
-        .iter()
-        .map(|(_, params)| {
-            params
-                .get("configId")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(config_ids, vec!["mode", "model", "thought_level"]);
 }
 
 // === Async transport coverage ===

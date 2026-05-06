@@ -238,28 +238,6 @@ async fn apply_session_config_async(
     Ok(())
 }
 
-/// Synchronous entry preserved for `RpcCaller`-based unit tests.
-#[cfg(test)]
-pub(super) fn apply_session_config(
-    rpc: &mut impl super::RpcCaller,
-    session_id: &str,
-    session: &AcpSessionSpec,
-    config_options: &mut Vec<ConfigOption>,
-) -> AcpResult<()> {
-    for (category, option, value) in selected_config_updates(session, config_options) {
-        let response = rpc.call(
-            "session/set_config_option",
-            json!({
-                "sessionId": session_id,
-                "configId": option.id,
-                "value": value,
-            }),
-        );
-        absorb_config_response(category, &option, &value, response, config_options);
-    }
-    Ok(())
-}
-
 /// Pick (category, option, desired value) tuples to apply against
 /// `config_options` for `session`. ACP standardizes categories not values, so
 /// this mirrors the ask/code convention with a fallback to env-contract names.

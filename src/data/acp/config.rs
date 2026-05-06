@@ -54,7 +54,6 @@ impl AcpConfig {
                 vendor_kind_to_str(request.vendor)
             )));
         };
-
         if agent.program.trim().is_empty() {
             return Err(AcpError::human_block(format!(
                 "ACP agent for vendor {} has no executable configured",
@@ -75,102 +74,50 @@ impl AcpConfig {
             crate::adapters::EffortLevel::Tough => AcpReasoningEffort::High,
         };
         let permission_mode = AcpPermissionMode::Code;
-
-        let mut env = agent.env.clone();
-        env.insert(
-            "CODEXIZE_ACP_VENDOR".to_string(),
-            vendor_kind_to_str(request.vendor).to_string(),
-        );
-        env.insert("CODEXIZE_ACP_MODEL".to_string(), request.model.clone());
-        env.insert(
-            "CODEXIZE_ACP_REQUESTED_EFFORT".to_string(),
-            effort_to_str(request.requested_effort).to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_EFFECTIVE_EFFORT".to_string(),
-            reasoning_effort.to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_PERMISSION_MODE".to_string(),
-            permission_mode.to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_INTERACTIVE".to_string(),
-            request.interactive.to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_CHEAP".to_string(),
-            request.modes.cheap.to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_YOLO".to_string(),
-            request.modes.yolo.to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_ALLOWED_WRITE_PATHS".to_string(),
-            policy
-                .allowed_write_paths
+        let join_paths = |paths: &[PathBuf]| {
+            paths
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
-                .join("\n"),
-        );
-        env.insert(
-            "CODEXIZE_ACP_SHELL_POLICY".to_string(),
-            shell_policy_name(&policy.shell_policy).to_string(),
-        );
-        env.insert(
-            "CODEXIZE_ACP_ALLOWED_SHELL_COMMANDS".to_string(),
-            shell_policy_commands(&policy.shell_policy).join("\n"),
-        );
+                .join("\n")
+        };
+        let entries: [(&str, String); 11] = [
+            ("vendor", vendor_kind_to_str(request.vendor).to_string()),
+            ("model", request.model.clone()),
+            (
+                "requested_effort",
+                effort_to_str(request.requested_effort).to_string(),
+            ),
+            ("effective_effort", reasoning_effort.to_string()),
+            ("permission_mode", permission_mode.to_string()),
+            ("interactive", request.interactive.to_string()),
+            ("cheap", request.modes.cheap.to_string()),
+            ("yolo", request.modes.yolo.to_string()),
+            (
+                "allowed_write_paths",
+                join_paths(&policy.allowed_write_paths),
+            ),
+            (
+                "shell_policy",
+                shell_policy_name(&policy.shell_policy).to_string(),
+            ),
+            (
+                "allowed_shell_commands",
+                shell_policy_commands(&policy.shell_policy).join("\n"),
+            ),
+        ];
+        let mut env = agent.env.clone();
+        let mut metadata = BTreeMap::new();
+        for (suffix, value) in &entries {
+            env.insert(
+                format!("CODEXIZE_ACP_{}", suffix.to_uppercase()),
+                value.clone(),
+            );
+            metadata.insert(format!("codexize.{suffix}"), value.clone());
+        }
         env.insert(
             "CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE".to_string(),
             policy.enforce_readonly_workspace.to_string(),
-        );
-
-        let mut metadata = BTreeMap::new();
-        metadata.insert(
-            "codexize.vendor".to_string(),
-            vendor_kind_to_str(request.vendor).to_string(),
-        );
-        metadata.insert("codexize.model".to_string(), request.model.clone());
-        metadata.insert(
-            "codexize.requested_effort".to_string(),
-            effort_to_str(request.requested_effort).to_string(),
-        );
-        metadata.insert(
-            "codexize.effective_effort".to_string(),
-            reasoning_effort.to_string(),
-        );
-        metadata.insert(
-            "codexize.permission_mode".to_string(),
-            permission_mode.to_string(),
-        );
-        metadata.insert(
-            "codexize.interactive".to_string(),
-            request.interactive.to_string(),
-        );
-        metadata.insert(
-            "codexize.cheap".to_string(),
-            request.modes.cheap.to_string(),
-        );
-        metadata.insert("codexize.yolo".to_string(), request.modes.yolo.to_string());
-        metadata.insert(
-            "codexize.allowed_write_paths".to_string(),
-            policy
-                .allowed_write_paths
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-        metadata.insert(
-            "codexize.shell_policy".to_string(),
-            shell_policy_name(&policy.shell_policy).to_string(),
-        );
-        metadata.insert(
-            "codexize.allowed_shell_commands".to_string(),
-            shell_policy_commands(&policy.shell_policy).join("\n"),
         );
         metadata.insert(
             "codexize.enforce_readonly_workspace".to_string(),
@@ -216,41 +163,29 @@ impl Default for AcpAgentDefinition {
 
 impl Default for AcpConfig {
     fn default() -> Self {
-        // Current ACP entrypoints are vendor-specific: Gemini and Kimi expose
-        // ACP directly, while Codex and Claude are commonly launched through
-        // ACP bridge binaries, so keep the executable boundary explicit here.
-        let definitions = [
-            default_agent_definition(
-                VendorKind::Claude,
-                &default_claude_acp_program(),
-                Vec::<String>::new(),
-            ),
+        // Codex and Claude commonly launch through bridge binaries; Gemini and
+        // Kimi expose ACP directly. Keep the executable boundary explicit.
+        let str_args = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let claude_program = default_claude_acp_program();
+        Self::from_agents([
+            default_agent_definition(VendorKind::Claude, &claude_program, Vec::new()),
             default_agent_definition(
                 VendorKind::Codex,
                 "codex-acp",
-                vec![
-                    "-c".to_string(),
-                    "sandbox_mode=\"danger-full-access\"".to_string(),
-                    "-c".to_string(),
-                    "approval_policy=\"never\"".to_string(),
-                ],
+                str_args(&[
+                    "-c",
+                    "sandbox_mode=\"danger-full-access\"",
+                    "-c",
+                    "approval_policy=\"never\"",
+                ]),
             ),
-            default_agent_definition(
-                VendorKind::Gemini,
-                "gemini",
-                vec!["--yolo".to_string(), "--acp".to_string()],
-            ),
+            default_agent_definition(VendorKind::Gemini, "gemini", str_args(&["--yolo", "--acp"])),
             default_agent_definition(
                 VendorKind::Kimi,
                 "kimi",
-                vec![
-                    "--yolo".to_string(),
-                    "--thinking".to_string(),
-                    "acp".to_string(),
-                ],
+                str_args(&["--yolo", "--thinking", "acp"]),
             ),
-        ];
-        Self::from_agents(definitions)
+        ])
     }
 }
 

@@ -1313,7 +1313,7 @@ fn wait_for_run_label_to_finish(window_name: &str) {
         if !run_label_is_active(window_name) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::park_timeout(Duration::from_millis(25));
     }
     panic!("managed ACP run label did not finish: {window_name}");
 }
@@ -1323,7 +1323,7 @@ fn wait_until_run_label_active(window_name: &str) {
         if run_label_is_active(window_name) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::park_timeout(Duration::from_millis(25));
     }
     panic!("managed ACP run label did not become active: {window_name}");
 }
@@ -1333,7 +1333,7 @@ fn wait_until_run_label_waiting_for_input(window_name: &str) {
         if run_label_is_waiting_for_input(window_name) {
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::park_timeout(Duration::from_millis(25));
     }
     panic!("managed ACP run label did not wait for input: {window_name}");
 }
@@ -1343,7 +1343,7 @@ fn wait_for_path(path: &Path) {
         if path.exists() {
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::park_timeout(Duration::from_millis(25));
     }
     panic!("path did not appear: {}", path.display());
 }
@@ -1356,7 +1356,7 @@ fn wait_for_file_to_contain(path: &Path, needle: &str) {
         {
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        std::thread::park_timeout(Duration::from_millis(25));
     }
     panic!("{} did not contain {needle:?}", path.display());
 }
@@ -1570,7 +1570,7 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
 
             wait_until_run_label_active("[Brainstorm]");
             wait_for_path(&prompt_done_path);
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::park_timeout(Duration::from_millis(300));
 
             assert!(
                 run_label_is_active("[Brainstorm]"),

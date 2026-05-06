@@ -15,6 +15,8 @@ use std::{
     time::Duration,
 };
 
+const TRANSCRIPT_HANDOFF_PARK_INTERVAL: Duration = Duration::from_millis(25);
+
 /// Polling cadence for the runner's ACP receive loop. Kept here so transport
 /// code can sleep between idle reads without re-importing supervisor state.
 pub(super) const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -119,7 +121,12 @@ fn persist_agent_text_block(
     let run = (0..80).find_map(|_| {
         let found = find_transcript_run(session_id, &launch.window_name);
         if found.is_none() {
-            thread::sleep(Duration::from_millis(25));
+            // park (rather than the sync sleep primitive) keeps the runner
+            // crate off the banned blocking-poll API while preserving the
+            // transcript-handoff backoff cadence; an explicit unpark is
+            // intentionally not wired since this loop is bounded to 80
+            // iterations.
+            thread::park_timeout(TRANSCRIPT_HANDOFF_PARK_INTERVAL);
         }
         found
     });

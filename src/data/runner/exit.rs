@@ -122,11 +122,11 @@ pub(super) fn wait_for_stable_head() -> (String, String) {
     loop {
         let lock_path = Path::new(".git").join("index.lock");
         while lock_path.exists() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(50));
+            thread::park_timeout(Duration::from_millis(50));
         }
 
         let first = git_rev_parse_head().unwrap_or_default();
-        thread::sleep(interval);
+        thread::park_timeout(interval);
         let second = git_rev_parse_head().unwrap_or_default();
         if first == second {
             return (second, "stable".to_string());

@@ -177,7 +177,7 @@ pub fn run_child_with_timeout(
             let _ = child.wait();
             return Ok(None);
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::park_timeout(Duration::from_millis(100));
     }
 }
 

@@ -1,8 +1,94 @@
 use crate::artifacts::ArtifactKind;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, strum::Display)]
 pub enum Phase {
+    #[strum(to_string = "Idea Input")]
+    IdeaInput,
+    #[strum(to_string = "Brainstorming")]
+    BrainstormRunning,
+    #[strum(to_string = "Spec Review")]
+    SpecReviewRunning,
+    #[strum(to_string = "Spec Review")]
+    SpecReviewPaused,
+    #[strum(to_string = "Planning")]
+    PlanningRunning,
+    #[strum(to_string = "Plan Review")]
+    PlanReviewRunning,
+    #[strum(to_string = "Plan Review")]
+    PlanReviewPaused,
+    #[strum(to_string = "Sharding")]
+    ShardingRunning,
+    #[strum(to_string = "Skip Confirmation")]
+    SkipToImplPending, // New phase
+    /// Coder agent is working on the current task in round N.
+    #[strum(to_string = "Implementation Round {0}")]
+    ImplementationRound(u32),
+    /// Reviewer agent is checking the current task's work in round N.
+    #[strum(to_string = "Review Round {0}")]
+    ReviewRound(u32),
+    /// Builder-only recovery stage that repairs artifacts and reconciles queue state.
+    ///
+    /// The stored round is the builder round that triggered recovery; successful recovery
+    /// resumes into `BuilderRecoveryPlanReview` of the same round.
+    #[strum(to_string = "Builder Recovery")]
+    BuilderRecovery(u32),
+    /// Non-interactive plan review inserted after a builder recovery stage completes.
+    /// Verifies the recovered spec/plan is coherent before sharding.
+    #[strum(to_string = "Recovery Plan Review")]
+    BuilderRecoveryPlanReview(u32),
+    /// Recovery-mode re-sharding inserted after a successful recovery plan review.
+    /// Regenerates the task queue from the recovered spec/plan.
+    #[strum(to_string = "Recovery Sharding")]
+    BuilderRecoverySharding(u32),
+    /// Interactive non-coder run advanced HEAD under `GuardMode::AskOperator`;
+    /// the modal is up and the operator must choose reset or keep before the
+    /// run can finalize.
+    #[strum(to_string = "Guard Decision")]
+    GitGuardPending,
+    /// Final goal validation runs once per queue-empty pre-`Done` boundary.
+    /// The stored round is the coder round whose work is being validated.
+    #[strum(to_string = "Final Validation Round {0}")]
+    FinalValidation(u32),
+    /// Behavior-preserving cleanup pass between loop convergence and FinalValidation.
+    /// The stored round matches the coder round whose work is being simplified.
+    #[strum(to_string = "Simplification Round {0}")]
+    Simplification(u32),
+    #[strum(to_string = "Done")]
+    Done,
+    #[strum(to_string = "Blocked")]
+    BlockedNeedsUser,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TransitionEdge {
+    from: PhaseKind,
+    to: PhaseKind,
+    guard: RoundGuard,
+}
+
+impl TransitionEdge {
+    const fn new(from: PhaseKind, to: PhaseKind) -> Self {
+        Self {
+            from,
+            to,
+            guard: RoundGuard::Any,
+        }
+    }
+
+    const fn guarded(from: PhaseKind, to: PhaseKind, guard: RoundGuard) -> Self {
+        Self { from, to, guard }
+    }
+
+    fn allows(self, from: &Phase, to: &Phase) -> bool {
+        self.from == from.kind()
+            && self.to == to.kind()
+            && self.guard.allows(from.round(), to.round())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhaseKind {
     IdeaInput,
     BrainstormRunning,
     SpecReviewRunning,
@@ -11,45 +97,237 @@ pub enum Phase {
     PlanReviewRunning,
     PlanReviewPaused,
     ShardingRunning,
-    SkipToImplPending, // New phase
-    /// Coder agent is working on the current task in round N.
-    ImplementationRound(u32),
-    /// Reviewer agent is checking the current task's work in round N.
-    ReviewRound(u32),
-    /// Builder-only recovery stage that repairs artifacts and reconciles queue state.
-    ///
-    /// The stored round is the builder round that triggered recovery; successful recovery
-    /// resumes into `BuilderRecoveryPlanReview` of the same round.
-    BuilderRecovery(u32),
-    /// Non-interactive plan review inserted after a builder recovery stage completes.
-    /// Verifies the recovered spec/plan is coherent before sharding.
-    BuilderRecoveryPlanReview(u32),
-    /// Recovery-mode re-sharding inserted after a successful recovery plan review.
-    /// Regenerates the task queue from the recovered spec/plan.
-    BuilderRecoverySharding(u32),
-    /// Interactive non-coder run advanced HEAD under `GuardMode::AskOperator`;
-    /// the modal is up and the operator must choose reset or keep before the
-    /// run can finalize.
+    SkipToImplPending,
+    ImplementationRound,
+    ReviewRound,
+    BuilderRecovery,
+    BuilderRecoveryPlanReview,
+    BuilderRecoverySharding,
     GitGuardPending,
-    /// Final goal validation runs once per queue-empty pre-`Done` boundary.
-    /// The stored round is the coder round whose work is being validated.
-    FinalValidation(u32),
-    /// Behavior-preserving cleanup pass between loop convergence and FinalValidation.
-    /// The stored round matches the coder round whose work is being simplified.
-    Simplification(u32),
+    FinalValidation,
+    Simplification,
     Done,
     BlockedNeedsUser,
 }
 
-impl std::fmt::Display for Phase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Temporary: delegates to display_name() until Phase derives
-        // strum::Display as part of the pipeline FSM simplification task.
-        f.write_str(&self.display_name())
+#[derive(Debug, Clone, Copy)]
+enum RoundGuard {
+    Any,
+    Same,
+    SameNonZero,
+    ToNext,
+    ToPrevious,
+    ToRound(u32),
+    FromAtMost(u32),
+}
+
+impl RoundGuard {
+    fn allows(self, from: Option<u32>, to: Option<u32>) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Same => from.zip(to).is_some_and(|(from, to)| from == to),
+            Self::SameNonZero => from
+                .zip(to)
+                .is_some_and(|(from, to)| from == to && from > 0),
+            Self::ToNext => from
+                .and_then(|from| from.checked_add(1))
+                .zip(to)
+                .is_some_and(|(expected, to)| expected == to),
+            Self::ToPrevious => to
+                .and_then(|to| to.checked_add(1))
+                .zip(from)
+                .is_some_and(|(expected, from)| expected == from),
+            Self::ToRound(round) => to == Some(round),
+            Self::FromAtMost(max) => from.is_some_and(|from| from <= max),
+        }
     }
 }
 
+use PhaseKind as P;
+
+// A table stays clearer than statig/rust-fsm here because most parameterized
+// edges are simple round guards rather than state-entry/exit actions.
+const TRANSITION_EDGES: &[TransitionEdge] = &[
+    TransitionEdge::new(P::IdeaInput, P::BrainstormRunning),
+    TransitionEdge::new(P::BrainstormRunning, P::SpecReviewRunning),
+    TransitionEdge::new(P::BrainstormRunning, P::BlockedNeedsUser),
+    TransitionEdge::new(P::BrainstormRunning, P::SkipToImplPending),
+    TransitionEdge::new(P::SpecReviewRunning, P::SpecReviewPaused),
+    TransitionEdge::new(P::SpecReviewRunning, P::PlanningRunning),
+    TransitionEdge::new(P::SpecReviewRunning, P::BlockedNeedsUser),
+    TransitionEdge::new(P::SpecReviewPaused, P::SpecReviewRunning),
+    TransitionEdge::new(P::SpecReviewPaused, P::PlanningRunning),
+    TransitionEdge::new(P::SpecReviewPaused, P::BlockedNeedsUser),
+    TransitionEdge::new(P::SkipToImplPending, P::ImplementationRound),
+    TransitionEdge::new(P::SkipToImplPending, P::SpecReviewRunning),
+    TransitionEdge::new(P::SkipToImplPending, P::BlockedNeedsUser),
+    TransitionEdge::new(P::SkipToImplPending, P::Done),
+    TransitionEdge::new(P::SkipToImplPending, P::BrainstormRunning),
+    TransitionEdge::new(P::PlanningRunning, P::PlanReviewRunning),
+    TransitionEdge::new(P::PlanningRunning, P::ShardingRunning),
+    TransitionEdge::new(P::PlanningRunning, P::BlockedNeedsUser),
+    TransitionEdge::new(P::PlanReviewRunning, P::ShardingRunning),
+    TransitionEdge::new(P::PlanReviewRunning, P::BlockedNeedsUser),
+    TransitionEdge::new(P::PlanReviewPaused, P::PlanReviewRunning),
+    TransitionEdge::new(P::PlanReviewPaused, P::ShardingRunning),
+    TransitionEdge::new(P::PlanReviewPaused, P::BlockedNeedsUser),
+    TransitionEdge::new(P::BlockedNeedsUser, P::PlanReviewRunning),
+    TransitionEdge::guarded(
+        P::ShardingRunning,
+        P::ImplementationRound,
+        RoundGuard::ToRound(1),
+    ),
+    TransitionEdge::new(P::ShardingRunning, P::BlockedNeedsUser),
+    TransitionEdge::guarded(P::ImplementationRound, P::ReviewRound, RoundGuard::Same),
+    TransitionEdge::guarded(P::ImplementationRound, P::BuilderRecovery, RoundGuard::Same),
+    TransitionEdge::new(P::ImplementationRound, P::BlockedNeedsUser),
+    TransitionEdge::guarded(P::ReviewRound, P::ImplementationRound, RoundGuard::ToNext),
+    TransitionEdge::new(P::ReviewRound, P::Done),
+    TransitionEdge::new(P::ReviewRound, P::BlockedNeedsUser),
+    TransitionEdge::guarded(P::ReviewRound, P::BuilderRecovery, RoundGuard::Same),
+    TransitionEdge::guarded(
+        P::BuilderRecovery,
+        P::ImplementationRound,
+        RoundGuard::ToNext,
+    ),
+    TransitionEdge::guarded(
+        P::BuilderRecovery,
+        P::BuilderRecoveryPlanReview,
+        RoundGuard::Same,
+    ),
+    TransitionEdge::guarded(
+        P::BuilderRecovery,
+        P::BuilderRecoverySharding,
+        RoundGuard::Same,
+    ),
+    TransitionEdge::new(P::BuilderRecovery, P::BlockedNeedsUser),
+    TransitionEdge::guarded(
+        P::BuilderRecoveryPlanReview,
+        P::BuilderRecoverySharding,
+        RoundGuard::Same,
+    ),
+    TransitionEdge::guarded(
+        P::BuilderRecoveryPlanReview,
+        P::BuilderRecovery,
+        RoundGuard::Same,
+    ),
+    TransitionEdge::new(P::BuilderRecoveryPlanReview, P::BlockedNeedsUser),
+    TransitionEdge::guarded(
+        P::BuilderRecoverySharding,
+        P::ImplementationRound,
+        RoundGuard::ToNext,
+    ),
+    TransitionEdge::new(P::BuilderRecoverySharding, P::BlockedNeedsUser),
+    TransitionEdge::new(P::BlockedNeedsUser, P::BrainstormRunning),
+    TransitionEdge::new(P::BlockedNeedsUser, P::SpecReviewRunning),
+    TransitionEdge::new(P::BlockedNeedsUser, P::PlanningRunning),
+    TransitionEdge::new(P::BlockedNeedsUser, P::ShardingRunning),
+    TransitionEdge::new(P::BlockedNeedsUser, P::ImplementationRound),
+    TransitionEdge::new(P::BlockedNeedsUser, P::ReviewRound),
+    TransitionEdge::new(P::BlockedNeedsUser, P::BuilderRecovery),
+    TransitionEdge::new(P::BrainstormRunning, P::GitGuardPending),
+    TransitionEdge::new(P::PlanningRunning, P::GitGuardPending),
+    TransitionEdge::new(P::BuilderRecovery, P::GitGuardPending),
+    TransitionEdge::new(P::GitGuardPending, P::BlockedNeedsUser),
+    TransitionEdge::new(P::GitGuardPending, P::Done),
+    TransitionEdge::new(P::GitGuardPending, P::SpecReviewRunning),
+    TransitionEdge::new(P::GitGuardPending, P::SkipToImplPending),
+    TransitionEdge::new(P::GitGuardPending, P::PlanReviewRunning),
+    TransitionEdge::new(P::GitGuardPending, P::BuilderRecoveryPlanReview),
+    TransitionEdge::new(P::FinalValidation, P::Done),
+    TransitionEdge::guarded(
+        P::FinalValidation,
+        P::ImplementationRound,
+        RoundGuard::ToNext,
+    ),
+    TransitionEdge::new(P::FinalValidation, P::BlockedNeedsUser),
+    TransitionEdge::guarded(P::ReviewRound, P::Simplification, RoundGuard::Same),
+    TransitionEdge::guarded(
+        P::ImplementationRound,
+        P::Simplification,
+        RoundGuard::ToRound(1),
+    ),
+    TransitionEdge::new(P::BlockedNeedsUser, P::Simplification),
+    TransitionEdge::guarded(P::Simplification, P::FinalValidation, RoundGuard::Same),
+    TransitionEdge::new(P::Simplification, P::BlockedNeedsUser),
+    TransitionEdge::new(P::BlockedNeedsUser, P::FinalValidation),
+    TransitionEdge::new(P::BlockedNeedsUser, P::Done),
+    TransitionEdge::new(P::BrainstormRunning, P::IdeaInput),
+    TransitionEdge::new(P::SpecReviewRunning, P::BrainstormRunning),
+    TransitionEdge::new(P::SpecReviewPaused, P::BrainstormRunning),
+    TransitionEdge::new(P::PlanningRunning, P::SpecReviewRunning),
+    TransitionEdge::new(P::ShardingRunning, P::PlanReviewRunning),
+    TransitionEdge::new(P::PlanReviewRunning, P::PlanningRunning),
+    TransitionEdge::new(P::PlanReviewRunning, P::PlanReviewPaused),
+    TransitionEdge::new(P::PlanReviewPaused, P::PlanningRunning),
+    TransitionEdge::guarded(
+        P::ImplementationRound,
+        P::ShardingRunning,
+        RoundGuard::FromAtMost(1),
+    ),
+    TransitionEdge::guarded(
+        P::ImplementationRound,
+        P::BrainstormRunning,
+        RoundGuard::FromAtMost(1),
+    ),
+    TransitionEdge::guarded(
+        P::ImplementationRound,
+        P::ReviewRound,
+        RoundGuard::ToPrevious,
+    ),
+    TransitionEdge::guarded(P::ReviewRound, P::ImplementationRound, RoundGuard::Same),
+    TransitionEdge::guarded(P::FinalValidation, P::ReviewRound, RoundGuard::SameNonZero),
+    TransitionEdge::guarded(
+        P::FinalValidation,
+        P::ImplementationRound,
+        RoundGuard::ToRound(1),
+    ),
+    TransitionEdge::guarded(P::Simplification, P::ReviewRound, RoundGuard::SameNonZero),
+    TransitionEdge::guarded(
+        P::Simplification,
+        P::ImplementationRound,
+        RoundGuard::ToRound(1),
+    ),
+];
+
 impl Phase {
+    fn kind(self) -> PhaseKind {
+        match self {
+            Phase::IdeaInput => PhaseKind::IdeaInput,
+            Phase::BrainstormRunning => PhaseKind::BrainstormRunning,
+            Phase::SpecReviewRunning => PhaseKind::SpecReviewRunning,
+            Phase::SpecReviewPaused => PhaseKind::SpecReviewPaused,
+            Phase::PlanningRunning => PhaseKind::PlanningRunning,
+            Phase::PlanReviewRunning => PhaseKind::PlanReviewRunning,
+            Phase::PlanReviewPaused => PhaseKind::PlanReviewPaused,
+            Phase::ShardingRunning => PhaseKind::ShardingRunning,
+            Phase::SkipToImplPending => PhaseKind::SkipToImplPending,
+            Phase::ImplementationRound(_) => PhaseKind::ImplementationRound,
+            Phase::ReviewRound(_) => PhaseKind::ReviewRound,
+            Phase::BuilderRecovery(_) => PhaseKind::BuilderRecovery,
+            Phase::BuilderRecoveryPlanReview(_) => PhaseKind::BuilderRecoveryPlanReview,
+            Phase::BuilderRecoverySharding(_) => PhaseKind::BuilderRecoverySharding,
+            Phase::GitGuardPending => PhaseKind::GitGuardPending,
+            Phase::FinalValidation(_) => PhaseKind::FinalValidation,
+            Phase::Simplification(_) => PhaseKind::Simplification,
+            Phase::Done => PhaseKind::Done,
+            Phase::BlockedNeedsUser => PhaseKind::BlockedNeedsUser,
+        }
+    }
+
+    fn round(self) -> Option<u32> {
+        match self {
+            Phase::ImplementationRound(round)
+            | Phase::ReviewRound(round)
+            | Phase::BuilderRecovery(round)
+            | Phase::BuilderRecoveryPlanReview(round)
+            | Phase::BuilderRecoverySharding(round)
+            | Phase::FinalValidation(round)
+            | Phase::Simplification(round) => Some(round),
+            _ => None,
+        }
+    }
+
     pub fn label(&self) -> String {
         match self {
             Phase::IdeaInput => "Idea Input".to_string(),
@@ -76,121 +354,9 @@ impl Phase {
 
     /// Returns true if a transition from `self` to `target` is valid.
     pub fn can_transition_to(&self, target: &Phase) -> bool {
-        use Phase::*;
-        match (self, target) {
-            // Forward transitions
-            (IdeaInput, BrainstormRunning) => true,
-            (BrainstormRunning, SpecReviewRunning) => true,
-            (BrainstormRunning, BlockedNeedsUser) => true,
-            (BrainstormRunning, SkipToImplPending) => true, // New transition
-            (SpecReviewRunning, SpecReviewPaused) => true,
-            (SpecReviewRunning, PlanningRunning) => true,
-            (SpecReviewRunning, BlockedNeedsUser) => true,
-            (SpecReviewPaused, SpecReviewRunning) => true,
-            (SpecReviewPaused, PlanningRunning) => true,
-            (SpecReviewPaused, BlockedNeedsUser) => true,
-            (SkipToImplPending, ImplementationRound(_)) => true, // New transition
-            (SkipToImplPending, SpecReviewRunning) => true,      // New transition
-            (SkipToImplPending, BlockedNeedsUser) => true,       // New transition
-            (SkipToImplPending, Done) => true,                   // nothing-to-do outcome
-            (SkipToImplPending, BrainstormRunning) => true,      // decline nothing-to-do → retry
-            // New forward transitions for Plan Review
-            (PlanningRunning, PlanReviewRunning) => true,
-            (PlanningRunning, ShardingRunning) => true,
-            (PlanReviewRunning, ShardingRunning) => true,
-            (PlanReviewRunning, BlockedNeedsUser) => true,
-            (PlanReviewPaused, PlanReviewRunning) => true,
-            (PlanReviewPaused, ShardingRunning) => true,
-            (PlanReviewPaused, BlockedNeedsUser) => true,
-            (BlockedNeedsUser, PlanReviewRunning) => true,
-            (PlanningRunning, BlockedNeedsUser) => true,
-            (ShardingRunning, ImplementationRound(1)) => true,
-            (ShardingRunning, BlockedNeedsUser) => true,
-            (ImplementationRound(r), ReviewRound(r2)) if *r == *r2 => true,
-            (ImplementationRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
-            (ImplementationRound(_), BlockedNeedsUser) => true,
-            (ReviewRound(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
-            (ReviewRound(_), Done) => true,
-            (ReviewRound(_), BlockedNeedsUser) => true,
-            (ReviewRound(r), BuilderRecovery(r2)) if *r == *r2 => true,
-            (BuilderRecovery(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
-            (BuilderRecovery(r), BuilderRecoveryPlanReview(r2)) if *r == *r2 => true,
-            (BuilderRecovery(r), BuilderRecoverySharding(r2)) if *r == *r2 => true,
-            (BuilderRecovery(_), BlockedNeedsUser) => true,
-            (BuilderRecoveryPlanReview(r), BuilderRecoverySharding(r2)) if *r == *r2 => true,
-            (BuilderRecoveryPlanReview(r), BuilderRecovery(r2)) if *r == *r2 => true,
-            (BuilderRecoveryPlanReview(_), BlockedNeedsUser) => true,
-            (BuilderRecoverySharding(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
-            (BuilderRecoverySharding(_), BlockedNeedsUser) => true,
-            (BlockedNeedsUser, BrainstormRunning) => true,
-            (BlockedNeedsUser, SpecReviewRunning) => true,
-            (BlockedNeedsUser, PlanningRunning) => true,
-            (BlockedNeedsUser, ShardingRunning) => true,
-            (BlockedNeedsUser, ImplementationRound(_)) => true,
-            (BlockedNeedsUser, ReviewRound(_)) => true,
-            (BlockedNeedsUser, BuilderRecovery(_)) => true,
-            // Git guard pending: inbound from every non-coder running phase
-            // that may launch under AskOperator. Outbound covers both the
-            // reset-failure successors and every keep-success successor a
-            // brainstorm / planning / interactive recovery run could reach.
-            (BrainstormRunning, GitGuardPending) => true,
-            (PlanningRunning, GitGuardPending) => true,
-            (BuilderRecovery(_), GitGuardPending) => true,
-            (GitGuardPending, BlockedNeedsUser) => true,
-            (GitGuardPending, Done) => true,
-            (GitGuardPending, SpecReviewRunning) => true,
-            (GitGuardPending, SkipToImplPending) => true,
-            (GitGuardPending, PlanReviewRunning) => true,
-            (GitGuardPending, BuilderRecoveryPlanReview(_)) => true,
-            // Final validation: queue-empty/pre-`Done` boundary on every
-            // code-producing path. Round identifies the coder round whose
-            // work is being validated. Normal pipeline entries reach
-            // FinalValidation through Simplification; the only non-simplifier
-            // inbound edge is BlockedNeedsUser -> FinalValidation(_).
-            (FinalValidation(_), Done) => true,
-            (FinalValidation(r), ImplementationRound(r2)) if *r2 == *r + 1 => true,
-            (FinalValidation(_), BlockedNeedsUser) => true,
-            // Simplification: behavior-preserving cleanup pass that gates every
-            // normal entry into FinalValidation. The pre-existing direct edges
-            // ReviewRound(r) -> FinalValidation(r) and ImplementationRound(1)
-            // -> FinalValidation(1) are intentionally absent from this graph;
-            // BlockedNeedsUser -> FinalValidation(_) is the operator-directed
-            // recovery exception (matched separately below).
-            (ReviewRound(r), Simplification(r2)) if *r == *r2 => true,
-            (ImplementationRound(1), Simplification(1)) => true,
-            (BlockedNeedsUser, Simplification(_)) => true,
-            (Simplification(r), FinalValidation(r2)) if *r == *r2 => true,
-            (Simplification(_), BlockedNeedsUser) => true,
-            // Operator-directed recovery into final validation from a block.
-            (BlockedNeedsUser, FinalValidation(_)) => true,
-            // Force-ship from a final-validation block. The runtime guard in
-            // `execute_transition` rejects this transition when the block did
-            // not originate from final validation.
-            (BlockedNeedsUser, Done) => true,
-            // Backward transitions (go_back)
-            (BrainstormRunning, IdeaInput) => true,
-            (SpecReviewRunning, BrainstormRunning) => true,
-            (SpecReviewPaused, BrainstormRunning) => true,
-            (PlanningRunning, SpecReviewRunning) => true,
-            (ShardingRunning, PlanReviewRunning) => true, // Changed from PlanningRunning
-            // New backward transitions for Plan Review
-            (PlanReviewRunning, PlanningRunning) => true,
-            (PlanReviewRunning, PlanReviewPaused) => true,
-            (PlanReviewPaused, PlanningRunning) => true,
-            (ImplementationRound(r), ShardingRunning) if *r <= 1 => true,
-            // Skip-to-implementation sessions rewind past sharding back to brainstorm,
-            // since sharding never ran on this path.
-            (ImplementationRound(r), BrainstormRunning) if *r <= 1 => true,
-            (ImplementationRound(r), ReviewRound(r2)) if *r2 == *r - 1 => true,
-            (ReviewRound(r), ImplementationRound(r2)) if *r == *r2 => true,
-            // Rewind transitions out of final validation.
-            (FinalValidation(r), ReviewRound(r2)) if *r == *r2 && *r >= 1 => true,
-            (FinalValidation(1), ImplementationRound(1)) => true,
-            // Rewind transitions out of simplification.
-            (Simplification(r), ReviewRound(r2)) if *r == *r2 && *r >= 1 => true,
-            (Simplification(1), ImplementationRound(1)) => true,
-            _ => false,
-        }
+        TRANSITION_EDGES
+            .iter()
+            .any(|edge| edge.allows(self, target))
     }
 
     /// Artifacts that should exist before entering this phase.
@@ -266,6 +432,10 @@ mod tests {
 
     #[test]
     fn plan_review_forward_transitions() {
+        assert!(
+            super::TRANSITION_EDGES.len() >= 70,
+            "pipeline transitions should stay in the declarative edge table"
+        );
         assert!(Phase::PlanningRunning.can_transition_to(&Phase::PlanReviewRunning));
         assert!(Phase::PlanningRunning.can_transition_to(&Phase::ShardingRunning));
         assert!(Phase::PlanReviewRunning.can_transition_to(&Phase::PlanReviewPaused));

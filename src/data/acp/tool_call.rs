@@ -107,11 +107,9 @@ impl ToolCallMap {
     }
 }
 
+#[rustfmt::skip]
 pub(super) fn is_terminal_status(s: &str) -> bool {
-    matches!(
-        s,
-        "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error"
-    )
+    matches!(s, "completed" | "failed" | "cancelled" | "canceled" | "errored" | "error")
 }
 
 fn is_success_status(s: &str) -> bool {

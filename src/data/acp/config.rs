@@ -23,28 +23,20 @@ pub struct AcpConfig {
     agents: BTreeMap<VendorKind, AcpAgentDefinition>,
 }
 
+#[rustfmt::skip]
 impl AcpConfig {
-    pub fn empty() -> Self {
-        Self {
-            agents: BTreeMap::new(),
-        }
-    }
+    pub fn empty() -> Self { Self { agents: BTreeMap::new() } }
 
     pub fn from_agents(agents: impl IntoIterator<Item = AcpAgentDefinition>) -> Self {
-        Self {
-            agents: agents.into_iter().map(|a| (a.vendor, a)).collect(),
-        }
+        Self { agents: agents.into_iter().map(|a| (a.vendor, a)).collect() }
     }
 
     pub fn available_vendors(&self) -> std::collections::BTreeSet<VendorKind> {
-        self.agents
-            .iter()
+        self.agents.iter()
             .filter(|(_, a)| !a.program.trim().is_empty() && program_is_executable(&a.program))
-            .map(|(v, _)| *v)
-            .collect()
+            .map(|(v, _)| *v).collect()
     }
 
-    #[rustfmt::skip]
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
         let agent = self.agents.get(&request.vendor).ok_or_else(|| AcpError::human_block(
             format!("ACP agent not configured for vendor {}", vendor_kind_to_str(request.vendor))
@@ -100,106 +92,77 @@ impl AcpConfig {
     }
 }
 
+#[rustfmt::skip]
 impl Default for AcpConfig {
-    #[rustfmt::skip]
     fn default() -> Self {
-        let str_args = |args: &[&str]| args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let claude = {
-            let local = claude_acp_local_program();
-            if path_is_executable(&local) { local.display().to_string() } else { "claude-agent-acp".to_string() }
-        };
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let local = claude_acp_local_program();
+        let claude = if path_is_executable(&local) { local.display().to_string() } else { "claude-agent-acp".into() };
         Self::from_agents([
             agent_def(VendorKind::Claude, &claude, Vec::new()),
-            agent_def(VendorKind::Codex, "codex-acp", str_args(&[
-                "-c", "sandbox_mode=\"danger-full-access\"",
-                "-c", "approval_policy=\"never\"",
-            ])),
-            agent_def(VendorKind::Gemini, "gemini", str_args(&["--yolo", "--acp"])),
-            agent_def(VendorKind::Kimi, "kimi", str_args(&["--yolo", "--thinking", "acp"])),
+            agent_def(VendorKind::Codex, "codex-acp",
+                argv(&["-c", "sandbox_mode=\"danger-full-access\"", "-c", "approval_policy=\"never\""])),
+            agent_def(VendorKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
+            agent_def(VendorKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
         ])
     }
 }
 
+#[rustfmt::skip]
 pub fn claude_acp_install_root() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codexize")
-        .join("acp")
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+        .join(".codexize").join("acp")
 }
 
+#[rustfmt::skip]
 pub fn claude_acp_local_program() -> PathBuf {
-    claude_acp_install_root()
-        .join("node_modules")
-        .join(".bin")
-        .join("claude-agent-acp")
+    claude_acp_install_root().join("node_modules").join(".bin").join("claude-agent-acp")
 }
 
-pub fn claude_acp_is_available() -> bool {
-    path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp")
-}
-pub fn claude_cli_is_available() -> bool {
-    program_is_executable(CLAUDE_CLI)
-}
+#[rustfmt::skip]
 pub fn should_offer_claude_acp_install() -> bool {
-    program_is_executable(CLAUDE_CLI) && !claude_acp_is_available()
+    program_is_executable(CLAUDE_CLI)
+        && !(path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp"))
 }
-pub fn codex_acp_is_available() -> bool {
-    program_is_executable(CODEX_ACP_CLI)
-}
-pub fn codex_cli_is_available() -> bool {
-    program_is_executable(CODEX_CLI)
-}
+#[rustfmt::skip]
 pub fn should_offer_codex_acp_install() -> bool {
-    program_is_executable(CODEX_CLI) && !codex_acp_is_available()
+    program_is_executable(CODEX_CLI) && !program_is_executable(CODEX_ACP_CLI)
 }
 
 #[rustfmt::skip]
 fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
     #[cfg(test)]
-    if let Some(p) = test_program_override(vendor) {
-        return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };
+    {
+        let key = match vendor {
+            VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+            VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+            VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+            VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+        };
+        if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
+            return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };
+        }
     }
     AcpAgentDefinition { vendor, program: program.to_string(), args, env: BTreeMap::new() }
 }
 
-#[cfg(test)]
 #[rustfmt::skip]
-fn test_program_override(vendor: VendorKind) -> Option<String> {
-    let key = match vendor {
-        VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
-        VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
-        VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
-        VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
-    };
-    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
-}
-
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        Ok(std::env::current_dir()?.join(path))
-    }
+    if path.is_absolute() { Ok(path.to_path_buf()) } else { Ok(std::env::current_dir()?.join(path)) }
 }
 
-fn absolutize_policy(policy: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
+#[rustfmt::skip]
+fn absolutize_policy(p: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
     Ok(AcpLaunchPolicy {
-        allowed_write_paths: policy
-            .allowed_write_paths
-            .iter()
-            .map(|p| absolutize(p))
-            .collect::<AcpResult<Vec<_>>>()?,
-        shell_policy: policy.shell_policy.clone(),
-        enforce_readonly_workspace: policy.enforce_readonly_workspace,
+        allowed_write_paths: p.allowed_write_paths.iter().map(|p| absolutize(p)).collect::<AcpResult<Vec<_>>>()?,
+        shell_policy: p.shell_policy.clone(), enforce_readonly_workspace: p.enforce_readonly_workspace,
     })
 }
 
+#[rustfmt::skip]
 pub fn program_is_executable(program: &str) -> bool {
     let candidate = Path::new(program);
-    if candidate.components().count() > 1 {
-        return path_is_executable(candidate);
-    }
+    if candidate.components().count() > 1 { return path_is_executable(candidate); }
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path).any(|dir| path_is_executable(&dir.join(program)))
 }
@@ -213,12 +176,9 @@ fn path_is_executable(path: &Path) -> bool {
 }
 
 #[rustfmt::skip]
-fn effort_str(effort: crate::adapters::EffortLevel) -> &'static str {
-    match effort {
-        crate::adapters::EffortLevel::Low => "low",
-        crate::adapters::EffortLevel::Normal => "normal",
-        crate::adapters::EffortLevel::Tough => "tough",
-    }
+fn effort_str(e: crate::adapters::EffortLevel) -> &'static str {
+    use crate::adapters::EffortLevel::*;
+    match e { Low => "low", Normal => "normal", Tough => "tough" }
 }
 
 #[cfg(test)]

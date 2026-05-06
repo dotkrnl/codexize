@@ -12,12 +12,10 @@ use tokio::process::{Child, Command};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
+#[rustfmt::skip]
 pub(super) fn build_session_runtime() -> AcpResult<Runtime> {
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .thread_name("codexize-acp")
-        .build()
+        .worker_threads(1).enable_all().thread_name("codexize-acp").build()
         .map_err(|err| AcpError::io(format!("failed to build ACP tokio runtime: {err}")))
 }
 
@@ -65,51 +63,42 @@ pub(super) async fn handshake(rpc: &mut RpcClient, launch: &AcpResolvedLaunch) -
     Ok(HandshakeOutput { session_id: session.session_id, supports_close: init.supports_close, prompt_response })
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct NewSessionResult {
-    #[serde(rename = "sessionId")]
-    pub(super) session_id: String,
-    #[serde(rename = "configOptions", default)]
-    pub(super) config_options: Vec<ConfigOption>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct ConfigOption {
-    pub(super) id: String,
-    #[serde(default)]
-    pub(super) category: Option<String>,
-    #[serde(rename = "currentValue", default)]
-    pub(super) current_value: Option<String>,
-    #[serde(default)]
-    pub(super) options: Vec<ConfigChoice>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(super) struct ConfigChoice {
-    pub(super) value: String,
-}
-
-#[derive(Debug)]
-pub(super) struct InitializeOutcome {
-    pub(super) protocol_version: u64,
-    pub(super) supports_close: bool,
-}
+#[rustfmt::skip]
+pub(super) struct InitializeOutcome { pub(super) protocol_version: u64, pub(super) supports_close: bool }
 
 #[rustfmt::skip]
-pub(super) fn parse_initialize_result(value: Value) -> AcpResult<InitializeOutcome> {
+pub(super) fn parse_initialize_result(v: Value) -> AcpResult<InitializeOutcome> {
     Ok(InitializeOutcome {
-        protocol_version: value.get("protocolVersion").and_then(Value::as_u64)
+        protocol_version: v.get("protocolVersion").and_then(Value::as_u64)
             .ok_or_else(|| AcpError::protocol("ACP initialize response missing protocolVersion"))?,
-        supports_close: value.pointer("/agentCapabilities/sessionCapabilities/close")
+        supports_close: v.pointer("/agentCapabilities/sessionCapabilities/close")
             .and_then(Value::as_bool).unwrap_or(false),
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PromptTurnOutcome {
-    Finished,
-    Failed { message: String },
+#[rustfmt::skip]
+#[derive(Debug, Deserialize)]
+pub(super) struct NewSessionResult {
+    #[serde(rename = "sessionId")] pub(super) session_id: String,
+    #[serde(rename = "configOptions", default)] pub(super) config_options: Vec<ConfigOption>,
 }
+
+#[rustfmt::skip]
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ConfigOption {
+    pub(super) id: String,
+    #[serde(default)] pub(super) category: Option<String>,
+    #[serde(rename = "currentValue", default)] pub(super) current_value: Option<String>,
+    #[serde(default)] pub(super) options: Vec<ConfigChoice>,
+}
+
+#[rustfmt::skip]
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ConfigChoice { pub(super) value: String }
+
+#[rustfmt::skip]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PromptTurnOutcome { Finished, Failed { message: String } }
 
 #[rustfmt::skip]
 pub(super) fn parse_prompt_result(value: Value) -> AcpResult<PromptTurnOutcome> {
@@ -152,15 +141,13 @@ async fn apply_session_config(rpc: &mut RpcClient, session_id: &str, session: &A
         if option.current_value.as_deref() == Some(value.as_str())
             || (!option.options.is_empty() && !option.options.iter().any(|c| c.value == value))
         { continue }
-        match rpc.call_async("session/set_config_option",
-            json!({ "sessionId": session_id, "configId": option.id, "value": value })
-        ).await.and_then(|v| {
-            serde_json::from_value::<NewSessionResult>(json!({
-                "sessionId": session_id,
-                "configOptions": v.get("configOptions").cloned().unwrap_or(json!([])),
-            })).map(|w| w.config_options)
-            .map_err(|err| AcpError::protocol(format!("failed to parse ACP session/set_config_option response: {err}")))
-        }) {
+        let result = rpc.call_async("session/set_config_option",
+            json!({ "sessionId": session_id, "configId": option.id, "value": value })).await
+            .and_then(|v| serde_json::from_value::<Vec<ConfigOption>>(
+                v.get("configOptions").cloned().unwrap_or(json!([])))
+                .map_err(|err| AcpError::protocol(format!(
+                    "failed to parse ACP session/set_config_option response: {err}"))));
+        match result {
             Ok(updated) => *options = updated,
             Err(err) => tracing::debug!(target: "codexize::acp",
                 "session/set_config_option failed for category={category} id={} value={value}: {err}", option.id),

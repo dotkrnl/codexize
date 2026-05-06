@@ -1,11 +1,9 @@
 use std::collections::VecDeque;
 
 /// `Continue` appends to the current live block; `StartNewMessage` finalizes first.
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AcpTextBoundary {
-    Continue,
-    StartNewMessage,
-}
+pub enum AcpTextBoundary { Continue, StartNewMessage }
 
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,11 +19,9 @@ pub enum ClientUpdate {
     Unknown { kind: String },
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolCallActivityKind {
-    Start,
-    Finish,
-}
+pub enum ToolCallActivityKind { Start, Finish }
 
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,19 +49,14 @@ pub struct AcpTextAccumulator {
     ready: VecDeque<String>,
 }
 
+#[rustfmt::skip]
 impl AcpTextAccumulator {
     pub const DEFAULT_MAX_CHARS: usize = 8192;
 
-    pub fn new() -> Self {
-        Self::with_max_chars(Self::DEFAULT_MAX_CHARS)
-    }
+    pub fn new() -> Self { Self::with_max_chars(Self::DEFAULT_MAX_CHARS) }
 
     pub fn with_max_chars(max_chars: usize) -> Self {
-        Self {
-            buffer: String::new(),
-            max_chars: max_chars.max(1),
-            ready: VecDeque::new(),
-        }
+        Self { buffer: String::new(), max_chars: max_chars.max(1), ready: VecDeque::new() }
     }
 
     pub fn push(&mut self, chunk: &str) -> Option<String> {
@@ -80,13 +71,10 @@ impl AcpTextAccumulator {
         (!self.buffer.is_empty()).then_some(self.buffer.as_str())
     }
 
-    pub fn next_ready(&mut self) -> Option<String> {
-        self.ready.pop_front()
-    }
+    pub fn next_ready(&mut self) -> Option<String> { self.ready.pop_front() }
 
     pub fn finish_prompt_turn(&mut self) -> Option<String> {
-        self.ready
-            .pop_front()
+        self.ready.pop_front()
             .or_else(|| (!self.buffer.is_empty()).then(|| std::mem::take(&mut self.buffer)))
     }
 
@@ -107,9 +95,8 @@ impl AcpTextAccumulator {
 }
 
 impl Default for AcpTextAccumulator {
-    fn default() -> Self {
-        Self::new()
-    }
+    #[rustfmt::skip]
+    fn default() -> Self { Self::new() }
 }
 
 #[rustfmt::skip]

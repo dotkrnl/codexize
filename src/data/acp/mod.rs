@@ -10,10 +10,8 @@ mod tool_call;
 pub use client::client_updates_from_session_updates_for_test;
 pub use client::{AcpConnector, AcpSession, SubprocessConnector};
 pub use config::{
-    AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_is_available,
-    claude_acp_local_program, claude_cli_is_available, codex_acp_is_available,
-    codex_cli_is_available, program_is_executable, should_offer_claude_acp_install,
-    should_offer_codex_acp_install,
+    AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_local_program,
+    program_is_executable, should_offer_claude_acp_install, should_offer_codex_acp_install,
 };
 pub use events::{
     AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientUpdate,
@@ -34,29 +32,21 @@ pub enum AcpError {
     #[error("{0}")] Protocol(String),
 }
 
+#[rustfmt::skip]
 impl AcpError {
-    pub fn human_block(m: impl Into<String>) -> Self {
-        Self::HumanBlock(m.into())
-    }
-    pub fn protocol(m: impl Into<String>) -> Self {
-        Self::Protocol(m.into())
-    }
-    pub fn io(m: impl Into<String>) -> Self {
-        Self::Io(m.into())
-    }
+    pub fn human_block(m: impl Into<String>) -> Self { Self::HumanBlock(m.into()) }
+    pub fn protocol(m: impl Into<String>) -> Self { Self::Protocol(m.into()) }
+    pub fn io(m: impl Into<String>) -> Self { Self::Io(m.into()) }
 }
 
 impl From<std::io::Error> for AcpError {
-    fn from(value: std::io::Error) -> Self {
-        Self::io(value.to_string())
-    }
+    #[rustfmt::skip]
+    fn from(value: std::io::Error) -> Self { Self::io(value.to_string()) }
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PromptPayload {
-    Text(String),
-    File(PathBuf),
-}
+pub enum PromptPayload { Text(String), File(PathBuf) }
 
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
@@ -73,13 +63,14 @@ pub enum AcpPermissionMode {
     #[strum(to_string = "code")] Code,
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AcpShellCommandPolicy {
-    #[default]
-    FullAccess,
+    #[default] FullAccess,
     Allowlist(Vec<String>),
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AcpLaunchPolicy {
     pub allowed_write_paths: Vec<PathBuf>,
@@ -87,67 +78,47 @@ pub struct AcpLaunchPolicy {
     pub enforce_readonly_workspace: bool,
 }
 
+#[rustfmt::skip]
 impl AcpLaunchPolicy {
-    #[rustfmt::skip]
     pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
+        let cmds = ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"];
         Self {
             allowed_write_paths: vec![verdict_path.into(), live_summary_path.into()],
-            shell_policy: AcpShellCommandPolicy::Allowlist(
-                ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"]
-                    .map(String::from).to_vec()
-            ),
+            shell_policy: AcpShellCommandPolicy::Allowlist(cmds.map(String::from).to_vec()),
             enforce_readonly_workspace: true,
         }
     }
-
     /// Simplifier writes/commits repo files; workspace not read-only, shell unrestricted.
-    pub fn simplifier(
-        simplification_path: impl Into<PathBuf>,
-        live_summary_path: impl Into<PathBuf>,
-    ) -> Self {
+    pub fn simplifier(simplification_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
         Self {
             allowed_write_paths: vec![simplification_path.into(), live_summary_path.into()],
-            shell_policy: AcpShellCommandPolicy::FullAccess,
-            enforce_readonly_workspace: false,
+            shell_policy: AcpShellCommandPolicy::FullAccess, enforce_readonly_workspace: false,
         }
     }
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
-    pub vendor: VendorKind,
-    pub cwd: PathBuf,
-    pub prompt: PromptPayload,
-    pub model: String,
-    pub requested_effort: EffortLevel,
-    pub effective_effort: EffortLevel,
-    pub interactive: bool,
-    pub modes: LaunchModes,
-    pub policy: AcpLaunchPolicy,
+    pub vendor: VendorKind, pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
+    pub requested_effort: EffortLevel, pub effective_effort: EffortLevel,
+    pub interactive: bool, pub modes: LaunchModes, pub policy: AcpLaunchPolicy,
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcpSpawnSpec {
-    pub program: String,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-}
+pub struct AcpSpawnSpec { pub program: String, pub args: Vec<String>, pub env: BTreeMap<String, String> }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpSessionSpec {
-    pub cwd: PathBuf,
-    pub prompt: PromptPayload,
-    pub model: String,
-    pub reasoning_effort: AcpReasoningEffort,
-    pub permission_mode: AcpPermissionMode,
-    pub policy: AcpLaunchPolicy,
-    pub metadata: BTreeMap<String, String>,
+    pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
+    pub reasoning_effort: AcpReasoningEffort, pub permission_mode: AcpPermissionMode,
+    pub policy: AcpLaunchPolicy, pub metadata: BTreeMap<String, String>,
 }
 
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpResolvedLaunch {
-    pub vendor: VendorKind,
-    pub interactive: bool,
-    pub spawn: AcpSpawnSpec,
-    pub session: AcpSessionSpec,
+    pub vendor: VendorKind, pub interactive: bool, pub spawn: AcpSpawnSpec, pub session: AcpSessionSpec,
 }

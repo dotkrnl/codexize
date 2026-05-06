@@ -16,13 +16,10 @@ type Pending = HashMap<u64, oneshot::Sender<AcpResult<Value>>>;
 type Updates = mpsc::UnboundedSender<AcpResult<Value>>;
 type Respond = Option<(u64, oneshot::Sender<AcpResult<Value>>)>;
 
+#[rustfmt::skip]
 #[derive(Debug)]
 pub(super) enum RpcCommand {
-    Send {
-        method: String,
-        params: Value,
-        respond: Respond,
-    },
+    Send { method: String, params: Value, respond: Respond },
     Shutdown,
 }
 
@@ -35,8 +32,8 @@ pub(super) struct RpcClient {
     actor: Option<JoinHandle<()>>,
 }
 
+#[rustfmt::skip]
 impl RpcClient {
-    #[rustfmt::skip]
     pub(super) fn start<R, W>(runtime: Arc<Runtime>, reader: R, writer: W) -> Self
     where R: AsyncBufRead + Unpin + Send + 'static, W: AsyncWrite + Unpin + Send + 'static
     {
@@ -50,18 +47,15 @@ impl RpcClient {
         }
     }
 
-    #[rustfmt::skip]
     fn enqueue(&self, method: &str, params: Value, respond: Respond) -> AcpResult<()> {
         let kind = if respond.is_some() { "request" } else { "notification" };
         self.commands.send(RpcCommand::Send { method: method.to_string(), params, respond })
             .map_err(|_| AcpError::io(format!("failed to enqueue ACP {kind} {method}: actor stopped")))
     }
 
-    pub(super) fn start_request(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> AcpResult<oneshot::Receiver<AcpResult<Value>>> {
+    pub(super) fn start_request(&self, method: &str, params: Value)
+        -> AcpResult<oneshot::Receiver<AcpResult<Value>>>
+    {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.enqueue(method, params, Some((id, tx)))?;
@@ -73,12 +67,10 @@ impl RpcClient {
     }
 
     pub(super) async fn call_async(&mut self, method: &str, params: Value) -> AcpResult<Value> {
-        self.start_request(method, params)?
-            .await
+        self.start_request(method, params)?.await
             .map_err(|_| AcpError::protocol(format!("ACP request {method} channel disconnected")))?
     }
 
-    #[rustfmt::skip]
     pub(super) fn try_next_update(&mut self) -> AcpResult<Option<Value>> {
         match self.updates.try_recv() {
             Ok(Ok(v)) => Ok(Some(v)),
@@ -88,9 +80,7 @@ impl RpcClient {
     }
 
     fn join_actor(&mut self, runtime: &Runtime) {
-        if let Some(actor) = self.actor.take() {
-            let _ = runtime.block_on(actor);
-        }
+        if let Some(actor) = self.actor.take() { let _ = runtime.block_on(actor); }
     }
 
     pub(super) fn shutdown_blocking_no_child(&mut self) {
@@ -235,16 +225,15 @@ where W: AsyncWrite + Unpin
     Ok(())
 }
 
+#[rustfmt::skip]
 fn broadcast_error(pending: &mut Pending, updates: &Updates, err: AcpError) {
-    for (_, tx) in pending.drain() {
-        let _ = tx.send(Err(err.clone()));
-    }
+    for (_, tx) in pending.drain() { let _ = tx.send(Err(err.clone())); }
     let _ = updates.send(Err(err));
 }
 
+#[rustfmt::skip]
 async fn write_line<W>(writer: &mut W, message: &Value) -> std::io::Result<()>
-where
-    W: AsyncWrite + Unpin,
+where W: AsyncWrite + Unpin
 {
     let encoded = serde_json::to_string(message)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;

@@ -25,6 +25,7 @@ pub(super) struct AcpBoundaryState {
     thought: StreamIdentity,
 }
 
+#[rustfmt::skip]
 impl AcpBoundaryState {
     pub(super) fn new() -> Self {
         let mut s = Self::default();
@@ -35,14 +36,8 @@ impl AcpBoundaryState {
     /// ACP servers may legally reuse message ids across turns, so the next
     /// turn must always restart at `StartNewMessage`.
     pub(super) fn reset_for_prompt_turn(&mut self) {
-        self.message = StreamIdentity {
-            last: None,
-            restart: true,
-        };
-        self.thought = StreamIdentity {
-            last: None,
-            restart: true,
-        };
+        self.message = StreamIdentity { last: None, restart: true };
+        self.thought = StreamIdentity { last: None, restart: true };
     }
 }
 
@@ -113,45 +108,36 @@ fn extract_identity(value: &Value) -> Option<String> {
 }
 
 #[rustfmt::skip]
-fn handle_tool_call(state: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
-    let terminal = state.status.as_deref().map(is_terminal_status).unwrap_or(false);
-    let invocation = format_invocation_line(&state, cwd);
-    let Some(id) = state.tool_call_id.clone() else {
-        out.push_back(tool_call_text(invocation));
-        if terminal { out.push_back(tool_call_text(format_result_line(&state))); }
+fn handle_tool_call(s: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
+    let terminal = s.status.as_deref().map(is_terminal_status).unwrap_or(false);
+    out.push_back(tool_text(format_invocation_line(&s, cwd)));
+    let Some(id) = s.tool_call_id.clone() else {
+        if terminal { out.push_back(tool_text(format_result_line(&s))); }
         return;
     };
-    map.insert(id.clone(), state.clone());
-    out.push_back(tool_call_text(invocation));
-    if terminal {
-        out.push_back(tool_call_text(format_result_line(&state)));
-        emit_activity_once(&id, true, map, out);
-        map.evict(&id);
-    } else {
-        emit_activity_once(&id, false, map, out);
-    }
+    map.insert(id.clone(), s.clone());
+    if terminal { out.push_back(tool_text(format_result_line(&s))); }
+    emit_activity_once(&id, terminal, map, out);
+    if terminal { map.evict(&id); }
 }
 
 #[rustfmt::skip]
-fn handle_tool_call_update(payload: ToolCallDisplayState, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
-    let terminal = payload.status.as_deref().map(is_terminal_status).unwrap_or(false);
-    let active = payload.status.as_deref().is_some_and(|s| matches!(s, "pending" | "in_progress"));
-    let Some(id) = payload.tool_call_id.clone() else {
-        if terminal { out.push_back(tool_call_text(format_result_line(&payload))); }
+fn handle_tool_call_update(p: ToolCallDisplayState, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
+    let terminal = p.status.as_deref().map(is_terminal_status).unwrap_or(false);
+    let active = p.status.as_deref().is_some_and(|s| matches!(s, "pending" | "in_progress"));
+    let Some(id) = p.tool_call_id.clone() else {
+        if terminal { out.push_back(tool_text(format_result_line(&p))); }
         return;
     };
-    if let Some(state) = map.merge(&id, &payload) {
+    if let Some(state) = map.merge(&id, &p) {
         if terminal {
-            out.push_back(tool_call_text(format_result_line(state)));
+            out.push_back(tool_text(format_result_line(state)));
             emit_activity_once(&id, true, map, out);
             map.evict(&id);
-        } else if active {
-            emit_activity_once(&id, false, map, out);
-        }
+        } else if active { emit_activity_once(&id, false, map, out); }
     } else if terminal && !map.was_emitted(&id, true) {
-        out.push_back(tool_call_text(format_result_line(&payload)));
-        out.push_back(activity(&id, ToolCallActivityKind::Finish));
-        map.mark_emitted(&id, true);
+        out.push_back(tool_text(format_result_line(&p)));
+        emit_activity_once(&id, true, map, out);
     }
 }
 
@@ -159,21 +145,11 @@ fn handle_tool_call_update(payload: ToolCallDisplayState, map: &mut ToolCallMap,
 fn emit_activity_once(id: &str, terminal: bool, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
     if map.was_emitted(id, terminal) { return; }
     let kind = if terminal { ToolCallActivityKind::Finish } else { ToolCallActivityKind::Start };
-    out.push_back(activity(id, kind));
+    out.push_back(ClientUpdate::ToolCallActivity { tool_call_id: id.to_string(), kind });
     map.mark_emitted(id, terminal);
 }
 
-fn activity(id: &str, kind: ToolCallActivityKind) -> ClientUpdate {
-    ClientUpdate::ToolCallActivity {
-        tool_call_id: id.to_string(),
-        kind,
-    }
-}
-
-fn tool_call_text(text: String) -> ClientUpdate {
-    ClientUpdate::ToolCallText {
-        text,
-        boundary: AcpTextBoundary::StartNewMessage,
-        identity: None,
-    }
+#[rustfmt::skip]
+fn tool_text(text: String) -> ClientUpdate {
+    ClientUpdate::ToolCallText { text, boundary: AcpTextBoundary::StartNewMessage, identity: None }
 }

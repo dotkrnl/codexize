@@ -91,9 +91,8 @@ impl SubprocessSession {
 }
 
 impl AcpSession for SubprocessSession {
-    fn session_id(&self) -> &str {
-        &self.session_id
-    }
+    #[rustfmt::skip]
+    fn session_id(&self) -> &str { &self.session_id }
 
     #[rustfmt::skip]
     fn try_next_update(&mut self) -> AcpResult<Option<ClientUpdate>> {
@@ -140,9 +139,9 @@ impl AcpSession for SubprocessSession {
         Ok(())
     }
 
+    #[rustfmt::skip]
     fn cancel_prompt(&mut self) -> AcpResult<()> {
-        self.rpc
-            .notify("session/cancel", json!({ "sessionId": self.session_id }))
+        self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id }))
     }
 
     #[rustfmt::skip]
@@ -175,9 +174,8 @@ impl AcpSession for SubprocessSession {
 }
 
 impl Drop for SubprocessSession {
-    fn drop(&mut self) {
-        let _ = self.close();
-    }
+    #[rustfmt::skip]
+    fn drop(&mut self) { let _ = self.close(); }
 }
 
 #[rustfmt::skip]

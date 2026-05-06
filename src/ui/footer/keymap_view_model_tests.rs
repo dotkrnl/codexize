@@ -61,9 +61,7 @@ fn measure_system_assumes_system_bindings_enabled() {
 #[test]
 fn measure_simple_bindings_drops_labels_when_requested() {
     let bindings = [binding("Esc", "quit", false, None)];
-    assert!(
-        measure_simple_bindings(&bindings, true) > measure_simple_bindings(&bindings, false)
-    );
+    assert!(measure_simple_bindings(&bindings, true) > measure_simple_bindings(&bindings, false));
 }
 
 #[test]

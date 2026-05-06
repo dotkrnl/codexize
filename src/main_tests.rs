@@ -17,8 +17,7 @@ fn yolo_flag_parses_as_create_mode_seed() {
 
 #[test]
 fn yolo_and_cheap_flags_combine() {
-    let cli =
-        Cli::try_parse_from(["codexize", "--yolo", "--cheap"]).expect("parse --yolo --cheap");
+    let cli = Cli::try_parse_from(["codexize", "--yolo", "--cheap"]).expect("parse --yolo --cheap");
     assert!(cli.yolo);
     assert!(cli.cheap);
 }
@@ -79,8 +78,8 @@ fn message_long_flag_with_equals_parses() {
 
 #[test]
 fn message_can_appear_before_yolo() {
-    let cli = Cli::try_parse_from(["codexize", "-m", "ship it", "--yolo"])
-        .expect("parse -m ... --yolo");
+    let cli =
+        Cli::try_parse_from(["codexize", "-m", "ship it", "--yolo"]).expect("parse -m ... --yolo");
     assert!(cli.yolo);
     assert_eq!(cli.message.as_deref(), Some("ship it"));
 }

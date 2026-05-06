@@ -216,9 +216,9 @@ fn zero_as_missing_fires_counter_and_rewrites_provenance() {
     // correctness=0.0 appears in Planning, Build, Review → 3 events
     let correctness_events: Vec<_> = events
         .iter()
-        .filter(|e| {
-            matches!(e, SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness")
-        })
+        .filter(
+            |e| matches!(e, SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness"),
+        )
         .collect();
     assert_eq!(
         correctness_events.len(),

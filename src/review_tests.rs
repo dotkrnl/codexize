@@ -1,107 +1,108 @@
-    use super::*;
 
-    fn write_review(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
-        let path = dir.path().join("review.toml");
-        std::fs::write(&path, content).unwrap();
-        path
-    }
+use super::*;
 
-    #[test]
-    fn review_approved_basic() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "approved"
+fn write_review(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
+    let path = dir.path().join("review.toml");
+    std::fs::write(&path, content).unwrap();
+    path
+}
+
+#[test]
+fn review_approved_basic() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
 summary = "All changes look good"
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::Approved);
-        assert_eq!(verdict.summary, "All changes look good");
-        assert!(verdict.feedback.is_empty());
-        assert!(verdict.new_tasks.is_empty());
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::Approved);
+    assert_eq!(verdict.summary, "All changes look good");
+    assert!(verdict.feedback.is_empty());
+    assert!(verdict.new_tasks.is_empty());
+}
 
-    #[test]
-    fn review_approved_with_advisory_feedback_is_allowed() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "approved"
+#[test]
+fn review_approved_with_advisory_feedback_is_allowed() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
 summary = "Approved with minor notes"
 feedback = ["Consider adding more tests in the future"]
 "#,
-        );
-        // approved + feedback is advisory and must not be rejected
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::Approved);
-        assert_eq!(verdict.feedback.len(), 1);
-        assert!(verdict.feedback[0].contains("tests"));
-    }
+    );
+    // approved + feedback is advisory and must not be rejected
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::Approved);
+    assert_eq!(verdict.feedback.len(), 1);
+    assert!(verdict.feedback[0].contains("tests"));
+}
 
-    #[test]
-    fn review_revise_requires_feedback() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "revise"
+#[test]
+fn review_revise_requires_feedback() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
 summary = "Needs changes"
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("feedback"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("feedback"));
+}
 
-    #[test]
-    fn review_revise_with_feedback_passes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "revise"
+#[test]
+fn review_revise_with_feedback_passes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
 summary = "Fix the logic"
 feedback = ["The loop condition is wrong"]
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::Revise);
-        assert!(!verdict.feedback.is_empty());
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::Revise);
+    assert!(!verdict.feedback.is_empty());
+}
 
-    #[test]
-    fn review_refine_requires_feedback() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "refine"
+#[test]
+fn review_refine_requires_feedback() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "refine"
 summary = "Mostly good"
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("feedback"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("feedback"));
+}
 
-    #[test]
-    fn review_refine_with_feedback_passes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "refine"
+#[test]
+fn review_refine_with_feedback_passes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "refine"
 summary = "Approved with nits"
 feedback = ["Rename `foo` to `foo_bar` next time", "Drop the dead import"]
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::Refine);
-        assert_eq!(verdict.feedback.len(), 2);
-        assert!(verdict.new_tasks.is_empty());
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::Refine);
+    assert_eq!(verdict.feedback.len(), 2);
+    assert!(verdict.new_tasks.is_empty());
+}
 
-    #[test]
-    fn review_refine_must_not_have_new_tasks() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "refine"
+#[test]
+fn review_refine_must_not_have_new_tasks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "refine"
 summary = "Nits only"
 feedback = ["Tighten the names"]
 
@@ -112,72 +113,72 @@ description = "More"
 test = "cargo test"
 estimated_tokens = 100
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("refine"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("refine"));
+}
 
-    #[test]
-    fn review_human_blocked_requires_feedback() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "human_blocked"
+#[test]
+fn review_human_blocked_requires_feedback() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "human_blocked"
 summary = "Need human judgment"
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("feedback"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("feedback"));
+}
 
-    #[test]
-    fn review_agent_pivot_requires_feedback() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "agent_pivot"
+#[test]
+fn review_agent_pivot_requires_feedback() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "agent_pivot"
 summary = "Agent can fix the direction"
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("feedback"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("feedback"));
+}
 
-    #[test]
-    fn review_human_blocked_with_feedback_passes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "human_blocked"
+#[test]
+fn review_human_blocked_with_feedback_passes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "human_blocked"
 summary = "Spec needs product clarification"
 feedback = ["The product direction for feature X is unclear"]
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::HumanBlocked);
-        assert_eq!(verdict.feedback.len(), 1);
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::HumanBlocked);
+    assert_eq!(verdict.feedback.len(), 1);
+}
 
-    #[test]
-    fn review_agent_pivot_with_feedback_passes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "agent_pivot"
+#[test]
+fn review_agent_pivot_with_feedback_passes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "agent_pivot"
 summary = "Agent can repair the plan"
 feedback = ["Tasks 3 and 4 are in the wrong order"]
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::AgentPivot);
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::AgentPivot);
+}
 
-    #[test]
-    fn review_approved_must_not_have_new_tasks() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "approved"
+#[test]
+fn review_approved_must_not_have_new_tasks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
 summary = "Looks good"
 
 [[new_tasks]]
@@ -187,30 +188,30 @@ description = "Something extra"
 test = "cargo test"
 estimated_tokens = 1000
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("approved"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("approved"));
+}
 
-    #[test]
-    fn review_empty_summary_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "approved"
+#[test]
+fn review_empty_summary_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "approved"
 summary = "   "
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("summary"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("summary"));
+}
 
-    #[test]
-    fn review_revise_with_valid_new_tasks_passes() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "revise"
+#[test]
+fn review_revise_with_valid_new_tasks_passes() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
 summary = "Split this task"
 feedback = ["Task is too large"]
 
@@ -228,19 +229,19 @@ description = "Second half of the work"
 test = "cargo test part_b"
 estimated_tokens = 5000
 "#,
-        );
-        let verdict = validate(&path).unwrap();
-        assert_eq!(verdict.status, ReviewStatus::Revise);
-        assert_eq!(verdict.new_tasks.len(), 2);
-        assert_eq!(verdict.new_tasks[0].title, "Part A");
-    }
+    );
+    let verdict = validate(&path).unwrap();
+    assert_eq!(verdict.status, ReviewStatus::Revise);
+    assert_eq!(verdict.new_tasks.len(), 2);
+    assert_eq!(verdict.new_tasks[0].title, "Part A");
+}
 
-    #[test]
-    fn review_new_task_missing_title_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "revise"
+#[test]
+fn review_new_task_missing_title_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
 summary = "Split"
 feedback = ["needs splitting"]
 
@@ -251,17 +252,17 @@ description = "desc"
 test = "cargo test"
 estimated_tokens = 1000
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("empty title"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("empty title"));
+}
 
-    #[test]
-    fn review_new_task_zero_tokens_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = write_review(
-            &dir,
-            r#"status = "revise"
+#[test]
+fn review_new_task_zero_tokens_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "revise"
 summary = "Split"
 feedback = ["needs splitting"]
 
@@ -272,40 +273,40 @@ description = "desc"
 test = "cargo test"
 estimated_tokens = 0
 "#,
-        );
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("estimated_tokens"));
-    }
+    );
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("estimated_tokens"));
+}
 
-    #[test]
-    fn review_missing_file_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("nonexistent.toml");
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("cannot read"));
-    }
+#[test]
+fn review_missing_file_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("nonexistent.toml");
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("cannot read"));
+}
 
-    #[test]
-    fn review_malformed_toml_fails() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("bad.toml");
-        std::fs::write(&path, "this is [[[ not valid toml").unwrap();
-        let err = validate(&path).unwrap_err();
-        assert!(format!("{err:#}").contains("malformed review TOML"));
-    }
+#[test]
+fn review_malformed_toml_fails() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("bad.toml");
+    std::fs::write(&path, "this is [[[ not valid toml").unwrap();
+    let err = validate(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("malformed review TOML"));
+}
 
-    #[test]
-    fn review_all_status_values_roundtrip() {
-        for (toml_val, expected) in [
-            ("\"approved\"", ReviewStatus::Approved),
-            ("\"refine\"", ReviewStatus::Refine),
-            ("\"revise\"", ReviewStatus::Revise),
-            ("\"human_blocked\"", ReviewStatus::HumanBlocked),
-            ("\"agent_pivot\"", ReviewStatus::AgentPivot),
-        ] {
-            let status: ReviewStatus = toml::from_str(&format!("status = {toml_val}\n"))
-                .map(|w: std::collections::HashMap<String, ReviewStatus>| w["status"].clone())
-                .unwrap();
-            assert_eq!(status, expected);
-        }
+#[test]
+fn review_all_status_values_roundtrip() {
+    for (toml_val, expected) in [
+        ("\"approved\"", ReviewStatus::Approved),
+        ("\"refine\"", ReviewStatus::Refine),
+        ("\"revise\"", ReviewStatus::Revise),
+        ("\"human_blocked\"", ReviewStatus::HumanBlocked),
+        ("\"agent_pivot\"", ReviewStatus::AgentPivot),
+    ] {
+        let status: ReviewStatus = toml::from_str(&format!("status = {toml_val}\n"))
+            .map(|w: std::collections::HashMap<String, ReviewStatus>| w["status"].clone())
+            .unwrap();
+        assert_eq!(status, expected);
     }
+}

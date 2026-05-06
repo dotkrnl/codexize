@@ -33,11 +33,10 @@ fn confirm_quit_running_agent_routes_termination_through_data_without_app_mutati
     );
 
     let mut requests = Vec::new();
-    let confirm =
-        runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
-            requests.push(request);
-            DataOutcome::Terminated(true)
-        });
+    let confirm = runtime.route_command_with_dispatch(AppCommand::ConfirmModal, &view, |request| {
+        requests.push(request);
+        DataOutcome::Terminated(true)
+    });
 
     assert_eq!(confirm, TerminalCommandOutcome::HandledExit);
     assert_eq!(requests, vec![DataRequest::TerminateRun { run_id: 7 }]);

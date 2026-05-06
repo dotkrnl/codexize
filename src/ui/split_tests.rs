@@ -74,9 +74,7 @@ fn split_panel_visibility_is_mode_independent_and_verbose_gates_thoughts() {
                     | MessageKind::Started
                     | MessageKind::End => true,
                     MessageKind::AgentThought => show_thinking_texts,
-                    MessageKind::Brief | MessageKind::Summary | MessageKind::SummaryWarn => {
-                        false
-                    }
+                    MessageKind::Brief | MessageKind::Summary | MessageKind::SummaryWarn => false,
                 };
 
                 assert_eq!(

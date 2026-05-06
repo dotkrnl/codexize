@@ -66,9 +66,7 @@ fn exact_name_with_args() {
 fn unique_prefix_match() {
     let cmds = test_commands();
     let result = resolve("qu", &cmds);
-    assert!(
-        matches!(result, MatchResult::UniquePrefix { command, .. } if command.name == "quit")
-    );
+    assert!(matches!(result, MatchResult::UniquePrefix { command, .. } if command.name == "quit"));
 }
 
 #[test]

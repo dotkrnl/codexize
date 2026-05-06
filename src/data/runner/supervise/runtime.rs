@@ -128,6 +128,17 @@ fn drive_acp_session(
             .try_next_update()
             .map_err(|err| anyhow!("{err}"))?
             .and_then(|update| translate_update(update, launch.resolved.interactive));
+        // If the underlying transport (e.g., the ACP child process) has gone
+        // away without emitting a terminal event, synthesize a
+        // PromptTurnFailed so the loop can route through the existing
+        // failure paths instead of hanging on `Ok(None)` polls forever.
+        let event = match event {
+            Some(e) => Some(e),
+            None => match session.dead_reason().map_err(|err| anyhow!("{err}"))? {
+                Some(message) => Some(AcpRuntimeEvent::PromptTurnFailed { message }),
+                None => None,
+            },
+        };
         match event {
             Some(AcpRuntimeEvent::PromptTurnFinished) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);

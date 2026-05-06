@@ -22,6 +22,17 @@ pub trait AcpSession: Send {
     fn submit_prompt(&mut self, text: &str) -> AcpResult<()>;
     fn cancel_prompt(&mut self) -> AcpResult<()>;
     fn close(&mut self) -> AcpResult<()>;
+    /// Liveness probe. Returns `Ok(None)` while the underlying transport is
+    /// still healthy, or `Ok(Some(message))` once the session has dropped
+    /// (e.g. the ACP child process exited without emitting a terminal
+    /// `PromptTurn{Finished,Failed}` event). The supervisor uses this to
+    /// avoid hanging on a silently-dead vendor — without it, `try_next_update`
+    /// can return `Ok(None)` indefinitely while the TUI keeps the run marked
+    /// active. Default returns `Ok(None)` for sessions that don't track an
+    /// out-of-band liveness signal.
+    fn dead_reason(&mut self) -> AcpResult<Option<String>> {
+        Ok(None)
+    }
 }
 pub trait AcpConnector {
     fn connect(&self, launch: &AcpResolvedLaunch) -> AcpResult<Box<dyn AcpSession>>;
@@ -129,6 +140,23 @@ impl AcpSession for SubprocessSession {
     #[rustfmt::skip]
     fn cancel_prompt(&mut self) -> AcpResult<()> {
         self.rpc.notify("session/cancel", json!({ "sessionId": self.session_id }))
+    }
+    fn dead_reason(&mut self) -> AcpResult<Option<String>> {
+        if self.closed {
+            return Ok(None);
+        }
+        let Some(child) = self.child.as_mut() else {
+            return Ok(None);
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => Ok(Some(format!(
+                "ACP child process exited unexpectedly: {status}"
+            ))),
+            Ok(None) => Ok(None),
+            Err(err) => Ok(Some(format!(
+                "ACP child process status check failed: {err}"
+            ))),
+        }
     }
     #[rustfmt::skip]
     fn close(&mut self) -> AcpResult<()> {

@@ -17,6 +17,7 @@ struct FakeSession {
     submitted: Vec<String>,
     cancel_calls: u32,
     closed: bool,
+    dead_reason: Option<String>,
 }
 
 impl FakeSession {
@@ -26,7 +27,13 @@ impl FakeSession {
             submitted: Vec::new(),
             cancel_calls: 0,
             closed: false,
+            dead_reason: None,
         }
+    }
+
+    fn with_dead_reason(mut self, reason: &str) -> Self {
+        self.dead_reason = Some(reason.to_string());
+        self
     }
 }
 
@@ -52,6 +59,10 @@ impl AcpSession for FakeSession {
     fn close(&mut self) -> AcpResult<()> {
         self.closed = true;
         Ok(())
+    }
+
+    fn dead_reason(&mut self) -> AcpResult<Option<String>> {
+        Ok(self.dead_reason.clone())
     }
 }
 
@@ -116,6 +127,31 @@ fn non_interactive_interrupt_resubmits_warning_then_finishes() {
 
     assert_eq!(outcome.exit_code, 0, "non-interactive interrupt + resume should finish gracefully");
     assert_eq!(outcome.signal_received, "");
+}
+
+#[test]
+fn silent_child_exit_during_idle_polls_breaks_the_loop() {
+    // The vendor session never emits a terminal event — try_next_update
+    // returns None forever — but the underlying child process has died.
+    // Without a dead_reason check, the loop spins on poll_park indefinitely
+    // and the TUI keeps the run marked active. With it, the loop exits as a
+    // failed run so the supervisor can route through the standard failover.
+    let session: Box<dyn AcpSession> = Box::new(
+        FakeSession::new(Vec::new()).with_dead_reason("child crashed mid-turn"),
+    );
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (_input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    let outcome = drive_acp_session(session, &launch, &cancel, &mut input_rx, &waiting_tx)
+        .expect("loop returns outcome");
+
+    assert_eq!(
+        outcome.exit_code, 1,
+        "silent child exit must surface as a failed run"
+    );
 }
 
 #[test]

@@ -50,6 +50,10 @@ struct SymbolStyle {
     color: Color,
 }
 
+fn ss(symbol: &'static str, color: Color) -> SymbolStyle {
+    SymbolStyle { symbol, color }
+}
+
 fn message_symbol(
     kind: MessageKind,
     run_status: RunStatus,
@@ -59,77 +63,41 @@ fn message_symbol(
     match kind {
         MessageKind::Started => {
             if animate_started && run_status == RunStatus::Running {
-                SymbolStyle {
-                    symbol: spinner_frame(spinner_tick),
-                    color: Color::Blue,
-                }
+                ss(spinner_frame(spinner_tick), Color::Blue)
             } else {
-                SymbolStyle {
-                    symbol: "○",
-                    color: Color::DarkGray,
-                }
+                ss("○", Color::DarkGray)
             }
         }
-        MessageKind::Brief => SymbolStyle {
-            symbol: "◐",
-            color: Color::Cyan,
-        },
-        MessageKind::UserInput => SymbolStyle {
-            symbol: "›",
-            color: Color::Magenta,
-        },
-        MessageKind::AgentText => SymbolStyle {
-            symbol: "▸",
-            color: Color::White,
-        },
-        MessageKind::AgentThought => SymbolStyle {
-            symbol: "·",
-            color: Color::DarkGray,
-        },
-        MessageKind::Summary => SymbolStyle {
-            symbol: "✓",
-            color: Color::Green,
-        },
-        MessageKind::SummaryWarn => SymbolStyle {
-            symbol: "⚠",
-            color: Color::Yellow,
-        },
+        MessageKind::Brief => ss("◐", Color::Cyan),
+        MessageKind::UserInput => ss("›", Color::Magenta),
+        MessageKind::AgentText => ss("▸", Color::White),
+        MessageKind::AgentThought => ss("·", Color::DarkGray),
+        MessageKind::Summary => ss("✓", Color::Green),
+        MessageKind::SummaryWarn => ss("⚠", Color::Yellow),
         MessageKind::End => match run_status {
-            RunStatus::Done => SymbolStyle {
-                symbol: "●",
-                color: Color::Green,
-            },
-            RunStatus::FailedUnverified => SymbolStyle {
-                symbol: "!",
-                color: Color::Yellow,
-            },
-            _ => SymbolStyle {
-                symbol: "✗",
-                color: Color::Red,
-            },
+            RunStatus::Done => ss("●", Color::Green),
+            RunStatus::FailedUnverified => ss("!", Color::Yellow),
+            _ => ss("✗", Color::Red),
         },
+    }
+}
+
+fn hint(is_summary: bool, is_warning: bool, is_dim: bool, is_error: bool) -> HistoricalStyleHints {
+    HistoricalStyleHints {
+        is_summary,
+        is_warning,
+        is_dim,
+        is_error,
     }
 }
 
 fn kind_to_hints(kind: MessageKind, run_status: RunStatus) -> HistoricalStyleHints {
     match kind {
-        MessageKind::Summary => HistoricalStyleHints {
-            is_summary: true,
-            ..Default::default()
-        },
-        MessageKind::SummaryWarn => HistoricalStyleHints {
-            is_warning: true,
-            ..Default::default()
-        },
-        MessageKind::AgentThought => HistoricalStyleHints {
-            is_dim: true,
-            ..Default::default()
-        },
+        MessageKind::Summary => hint(true, false, false, false),
+        MessageKind::SummaryWarn => hint(false, true, false, false),
+        MessageKind::AgentThought => hint(false, false, true, false),
         MessageKind::End => match run_status {
-            RunStatus::Failed | RunStatus::FailedUnverified => HistoricalStyleHints {
-                is_error: true,
-                ..Default::default()
-            },
+            RunStatus::Failed | RunStatus::FailedUnverified => hint(false, false, false, true),
             _ => Default::default(),
         },
         _ => Default::default(),
@@ -172,8 +140,17 @@ fn push_wrapped_span_line(
         lines.push(Vec::new());
         return;
     }
-
     lines.extend(wrap_spans(std::mem::take(current), content_width));
+}
+
+fn flush_if_non_empty(
+    lines: &mut Vec<Vec<Span<'static>>>,
+    current: &mut Vec<Span<'static>>,
+    width: usize,
+) {
+    if !current.is_empty() {
+        push_wrapped_span_line(lines, current, width);
+    }
 }
 
 fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'static>>> {
@@ -244,19 +221,15 @@ fn render_agent_markdown(
         match event {
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) if !current.is_empty() => {
-                push_wrapped_span_line(&mut lines, &mut current, content_width);
+                flush_if_non_empty(&mut lines, &mut current, content_width);
             }
             Event::End(TagEnd::Paragraph) => {}
             Event::Start(Tag::Heading { .. }) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 style_stack.push(heading_style);
             }
             Event::End(TagEnd::Heading(_)) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 style_stack.pop();
             }
             Event::Start(Tag::Strong) => {
@@ -280,26 +253,20 @@ fn render_agent_markdown(
                 list_depth = list_depth.saturating_sub(1);
             }
             Event::Start(Tag::Item) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 let indent = "  ".repeat(list_depth.saturating_sub(1));
                 current.push(Span::styled(format!("{indent}• "), base_style));
             }
             Event::End(TagEnd::Item) if !current.is_empty() => {
-                push_wrapped_span_line(&mut lines, &mut current, content_width);
+                flush_if_non_empty(&mut lines, &mut current, content_width);
             }
             Event::End(TagEnd::Item) => {}
             Event::Start(Tag::CodeBlock(_)) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 in_code_block = true;
             }
             Event::End(TagEnd::CodeBlock) => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 in_code_block = false;
             }
             Event::Text(value) => {
@@ -329,18 +296,14 @@ fn render_agent_markdown(
                 push_wrapped_span_line(&mut lines, &mut current, content_width);
             }
             Event::Rule => {
-                if !current.is_empty() {
-                    push_wrapped_span_line(&mut lines, &mut current, content_width);
-                }
+                flush_if_non_empty(&mut lines, &mut current, content_width);
                 lines.push(vec![Span::styled("─".repeat(content_width), base_style)]);
             }
             _ => {}
         }
     }
 
-    if !current.is_empty() {
-        push_wrapped_span_line(&mut lines, &mut current, content_width);
-    }
+    flush_if_non_empty(&mut lines, &mut current, content_width);
 
     if lines.is_empty() {
         wrap_text(text, content_width)
@@ -364,14 +327,10 @@ fn push_blank_line_if_needed(lines: &mut Vec<Line<'static>>) {
 fn capitalize_first_span(spans: &[Span<'static>]) -> Vec<Span<'static>> {
     let mut capitalized = spans.to_vec();
     for span in &mut capitalized {
-        if span.content.is_empty() {
-            continue;
-        }
         let mut chars = span.content.chars();
-        if let Some(first) = chars.next() {
-            let text = first.to_uppercase().collect::<String>() + chars.as_str();
-            span.content = text.into();
-        }
+        let Some(first) = chars.next() else { continue; };
+        let text = first.to_uppercase().collect::<String>() + chars.as_str();
+        span.content = text.into();
         break;
     }
     capitalized
@@ -530,17 +489,18 @@ fn render_messages(
 }
 
 fn body_style_from_hints(hints: HistoricalStyleHints) -> Style {
-    if hints.is_error {
-        Style::default().fg(Color::Red)
+    let color = if hints.is_error {
+        Color::Red
     } else if hints.is_warning {
-        Style::default().fg(Color::Yellow)
+        Color::Yellow
     } else if hints.is_summary {
-        Style::default().fg(Color::Green)
+        Color::Green
     } else if hints.is_dim {
-        Style::default().fg(Color::DarkGray)
+        Color::DarkGray
     } else {
-        Style::default().fg(Color::White)
-    }
+        Color::White
+    };
+    Style::default().fg(color)
 }
 
 impl Widget for ChatWidget<'_> {
@@ -548,54 +508,21 @@ impl Widget for ChatWidget<'_> {
         if area.height == 0 || area.width == 0 {
             return;
         }
-
-        let width = area.width as usize;
-        let height = area.height as usize;
-
-        let all_lines = message_lines(
+        for (i, line) in chat_lines(
             self.messages,
             self.run,
+            self.scroll_offset,
             &self.local_offset,
-            self.running_tail.clone(),
-            width,
+            self.running_tail,
+            area.width as usize,
+            area.height as usize,
             self.spinner_tick,
             self.animate_started,
-        );
-
-        let total = all_lines.len();
-        if total == 0 {
-            return;
-        }
-
-        let Some(window) = chat_scroll_window(total, height, self.scroll_offset) else {
-            return;
-        };
-
-        let mut row = area.y;
-
-        if window.show_above_indicator {
-            let indicator = format!("  ↑ {} more above", window.above_count);
-            let line = Line::from(Span::styled(
-                indicator,
-                Style::default().fg(Color::DarkGray),
-            ));
-            buf.set_line(area.x, row, &line, area.width);
-            row += 1;
-        }
-
-        for line in &all_lines[window.offset..window.visible_end] {
-            let line = line.clone();
-            buf.set_line(area.x, row, &line, area.width);
-            row += 1;
-        }
-
-        if window.show_below_indicator {
-            let indicator = format!("  ↓ {} more below", window.below_count);
-            let line = Line::from(Span::styled(
-                indicator,
-                Style::default().fg(Color::DarkGray),
-            ));
-            buf.set_line(area.x, row, &line, area.width);
+        )
+        .into_iter()
+        .enumerate()
+        {
+            buf.set_line(area.x, area.y + i as u16, &line, area.width);
         }
     }
 }

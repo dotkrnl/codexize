@@ -11,10 +11,6 @@ use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
 
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 
-pub fn load_live_models() -> Result<Vec<LiveModel>> {
-    crate::data::async_bridge::block_on_io(load_live_models_async())
-}
-
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
     let payload = fetch_usage_payload(&api_key).await?;

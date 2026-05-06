@@ -12,14 +12,6 @@ use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
 use std::collections::BTreeSet;
 
-/// Load and merge dashboard + quota data into the canonical model universe.
-///
-/// Refreshes any expired cache section in-process, persisting the fresh
-/// payloads back to the cache before delegating to the pure assembly.
-pub fn assemble_models() -> (Vec<CachedModel>, Vec<QuotaError>) {
-    crate::data::async_bridge::block_on_io(assemble_models_async())
-}
-
 pub async fn assemble_models_async() -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load();
     assemble_with_refresh(loaded, &AcpConfig::default().available_vendors()).await

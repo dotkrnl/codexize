@@ -284,8 +284,8 @@ fn assemble_models_uses_default_cache_dir_when_fresh() {
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     with_temp_home_cache(dashboard, quotas, || {
         // Cache was just written, so dashboard + quotas are fresh; the
-        // public wrapper should not need any network refresh.
-        let (models, errors) = assemble_models();
+        // async loader should not need any network refresh.
+        let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async());
         assert!(
             errors.is_empty(),
             "fresh cache should not trigger refresh errors"

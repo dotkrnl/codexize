@@ -129,10 +129,6 @@ pub enum LoadOutcome {
     },
 }
 
-pub fn load_models() -> Result<LoadOutcome> {
-    crate::data::async_bridge::block_on_io(load_models_async())
-}
-
 pub async fn load_models_async() -> Result<LoadOutcome> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))

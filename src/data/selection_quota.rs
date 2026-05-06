@@ -17,15 +17,6 @@ type ModelResetMap = BTreeMap<String, Option<DateTime<Utc>>>;
 type ModelQuotaAndResetMaps = (ModelQuotaMap, ModelResetMap);
 type QuotaLoadResult = (VendorQuotaMap, VendorResetMap, Vec<QuotaError>);
 
-pub fn load_quota_maps() -> QuotaLoadResult {
-    let vendors = crate::data::adapters::all_vendors();
-    load_quota_maps_for(vendors)
-}
-
-pub fn load_quota_maps_for(vendors: impl IntoIterator<Item = VendorKind>) -> QuotaLoadResult {
-    crate::data::async_bridge::block_on_io(load_quota_maps_for_async(vendors))
-}
-
 pub async fn load_quota_maps_for_async(
     vendors: impl IntoIterator<Item = VendorKind>,
 ) -> QuotaLoadResult {

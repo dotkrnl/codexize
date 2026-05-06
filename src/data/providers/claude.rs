@@ -9,10 +9,6 @@ const BASE_URL: &str = "https://api.anthropic.com";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const BETA_HEADER: &str = "oauth-2025-04-20";
 
-pub fn load_live_models() -> Result<Vec<LiveModel>> {
-    crate::data::async_bridge::block_on_io(load_live_models_async())
-}
-
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
     let token = resolve_access_token()?;

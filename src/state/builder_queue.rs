@@ -83,7 +83,6 @@ impl BuilderState {
         }
         self.iteration = 0;
         self.last_verdict = None;
-        self.sync_legacy_queue_views();
     }
 
     pub fn current_task_id(&self) -> Option<u32> {
@@ -128,7 +127,6 @@ impl BuilderState {
         }) {
             self.pipeline_items[index].round = Some(round);
             self.iteration = round;
-            self.sync_legacy_queue_views();
             return self.pipeline_items[index].task_id;
         }
 
@@ -139,7 +137,6 @@ impl BuilderState {
             self.pipeline_items[index].round = Some(round);
             self.iteration = round;
             let task_id = self.pipeline_items[index].task_id;
-            self.sync_legacy_queue_views();
             return task_id;
         }
 
@@ -161,19 +158,9 @@ impl BuilderState {
             if round.is_some() {
                 self.pipeline_items[index].round = round;
             }
-            self.sync_legacy_queue_views();
             true
         } else {
             false
         }
-    }
-
-    pub fn sync_legacy_queue_views(&mut self) {
-        if self.pipeline_items.is_empty() {
-            return;
-        }
-        self.done = self.done_task_ids();
-        self.current_task = self.current_task_id();
-        self.pending = self.pending_task_ids();
     }
 }

@@ -140,10 +140,7 @@ impl App {
             *key_task_id != Some(task_id) && stage != "recovery"
         });
 
-        if self.state.builder.pipeline_items.is_empty() {
-            self.state.builder.current_task = Some(task_id);
-            self.state.builder.pending.retain(|id| *id != task_id);
-        } else if let Some(item) = self
+        if let Some(item) = self
             .state
             .builder
             .pipeline_items
@@ -152,7 +149,21 @@ impl App {
         {
             item.status = PipelineItemStatus::Pending;
             item.round = None;
-            self.state.builder.sync_legacy_queue_views();
+        } else {
+            self.state
+                .builder
+                .push_pipeline_item(crate::state::PipelineItem {
+                    id: 0,
+                    stage: "coder".to_string(),
+                    task_id: Some(task_id),
+                    round: None,
+                    status: PipelineItemStatus::Pending,
+                    title: self.state.builder.task_titles.get(&task_id).cloned(),
+                    mode: None,
+                    trigger: None,
+                    interactive: None,
+                    iteration: self.state.builder.iteration.max(1),
+                });
         }
 
         self.clear_agent_error();

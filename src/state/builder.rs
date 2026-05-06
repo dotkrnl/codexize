@@ -6,8 +6,6 @@ use std::collections::BTreeSet;
 mod builder_queue;
 #[path = "builder_revise.rs"]
 mod builder_revise;
-#[path = "builder_status.rs"]
-mod builder_status;
 #[cfg(test)]
 #[path = "builder_tests.rs"]
 mod builder_tests;
@@ -18,13 +16,6 @@ mod builder_tests;
 pub struct BuilderState {
     #[serde(default)]
     pub pipeline_items: Vec<PipelineItem>,
-    // Compatibility views for older session files; mutators derive them from pipeline_items.
-    #[serde(default)]
-    pub pending: Vec<u32>,
-    #[serde(default)]
-    pub done: Vec<u32>,
-    #[serde(default)]
-    pub current_task: Option<u32>,
     /// Global iteration counter — one coder+reviewer cycle is one iteration.
     #[serde(default)]
     pub iteration: u32,
@@ -113,9 +104,6 @@ impl<'de> Deserialize<'de> for BuilderState {
         let wire = BuilderStateWire::deserialize(deserializer)?;
         let mut state = Self {
             pipeline_items: wire.pipeline_items,
-            pending: wire.pending,
-            done: wire.done,
-            current_task: wire.current_task,
             iteration: wire.iteration,
             last_verdict: wire.last_verdict,
             pending_refine_feedback: wire.pending_refine_feedback,
@@ -128,34 +116,37 @@ impl<'de> Deserialize<'de> for BuilderState {
             task_titles: wire.task_titles,
             next_iteration_for_recovery: wire.next_iteration_for_recovery,
         };
-        state.hydrate_legacy_pipeline_items();
+        state.hydrate_legacy_pipeline_items(wire.done, wire.current_task, wire.pending);
         Ok(state)
     }
 }
 
 impl BuilderState {
-    fn hydrate_legacy_pipeline_items(&mut self) {
+    fn hydrate_legacy_pipeline_items(
+        &mut self,
+        done: Vec<u32>,
+        current_task: Option<u32>,
+        pending: Vec<u32>,
+    ) {
         if !self.pipeline_items.is_empty() {
-            self.sync_legacy_queue_views();
             return;
         }
-        if self.done.is_empty() && self.current_task.is_none() && self.pending.is_empty() {
+        if done.is_empty() && current_task.is_none() && pending.is_empty() {
             return;
         }
 
         let mut seen = BTreeSet::new();
         let mut next_pipeline_id = 1;
-        for (task_id, status, round) in self
-            .done
+        for (task_id, status, round) in done
             .iter()
             .copied()
             .map(|task_id| (task_id, PipelineItemStatus::Approved, None))
-            .chain(self.current_task.map(|task_id| {
+            .chain(current_task.map(|task_id| {
                 let round = (self.iteration > 0).then_some(self.iteration);
                 (task_id, PipelineItemStatus::Running, round)
             }))
             .chain(
-                self.pending
+                pending
                     .iter()
                     .copied()
                     .map(|task_id| (task_id, PipelineItemStatus::Pending, None)),
@@ -180,6 +171,5 @@ impl BuilderState {
             });
             next_pipeline_id += 1;
         }
-        self.sync_legacy_queue_views();
     }
 }

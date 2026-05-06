@@ -253,27 +253,7 @@ pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node 
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    let mut ordered_task_ids = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    if state.builder.pipeline_items.is_empty() && iteration == 1 {
-        for id in &state.builder.done {
-            if seen.insert(*id) {
-                ordered_task_ids.push(*id);
-            }
-        }
-        if let Some(id) = state.builder.current_task
-            && seen.insert(id)
-        {
-            ordered_task_ids.push(id);
-        }
-        for id in &state.builder.pending {
-            if seen.insert(*id) {
-                ordered_task_ids.push(*id);
-            }
-        }
-    } else {
-        ordered_task_ids = task_ids_in_iteration.clone();
-    }
+    let ordered_task_ids = task_ids_in_iteration.clone();
     let task_status_by_id = state
         .builder
         .pipeline_items

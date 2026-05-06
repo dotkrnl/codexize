@@ -228,7 +228,6 @@ pub fn append_final_validation_gap_tasks(
             iteration,
         });
     }
-    state.builder.sync_legacy_queue_views();
 }
 
 pub fn queue_recovery_stage(
@@ -361,7 +360,6 @@ pub fn replace_recovery_pipeline(
     }
     state.builder.pipeline_items = items;
     normalize_pipeline_item_ids(&mut state.builder);
-    state.builder.sync_legacy_queue_views();
 }
 
 fn normalize_pipeline_item_ids(builder: &mut BuilderState) {

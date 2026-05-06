@@ -99,7 +99,6 @@ impl BuilderState {
         }
 
         self.last_verdict = Some("revise".to_string());
-        self.sync_legacy_queue_views();
         assigned_ids
     }
 }

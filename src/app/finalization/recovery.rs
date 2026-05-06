@@ -225,9 +225,8 @@ impl App {
         let done_ids = self
             .state
             .builder
-            .done
-            .iter()
-            .copied()
+            .done_task_ids()
+            .into_iter()
             .collect::<BTreeSet<_>>();
         let started_ids = self.started_builder_task_ids();
         let prev_task_ids = self

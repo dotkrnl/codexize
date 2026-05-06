@@ -10,9 +10,7 @@ show_thinking_texts = false
 validation_attempts = 0
 
 [builder]
-done = []
 iteration = 0
-pending = []
 pending_refine_feedback = []
 pipeline_items = []
 recovery_cycle_count = 0

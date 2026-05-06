@@ -1,15 +1,16 @@
-#[path = "../finalization_complete.rs"]
+#[rustfmt::skip]
+#[allow(clippy::possible_missing_else)]
 mod complete;
 mod reason;
-#[path = "../finalization_reasons.rs"]
+#[rustfmt::skip]
+#[allow(clippy::possible_missing_else)]
 mod reasons;
-#[path = "../finalization_recovery.rs"]
+#[rustfmt::skip]
+#[allow(clippy::possible_missing_else)]
 mod recovery;
-#[path = "../finalization_retry_policy.rs"]
+#[rustfmt::skip]
+#[allow(clippy::possible_missing_else)]
 mod retry_policy;
-
 pub(crate) use reason::Reason;
-
-// Keep heavy orchestration logic outside `app/finalization/` while preserving
-// the same module paths for call sites and tests.
-include!("../finalization_core.rs");
+#[rustfmt::skip]
+include!("core.rs");

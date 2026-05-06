@@ -240,19 +240,18 @@ fn is_success_status(status: &str) -> bool {
 }
 
 /// Sanitize a raw output snippet per spec §Result Formatting:
-/// 1. Strip ANSI CSI / OSC escapes and bare `ESC X` sequences.
+/// 1. Strip ANSI CSI / OSC escapes and bare `ESC X` sequences (via the `vte`
+///    parser inside `strip-ansi-escapes`, which handles every dispatched
+///    sequence the hand-rolled state machine recognised plus the long tail
+///    we did not cover).
 /// 2. Replace control chars (except `\t`, `\n`, `\r`) and `0x7F` with a space.
 /// 3. Replace tabs / newlines / runs of whitespace with a single space; trim.
 ///
 /// Truncation is intentionally *not* applied here.
 pub(super) fn sanitize_snippet(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1B}' {
-            consume_escape(&mut chars);
-            continue;
-        }
+    let stripped = strip_ansi_escapes::strip_str(input);
+    let mut out = String::with_capacity(stripped.len());
+    for c in stripped.chars() {
         let code = c as u32;
         let is_replaced_control =
             (code <= 0x1F && c != '\t' && c != '\n' && c != '\r') || code == 0x7F;
@@ -266,43 +265,6 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
         }
     }
     out.trim().to_string()
-}
-
-fn consume_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    match chars.peek().copied() {
-        Some('[') => {
-            chars.next();
-            // CSI: parameter / intermediate bytes followed by a final byte 0x40..=0x7E.
-            for next in chars.by_ref() {
-                if matches!(next, '\u{40}'..='\u{7E}') {
-                    break;
-                }
-            }
-        }
-        Some(']') => {
-            chars.next();
-            // OSC terminated by BEL or ST (ESC \).
-            while let Some(&next) = chars.peek() {
-                if next == '\u{07}' {
-                    chars.next();
-                    return;
-                }
-                if next == '\u{1B}' {
-                    chars.next();
-                    if chars.peek().copied() == Some('\\') {
-                        chars.next();
-                    }
-                    return;
-                }
-                chars.next();
-            }
-        }
-        Some(_) => {
-            // Bare ESC X: drop the single following byte.
-            chars.next();
-        }
-        None => {}
-    }
 }
 
 /// Truncate `text` so its char count does not exceed `max`, appending `...`

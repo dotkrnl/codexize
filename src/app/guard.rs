@@ -333,6 +333,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_warns_on_pre_dirty_status() {
         let head = git_head().unwrap_or_default();
         let current_status = git_status().unwrap_or_default();
@@ -349,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_warns_on_changed_status() {
         let head = git_head().unwrap_or_default();
         let current_status = git_status().unwrap_or_default();
@@ -363,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_hard_error_on_head_advance_auto_reset() {
         let snap = test_snapshot("0000000000000000000000000000000000000000", "");
         let result = verify_non_coder(&snap);
@@ -375,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_pending_on_head_advance_ask_operator() {
         let mut snap = test_snapshot("0000000000000000000000000000000000000000", "");
         snap.mode = GuardMode::AskOperator;
@@ -400,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_matching_status_has_no_modified_warning() {
         let head = git_head().unwrap_or_default();
         let status = git_status().unwrap_or_default();
@@ -414,6 +419,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_non_coder_hard_error_when_dirty_baseline_changes() {
         let head = git_head().unwrap_or_default();
         let status = git_status().unwrap_or_default();
@@ -430,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn snapshot_deserializes_without_mode_as_auto_reset() {
         // Pre-existing on-disk snapshots predate the `mode` field and must
         // load as AutoReset to preserve today's behavior on resume.
@@ -443,6 +450,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn guard_mode_round_trips_through_toml() {
         let snap = Snapshot {
             head: "deadbeef".to_string(),
@@ -495,6 +503,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn git_status_dirty_reports_clean_then_dirty() {
         let temp = tempfile::TempDir::new().unwrap();
         init_repo(temp.path());
@@ -506,6 +515,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn capture_non_coder_writes_snapshot_with_head_and_status() {
         let repo = tempfile::TempDir::new().unwrap();
         init_repo(repo.path());
@@ -520,6 +530,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn capture_coder_records_round_control_files() {
         let repo = tempfile::TempDir::new().unwrap();
         init_repo(repo.path());
@@ -540,6 +551,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_returns_ok_when_snapshot_file_is_missing() {
         let dir = tempfile::TempDir::new().unwrap();
         // No snapshot file written here.
@@ -548,6 +560,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn verify_dispatches_to_coder_path_when_stage_is_coder() {
         let snapshot_dir = tempfile::TempDir::new().unwrap();
         let mut control = BTreeMap::new();
@@ -583,6 +596,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn reset_hard_to_returns_false_for_empty_head() {
         // Empty string short-circuits before any git invocation, so the
         // function returns false without touching the working tree.
@@ -590,6 +604,7 @@ git_status = ""
     }
 
     #[test]
+    #[serial_test::serial(process_cwd)]
     fn reset_hard_to_returns_false_when_head_does_not_resolve() {
         let temp = tempfile::TempDir::new().unwrap();
         init_repo(temp.path());

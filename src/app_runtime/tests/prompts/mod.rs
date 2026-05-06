@@ -19,7 +19,11 @@ fn assert_prompt_insta_snapshot(name: &str, actual: &str) {
     });
 }
 
+// `with_temp_root_and_cwd` chdir's the entire process; guard tests in
+// `app::guard` shell out to `git` from cwd, so the two cannot run
+// concurrently without serializing.
 #[test]
+#[serial_test::serial(process_cwd)]
 fn prompt_insta_snapshots_match_fixtures() {
     use std::path::{Path, PathBuf};
     with_temp_root_and_cwd(|_root| {

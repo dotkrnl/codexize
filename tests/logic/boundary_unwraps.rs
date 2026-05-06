@@ -13,7 +13,7 @@ fn production_source_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
             }
             production_source_files(&path, files);
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs")
-            && !name.is_some_and(|n| n.starts_with("tests_"))
+            && !name.is_some_and(|n| n.starts_with("tests_") || n.ends_with("_tests.rs"))
         {
             files.push(path);
         }

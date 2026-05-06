@@ -151,51 +151,35 @@ fn compute_section_path(
     round: u32,
     attempt: u32,
 ) -> Vec<SectionPart> {
-    match stage {
-        "brainstorm" => vec![
-            SectionPart::Brainstorm,
-            SectionPart::Stage(stage.to_string()),
-        ],
-        "spec-review" => vec![
-            SectionPart::SpecReview,
-            SectionPart::Stage(stage.to_string()),
-        ],
-        "planning" => vec![SectionPart::Planning, SectionPart::Stage(stage.to_string())],
+    let mut path: Vec<SectionPart> = match stage {
+        "brainstorm" => vec![SectionPart::Brainstorm],
+        "spec-review" => vec![SectionPart::SpecReview],
+        "planning" => vec![SectionPart::Planning],
         "plan-review" if matches!(state.current_phase, Phase::BuilderRecoveryPlanReview(_)) => {
             vec![
                 SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
                 SectionPart::RecoveryPlanReview { round },
-                SectionPart::Stage(stage.to_string()),
             ]
         }
-        "plan-review" => vec![
-            SectionPart::PlanReview,
-            SectionPart::Stage(stage.to_string()),
+        "plan-review" => vec![SectionPart::PlanReview],
+        "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => vec![
+            SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
+            SectionPart::RecoverySharding { round },
         ],
-        "sharding" if matches!(state.current_phase, Phase::BuilderRecoverySharding(_)) => {
-            vec![
-                SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
-                SectionPart::RecoverySharding { round },
-                SectionPart::Stage(stage.to_string()),
-            ]
-        }
-        "sharding" => vec![SectionPart::Sharding, SectionPart::Stage(stage.to_string())],
+        "sharding" => vec![SectionPart::Sharding],
         "recovery" => vec![
             SectionPart::Iteration(recovery_iteration_for_path(state, task_id)),
             SectionPart::Recovery { round },
-            SectionPart::Stage(stage.to_string()),
         ],
         "simplifier" => vec![
             SectionPart::Iteration(loop_iteration_for_round(state, round)),
             SectionPart::Simplification,
             SectionPart::Round { n: round, attempt },
-            SectionPart::Stage(stage.to_string()),
         ],
         "final-validation" => vec![
             SectionPart::Iteration(loop_iteration_for_round(state, round)),
             SectionPart::FinalValidation,
             SectionPart::Round { n: round, attempt },
-            SectionPart::Stage(stage.to_string()),
         ],
         "coder" | "reviewer" => {
             let iteration = task_id
@@ -208,16 +192,17 @@ fn compute_section_path(
                         .map(|i| i.iteration)
                 })
                 .unwrap_or(1);
-            let mut path = vec![SectionPart::Iteration(iteration), SectionPart::Loop];
+            let mut head = vec![SectionPart::Iteration(iteration), SectionPart::Loop];
             if let Some(tid) = task_id {
-                path.push(SectionPart::Task(tid));
+                head.push(SectionPart::Task(tid));
             }
-            path.push(SectionPart::Round { n: round, attempt });
-            path.push(SectionPart::Stage(stage.to_string()));
-            path
+            head.push(SectionPart::Round { n: round, attempt });
+            head
         }
-        _ => vec![SectionPart::Stage(stage.to_string())],
-    }
+        _ => Vec::new(),
+    };
+    path.push(SectionPart::Stage(stage.to_string()));
+    path
 }
 
 /// Find the iteration number for a round based on pipeline items.

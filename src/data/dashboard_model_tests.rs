@@ -109,6 +109,32 @@ fn merge_matches_inventory_by_normalized_ipbr_aliases() {
 }
 
 #[test]
+fn merge_drops_alias_match_when_canonical_inventory_already_consumed_row() {
+    // Regression: opencode advertised both `glm-5` and `glm-5.1` while the
+    // ipbr scoreboard listed only `glm-5.1`, with `glm-5` among its
+    // aliases. The pre-fix merge let `glm-5` borrow `glm-5.1`'s
+    // authoritative phase scores via the alias, making it auto-selectable
+    // alongside `glm-5.1`. The strong (display_name / canonical_id) match
+    // must claim the row before any alias resolves, so the alias-only
+    // inventory id drops instead of duplicating.
+    let models = merge(
+        vec![inventory("glm-5", 0), inventory("glm-5.1", 1)],
+        vec![ipbr_score("glm-5.1", None, &["glm-5"], 80.0, 3)],
+    );
+
+    assert!(
+        !models.iter().any(|m| m.name == "glm-5"),
+        "alias-only inventory match must drop when the canonical id already owns the row"
+    );
+    let canonical = models
+        .iter()
+        .find(|m| m.name == "glm-5.1")
+        .expect("canonical inventory row should remain");
+    assert_eq!(canonical.score_source, ScoreSource::Ipbr);
+    assert_eq!(canonical.ipbr_phase_scores.build, Some(82.0));
+}
+
+#[test]
 fn merge_does_not_readd_ipbr_row_consumed_by_normalized_inventory_match() {
     let models = merge(
         vec![inventory("claude-opus-4.1", 0)],

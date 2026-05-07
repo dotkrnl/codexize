@@ -52,8 +52,12 @@ correct. Give each subagent a self-contained brief; verify before committing.
 
 Hard rules:
   - No clarifying questions — work from task + spec + plan.
-  - Stay in this task's scope. Follow-up work you uncover → note for the
-    reviewer, don't do it yourself.
+  - Nothing in this repo is "out of scope", "pre-existing", or
+    "unrelated". When you notice a bug or an obvious improvement while
+    working the task, fix it — don't defer it to the reviewer or a
+    follow-up. Land each such fix as its OWN atomic commit, separate
+    from the task's main commits, so it stays bisectable on its own and
+    the reviewer can read it independently.
   - Working tree must be clean on exit. Commit every change you intend to
     keep; revert anything you don't author or don't want to keep.
     `git status --porcelain` MUST be empty when you stop, even if the

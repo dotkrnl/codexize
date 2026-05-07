@@ -8,12 +8,18 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
+/// Quota-map key used by every Kimi-routed model: a single shared usage
+/// pool funds them all, so `logic::selection::quota::find_quota_by_heuristic`
+/// resolves any Kimi `model.name` against this single entry. Avoids
+/// pretending a synthetic placeholder is a real model id — which used to
+/// be `"kimi-latest"`, conflicting with the ipbr alias of the same name.
+pub const SHARED_QUOTA_KEY: &str = "kimi-shared";
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
     let payload = fetch_usage_payload(&api_key).await?;
     let mut models = BTreeMap::<String, Option<u8>>::new();
     if let Some(usage) = payload.get("usage").and_then(Value::as_object) {
-        models.insert("kimi-latest".to_string(), usage_remaining_percent(usage));
+        models.insert(SHARED_QUOTA_KEY.to_string(), usage_remaining_percent(usage));
     }
     if let Some(limits) = payload.get("limits").and_then(Value::as_array) {
         for item in limits {

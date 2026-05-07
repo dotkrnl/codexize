@@ -244,7 +244,9 @@ fn assemble_collapses_kimi_models() {
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].name, "kimi-latest");
+    // Canonical surfaces under its real name (auto-inferred from the picked
+    // row), not a synthesized "kimi-latest" placeholder.
+    assert_eq!(models[0].name, "kimi-k2");
     assert_eq!(models[0].vendor, VendorKind::Kimi);
     // Retains the lower-display-order model's cosmetic score (70.0),
     // proving overall_score did not drive the collapse.
@@ -254,9 +256,9 @@ fn assemble_collapses_kimi_models() {
 #[test]
 fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
     // Real-feed scenario the previous display-order-only collapse mishandled:
-    // the inventory feed lists `kimi-k2-0905-preview` ahead of `kimi-latest`
-    // (lower display_order) but ipbr's phase scores show `kimi-latest` is the
-    // stronger model. The collapse MUST keep the better ipbr scores so
+    // the inventory feed lists a weaker model ahead of the stronger one
+    // (lower display_order) but ipbr's phase scores show the latter is the
+    // canonical pick. The collapse MUST keep the better ipbr scores so
     // downstream phase-rank / pool-weight cells reflect the canonical kimi.
     let mut weaker_low_order =
         make_entry_with_order("kimi-k2-0905-preview", "moonshotai", 38.0, 38.0, 14);
@@ -284,7 +286,8 @@ fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
 
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
-    assert_eq!(kimi.name, "kimi-latest");
+    // Auto-inferred name: the picked entry's actual name surfaces.
+    assert_eq!(kimi.name, "kimi-real");
     // The retained model must be the one with the higher ipbr phase-score
     // sum, even though its display_order is later in the inventory feed.
     assert_eq!(kimi.ipbr_phase_scores.build, Some(73.6));
@@ -322,7 +325,9 @@ fn assemble_collapses_kimi_ignores_cosmetic_overall_score() {
 
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
-    assert_eq!(kimi.name, "kimi-latest");
+    // Auto-inferred name: the strong-ipbr kimi-k2 row wins and surfaces
+    // under its own name.
+    assert_eq!(kimi.name, "kimi-k2");
     // overall_score 95 lost to overall_score 60 because ipbr phase scores
     // were stronger on the kimi-k2 row.
     assert_eq!(kimi.overall_score, 60.0);
@@ -350,7 +355,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
 
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
-    assert_eq!(kimi.name, "kimi-latest");
+    assert_eq!(kimi.name, "kimi-k2");
     // Build and Review auto-selection must see the ipbr phase scores
     // from the collapsed model, not fall back to overall_score.
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Build), Some(82.0));

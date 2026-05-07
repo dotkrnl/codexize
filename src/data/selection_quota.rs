@@ -194,12 +194,16 @@ fn live_map_opencode(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     )
 }
 fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
-    // Kimi only has one effective model (kimi-latest); expose it under that
-    // canonical name regardless of what the API returns.
+    // Kimi runs every model off one shared usage pool, so we expose the
+    // quota under a single sentinel key and let
+    // `quota::find_quota_by_heuristic` resolve any Kimi-named model
+    // against it. Using a sentinel (not a synthetic model id like the
+    // former `kimi-latest`) means the universe surfaces real ipbr names
+    // instead of a placeholder that aliases another row's identifier.
     let quota = models.into_iter().filter_map(|m| m.quota_percent).min();
     (
-        BTreeMap::from([("kimi-latest".to_string(), quota)]),
-        BTreeMap::from([("kimi-latest".to_string(), None)]),
+        BTreeMap::from([(providers::kimi::SHARED_QUOTA_KEY.to_string(), quota)]),
+        BTreeMap::from([(providers::kimi::SHARED_QUOTA_KEY.to_string(), None)]),
     )
 }
 #[cfg(test)]

@@ -24,12 +24,13 @@ fn kimi_quota_takes_min_across_windows() {
         },
     ]);
 
+    let key = providers::kimi::SHARED_QUOTA_KEY;
     assert_eq!(
-        mapped.0.get("kimi-latest"),
+        mapped.0.get(key),
         Some(&Some(20)),
         "should use the minimum quota across all windows"
     );
-    assert_eq!(mapped.1.get("kimi-latest"), Some(&None));
+    assert_eq!(mapped.1.get(key), Some(&None));
 }
 
 #[test]
@@ -41,7 +42,7 @@ fn kimi_quota_returns_none_when_all_missing() {
     }]);
 
     assert_eq!(
-        mapped.0.get("kimi-latest"),
+        mapped.0.get(providers::kimi::SHARED_QUOTA_KEY),
         Some(&None),
         "should return None when no quotas are available"
     );

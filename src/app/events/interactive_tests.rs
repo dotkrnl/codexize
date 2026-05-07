@@ -9,7 +9,7 @@ fn running_recovery_run(id: u64) -> RunRecord {
         task_id: None,
         round: 1,
         attempt: 1,
-        model: "kimi-latest".to_string(),
+        model: "kimi-k2.6".to_string(),
         vendor: "moonshotai".to_string(),
         route_provider: None,
         window_name: "[Recovery]".to_string(),

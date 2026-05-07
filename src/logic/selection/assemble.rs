@@ -122,13 +122,20 @@ pub fn assemble_universe(
             })
         })
         .collect();
-    // Collapse all Kimi models into a single "kimi-latest" representative.
-    // The canonical pick is the ipbr-matched sibling with the largest sum of
-    // present phase scores; ipbr scores are authoritative (unlike cosmetic
-    // overall_score / current_score, which selection MUST NOT consult).
-    // Display_order and name only break ties — including the no-ipbr case,
-    // where every candidate has phase-score sum 0 and falls through to
-    // stable inventory order.
+    // Collapse all direct-Kimi models into a single representative whose
+    // name is auto-inferred from the picked row — the ipbr-matched sibling
+    // with the largest sum of present phase scores. This used to rename to
+    // a hardcoded `"kimi-latest"`; we now keep the actual name (e.g.
+    // `kimi-k2.6`) so the model_universe surface reflects the real ipbr
+    // canonical and shares an `ipbr_match_key` with any opencode-routed
+    // sibling for the same row, letting `deduplicate_routed_models` choose
+    // the better route by quota.
+    //
+    // ipbr scores are authoritative (unlike cosmetic overall_score /
+    // current_score, which selection MUST NOT consult). Display_order and
+    // name only break ties — including the no-ipbr case, where every
+    // candidate has phase-score sum 0 and falls through to stable
+    // inventory order.
     let best_kimi_idx = models
         .iter()
         .enumerate()
@@ -156,8 +163,7 @@ pub fn assemble_universe(
         })
         .map(|(i, _)| i);
     if let Some(i) = best_kimi_idx {
-        let mut canonical = models[i].clone();
-        canonical.name = "kimi-latest".to_string();
+        let canonical = models[i].clone();
         models.retain(|m| m.vendor != VendorKind::Kimi);
         models.push(canonical);
     }

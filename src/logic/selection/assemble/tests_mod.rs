@@ -694,51 +694,6 @@ fn reset_coverage_gaps_require_matching_model_keys() {
 }
 
 #[test]
-fn score_failure_prefers_cached_ipbr_entries_over_inventory_only() {
-    let mut cached_with_ipbr = make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0);
-    cached_with_ipbr.score_source = ScoreSource::Ipbr;
-    cached_with_ipbr.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        idea: Some(70.0),
-        planning: Some(72.0),
-        build: Some(73.0),
-        review: Some(71.0),
-    };
-    let cached = vec![cached_with_ipbr];
-    let inv_only = vec![make_entry("claude-sonnet-4-6", "claude", 0.0, 0.0)];
-
-    let resolved = resolve_score_failure_entries(cached.clone(), inv_only);
-
-    assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].score_source, ScoreSource::Ipbr);
-    assert_eq!(resolved[0].ipbr_phase_scores.build, Some(73.0));
-}
-
-#[test]
-fn score_failure_falls_back_to_inventory_only_when_no_cached_ipbr() {
-    // No cached row carries `ScoreSource::Ipbr`, so the inventory-only
-    // refresh must still surface so the strip is not blank — phase
-    // scores stay `None` until ipbr recovers.
-    let cached = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
-    let inv_only = vec![make_entry("gpt-5.4", "openai", 0.0, 0.0)];
-
-    let resolved = resolve_score_failure_entries(cached, inv_only);
-
-    assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].name, "gpt-5.4");
-    assert_eq!(resolved[0].score_source, ScoreSource::None);
-}
-
-#[test]
-fn score_failure_falls_back_to_inventory_only_when_cache_is_empty() {
-    let inv_only = vec![make_entry("claude-sonnet-4-6", "claude", 0.0, 0.0)];
-
-    let resolved = resolve_score_failure_entries(Vec::new(), inv_only);
-
-    assert_eq!(resolved.len(), 1);
-    assert_eq!(resolved[0].name, "claude-sonnet-4-6");
-}
-
-#[test]
 fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
     let errors =
         dashboard_warnings_to_quota_errors(vec!["ipbr normalized key 'x' collided".into()]);

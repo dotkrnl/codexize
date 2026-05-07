@@ -1,12 +1,13 @@
 pub use crate::data::dashboard_model::synthesize_sibling;
 use crate::data::dashboard_model::{
-    InventoryEntry, ScoreEntry, inv_only, merge_with_warnings, normalize_ipbr_key, scores_only,
+    InventoryEntry, ScoreEntry, merge_with_warnings, normalize_ipbr_key,
 };
 use crate::data::providers::opencode;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
+#[cfg(test)]
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -65,9 +66,9 @@ fn record_axis_parse_fail(suite: &str, axis: &str) {
             axis: axis.to_string(),
         });
 }
-pub const MODELS_LIST_URL: &str = "https://aistupidlevel.info/api/models";
-/// Source of truth for per-phase rank scores. Replaces the old
-/// `aistupidlevel.info/dashboard/cached` JSON feed.
+/// Source of truth for the model universe — both the inventory of models
+/// and their per-phase rank scores. ipbr is the only upstream feed; opencode
+/// inventory is layered on top via the local `opencode` CLI.
 pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
@@ -105,118 +106,33 @@ pub struct DashboardModel {
     /// name; UI surfaces this so the fallback is visible.
     pub fallback_from: Option<String>,
 }
-/// Outcome of a dashboard refresh. The InventoryOnly variant exists so the
-/// caller can preserve cached ipbr score data when only the score source
-/// fails — collapsing it into a successful `Vec<DashboardModel>` would let
-/// the cache layer save inventory-only entries and discard previously
-/// fetched ipbr phase scores.
-pub enum LoadOutcome {
-    /// Both inventory and ipbr scores refreshed; safe to persist.
-    Both {
-        models: Vec<DashboardModel>,
-        warnings: Vec<String>,
-    },
-    /// Inventory refreshed but ipbr scores failed. Callers MUST prefer
-    /// previously cached ipbr score data when available; only when there
-    /// is no cached ipbr data should they fall back to these
-    /// inventory-only models (with all phase scores `None`).
-    InventoryOnly {
-        models: Vec<DashboardModel>,
-        score_error: anyhow::Error,
-    },
+/// Outcome of a dashboard refresh. ipbr is the sole authoritative source;
+/// when the fetch succeeds the caller may persist the result. When it fails
+/// `load_models_async` returns `Err`, and the caller is expected to keep
+/// using the previously cached entries.
+pub struct LoadOutcome {
+    pub models: Vec<DashboardModel>,
+    pub warnings: Vec<String>,
 }
 pub async fn load_models_async() -> Result<LoadOutcome> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .context("failed to build HTTP client")?;
-    // Load both sources in parallel via two requests
-    let (inventory, scores) = tokio::join!(load_inventory(&client), load_scores(&client));
-    match (inventory, scores) {
-        (Ok(mut inv), Ok(sc)) => {
-            append_opencode_inventory(&mut inv, opencode::enumerate_models());
-            let merged = merge_with_warnings(inv, sc);
-            Ok(LoadOutcome::Both {
-                models: merged.models,
-                warnings: merged.warnings,
-            })
-        }
-        (Ok(inv), Err(score_error)) => Ok(LoadOutcome::InventoryOnly {
-            models: inv_only(inv),
-            score_error,
-        }),
-        // Inventory failed but scores succeeded: ipbr authority is intact,
-        // so this is still a "Both" outcome from the cache's perspective —
-        // saving these score-only entries does not discard any cached ipbr
-        // data that this fetch already replaced with fresh ipbr data.
-        (Err(_), Ok(sc)) => {
-            let mut inv = Vec::new();
-            append_opencode_inventory(&mut inv, opencode::enumerate_models());
-            if inv.is_empty() {
-                Ok(LoadOutcome::Both {
-                    models: scores_only(sc),
-                    warnings: Vec::new(),
-                })
-            } else {
-                let merged = merge_with_warnings(inv, sc);
-                Ok(LoadOutcome::Both {
-                    models: merged.models,
-                    warnings: merged.warnings,
-                })
-            }
-        }
-        (Err(e1), Err(e2)) => {
-            anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
-        }
-    }
-}
-async fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
-    let payload = client
-        .get(MODELS_LIST_URL)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .context("models list request failed")?
-        .json::<Value>()
-        .await
-        .context("models list was not valid JSON")?;
-    let arr = payload
-        .as_array()
-        .context("models list is not a JSON array")?;
-    let mut entries = Vec::new();
-    for (i, item) in arr.iter().enumerate() {
-        let name = item
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if name.is_empty() {
-            continue;
-        }
-        let vendor = item
-            .get("vendor")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        entries.push(InventoryEntry {
-            name,
-            vendor,
-            display_order: i,
-            route_underlying_vendor: None,
-            route_provider: None,
-        });
-    }
-    anyhow::ensure!(!entries.is_empty(), "models list returned no entries");
-    Ok(entries)
+    let scores = load_scores(&client).await?;
+    let mut inventory = Vec::new();
+    append_opencode_inventory(&mut inventory, opencode::enumerate_models());
+    let merged = merge_with_warnings(inventory, scores);
+    Ok(LoadOutcome {
+        models: merged.models,
+        warnings: merged.warnings,
+    })
 }
 pub(crate) fn append_opencode_inventory(
     inventory: &mut Vec<InventoryEntry>,
     models: Vec<opencode::OpencodeModelMeta>,
 ) {
-    let start = inventory.len();
-    inventory.extend(models.into_iter().enumerate().filter_map(|(i, meta)| {
+    inventory.extend(models.into_iter().filter_map(|meta| {
         // Both `opencode` (zen tier) and `opencode-go` (Go tier) ride the
         // same shared quota and surface as `vendor = "opencode"` in the UI;
         // they only diverge at ACP launch time, where route_provider picks
@@ -231,7 +147,6 @@ pub(crate) fn append_opencode_inventory(
         Some(InventoryEntry {
             name,
             vendor: "opencode".to_string(),
-            display_order: start + i,
             route_underlying_vendor: meta.underlying_vendor,
             route_provider: Some(meta.provider_id),
         })
@@ -285,10 +200,11 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
         toml::from_str(body).context("ipbr scoreboard was not valid TOML")?;
     let mut entries = Vec::new();
     for (i, row) in board.models.into_iter().enumerate() {
-        // The merge key shape must remain compatible with `load_inventory`,
-        // which only lowercases (no kebab/punctuation collapse). The richer
-        // `normalize_ipbr_key` form is exposed via `canonical_id`/`aliases`
-        // for the upcoming normalized-exact matching task.
+        // The merge key shape (lowercase only, no kebab/punctuation collapse)
+        // matches the opencode inventory shape so the merge layer can cross
+        // them with a normalized-exact lookup. Richer matching against the
+        // richer `normalize_ipbr_key` form runs over `canonical_id` and
+        // `aliases`.
         let display_key = row.display_name.trim().to_ascii_lowercase();
         if display_key.is_empty() {
             // No usable display_name: cannot index this row. Skip rather

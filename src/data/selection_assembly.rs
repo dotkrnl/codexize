@@ -75,7 +75,7 @@ async fn assemble_with_refresh(
     // On error, fall back to expired cached entries (which may be empty).
     let dashboard_entries = if dashboard_expired {
         match dashboard::load_models_async().await {
-            Ok(LoadOutcome::Both {
+            Ok(LoadOutcome {
                 models: fresh,
                 warnings,
             }) => {
@@ -83,19 +83,6 @@ async fn assemble_with_refresh(
                 let entries = pure::dashboard_models_to_entries(&fresh);
                 let _ = cache::save_dashboard(&entries);
                 entries
-            }
-            Ok(LoadOutcome::InventoryOnly {
-                models,
-                score_error,
-            }) => {
-                quota_errors.push(QuotaError {
-                    vendor: VendorKind::Claude,
-                    message: format!("dashboard fetch failed: {score_error}"),
-                });
-                pure::resolve_score_failure_entries(
-                    cached_dashboard,
-                    pure::dashboard_models_to_entries(&models),
-                )
             }
             Err(e) => {
                 quota_errors.push(QuotaError {

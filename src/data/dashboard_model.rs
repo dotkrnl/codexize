@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
-    pub(crate) display_order: usize,
     pub(crate) route_underlying_vendor: Option<VendorKind>,
     /// Opencode sub-provider this row was advertised under (`opencode` or
     /// `opencode-go`). The bare `name` stays ipbr-compatible; route_provider
@@ -20,11 +19,11 @@ pub(crate) struct InventoryEntry {
 }
 /// Canonicalized score record produced by score ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
-/// the existing exact-match merge keeps working; richer normalization is
-/// exposed via `canonical_id` / `aliases` for the upcoming matching task.
-/// For ipbr-sourced rows, `score_source = Ipbr` and `ipbr_row_matched = true`;
-/// the legacy aistupidlevel parser (kept only for tests) leaves
-/// `score_source = None` so the cosmetic `axes` cannot masquerade as
+/// the opencode-inventory merge keys join cleanly; richer normalization is
+/// exposed via `canonical_id` / `aliases` for the alias matcher.
+/// All production rows are `score_source = Ipbr` and `ipbr_row_matched = true`;
+/// the legacy aistupidlevel parser still appears in tests only and leaves
+/// `score_source = None` so its cosmetic `axes` cannot masquerade as
 /// ipbr authority.
 #[derive(Debug, Clone)]
 pub(crate) struct ScoreEntry {
@@ -96,62 +95,33 @@ pub(crate) fn merge_with_warnings(
     scores: Vec<ScoreEntry>,
 ) -> MergeResult {
     let ipbr_lookup = build_ipbr_lookup(&scores);
-    let legacy_score_map: HashMap<String, &ScoreEntry> = scores
-        .iter()
-        .filter(|s| s.score_source != ScoreSource::Ipbr)
-        .map(|s| (s.name.clone(), s))
-        .collect();
     let mut consumed_ipbr_scores = BTreeSet::new();
     let mut models: Vec<DashboardModel> = Vec::with_capacity(inventory.len());
+    // Inventory rows (opencode) only survive when they match an ipbr score.
+    // Anything without a match is outside the supported universe and is
+    // dropped — there is no longer a non-ipbr inventory source.
     for inv in inventory {
-        if let Some(score_index) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) {
-            consumed_ipbr_scores.insert(*score_index);
-            let route_underlying_vendor = if inv.vendor == "opencode" {
-                // Opencode CLI metadata may omit resale provenance; the
-                // matched ipbr row is the next-stable source for route
-                // eligibility without falling back to model-name guessing.
-                inv.route_underlying_vendor
-                    .or_else(|| vendor_kind_from_score_vendor(&scores[*score_index].vendor))
-            } else {
-                inv.route_underlying_vendor
-            };
-            models.push(dashboard_model_from_score(
-                inv.name,
-                &inv.vendor,
-                &scores[*score_index],
-                None,
-                route_underlying_vendor,
-                inv.route_provider,
-            ));
-        } else if inv.vendor == "opencode" {
+        let Some(&score_index) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) else {
             continue;
-        } else if let Some(sc) = legacy_score_map.get(&inv.name) {
-            models.push(dashboard_model_from_score(
-                inv.name,
-                &inv.vendor,
-                sc,
-                None,
-                inv.route_underlying_vendor,
-                inv.route_provider,
-            ));
-        } else if let Some(sc) = sibling_score(&inv.name, &scores) {
-            models.push(dashboard_model_from_score(
-                inv.name,
-                &inv.vendor,
-                sc,
-                Some(sc.name.clone()),
-                inv.route_underlying_vendor,
-                inv.route_provider,
-            ));
+        };
+        consumed_ipbr_scores.insert(score_index);
+        let route_underlying_vendor = if inv.vendor == "opencode" {
+            // Opencode CLI metadata may omit resale provenance; the matched
+            // ipbr row is the next-stable source for route eligibility
+            // without falling back to model-name guessing.
+            inv.route_underlying_vendor
+                .or_else(|| vendor_kind_from_score_vendor(&scores[score_index].vendor))
         } else {
-            models.push(empty_inventory_model(
-                inv.name,
-                inv.vendor,
-                inv.display_order + 10_000,
-                inv.route_underlying_vendor,
-                inv.route_provider,
-            ));
-        }
+            inv.route_underlying_vendor
+        };
+        models.push(dashboard_model_from_score(
+            inv.name,
+            &inv.vendor,
+            &scores[score_index],
+            None,
+            route_underlying_vendor,
+            inv.route_provider,
+        ));
     }
     let inv_names: std::collections::HashSet<String> =
         models.iter().map(|m| m.name.clone()).collect();
@@ -173,6 +143,7 @@ pub(crate) fn merge_with_warnings(
         warnings: ipbr_lookup.warnings,
     }
 }
+#[cfg(test)]
 pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
     scores
         .into_iter()
@@ -198,45 +169,6 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             fallback_from: None,
         })
         .collect()
-}
-pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
-    inventory
-        .into_iter()
-        .map(|inv| {
-            empty_inventory_model(
-                inv.name,
-                inv.vendor,
-                inv.display_order,
-                inv.route_underlying_vendor,
-                inv.route_provider,
-            )
-        })
-        .collect()
-}
-fn empty_inventory_model(
-    name: String,
-    vendor: String,
-    display_order: usize,
-    route_underlying_vendor: Option<VendorKind>,
-    route_provider: Option<String>,
-) -> DashboardModel {
-    DashboardModel {
-        name,
-        vendor,
-        overall_score: 0.0,
-        current_score: 0.0,
-        standard_error: 0.0,
-        axes: Vec::new(),
-        axis_provenance: BTreeMap::new(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
-        route_underlying_vendor,
-        route_provider,
-        display_order,
-        fallback_from: None,
-    }
 }
 pub fn synthesize_sibling(
     name: &str,
@@ -410,17 +342,6 @@ fn version_stem(name: &str) -> Option<&str> {
     } else {
         None
     }
-}
-fn sibling_score<'a>(name: &str, scores: &'a [ScoreEntry]) -> Option<&'a ScoreEntry> {
-    let stem = version_stem(name)?;
-    scores
-        .iter()
-        .filter(|sc| sc.name != name && version_stem(&sc.name) == Some(stem))
-        .max_by(|a, b| {
-            a.overall_score
-                .partial_cmp(&b.overall_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
 }
 struct IpbrLookup {
     matches: HashMap<String, usize>,

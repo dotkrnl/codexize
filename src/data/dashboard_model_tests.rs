@@ -43,43 +43,46 @@ fn ipbr_score(
     }
 }
 
-fn inventory(name: &str, order: usize) -> InventoryEntry {
+fn inventory(name: &str, _order: usize) -> InventoryEntry {
     InventoryEntry {
         name: name.to_string(),
         vendor: String::new(),
-        display_order: order,
         route_underlying_vendor: None,
         route_provider: None,
     }
 }
 
-fn vendor_inventory(name: &str, vendor: &str, order: usize) -> InventoryEntry {
+fn vendor_inventory(name: &str, vendor: &str, _order: usize) -> InventoryEntry {
     InventoryEntry {
         name: name.to_string(),
         vendor: vendor.to_string(),
-        display_order: order,
         route_underlying_vendor: None,
         route_provider: None,
     }
 }
 
 #[test]
-fn merge_enriches_inventory_and_preserves_unscored_models() {
+fn merge_drops_inventory_without_ipbr_match_and_admits_orphan_scores() {
+    // ipbr is the sole authority for the supported universe: an inventory
+    // row without an ipbr match disappears, while an ipbr score with no
+    // inventory still surfaces directly under its scoreboard vendor.
     let models = merge(
         vec![inventory("gpt-5.5", 0), inventory("claude-sonnet-4.5", 1)],
-        vec![score("gpt-5.4", 0.8, 0)],
+        vec![ipbr_score("gpt-5.4", None, &[], 0.8, 0)],
     );
-    let synthesized = models
-        .iter()
-        .find(|model| model.name == "gpt-5.5")
-        .expect("inventory sibling should be retained");
-    let unscored = models
-        .iter()
-        .find(|model| model.name == "claude-sonnet-4.5")
-        .expect("unscored inventory model should be retained");
 
-    assert_eq!(synthesized.fallback_from.as_deref(), Some("gpt-5.4"));
-    assert_eq!(unscored.overall_score, 0.0);
+    assert!(
+        !models.iter().any(|m| m.name == "gpt-5.5"),
+        "inventory rows without an ipbr match should not be kept"
+    );
+    assert!(
+        !models.iter().any(|m| m.name == "claude-sonnet-4.5"),
+        "inventory rows without an ipbr match should not be kept"
+    );
+    assert!(
+        models.iter().any(|m| m.name == "gpt-5.4"),
+        "ipbr scores with no matching inventory still surface"
+    );
 }
 
 #[test]
@@ -151,33 +154,15 @@ fn merge_excludes_collided_normalized_ipbr_keys_and_warns() {
         ],
     );
 
-    let model = result
-        .models
-        .iter()
-        .find(|model| model.name == "claude-opus-4.1")
-        .expect("inventory model should remain visible after collision");
-
-    assert_eq!(model.score_source, ScoreSource::None);
-    assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
+    // Both colliding scores are excluded from the lookup, so the inventory
+    // row has nothing to match and is dropped. The collision still surfaces
+    // as a warning so operators see the upstream feed problem.
+    assert!(
+        !result.models.iter().any(|m| m.name == "claude-opus-4.1"),
+        "inventory rows whose only matches collided should be dropped"
+    );
     assert_eq!(result.warnings.len(), 1);
     assert!(result.warnings[0].contains("claude-opus-4-1"));
-}
-
-#[test]
-fn merge_keeps_unmatched_inventory_model_visible_and_unscored() {
-    let models = merge(
-        vec![inventory("unlisted-model", 0)],
-        vec![ipbr_score("Claude Opus 4", None, &[], 86.0, 1)],
-    );
-
-    let model = models
-        .iter()
-        .find(|model| model.name == "unlisted-model")
-        .expect("inventory-only model should remain visible");
-
-    assert_eq!(model.score_source, ScoreSource::None);
-    assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
-    assert!(!model.ipbr_row_matched);
 }
 
 #[test]
@@ -203,22 +188,17 @@ fn merge_drops_opencode_inventory_without_ipbr_match() {
 }
 
 #[test]
-fn merge_marks_ipbr_sibling_synthesis_as_cosmetic_only() {
+fn merge_no_longer_applies_in_merge_sibling_synthesis() {
+    // The merge layer used to fall back to a same-stem sibling when an
+    // inventory row had no ipbr match. ipbr is now the sole authority for
+    // the supported universe, so the row is dropped instead. The public
+    // `synthesize_sibling` helper (used by `assemble_universe` for live-quota
+    // orphans) is still exercised below.
     let models = merge(
         vec![inventory("gpt-5.5", 0)],
         vec![ipbr_score("gpt-5.4", None, &[], 86.0, 1)],
     );
-
-    let model = models
-        .iter()
-        .find(|model| model.name == "gpt-5.5")
-        .expect("sibling synthesized model should remain visible");
-
-    assert_eq!(model.fallback_from.as_deref(), Some("gpt-5.4"));
-    assert_eq!(model.overall_score, 86.0);
-    assert_eq!(model.score_source, ScoreSource::None);
-    assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
-    assert!(!model.ipbr_row_matched);
+    assert!(!models.iter().any(|m| m.name == "gpt-5.5"));
 }
 
 #[test]
@@ -227,14 +207,6 @@ fn scores_only_converts_scores_without_fallback() {
 
     assert_eq!(models[0].name, "gpt-5.4");
     assert_eq!(models[0].fallback_from, None);
-}
-
-#[test]
-fn inv_only_zeroes_scores() {
-    let models = inv_only(vec![inventory("gpt-5.5", 1)]);
-
-    assert_eq!(models[0].overall_score, 0.0);
-    assert_eq!(models[0].display_order, 1);
 }
 
 #[test]
@@ -330,9 +302,10 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
 
 #[test]
 fn dashboard_model_after_representative_merge_snapshot() {
-    // Mirrors a typical refresh: an inventory list with a couple of
-    // model names, an ipbr-sourced score, and a sibling-only entry
-    // that exercises the cosmetic-fallback branch.
+    // Mirrors a typical refresh: a couple of inventory rows joined against
+    // a small set of scores. Inventory rows without an ipbr match are
+    // dropped; ipbr-sourced rows survive with phase scores; legacy
+    // non-ipbr scores still surface (only test fixtures produce these).
     let models = merge(
         vec![
             inventory("anthropic/claude-opus-4", 0),

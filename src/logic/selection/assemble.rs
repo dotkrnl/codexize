@@ -297,27 +297,6 @@ pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> 
         models.keys().any(|name| !reset_models.contains_key(name))
     })
 }
-/// On ipbr score fetch/parse failure: prefer the previously cached entries
-/// when they carry any ipbr-sourced rows, so a transient ipbr outage does
-/// not wipe out the last known ranking authority. Fall through to the
-/// inventory-only refresh only when no cached ipbr data exists, leaving
-/// inventory-visible models present with phase scores `None`. The caller
-/// MUST NOT persist the result — letting the next successful refresh write
-/// fresh ipbr data without first being suppressed by a cached inv-only
-/// snapshot.
-pub fn resolve_score_failure_entries(
-    cached: Vec<DashboardEntry>,
-    inventory_only: Vec<DashboardEntry>,
-) -> Vec<DashboardEntry> {
-    if cached
-        .iter()
-        .any(|entry| entry.score_source == ScoreSource::Ipbr)
-    {
-        cached
-    } else {
-        inventory_only
-    }
-}
 pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEntry> {
     models
         .iter()

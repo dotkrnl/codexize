@@ -11,12 +11,53 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
+#[cfg(test)]
+use std::cell::Cell;
 const TRANSCRIPT_HANDOFF_PARK_INTERVAL: Duration = Duration::from_millis(25);
 /// Polling cadence for the runner's ACP receive loop. Kept here so transport
 /// code can sleep between idle reads without re-importing supervisor state.
 pub(super) const ACP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+/// Narrow clock injection seam scoped to the ACP runtime loop. Production
+/// code uses [`RealAcpClock`] (wall-clock `Instant` + thread parking); tests
+/// use [`FakeAcpClock`] to advance perceived time deterministically without
+/// real sleeps.
+pub(in crate::data::runner) trait AcpClock {
+    fn now(&self) -> Instant;
+    fn park(&self);
+}
+
+pub(in crate::data::runner) struct RealAcpClock;
+
+impl AcpClock for RealAcpClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn park(&self) {
+        thread::park_timeout(ACP_POLL_INTERVAL);
+    }
+}
+
+#[cfg(test)]
+pub(in crate::data::runner) struct FakeAcpClock {
+    pub(in crate::data::runner) now: Cell<Instant>,
+}
+
+#[cfg(test)]
+impl AcpClock for FakeAcpClock {
+    fn now(&self) -> Instant {
+        self.now.get()
+    }
+    fn park(&self) {
+        // Advance perceived wall-clock by one poll interval so the cancel-ack
+        // watchdog crosses 60s/120s thresholds after a fixed number of loop
+        // iterations, without sleeping real time.
+        self.now.set(self.now.get() + ACP_POLL_INTERVAL);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::data::runner) enum AcpCancelReason {
     Terminate,
@@ -247,5 +288,41 @@ impl AcpTextStream {
             return;
         }
         self.live_ts = persist_agent_text_block(launch, text.to_string(), kind);
+    }
+}
+
+/// Append a `MessageKind::SummaryWarn` dashboard message for the active run
+/// through the existing session-state persistence path. Best-effort — if the
+/// run record is not yet available (e.g. the app thread hasn't saved it) the
+/// message is silently dropped.
+pub(in crate::data::runner) fn persist_system_warning(launch: &ManagedAcpLaunch, text: &str) {
+    let Some(session_id) = launch.session_id.as_deref() else {
+        return;
+    };
+    let Some((run_id, _, _)) = find_transcript_run(session_id, &launch.window_name) else {
+        return;
+    };
+    let msg = Message {
+        ts: chrono::Utc::now(),
+        run_id,
+        kind: MessageKind::SummaryWarn,
+        sender: MessageSender::System,
+        text: text.to_string(),
+    };
+    let _ = SessionState::load(session_id).and_then(|state| state.append_message(&msg));
+}
+
+/// Write a durable JSONL trace record to the per-run ACP trace file so
+/// headless/non-watching runs still leave a forensic audit trail.
+pub(in crate::data::runner) fn append_acp_event_trace(launch: &ManagedAcpLaunch, record: serde_json::Value) {
+    let path = acp_text_trace_path(launch);
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let Ok(line) = serde_json::to_string(&record) else {
+        return;
+    };
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
     }
 }

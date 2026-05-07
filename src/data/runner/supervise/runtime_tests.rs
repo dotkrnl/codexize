@@ -3,7 +3,7 @@ use crate::acp::{
     AcpLaunchPolicy, AcpPermissionMode, AcpReasoningEffort, AcpResolvedLaunch, AcpResult,
     AcpSession, AcpSessionSpec, AcpSpawnSpec, ClientUpdate, PromptPayload,
 };
-use crate::data::runner::transport::{FakeAcpClock, ManagedAcpLaunch};
+use crate::data::runner::transport::{FakeAcpClock, ManagedAcpLaunch, RealAcpDiagnostics};
 use crate::selection::VendorKind;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -150,9 +150,16 @@ fn non_interactive_interrupt_resubmits_warning_then_finishes() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 0);
     assert_eq!(outcome.signal_received, "");
@@ -169,9 +176,16 @@ fn silent_child_exit_during_idle_polls_breaks_the_loop() {
     let (waiting_tx, _waiting_rx) = watch::channel(false);
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 1);
 }
@@ -189,9 +203,16 @@ fn non_interactive_failure_without_pending_input_still_exits_one() {
     let (waiting_tx, _waiting_rx) = watch::channel(false);
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 1);
 }
@@ -221,9 +242,16 @@ fn non_interactive_finished_resubmits_queued_interrupt_text() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 0);
     assert_eq!(outcome.signal_received, "");
@@ -247,9 +275,16 @@ fn cancel_ack_timeout_resends_then_terminates() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 143);
     assert_eq!(outcome.signal_received, "TERM");
@@ -282,9 +317,16 @@ fn cancel_ack_timer_disarmed_by_prompt_turn_failed_before_timeout() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     // PromptTurnFailed disarmed the timer and resubmitted; the resubmitted
     // turn finished normally with PromptTurnFinished, producing exit_code 0.
@@ -325,9 +367,16 @@ fn second_interrupt_while_pending_does_not_reset_cancel_ack_timer() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     // After resubmitting "first" on the first PromptTurnFailed, "second"
     // is still pending. The second PromptTurnFailed exits with code 1
@@ -340,8 +389,8 @@ fn interrupt_finished_resubmit_then_later_interrupt_arms_fresh_cancel() {
     // Full cycle: interrupt → PromptTurnFinished → resubmit queued text
     // (timer disarmed) → later interrupt (new timer armed) → vendor finishes.
     let session: Box<dyn AcpSession> = Box::new(FakeSession::new(vec![
-        ClientUpdate::PromptTurnFinished,    // triggers non-interactive resubmit
-        ClientUpdate::PromptTurnFinished,    // resubmitted turn finishes
+        ClientUpdate::PromptTurnFinished, // triggers non-interactive resubmit
+        ClientUpdate::PromptTurnFinished, // resubmitted turn finishes
     ]));
 
     let launch = launch_fixture(false);
@@ -354,9 +403,16 @@ fn interrupt_finished_resubmit_then_later_interrupt_arms_fresh_cancel() {
         .unwrap();
 
     let clock = fake_clock();
-    let outcome =
-        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
-            .expect("loop returns outcome");
+    let outcome = drive_acp_session_with_clock(
+        session,
+        &launch,
+        &cancel,
+        &mut input_rx,
+        &waiting_tx,
+        &clock,
+        &RealAcpDiagnostics,
+    )
+    .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 0);
     assert_eq!(outcome.signal_received, "");

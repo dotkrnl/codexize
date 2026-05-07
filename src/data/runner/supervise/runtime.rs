@@ -11,8 +11,8 @@ use crate::runner::exit::{
     validate_toml_artifacts, write_finish_stamp_for_outcome,
 };
 use crate::runner::transport::{
-    AcpCancelReason, AcpClock, AcpInput, AcpTextStream, ManagedAcpLaunch, RealAcpClock,
-    append_acp_event_trace, append_acp_text_trace, persist_system_warning,
+    AcpCancelReason, AcpClock, AcpDiagnostics, AcpInput, AcpTextStream, ManagedAcpLaunch,
+    RealAcpClock, RealAcpDiagnostics, append_acp_text_trace, find_launch_run_id,
 };
 use crate::state::MessageKind;
 use anyhow::{Result, anyhow};
@@ -73,7 +73,7 @@ fn run_managed_acp_loop(
     drive_acp_session(session, launch, cancel, input_rx, waiting_for_input)
 }
 /// Drive a connected ACP session through its prompt-turn lifecycle. Production
-/// wrapper that passes [`RealAcpClock`].
+/// wrapper that passes [`RealAcpClock`] and [`RealAcpDiagnostics`].
 fn drive_acp_session(
     session: Box<dyn AcpSession>,
     launch: &ManagedAcpLaunch,
@@ -81,20 +81,32 @@ fn drive_acp_session(
     input_rx: &mut mpsc::UnboundedReceiver<AcpInput>,
     waiting_for_input: &watch::Sender<bool>,
 ) -> Result<ManagedAcpOutcome> {
-    drive_acp_session_with_clock(session, launch, cancel, input_rx, waiting_for_input, &RealAcpClock)
+    drive_acp_session_with_clock(
+        session,
+        launch,
+        cancel,
+        input_rx,
+        waiting_for_input,
+        &RealAcpClock,
+        &RealAcpDiagnostics,
+    )
 }
 
-/// Clock-injectable core loop. Production passes [`RealAcpClock`]; tests pass
-/// a [`FakeAcpClock`] whose perceived wall-clock can be advanced
-/// deterministically so cancel-ack watchdog thresholds are crossed without
-/// sleeping real time.
-pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
+/// Clock-injectable core loop. Production passes [`RealAcpClock`] and
+/// [`RealAcpDiagnostics`]; tests pass a [`FakeAcpClock`] whose perceived
+/// wall-clock can be advanced deterministically across the 60s/120s
+/// cancel-ack thresholds without sleeping real time, plus a recording
+/// [`FakeAcpDiagnostics`] so they can assert the runtime persisted the
+/// expected `SummaryWarn` messages and emitted the durable JSONL trace
+/// records the operator relies on for headless postmortems.
+pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
     mut session: Box<dyn AcpSession>,
     launch: &ManagedAcpLaunch,
     cancel: &CancelSignal,
     input_rx: &mut mpsc::UnboundedReceiver<AcpInput>,
     waiting_for_input: &watch::Sender<bool>,
     clock: &C,
+    diagnostics: &D,
 ) -> Result<ManagedAcpOutcome> {
     let mut agent_text = AcpTextStream::new();
     let mut thought_text = AcpTextStream::new();
@@ -194,8 +206,13 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
                     }
                     clock.park();
                     check_cancel_ack(
-                        &mut session, launch, cancel,
-                        &mut cancel_sent_at, &mut cancel_resend_at, clock,
+                        &mut session,
+                        launch,
+                        cancel,
+                        &mut cancel_sent_at,
+                        &mut cancel_resend_at,
+                        clock,
+                        diagnostics,
                     )?;
                     continue;
                 }
@@ -205,18 +222,25 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
                 // race where the vendor's turn finishes between the
                 // interrupt being queued and cancel propagation completing.
                 if interrupting_turn && let Some(text) = pending_input.pop_front() {
+                    // `queued` reports how many interrupt texts remain queued
+                    // *after* the resubmitted text has been popped; 0 means
+                    // this resubmit fully drained the interrupt buffer.
                     let queued = pending_input.len();
                     let _ = waiting_for_input.send_replace(false);
                     session
                         .submit_prompt(&text)
                         .map_err(|err| anyhow!("{err}"))?;
                     interrupting_turn = false;
-                    append_acp_event_trace(launch, serde_json::json!({
-                        "type": "acp_resubmit_on_finished",
-                        "ts": chrono::Utc::now().to_rfc3339(),
-                        "window": launch.window_name,
-                        "queued_remaining": queued,
-                    }));
+                    diagnostics.record_event(
+                        launch,
+                        serde_json::json!({
+                            "type": "acp_resubmit_on_finished",
+                            "ts": chrono::Utc::now().to_rfc3339(),
+                            "run": find_launch_run_id(launch),
+                            "window": launch.window_name,
+                            "queued": queued,
+                        }),
+                    );
                     clock.park();
                     continue;
                 }
@@ -252,8 +276,13 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
                     }
                     clock.park();
                     check_cancel_ack(
-                        &mut session, launch, cancel,
-                        &mut cancel_sent_at, &mut cancel_resend_at, clock,
+                        &mut session,
+                        launch,
+                        cancel,
+                        &mut cancel_sent_at,
+                        &mut cancel_resend_at,
+                        clock,
+                        diagnostics,
                     )?;
                     continue;
                 }
@@ -263,8 +292,13 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
                     let _ = waiting_for_input.send_replace(true);
                     clock.park();
                     check_cancel_ack(
-                        &mut session, launch, cancel,
-                        &mut cancel_sent_at, &mut cancel_resend_at, clock,
+                        &mut session,
+                        launch,
+                        cancel,
+                        &mut cancel_sent_at,
+                        &mut cancel_resend_at,
+                        clock,
+                        diagnostics,
                     )?;
                     continue;
                 }
@@ -306,6 +340,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
             &mut cancel_sent_at,
             &mut cancel_resend_at,
             clock,
+            diagnostics,
         )?;
     };
     Ok(outcome)
@@ -319,13 +354,14 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock>(
 /// `acp_cancel_timeout_terminate`, and signal `AcpCancelReason::Terminate` so
 /// the existing exit_code 143 / vendor-failover path takes over on the next
 /// loop iteration.
-fn check_cancel_ack<C: AcpClock>(
+fn check_cancel_ack<C: AcpClock, D: AcpDiagnostics>(
     session: &mut Box<dyn AcpSession>,
     launch: &ManagedAcpLaunch,
     cancel: &CancelSignal,
     cancel_sent_at: &mut Option<Instant>,
     cancel_resend_at: &mut Option<Instant>,
     clock: &C,
+    diagnostics: &D,
 ) -> Result<()> {
     let Some(sent_at) = *cancel_sent_at else {
         return Ok(());
@@ -337,13 +373,17 @@ fn check_cancel_ack<C: AcpClock>(
         session.cancel_prompt().map_err(|err| anyhow!("{err}"))?;
         *cancel_resend_at = Some(now);
         let msg = "ACP cancel not acknowledged after 60s; resending cancel. If still unresponsive after another 60s the run will be terminated.";
-        persist_system_warning(launch, msg);
-        append_acp_event_trace(launch, serde_json::json!({
-            "type": "acp_cancel_resent",
-            "ts": chrono::Utc::now().to_rfc3339(),
-            "window": launch.window_name,
-            "elapsed_ms": elapsed.as_millis(),
-        }));
+        diagnostics.persist_warning(launch, msg);
+        diagnostics.record_event(
+            launch,
+            serde_json::json!({
+                "type": "acp_cancel_resent",
+                "ts": chrono::Utc::now().to_rfc3339(),
+                "run": find_launch_run_id(launch),
+                "window": launch.window_name,
+                "elapsed_ms": elapsed.as_millis(),
+            }),
+        );
         return Ok(());
     }
     if let Some(resend_at) = *cancel_resend_at {
@@ -352,13 +392,17 @@ fn check_cancel_ack<C: AcpClock>(
             // Second 60 s expiry: escalate to Terminate so the existing
             // vendor-failover path takes over.
             let msg = "ACP cancel still not acknowledged after 120s; terminating run, vendor failover will follow.";
-            persist_system_warning(launch, msg);
-            append_acp_event_trace(launch, serde_json::json!({
-                "type": "acp_cancel_timeout_terminate",
-                "ts": chrono::Utc::now().to_rfc3339(),
-                "window": launch.window_name,
-                "elapsed_ms": elapsed.as_millis(),
-            }));
+            diagnostics.persist_warning(launch, msg);
+            diagnostics.record_event(
+                launch,
+                serde_json::json!({
+                    "type": "acp_cancel_timeout_terminate",
+                    "ts": chrono::Utc::now().to_rfc3339(),
+                    "run": find_launch_run_id(launch),
+                    "window": launch.window_name,
+                    "elapsed_ms": elapsed.as_millis(),
+                }),
+            );
             cancel.signal(AcpCancelReason::Terminate);
             *cancel_sent_at = None;
             *cancel_resend_at = None;

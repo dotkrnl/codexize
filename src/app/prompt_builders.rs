@@ -140,7 +140,6 @@ pub(crate) fn final_validation_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/final_validation.md"))
 }
-#[cfg(test)]
 pub(crate) fn dreaming_prompt(
     session_dir: &Path,
     dream_report_path: &Path,

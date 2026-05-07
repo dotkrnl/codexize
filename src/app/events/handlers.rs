@@ -352,6 +352,12 @@ impl App {
                 let _ = self.transition_to_phase(Phase::IdeaInput);
                 false
             }
+            KeyCode::Char('s') | KeyCode::Char('S') if stage_id == StageId::Dreaming => {
+                if let Err(err) = self.skip_suggested_dreaming() {
+                    self.record_agent_error(format!("skip dreaming failed: {err:#}"));
+                }
+                false
+            }
             // Consume all other keys so the UI is genuinely modal.
             _ => false,
         }

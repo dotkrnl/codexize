@@ -145,6 +145,12 @@ impl App {
             Phase::ReviewRound(_) if self.state.agent_error.is_some() => {
                 Some(ModalKind::StageError(StageId::Review))
             }
+            Phase::FinalValidation(_) if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::FinalValidation))
+            }
+            Phase::Dreaming(_) if self.state.agent_error.is_some() => {
+                Some(ModalKind::StageError(StageId::Dreaming))
+            }
             Phase::BlockedNeedsUser
                 if self.state.block_origin == Some(BlockOrigin::FinalValidation) =>
             {
@@ -345,6 +351,7 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("missing pending dreaming decision"))?;
         decision.kind = DreamingDecisionKind::OperatorSkipped;
         self.state.dreaming_decision = Some(decision);
+        self.clear_agent_error();
         self.state.save()?;
         self.transition_to_phase(Phase::Done)?;
         Ok(())

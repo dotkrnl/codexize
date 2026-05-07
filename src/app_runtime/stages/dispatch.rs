@@ -40,7 +40,8 @@ impl App {
             Phase::BuilderRecoverySharding(_) => self.launch_recovery_sharding(),
             Phase::Simplification(_) => self.launch_simplifier(),
             Phase::FinalValidation(_) => self.launch_final_validation(),
-            Phase::DreamingPending | Phase::Dreaming(_) => {}
+            Phase::Dreaming(_) => self.launch_dreaming(),
+            Phase::DreamingPending => {}
             _ => {}
         }
     }
@@ -64,7 +65,7 @@ impl App {
             RetryLaunch::Coder => self.launch_coder(),
             RetryLaunch::Reviewer => self.launch_reviewer(),
             RetryLaunch::FinalValidation => self.launch_final_validation(),
-            RetryLaunch::Dreaming => {}
+            RetryLaunch::Dreaming => self.launch_dreaming(),
         }
     }
     /// Launch the canonical retry for a `StageId` value carried by the
@@ -83,7 +84,7 @@ impl App {
             StageId::Implementation => self.launch_coder(),
             StageId::Review => self.launch_reviewer(),
             StageId::FinalValidation => self.launch_final_validation(),
-            StageId::Dreaming => {}
+            StageId::Dreaming => self.launch_dreaming(),
         }
     }
     pub(crate) fn launch_retry_for_stage(
@@ -117,7 +118,7 @@ impl App {
             "reviewer" => self.launch_reviewer_with_model(Some(chosen)),
             "simplifier" => self.launch_simplifier_with_model(Some(chosen)),
             "final-validation" => self.launch_final_validation_with_model(Some(chosen)),
-            "dreaming" => false,
+            "dreaming" => self.launch_dreaming_with_model(Some(chosen)),
             _ => false,
         }
     }

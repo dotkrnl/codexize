@@ -101,6 +101,9 @@ fn stage_error_bindings(stage_id: StageId) -> (Vec<KeyBinding>, Vec<KeyBinding>)
     if stage_id == StageId::Brainstorm {
         actions.push(key("e", "edit idea"));
     }
+    if stage_id == StageId::Dreaming {
+        actions.push(key("s", "skip"));
+    }
     (actions, system_bindings())
 }
 /// Final validation blocked modal: actions + system.

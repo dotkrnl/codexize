@@ -1,6 +1,5 @@
 // Public prompt-builder facade. The heavy template helpers live in
 // `prompt_builders` so this module remains a thin orchestration surface.
-#[cfg(test)]
 pub(crate) use super::prompt_builders::dreaming_prompt;
 pub(crate) use super::prompt_builders::{
     ReviewerPromptInputs, brainstorm_prompt, coder_prompt, final_validation_prompt,

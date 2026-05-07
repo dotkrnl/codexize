@@ -13,6 +13,7 @@
 mod brainstorm;
 mod coder;
 mod dispatch;
+mod dreaming;
 mod final_validation;
 mod plan_review;
 mod planning;

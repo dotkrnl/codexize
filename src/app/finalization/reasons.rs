@@ -214,6 +214,19 @@ impl App {
                         });
                 (true, reason)
             }
+            "dreaming" => {
+                let report_path = crate::logic::memory::memory_root_from_session_path(&session_dir)
+                    .join("dreams")
+                    .join(format!("dream-{:04}.toml", run.round));
+                let reason = (!Self::artifact_present(&report_path))
+                    .then(|| Reason::ArtifactMissing.to_string())
+                    .or_else(|| {
+                        crate::data::memory::validate_dream_report_file(&report_path)
+                            .err()
+                            .map(Self::invalid_artifact)
+                    });
+                (true, reason)
+            }
             "simplifier" => {
                 let simplification_path =
                     Self::round_dir(&session_dir, run.round).join("simplification.toml");

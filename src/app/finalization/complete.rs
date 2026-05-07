@@ -27,6 +27,7 @@ impl App {
             }
             Phase::FinalValidation(round) => self.finalize_final_validation_success(run, round)?,
             Phase::Simplification(round) => self.finalize_simplification_success(run, round)?,
+            Phase::Dreaming(round) => self.finalize_dreaming_success(run, round)?,
             Phase::IdeaInput
             | Phase::SpecReviewPaused
             | Phase::PlanReviewPaused
@@ -34,7 +35,6 @@ impl App {
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
             | Phase::DreamingPending
-            | Phase::Dreaming(_)
             | Phase::Done => {}
         }
         Ok(())
@@ -71,6 +71,10 @@ impl App {
         if run.stage == "final-validation" {
             self.record_agent_error(error);
             self.transition_to_blocked(crate::state::BlockOrigin::FinalValidation)?;
+            return Ok(());
+        }
+        if run.stage == "dreaming" {
+            self.record_agent_error(error);
             return Ok(());
         }
         let failed_run = self

@@ -165,9 +165,17 @@ fn enumerate_isolates_provider_text_from_other_branch() {
         models
             .iter()
             .filter(|m| m.provider_id == "opencode-go")
-            .all(|m| ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5", "glm-5.1",
-                "kimi-k2.5", "kimi-k2.6", "qwen3.5-plus", "qwen3.6-plus"]
-                .contains(&m.id.as_str())),
+            .all(|m| [
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "glm-5",
+                "glm-5.1",
+                "kimi-k2.5",
+                "kimi-k2.6",
+                "qwen3.5-plus",
+                "qwen3.6-plus"
+            ]
+            .contains(&m.id.as_str())),
         "opencode-go branch must fall back to its hardcoded snapshot when CLI text only matches the other provider"
     );
 }

@@ -80,15 +80,13 @@ fn opencode_go_inventory_surfaces_with_route_provider_when_ipbr_matches() {
     let mut inventory = Vec::new();
     append_opencode_inventory(
         &mut inventory,
-        vec![
-            crate::data::providers::opencode::OpencodeModelMeta {
-                id: "deepseek-v4-flash".to_string(),
-                provider_id: "opencode-go".to_string(),
-                display_name: None,
-                api_npm: Some("@ai-sdk/openai-compatible".to_string()),
-                underlying_vendor: None,
-            },
-        ],
+        vec![crate::data::providers::opencode::OpencodeModelMeta {
+            id: "deepseek-v4-flash".to_string(),
+            provider_id: "opencode-go".to_string(),
+            display_name: None,
+            api_npm: Some("@ai-sdk/openai-compatible".to_string()),
+            underlying_vendor: None,
+        }],
     );
     let scores = parse_ipbr_scoreboard(
         r#"
@@ -164,7 +162,7 @@ fn fixture_cached_models() -> Vec<CachedModel> {
             ipbr_row_matched: true,
             ipbr_match_key: Some(entry.name.clone()),
             route_underlying_vendor: None,
-        route_provider: None,
+            route_provider: None,
             quota_percent: Some(80),
             quota_resets_at: None,
             display_order: entry.display_order,

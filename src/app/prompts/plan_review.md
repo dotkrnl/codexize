@@ -54,5 +54,11 @@ the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
 {review_path} saying so. Do NOT invent issues.
+
+Memory side-quest (optional, low effort): if the plan↔spec pass exposed a
+planning lesson worth remembering across sessions (a recurring edge case
+the plan missed, a structural ambiguity that keeps showing up, a pattern
+that misled past plans), append a short note under `.codexize/memory/**`.
+One observation, not a writeup. Skip if nothing surfaced.
 {memory_context}
 {instr}

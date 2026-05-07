@@ -93,5 +93,10 @@ Hard rules:
   - Stay in this stage's scope. Out-of-scope ideas → leave for follow-up,
     don't act on them here.
   - Final validation runs after you. Don't try to do its job.
+
+Memory side-quest (optional, low effort): if a repeating cleanup signaled
+a structural lesson (a convention worth codifying, a refactor pattern
+crossing multiple files), append a short note under `.codexize/memory/**`.
+One observation, not a writeup. Skip if nothing surfaced.
 {memory_context}
 {instr}

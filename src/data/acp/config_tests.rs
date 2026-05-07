@@ -349,10 +349,17 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
         acp::AcpShellCommandPolicy::FullAccess
     ));
     // Mandatory write paths still advertised so the runtime can surface
-    // misrouted required-output writes.
+    // misrouted required-output writes. Memory glob is included so the
+    // simplifier can append durable lessons it discovers while collapsing
+    // implementation details.
+    let memory_glob = temp.path().join(".codexize/memory/**");
     assert_eq!(
         resolved.session.policy.allowed_write_paths,
-        vec![simplification_path.clone(), live_summary_path.clone()]
+        vec![
+            simplification_path.clone(),
+            live_summary_path.clone(),
+            memory_glob.clone(),
+        ]
     );
     assert_eq!(
         resolved
@@ -361,9 +368,10 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
             .get("CODEXIZE_ACP_ALLOWED_WRITE_PATHS")
             .cloned(),
         Some(format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             simplification_path.display(),
-            live_summary_path.display()
+            live_summary_path.display(),
+            memory_glob.display()
         ))
     );
     assert_eq!(

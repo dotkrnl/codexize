@@ -112,8 +112,10 @@ impl AcpLaunchPolicy {
     }
     /// Simplifier writes/commits repo files; workspace not read-only, shell unrestricted.
     pub fn simplifier(simplification_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
+        let simplification_path = simplification_path.into();
+        let memory_glob = memory_glob_from_session_path(&simplification_path);
         Self {
-            allowed_write_paths: vec![simplification_path.into(), live_summary_path.into()],
+            allowed_write_paths: vec![simplification_path, live_summary_path.into(), memory_glob],
             shell_policy: AcpShellCommandPolicy::FullAccess, enforce_readonly_workspace: false,
         }
     }

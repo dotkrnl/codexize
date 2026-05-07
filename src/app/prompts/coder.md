@@ -76,5 +76,10 @@ Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
 If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
+
+Memory side-quest (optional, low effort): if you hit a vendor quirk, an
+architectural constraint, or a non-obvious pitfall while implementing,
+append a short note under `.codexize/memory/**`. Keep it bounded — a single
+observation, not a writeup. Skip if nothing surfaced.
 {memory_context}
 {instr}

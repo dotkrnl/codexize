@@ -73,5 +73,11 @@ Rules:
   - agent_pivot   → autonomous recovery required; explain the pivot.
   - Don't repeat feedback from prior reviews unless the coder ignored it
     without good reason — in which case call that out explicitly.
+
+Memory side-quest (optional, low effort): if the review surfaced a
+recurring pattern (a common mistake worth remembering, a convention worth
+codifying, a review heuristic that paid off), append a short note under
+`.codexize/memory/**`. One observation, not a writeup. Skip if nothing
+surfaced.
 {memory_context}
 {instr}

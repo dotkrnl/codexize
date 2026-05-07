@@ -1,5 +1,6 @@
 ---
 source: src/app/../app_runtime/tests/prompts/mod.rs
+assertion_line: 21
 description: Prompt output snapshot
 ---
 You review an implementation plan. NON-INTERACTIVE — no clarifying
@@ -62,6 +63,12 @@ the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
 /tmp/codexize-prompt-fixture/session/artifacts/plan-review-3.md saying so. Do NOT invent issues.
+
+Memory side-quest (optional, low effort): if the plan↔spec pass exposed a
+planning lesson worth remembering across sessions (a recurring edge case
+the plan missed, a structural ambiguity that keeps showing up, a pattern
+that misled past plans), append a short note under `.codexize/memory/**`.
+One observation, not a writeup. Skip if nothing surfaced.
 Project Memory:
   - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
   - Memory root: /tmp/codexize-prompt-fixture/session/.codexize/memory

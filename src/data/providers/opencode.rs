@@ -176,32 +176,33 @@ fn hardcoded_fallback_models() -> Vec<OpencodeModelMeta> {
     .collect()
 }
 fn run_models_command() -> Result<String> {
-    let output = Command::new("opencode")
-        .args(["models", "opencode", "--verbose"])
-        .output()
-        .context("failed to invoke `opencode models opencode --verbose`")?;
-    if !output.status.success() {
-        bail!(
-            "`opencode models opencode --verbose` exited with {:?}",
-            output.status
-        );
-    }
-    String::from_utf8(output.stdout).context("opencode models output was not UTF-8")
+    run_opencode_command(
+        ["models", "opencode", "--verbose"],
+        "opencode models opencode --verbose",
+        "opencode models output was not UTF-8",
+    )
 }
 fn run_stats_command() -> Result<String> {
+    let days = STATS_WINDOW_DAYS.to_string();
+    run_opencode_command(
+        ["stats", "--days", days.as_str(), "--models"],
+        "opencode stats",
+        "opencode stats output was not UTF-8",
+    )
+}
+fn run_opencode_command<const N: usize>(
+    args: [&str; N],
+    command_label: &str,
+    utf8_context: &'static str,
+) -> Result<String> {
     let output = Command::new("opencode")
-        .args([
-            "stats",
-            "--days",
-            &STATS_WINDOW_DAYS.to_string(),
-            "--models",
-        ])
+        .args(args)
         .output()
-        .context("failed to invoke `opencode stats`")?;
+        .with_context(|| format!("failed to invoke `{command_label}`"))?;
     if !output.status.success() {
-        bail!("`opencode stats` exited with {:?}", output.status);
+        bail!("`{command_label}` exited with {:?}", output.status);
     }
-    String::from_utf8(output.stdout).context("opencode stats output was not UTF-8")
+    String::from_utf8(output.stdout).context(utf8_context)
 }
 fn model_meta_from_value(value: &Value) -> Option<OpencodeModelMeta> {
     let obj = value.as_object()?;

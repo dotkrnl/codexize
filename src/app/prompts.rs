@@ -13,9 +13,9 @@ pub(crate) use super::prompt_ctx::{
 };
 #[allow(unused_imports)]
 pub(crate) use super::stage_support::{
-    assigned_revise_task_ids, git_rev_parse_head, read_review_scope, read_review_scope_base_sha,
-    restore_artifacts, rewrite_tasks_for_revise, task_effort_for, task_toml_for,
-    validate_stage_toml_writes, write_review_scope_artifact,
+    AUTO_TOUGH_AFTER_TASK_ROUNDS, assigned_revise_task_ids, auto_tough_effort, git_rev_parse_head,
+    read_review_scope, read_review_scope_base_sha, restore_artifacts, rewrite_tasks_for_revise,
+    task_effort_for, task_toml_for, validate_stage_toml_writes, write_review_scope_artifact,
 };
 // formatdoc! remains the canonical renderer for thin inline wrappers; see
 // `prompt_builders::PromptCtx::live_summary_instruction`.

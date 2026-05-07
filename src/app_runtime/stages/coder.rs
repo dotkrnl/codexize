@@ -1,6 +1,6 @@
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
-    coder_prompt, read_review_scope, task_effort_for, task_toml_for, write_review_scope_artifact,
+    coder_prompt, read_review_scope, task_toml_for, write_review_scope_artifact,
 };
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
@@ -43,7 +43,7 @@ impl App {
         self.capture_round_base(&round_dir);
         let modes = self.state.launch_modes();
         self.record_dirty_worktree_yolo_gate(dirty_before_coder, modes);
-        let requested_effort = task_effort_for(&session_dir, task_id);
+        let requested_effort = self.task_effort_for_round(&session_dir, task_id, r);
         let phase = Self::phase_for_stage("coder");
         let effort = modes.effort_for(requested_effort, phase);
         // Override-model bypass: an explicit operator pick wins over the

@@ -1,7 +1,7 @@
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
     ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope, reviewer_prompt,
-    rewrite_tasks_for_revise, task_effort_for,
+    rewrite_tasks_for_revise,
 };
 use crate::app::{App, guard};
 use crate::review;
@@ -54,7 +54,7 @@ impl App {
             .cloned()
             .collect::<Vec<_>>();
         let modes = self.state.launch_modes();
-        let requested_effort = task_effort_for(&session_dir, task_id);
+        let requested_effort = self.task_effort_for_round(&session_dir, task_id, r);
         let effort = modes.effort_for(requested_effort, Self::phase_for_stage("reviewer"));
         // Override-model bypass: explicit operator pick beats the effort filter.
         let (used_vendors, used_models) = Self::used_review_pairs(&excluded);

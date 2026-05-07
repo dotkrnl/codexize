@@ -11,6 +11,9 @@ pub(crate) enum OperatorTerminationMarker {
     Stopped,
     RetryRequested,
 }
+#[cfg(test)]
+#[path = "run_helpers_tests.rs"]
+mod tests;
 impl App {
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
@@ -21,6 +24,43 @@ impl App {
             .max()
             .unwrap_or(0)
             + 1
+    }
+    /// 1-based ordinal of `round` within this task's coder-round
+    /// history. The orchestrator's `Phase::ImplementationRound` round
+    /// counter is global — it ticks across tasks — so a task that
+    /// starts at global round 4 (because earlier tasks consumed rounds
+    /// 1-3) is on its 1st task-round, not its 4th. Used as the input
+    /// to `auto_tough_effort` so the auto-promotion threshold counts
+    /// rounds spent on this task only.
+    pub(crate) fn task_round_index(&self, task_id: u32, round: u32) -> u32 {
+        use std::collections::BTreeSet;
+        let mut rounds: BTreeSet<u32> = self
+            .state
+            .agent_runs
+            .iter()
+            .filter(|run| run.stage == "coder" && run.task_id == Some(task_id))
+            .map(|run| run.round)
+            .collect();
+        rounds.insert(round);
+        rounds
+            .iter()
+            .position(|&candidate| candidate == round)
+            .map(|pos| (pos + 1) as u32)
+            .unwrap_or(1)
+    }
+    /// Effort to launch a coder/reviewer at, applying the per-task
+    /// auto-tough rule on top of the task's declared effort. Both the
+    /// coder and reviewer launches read this so the pair stays in
+    /// agreement.
+    pub(crate) fn task_effort_for_round(
+        &self,
+        session_dir: &std::path::Path,
+        task_id: u32,
+        round: u32,
+    ) -> crate::adapters::EffortLevel {
+        use crate::app::prompts::{auto_tough_effort, task_effort_for};
+        let declared = task_effort_for(session_dir, task_id);
+        auto_tough_effort(declared, self.task_round_index(task_id, round))
     }
     pub(crate) fn completed_rounds(&self, stage: &str) -> u32 {
         self.state

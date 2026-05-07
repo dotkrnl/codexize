@@ -162,6 +162,40 @@ fn quit_running_agent_modal_exact_string() {
     assert!(text.contains("n cancel"));
 }
 
+// Dreaming decision modal
+#[test]
+fn dreaming_decision_exact_string() {
+    let line = keymap(
+        Phase::DreamingPending,
+        Some(ModalKind::DreamingDecision),
+        FocusCaps::default(),
+        false,
+        false,
+        200,
+    );
+    let text = line_text(&line);
+    assert!(text.contains("Enter run dreaming"));
+    assert!(text.contains("s skip"));
+    assert!(text.contains("Esc skip"));
+}
+
+// Dreaming stage error modal offers skip
+#[test]
+fn stage_error_dreaming_has_skip() {
+    let line = keymap(
+        Phase::Dreaming(1),
+        Some(ModalKind::StageError(StageId::Dreaming)),
+        FocusCaps::default(),
+        false,
+        false,
+        200,
+    );
+    let text = line_text(&line);
+    assert!(text.contains("r retry"));
+    assert!(text.contains("s skip"));
+    assert!(text.contains("Esc quit"));
+}
+
 // Input mode
 #[test]
 fn input_mode_exact_string() {

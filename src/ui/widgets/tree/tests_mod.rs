@@ -1377,6 +1377,114 @@ fn dreaming_renders_after_final_validation_as_global_stage() {
 }
 
 #[test]
+fn dreaming_pending_shows_waiting_user() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::DreamingPending;
+    state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::Pending,
+        round: 1,
+        reason: Some("Consolidate lessons.".to_string()),
+    });
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::WaitingUser);
+}
+
+#[test]
+fn dreaming_running_shows_running() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Dreaming(1);
+    let mut run = run(50, "dreaming", RunStatus::Running);
+    run.round = 1;
+    state.agent_runs.push(run);
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::Running);
+}
+
+#[test]
+fn dreaming_failed_shows_failed() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Dreaming(1);
+    state.agent_error = Some("invalid report".to_string());
+    let mut run = run(50, "dreaming", RunStatus::Failed);
+    run.round = 1;
+    state.agent_runs.push(run);
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::Failed);
+}
+
+#[test]
+fn dreaming_skipped_shows_skipped() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Done;
+    state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::OperatorSkipped,
+        round: 1,
+        reason: None,
+    });
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::Skipped);
+}
+
+#[test]
+fn dreaming_done_shows_done() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Done;
+    state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::OperatorAccepted,
+        round: 1,
+        reason: None,
+    });
+    let mut run = run(50, "dreaming", RunStatus::Done);
+    run.round = 1;
+    state.agent_runs.push(run);
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::Done);
+}
+
+#[test]
+fn dreaming_groups_runs_by_round() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Dreaming(2);
+    let mut r1 = run(50, "dreaming", RunStatus::Done);
+    r1.round = 1;
+    r1.ended_at = Some(chrono::Utc::now());
+    state.agent_runs.push(r1);
+    let mut r2 = run(60, "dreaming", RunStatus::Running);
+    r2.round = 2;
+    state.agent_runs.push(r2);
+
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    let mut run_ids = Vec::new();
+    collect_run_ids(dreaming, &mut run_ids);
+    assert!(run_ids.contains(&50));
+    assert!(run_ids.contains(&60));
+    assert_eq!(dreaming.status, NodeStatus::Running);
+}
+
+#[test]
+fn dreaming_not_reoffered_after_completion() {
+    let mut state = SessionState::new("test".to_string());
+    state.current_phase = Phase::Done;
+    state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::OperatorAccepted,
+        round: 1,
+        reason: None,
+    });
+    let mut run = run(50, "dreaming", RunStatus::Done);
+    run.round = 1;
+    state.agent_runs.push(run);
+    let nodes = build_tree(&state);
+    let dreaming = nodes.iter().find(|n| n.label == "Dreaming").unwrap();
+    assert_eq!(dreaming.status, NodeStatus::Done);
+}
+
+#[test]
 fn simplification_skipped_under_yolo_done() {
     let mut state = SessionState::new("test".to_string());
     state.current_phase = Phase::Done;

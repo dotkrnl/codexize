@@ -275,6 +275,45 @@ fn quit_modal_shows_run_context_and_shortcuts() {
 }
 
 #[test]
+fn dreaming_decision_modal_shows_reason_and_shortcuts() {
+    let mut app = test_app(nested_transcript_tree(), Vec::new(), Vec::new());
+    app.state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::Pending,
+        round: 1,
+        reason: Some("Memory changed during session.".to_string()),
+    });
+
+    let lines = app.modal_content_lines(ModalKind::DreamingDecision, 80);
+    let text = lines
+        .iter()
+        .map(line_to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("final-validation agent suggested Dreaming"));
+    assert!(text.contains("Memory changed during session."));
+    assert!(text.contains("Enter/r run Dreaming"));
+    assert!(text.contains("s/Esc skip and finish"));
+}
+
+#[test]
+fn dreaming_decision_modal_handles_missing_reason() {
+    let mut app = test_app(nested_transcript_tree(), Vec::new(), Vec::new());
+    app.state.dreaming_decision = Some(crate::state::DreamingDecision {
+        kind: crate::state::DreamingDecisionKind::Pending,
+        round: 1,
+        reason: None,
+    });
+
+    let lines = app.modal_content_lines(ModalKind::DreamingDecision, 80);
+    let text = lines
+        .iter()
+        .map(line_to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("(no reason provided)"));
+}
+
+#[test]
 fn renders_depth_indented_visible_rows_with_main_panel_transcript() {
     let app = test_app(
         nested_transcript_tree(),

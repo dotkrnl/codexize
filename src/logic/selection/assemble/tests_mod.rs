@@ -485,84 +485,76 @@ fn quota_heuristic_fallback_when_no_exact_match() {
 }
 
 #[test]
-fn dedup_keeps_opencode_when_quota_is_strictly_higher_than_direct_route() {
-    let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
-    let mut routed = direct.clone();
-    routed.name = "opencode/claude-opus-4-7".to_string();
-    routed.vendor = "opencode".to_string();
-    routed.route_underlying_vendor = Some(VendorKind::Claude);
-    let quotas = make_quota_payload(&[
-        ("claude", "claude-opus-4-7", Some(40)),
-        ("opencode", "opencode/claude-opus-4-7", Some(80)),
-    ]);
-
-    let models = assemble_universe(
-        vec![direct, routed],
-        quotas,
-        BTreeMap::new(),
-        &opencode_available(),
-    );
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, VendorKind::Opencode);
-    assert_eq!(models[0].name, "opencode/claude-opus-4-7");
-    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-7"));
-    assert_eq!(models[0].route_underlying_vendor, Some(VendorKind::Claude));
-}
-
-#[test]
-fn dedup_falls_back_to_direct_route_for_ties_and_unknown_quotas() {
+fn dedup_keeps_direct_when_quota_meets_floor() {
+    // Direct quota at or above the 20% floor wins unconditionally — even
+    // when opencode reports more remaining headroom.
     for (direct_quota, opencode_quota) in [
-        (Some(80), Some(80)),
+        (Some(20), Some(99)),
+        (Some(50), Some(50)),
+        (Some(80), Some(99)),
         (Some(80), None),
-        (None, None),
-        (Some(90), Some(80)),
+        (Some(20), None),
     ] {
-        let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
-        let mut routed = direct.clone();
-        routed.name = "opencode/claude-opus-4-7".to_string();
-        routed.vendor = "opencode".to_string();
-        routed.route_underlying_vendor = Some(VendorKind::Claude);
-        let quotas = make_quota_payload(&[
-            ("claude", "claude-opus-4-7", direct_quota),
-            ("opencode", "opencode/claude-opus-4-7", opencode_quota),
-        ]);
-
-        let models = assemble_universe(
-            vec![direct, routed],
-            quotas,
-            BTreeMap::new(),
-            &opencode_available(),
-        );
-
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].vendor, VendorKind::Claude);
-        assert_eq!(models[0].name, "claude-opus-4-7");
+        let survivor = run_dedup(direct_quota, opencode_quota);
+        assert_eq!(survivor.vendor, VendorKind::Claude);
+        assert_eq!(survivor.name, "claude-opus-4-7");
+        assert_eq!(survivor.quota_percent, direct_quota);
     }
 }
 
 #[test]
-fn dedup_prefers_any_known_quota_over_unknown_quota() {
+fn dedup_falls_back_to_opencode_when_direct_below_floor_and_opencode_higher() {
+    // Direct quota below 20% (or unknown) defers to opencode whenever
+    // opencode reports a strictly higher remaining quota.
+    for (direct_quota, opencode_quota) in [
+        (Some(19), Some(50)),
+        (Some(0), Some(1)),
+        (None, Some(80)),
+        (None, Some(0)),
+    ] {
+        let survivor = run_dedup(direct_quota, opencode_quota);
+        assert_eq!(survivor.vendor, VendorKind::Opencode);
+        assert_eq!(survivor.name, "opencode/claude-opus-4-7");
+        assert_eq!(survivor.quota_percent, opencode_quota);
+    }
+}
+
+#[test]
+fn dedup_keeps_direct_below_floor_when_opencode_does_not_win() {
+    // Direct below the floor still wins on ties, when its quota is
+    // strictly higher than opencode's, or when both sides are unknown.
+    for (direct_quota, opencode_quota) in [
+        (Some(19), Some(19)),
+        (Some(19), Some(10)),
+        (Some(19), None),
+        (None, None),
+        (Some(0), Some(0)),
+    ] {
+        let survivor = run_dedup(direct_quota, opencode_quota);
+        assert_eq!(survivor.vendor, VendorKind::Claude);
+        assert_eq!(survivor.name, "claude-opus-4-7");
+        assert_eq!(survivor.quota_percent, direct_quota);
+    }
+}
+
+fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedModel {
     let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
     let mut routed = direct.clone();
     routed.name = "opencode/claude-opus-4-7".to_string();
     routed.vendor = "opencode".to_string();
     routed.route_underlying_vendor = Some(VendorKind::Claude);
     let quotas = make_quota_payload(&[
-        ("claude", "claude-opus-4-7", None),
-        ("opencode", "opencode/claude-opus-4-7", Some(1)),
+        ("claude", "claude-opus-4-7", direct_quota),
+        ("opencode", "opencode/claude-opus-4-7", opencode_quota),
     ]);
-
     let models = assemble_universe(
         vec![direct, routed],
         quotas,
         BTreeMap::new(),
         &opencode_available(),
     );
-
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, VendorKind::Opencode);
-    assert_eq!(models[0].quota_percent, Some(1));
+    models.into_iter().next().unwrap()
 }
 
 #[test]

@@ -189,9 +189,10 @@ fn deduplicate_routed_models(models: Vec<CachedModel>) -> Vec<CachedModel> {
         let (Some(direct_index), Some(opencode_index)) = (best_direct, best_opencode) else {
             continue;
         };
-        // The stored ipbr key is the identity authority here; route names can
-        // differ even when both entries launch the same underlying model.
-        let survivor = if opencode_quota_wins(
+        // Prefer the official route whenever it has real headroom; only
+        // fall back to opencode when direct is scarce or unknown AND
+        // opencode genuinely has more headroom. Ties keep direct.
+        let survivor = if opencode_wins_over_direct(
             models[opencode_index].quota_percent,
             models[direct_index].quota_percent,
         ) {
@@ -211,6 +212,24 @@ fn deduplicate_routed_models(models: Vec<CachedModel>) -> Vec<CachedModel> {
         .filter_map(|(index, model)| (!drop_indexes.contains(&index)).then_some(model))
         .collect()
 }
+/// Floor below which the official-vendor route loses its automatic
+/// preference. Operator-stated rule: at or above this percent of remaining
+/// quota, never deflect to opencode for the same model.
+const DIRECT_QUOTA_FLOOR: u8 = 20;
+
+fn opencode_wins_over_direct(opencode: Option<u8>, direct: Option<u8>) -> bool {
+    if matches!(direct, Some(q) if q >= DIRECT_QUOTA_FLOOR) {
+        return false;
+    }
+    // Direct is below the floor or unknown: pick the higher quota; ties
+    // and both-unknown keep direct.
+    match (opencode, direct) {
+        (Some(o), Some(d)) => o > d,
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
 fn compare_route_candidate(a: &CachedModel, b: &CachedModel) -> Ordering {
     compare_quota_for_candidate(a.quota_percent, b.quota_percent)
         .then_with(|| a.display_order.cmp(&b.display_order))
@@ -222,13 +241,6 @@ fn compare_quota_for_candidate(a: Option<u8>, b: Option<u8>) -> Ordering {
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
-    }
-}
-fn opencode_quota_wins(opencode: Option<u8>, direct: Option<u8>) -> bool {
-    match (opencode, direct) {
-        (Some(opencode), Some(direct)) => opencode > direct,
-        (Some(_), None) => true,
-        _ => false,
     }
 }
 /// Merge a freshly-fetched quota map (keyed by `VendorKind`) into the cached

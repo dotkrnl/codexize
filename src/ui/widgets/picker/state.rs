@@ -409,6 +409,13 @@ pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
     let mut state = SessionState::new(session_id.clone());
     session_state::transitions::prepare_new_session_for_brainstorm(&mut state, idea, modes);
     state.save()?;
+    let memory_root = crate::logic::memory::memory_root_from_session_path(
+        &session_state::session_dir(&session_id),
+    );
+    // Best-effort: a transient FS error here must not block session creation.
+    if let Err(err) = crate::data::memory::ensure_memory_bootstrap(&memory_root) {
+        let _ = state.log_event(&format!("memory_bootstrap_failed: {err:#}"));
+    }
     state.log_event("session created")?;
     if state.modes.yolo {
         state.log_event("mode_toggled: mode=yolo value=true source=cli")?;

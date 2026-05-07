@@ -11,6 +11,26 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
+/// Idempotently seed the project-local memory store with empty index and
+/// manifest files so every agent's read path has something to look at on
+/// first run. Without this, the cold-start memory directory never exists,
+/// the validator's "skip" criterion always fires, and Dreaming never runs.
+pub fn ensure_memory_bootstrap(memory_root: &Path) -> Result<()> {
+    fs::create_dir_all(memory_root)
+        .with_context(|| format!("creating memory root {}", memory_root.display()))?;
+    let index = memory_root.join("index.md");
+    if !index.exists() {
+        fs::write(&index, "# Memory\n\nNo entries yet.\n")
+            .with_context(|| format!("seeding memory index {}", index.display()))?;
+    }
+    let manifest = memory_root.join("manifest.toml");
+    if !manifest.exists() {
+        fs::write(&manifest, "schema_version = 1\nentries = []\n")
+            .with_context(|| format!("seeding memory manifest {}", manifest.display()))?;
+    }
+    Ok(())
+}
+
 pub fn validate_manifest_file(path: &Path) -> Result<MemoryManifest> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("cannot read memory manifest {}", path.display()))?;

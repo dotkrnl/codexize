@@ -127,6 +127,26 @@ supersedes = ["lesson-1"]
 }
 
 #[test]
+fn ensure_memory_bootstrap_seeds_index_and_manifest_idempotently() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().join(".codexize/memory");
+
+    ensure_memory_bootstrap(&root).unwrap();
+    assert!(root.join("index.md").is_file());
+    let manifest = validate_manifest_file(&root.join("manifest.toml")).unwrap();
+    assert_eq!(manifest.schema_version, 1);
+    assert!(manifest.entries.is_empty());
+
+    // Hand-edit the seed and ensure a second call leaves it alone.
+    std::fs::write(root.join("index.md"), "# Memory\n\n- existing entry\n").unwrap();
+    ensure_memory_bootstrap(&root).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("index.md")).unwrap(),
+        "# Memory\n\n- existing entry\n"
+    );
+}
+
+#[test]
 fn dream_report_rejects_missing_inputs() {
     let dir = tempfile::TempDir::new().unwrap();
     let root = dir.path().join(".codexize/memory");

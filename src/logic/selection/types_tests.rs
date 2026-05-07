@@ -19,6 +19,8 @@ fn sample_cached_model() -> CachedModel {
         quota_resets_at: None,
         display_order: 2,
         fallback_from: Some("gpt-5".to_string()),
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
     }
 }
 
@@ -63,6 +65,8 @@ fn new_ipbr_fields_default_to_unscored_and_unmatched() {
     assert_eq!(model.ipbr_phase_scores.review, None);
     assert_eq!(model.score_source, ScoreSource::None);
     assert!(!model.ipbr_row_matched);
+    assert_eq!(model.ipbr_match_key, None);
+    assert_eq!(model.route_underlying_vendor, None);
 }
 
 #[test]

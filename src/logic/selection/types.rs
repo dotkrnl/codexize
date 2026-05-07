@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum VendorKind {
     Claude,
     Codex,
     Gemini,
     Kimi,
+    Opencode,
 }
 #[derive(Debug, Clone)]
 pub struct QuotaError {
@@ -75,6 +77,14 @@ pub struct CachedModel {
     /// "matched ipbr row but missing phase score" (still eligible for
     /// other phases) from "no ipbr row at all".
     pub ipbr_row_matched: bool,
+    /// Stored normalized/canonical ipbr match key. Route vendors can expose
+    /// different model labels for the same ipbr row, so later dedup must use
+    /// this stable key instead of recomputing from display names.
+    pub ipbr_match_key: Option<String>,
+    /// Underlying provider for a routed model. For direct providers this is
+    /// normally `None`; opencode-routed models use it for eligibility and
+    /// effort suffix decisions while still displaying `vendor = Opencode`.
+    pub route_underlying_vendor: Option<VendorKind>,
     pub quota_percent: Option<u8>,
     pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,

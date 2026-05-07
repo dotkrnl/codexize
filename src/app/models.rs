@@ -27,6 +27,7 @@ pub(crate) fn vendor_tag(vendor: VendorKind) -> &'static str {
         VendorKind::Codex => "codex",
         VendorKind::Gemini => "gemini",
         VendorKind::Kimi => "kimi",
+        VendorKind::Opencode => "opencode",
     }
 }
 pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
@@ -35,6 +36,7 @@ pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
         VendorKind::Codex => Color::Green,
         VendorKind::Gemini => Color::Blue,
         VendorKind::Kimi => Color::Yellow,
+        VendorKind::Opencode => Color::Cyan,
     }
 }
 pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
@@ -43,6 +45,7 @@ pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
         VendorKind::Codex => "gpt-",
         VendorKind::Gemini => "gemini-",
         VendorKind::Kimi => "kimi-",
+        VendorKind::Opencode => "",
     }
 }
 fn quota_error_summary(errors: &[QuotaError]) -> String {

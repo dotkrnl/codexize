@@ -65,6 +65,9 @@ async fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndRe
             .await
             .map(live_map_kimi)
             .map_err(|e| e.to_string()),
+        VendorKind::Opencode => {
+            Err("opencode quota provider is not wired in this selection layer yet".to_string())
+        }
     }
 }
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {

@@ -19,6 +19,8 @@ fn sample_entries_with_provenance(
         ipbr_phase_scores: IpbrPhaseScores::default(),
         score_source: ScoreSource::None,
         ipbr_row_matched: false,
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
         display_order: 0,
         fallback_from: None,
     }]
@@ -283,6 +285,8 @@ fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
         !entry.ipbr_row_matched,
         "no ipbr row matched until task 2 runs the ipbr lookup"
     );
+    assert_eq!(entry.ipbr_match_key, None);
+    assert_eq!(entry.route_underlying_vendor, None);
 }
 
 #[test]

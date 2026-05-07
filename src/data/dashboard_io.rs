@@ -92,6 +92,8 @@ pub struct DashboardModel {
     /// `true` when this model matched an ipbr row by normalized exact
     /// key. Inventory-/CLI-only visible models keep this `false`.
     pub ipbr_row_matched: bool,
+    pub ipbr_match_key: Option<String>,
+    pub route_underlying_vendor: Option<crate::selection::VendorKind>,
     pub display_order: usize,
     /// Set when this model's score was borrowed from a same-stem sibling
     /// because the ranking API has no entry for it yet. Holds the sibling's

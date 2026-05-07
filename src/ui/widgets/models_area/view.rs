@@ -401,11 +401,12 @@ fn vendor_label(vendor: VendorKind) -> &'static str {
         VendorKind::Codex => "codex",
         VendorKind::Gemini => "gemini",
         VendorKind::Kimi => "kimi",
+        VendorKind::Opencode => "opencode",
     }
 }
 /// Width of the vendor-tag column (padded).
 fn vendor_column_width() -> usize {
-    6
+    8
 }
 fn top_rank_prob_span(vendor_failed: bool, candidates: &[(bool, &str, u8, u8)]) -> Span<'static> {
     if vendor_failed {
@@ -438,6 +439,7 @@ fn render_compact_quota(
         VendorKind::Claude,
         VendorKind::Codex,
         VendorKind::Gemini,
+        VendorKind::Opencode,
     ];
     // Pick the vendor's representative by inventory ordering
     // (`display_order`, then name). Cosmetic `current_score` cannot drive

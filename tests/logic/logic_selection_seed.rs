@@ -26,6 +26,8 @@ fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
         },
         score_source: ScoreSource::Ipbr,
         ipbr_row_matched: true,
+        ipbr_match_key: Some(name.to_string()),
+        route_underlying_vendor: None,
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,

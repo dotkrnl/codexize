@@ -96,6 +96,7 @@ impl Default for AcpConfig {
                 argv(&["-c", "sandbox_mode=\"danger-full-access\"", "-c", "approval_policy=\"never\""])),
             agent_def(VendorKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
             agent_def(VendorKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
+            agent_def(VendorKind::Opencode, "opencode", argv(&["acp"])),
         ])
     }
 }
@@ -126,6 +127,7 @@ fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDe
             VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
             VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
             VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+            VendorKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
         };
         if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
             return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };

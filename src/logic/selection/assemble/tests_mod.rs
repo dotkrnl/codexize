@@ -39,6 +39,8 @@ fn make_entry_with_order(
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
         display_order,
         fallback_from: None,
     }

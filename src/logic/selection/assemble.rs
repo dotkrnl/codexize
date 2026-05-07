@@ -59,6 +59,8 @@ pub fn assemble_universe(
             ipbr_phase_scores: e.ipbr_phase_scores,
             score_source: e.score_source,
             ipbr_row_matched: e.ipbr_row_matched,
+            ipbr_match_key: e.ipbr_match_key,
+            route_underlying_vendor: e.route_underlying_vendor,
             display_order: e.display_order,
             fallback_from: e.fallback_from,
         })
@@ -108,6 +110,8 @@ pub fn assemble_universe(
                 ipbr_phase_scores: m.ipbr_phase_scores,
                 score_source: m.score_source,
                 ipbr_row_matched: m.ipbr_row_matched,
+                ipbr_match_key: m.ipbr_match_key,
+                route_underlying_vendor: m.route_underlying_vendor,
                 quota_percent,
                 quota_resets_at,
                 display_order: m.display_order,
@@ -248,6 +252,8 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
             ipbr_phase_scores: m.ipbr_phase_scores,
             score_source: m.score_source,
             ipbr_row_matched: m.ipbr_row_matched,
+            ipbr_match_key: m.ipbr_match_key.clone(),
+            route_underlying_vendor: m.route_underlying_vendor,
             display_order: m.display_order,
             fallback_from: m.fallback_from.clone(),
         })
@@ -271,6 +277,7 @@ pub fn parse_vendor_str(s: &str) -> Option<VendorKind> {
         "codex" | "openai" => Some(VendorKind::Codex),
         "gemini" | "google" => Some(VendorKind::Gemini),
         "kimi" | "moonshotai" => Some(VendorKind::Kimi),
+        "opencode" => Some(VendorKind::Opencode),
         _ => None,
     }
 }

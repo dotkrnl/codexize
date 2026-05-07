@@ -1,5 +1,5 @@
 use crate::data::cache_lock;
-use crate::selection::{IpbrPhaseScores, ScoreSource};
+use crate::selection::{IpbrPhaseScores, ScoreSource, VendorKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -84,6 +84,10 @@ pub struct DashboardEntry {
     /// do not appear matched.
     #[serde(default)]
     pub ipbr_row_matched: bool,
+    #[serde(default)]
+    pub ipbr_match_key: Option<String>,
+    #[serde(default)]
+    pub route_underlying_vendor: Option<VendorKind>,
     pub display_order: usize,
     #[serde(default)]
     pub fallback_from: Option<String>,

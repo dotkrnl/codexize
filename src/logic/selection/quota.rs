@@ -40,7 +40,7 @@ pub fn find_quota_by_heuristic(
                     .or_else(|| vendor_quotas.values().find_map(|q| *q))
             }
         }
-        VendorKind::Kimi => vendor_quotas.values().find_map(|q| *q),
+        VendorKind::Kimi | VendorKind::Opencode => vendor_quotas.values().find_map(|q| *q),
     }
 }
 pub fn find_reset_by_heuristic(

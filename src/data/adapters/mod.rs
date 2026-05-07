@@ -15,12 +15,13 @@ pub struct AgentRun {
     pub effort: EffortLevel,
     pub modes: LaunchModes,
 }
-pub fn all_vendors() -> [VendorKind; 4] {
+pub fn all_vendors() -> [VendorKind; 5] {
     [
         VendorKind::Codex,
         VendorKind::Claude,
         VendorKind::Gemini,
         VendorKind::Kimi,
+        VendorKind::Opencode,
     ]
 }
 pub fn short_model(model: &str) -> String {
@@ -31,14 +32,28 @@ pub fn effort_suffix(vendor: VendorKind, effort: EffortLevel) -> &'static str {
         EffortLevel::Normal => "",
         EffortLevel::Low => match vendor {
             VendorKind::Codex | VendorKind::Claude => ":low",
-            VendorKind::Gemini | VendorKind::Kimi => "",
+            VendorKind::Gemini | VendorKind::Kimi | VendorKind::Opencode => "",
         },
         EffortLevel::Tough => match vendor {
             VendorKind::Codex => ":xhigh",
             VendorKind::Claude => ":max",
-            VendorKind::Gemini | VendorKind::Kimi => "",
+            VendorKind::Gemini | VendorKind::Kimi | VendorKind::Opencode => "",
         },
     }
+}
+pub fn effort_suffix_for_model(
+    vendor: VendorKind,
+    route_underlying_vendor: Option<VendorKind>,
+    model: &str,
+    effort: EffortLevel,
+) -> &'static str {
+    let suffix_vendor = if vendor == VendorKind::Opencode {
+        route_underlying_vendor
+            .unwrap_or_else(|| crate::selection::vendor::infer_underlying_vendor_from_name(model))
+    } else {
+        vendor
+    };
+    effort_suffix(suffix_vendor, effort)
 }
 pub fn effort_suffix_from_str(vendor_str: &str, effort: EffortLevel) -> &'static str {
     match crate::selection::vendor::str_to_vendor(vendor_str) {
@@ -53,7 +68,7 @@ pub fn run_label_with_model(
     effort: EffortLevel,
 ) -> String {
     let short = short_model(model);
-    let suffix = effort_suffix(vendor, effort);
+    let suffix = effort_suffix_for_model(vendor, None, model, effort);
     if suffix.is_empty() {
         format!("{base} {short}")
     } else {

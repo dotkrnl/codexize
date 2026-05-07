@@ -200,6 +200,8 @@ mod tests {
             },
             score_source: ScoreSource::Ipbr,
             ipbr_row_matched: true,
+            ipbr_match_key: Some("dream-model".to_string()),
+            route_underlying_vendor: None,
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,

@@ -50,6 +50,7 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
         VendorKind::Codex,
         VendorKind::Gemini,
         VendorKind::Kimi,
+        VendorKind::Opencode,
     ] {
         if visible_vendors.contains(&vendor) {
             continue;

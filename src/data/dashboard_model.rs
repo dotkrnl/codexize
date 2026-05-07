@@ -145,7 +145,7 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
     scores
         .into_iter()
         .map(|sc| DashboardModel {
-            name: sc.name,
+            name: sc.name.clone(),
             vendor: sc.vendor,
             overall_score: sc.overall_score,
             current_score: sc.current_score,
@@ -155,6 +155,12 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             ipbr_phase_scores: sc.ipbr_phase_scores,
             score_source: sc.score_source,
             ipbr_row_matched: sc.ipbr_row_matched,
+            ipbr_match_key: if sc.ipbr_row_matched {
+                Some(normalize_ipbr_key(&sc.name))
+            } else {
+                None
+            },
+            route_underlying_vendor: None,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -178,6 +184,8 @@ fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> 
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
         display_order,
         fallback_from: None,
     }
@@ -216,6 +224,8 @@ pub fn synthesize_sibling(
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
@@ -321,6 +331,12 @@ fn dashboard_model_from_score(
             sc.score_source
         },
         ipbr_row_matched: !is_sibling_fallback && sc.ipbr_row_matched,
+        ipbr_match_key: if !is_sibling_fallback && sc.ipbr_row_matched {
+            Some(normalize_ipbr_key(&sc.name))
+        } else {
+            None
+        },
+        route_underlying_vendor: None,
         display_order: sc.display_order,
         fallback_from,
     }

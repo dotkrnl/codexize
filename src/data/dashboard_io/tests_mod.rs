@@ -15,6 +15,8 @@ fn model(name: &str, score: f64) -> DashboardModel {
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
+        ipbr_match_key: None,
+        route_underlying_vendor: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -60,6 +62,8 @@ fn fixture_cached_models() -> Vec<CachedModel> {
             },
             score_source: crate::selection::ScoreSource::Ipbr,
             ipbr_row_matched: true,
+            ipbr_match_key: Some(entry.name.clone()),
+            route_underlying_vendor: None,
             quota_percent: Some(80),
             quota_resets_at: None,
             display_order: entry.display_order,

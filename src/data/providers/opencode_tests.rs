@@ -159,6 +159,40 @@ fn extract_go_tier_spend_errors_when_table_missing() {
 }
 
 #[test]
+fn extract_go_tier_spend_errors_when_go_row_has_opaque_cost() {
+    let fixture = r#"┌─┐
+│       MODEL USAGE       │
+├─┤
+│ opencode-go/glm-5.1     │
+│  Messages            62 │
+│  Cost             tokens │
+└─┘"#;
+    let err = extract_go_tier_spend(fixture).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("opencode-go/glm-5.1") && msg.contains("dollar"),
+        "error should identify unsupported Go-tier quota shape: {msg}"
+    );
+}
+
+#[test]
+fn quota_models_from_stats_propagates_opaque_go_cost_error() {
+    let fixture = r#"┌─┐
+│       MODEL USAGE       │
+├─┤
+│ opencode-go/glm-5.1     │
+│  Messages            62 │
+│  Cost             quota │
+└─┘"#;
+    let err = quota_models_from_stats(fixture).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("opencode-go/glm-5.1") && msg.contains("dollar"),
+        "quota construction should surface unsupported Go-tier shape: {msg}"
+    );
+}
+
+#[test]
 fn remaining_percent_clamps_and_rounds() {
     assert_eq!(remaining_percent_from_spend(0.0), 100);
     assert_eq!(remaining_percent_from_spend(60.0), 0);

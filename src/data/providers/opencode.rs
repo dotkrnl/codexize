@@ -74,13 +74,15 @@ pub fn remaining_percent_from_spend(spent_dollars: f64) -> u8 {
 /// which means we have no way to even pin the spend at $0 with confidence.
 /// A MODEL USAGE table that exists but contains no `opencode-go/` rows is
 /// treated as $0 spent: stats listing other providers is still observable
-/// usage data, just not Go-tier usage.
+/// usage data, just not Go-tier usage. An observed Go-tier row without a
+/// dollar `Cost` is different: it proves the upstream shape is unsupported,
+/// so returning 100% remaining would invent a quota from unrelated units.
 pub fn extract_go_tier_spend(stats_text: &str) -> Result<f64> {
     if !stats_text.contains("MODEL USAGE") {
         bail!("opencode stats did not include a MODEL USAGE section");
     }
     let mut total = 0.0f64;
-    let mut in_go_block = false;
+    let mut pending_go_model: Option<String> = None;
     for line in stats_text.lines() {
         let cleaned = strip_box_chars(line);
         let trimmed = cleaned.trim();
@@ -88,15 +90,25 @@ pub fn extract_go_tier_spend(stats_text: &str) -> Result<f64> {
             continue;
         }
         if let Some(header) = model_header_token(trimmed) {
-            in_go_block = header.starts_with(GO_PROVIDER_PREFIX);
+            if let Some(model) = pending_go_model.take() {
+                bail!("opencode stats row for {model} did not include a dollar Cost");
+            }
+            if header.starts_with(GO_PROVIDER_PREFIX) {
+                pending_go_model = Some(header.to_string());
+            }
             continue;
         }
-        if in_go_block && trimmed.starts_with("Cost") {
-            if let Some(amount) = parse_dollar_amount(trimmed) {
-                total += amount;
-            }
-            in_go_block = false;
+        if let Some(model) = pending_go_model.as_deref()
+            && trimmed.starts_with("Cost")
+        {
+            let amount = parse_dollar_amount(trimmed)
+                .with_context(|| format!("opencode stats row for {model} had no dollar Cost"))?;
+            total += amount;
+            pending_go_model = None;
         }
+    }
+    if let Some(model) = pending_go_model {
+        bail!("opencode stats row for {model} did not include a dollar Cost");
     }
     Ok(total)
 }

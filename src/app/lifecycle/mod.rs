@@ -187,27 +187,40 @@ impl App {
     pub fn run(&mut self, terminal: &mut AppTerminal) -> Result<()> {
         crate::app_runtime::run_terminal_app(self, terminal)
     }
+    /// If the operator has queued an artifact path for external review,
+    /// take it. The terminal runtime drives the actual editor launch so it
+    /// can stop the crossterm input worker first — leaving the worker
+    /// running would race vim for keystrokes off the same TTY (see
+    /// [`Self::run_external_view_editor`]).
+    pub(crate) fn take_pending_view_path(&mut self) -> Option<std::path::PathBuf> {
+        self.pending_view_path.take()
+    }
+    /// Hand the terminal to `$EDITOR` (default `vim`) for `path`, prepending
+    /// a review banner that is stripped when the editor exits. Must only be
+    /// called with the crossterm input worker already shut down — the
+    /// runtime arranges that around the call.
+    pub(crate) fn run_external_view_editor(
+        &mut self,
+        terminal: &mut AppTerminal,
+        path: &std::path::Path,
+    ) {
+        let banner_inserted = prepend_review_banner(path);
+        let _ = crate::tui::run_foreground(terminal, || {
+            let _ = std::process::Command::new(
+                std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
+            )
+            .arg(path)
+            .status();
+            Ok(())
+        });
+        if banner_inserted {
+            let _ = strip_review_banner(path);
+        }
+    }
     /// Pre-data-drain phase of the per-tick coordination. The runtime calls
     /// this, then drains and routes any [`DataEvent`](crate::data::events::DataEvent)s,
     /// then finishes the tick via [`Self::runtime_tick_after_data_drain`].
-    pub(crate) fn runtime_tick_before_data_drain(
-        &mut self,
-        terminal: &mut AppTerminal,
-    ) -> Result<bool> {
-        if let Some(path) = self.pending_view_path.take() {
-            let banner_inserted = prepend_review_banner(&path);
-            let _ = crate::tui::run_foreground(terminal, || {
-                let _ = std::process::Command::new(
-                    std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string()),
-                )
-                .arg(&path)
-                .status();
-                Ok(())
-            });
-            if banner_inserted {
-                let _ = strip_review_banner(&path);
-            }
-        }
+    pub(crate) fn runtime_tick_before_data_drain(&mut self) -> Result<bool> {
         self.refresh_models_if_due();
         self.poll_agent_run();
         if self.pending_app_exit {

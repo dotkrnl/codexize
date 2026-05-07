@@ -95,6 +95,7 @@ pub fn poll_command(timeout: Duration, view: &AppView) -> Result<Option<AppComma
 pub struct CrosstermInputAdapter {
     rx: mpsc::UnboundedReceiver<Event>,
     cancel: CancellationToken,
+    worker: Option<tokio::task::JoinHandle<()>>,
 }
 impl CrosstermInputAdapter {
     pub fn spawn() -> Self {
@@ -104,7 +105,7 @@ impl CrosstermInputAdapter {
         // Crossterm's event API is blocking and terminal-global; keep it on
         // tokio's blocking pool while the synchronous render loop only drains
         // already-adapted events from an async channel.
-        tokio::task::spawn_blocking(move || {
+        let worker = tokio::task::spawn_blocking(move || {
             while !worker_cancel.is_cancelled() {
                 match event::poll(Duration::from_millis(50)) {
                     Ok(true) => {
@@ -120,7 +121,11 @@ impl CrosstermInputAdapter {
                 }
             }
         });
-        Self { rx, cancel }
+        Self {
+            rx,
+            cancel,
+            worker: Some(worker),
+        }
     }
     pub fn next_command(
         &mut self,
@@ -131,6 +136,21 @@ impl CrosstermInputAdapter {
         {
             Ok(Some(event)) => Ok(command_from_event(event, view)),
             Ok(None) | Err(_) => Ok(None),
+        }
+    }
+    /// Cancel the blocking-poll worker and wait for it to exit. Used
+    /// before handing the terminal to a foreground program (`$EDITOR`,
+    /// vim) so the worker's `event::poll` / `event::read` loop cannot
+    /// race the foreground program for keystrokes coming off the same
+    /// TTY. Buffered events arriving after the cancel are dropped via
+    /// `Self::drop` since they were intended for the now-superseded
+    /// alt-screen UI, not for the foreground program.
+    pub fn shutdown_blocking(mut self) {
+        self.cancel.cancel();
+        if let Some(handle) = self.worker.take() {
+            // The worker checks the cancellation flag once per `event::poll`
+            // window (≤ 50 ms), so this join completes promptly.
+            let _ = crate::data::async_bridge::block_on_io(handle);
         }
     }
 }

@@ -112,7 +112,16 @@ pub fn run_terminal_app(app: &mut App, terminal: &mut AppTerminal) -> Result<()>
     let mut runtime = TerminalRuntime::default();
     let mut input = crate::ui::tui::CrosstermInputAdapter::spawn();
     loop {
-        if app.runtime_tick_before_data_drain(terminal)? {
+        // Hand the TTY to `$EDITOR` outside the tick: the input worker has
+        // to be torn down first, otherwise its `event::poll` / `event::read`
+        // loop steals keystrokes from vim. Re-spawn the worker after the
+        // editor exits so the next render keeps picking up keys.
+        if let Some(path) = app.take_pending_view_path() {
+            input.shutdown_blocking();
+            app.run_external_view_editor(terminal, &path);
+            input = crate::ui::tui::CrosstermInputAdapter::spawn();
+        }
+        if app.runtime_tick_before_data_drain()? {
             app.drain_notifications_for_shutdown();
             return Ok(());
         }

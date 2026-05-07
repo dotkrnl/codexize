@@ -4,7 +4,7 @@ use crate::app::{App, guard};
 use crate::selection::CachedModel;
 use crate::selection::config::SelectionPhase;
 use crate::state::{self as session_state, Phase};
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 impl App {
     pub(crate) fn launch_dreaming(&mut self) {
@@ -33,12 +33,17 @@ impl App {
         let dream_dir = memory_root.join("dreams");
         if let Err(err) = std::fs::create_dir_all(&dream_dir) {
             self.record_agent_error(format!("error creating dream report dir: {err}"));
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
             return false;
         }
         // The report schema names dream-####.toml but does not define the
         // counter; use the final-validation round so retries replace the same
         // audited decision instead of producing competing dream reports.
         let dream_report_path = dream_dir.join(format!("dream-{round:04}.toml"));
+        // Re-entry of Phase::Dreaming(round) always restarts from scratch;
+        // remove any prior report so the current attempt does not accidentally
+        // finalize against stale output.
         let _ = std::fs::remove_file(&dream_report_path);
 
         let modes = self.state.launch_modes();
@@ -67,6 +72,8 @@ impl App {
         }
         if let Err(err) = std::fs::write(&prompt_path, prompt) {
             self.record_agent_error(format!("error writing prompt: {err}"));
+            let _ = self.state.save();
+            self.rebuild_tree_view(None);
             return false;
         }
 
@@ -124,6 +131,8 @@ impl App {
             }
             Err(err) => {
                 self.record_agent_error(format!("failed to launch dreaming: {err}"));
+                let _ = self.state.save();
+                self.rebuild_tree_view(None);
                 false
             }
         }
@@ -134,14 +143,19 @@ impl App {
         run: &crate::state::RunRecord,
         round: u32,
     ) -> Result<()> {
+        // reasons.rs already gates completion on dream-report validity for the
+        // noninteractive path; finalize the run first so a late validation miss
+        // does not leave the run stuck in Running state.
+        self.finalize_run_record(run.id, true, None);
+        self.clear_agent_error();
         let session_dir = session_state::session_dir(&self.state.session_id);
         let report_path = crate::logic::memory::memory_root_from_session_path(&session_dir)
             .join("dreams")
             .join(format!("dream-{round:04}.toml"));
-        crate::data::memory::validate_dream_report_file(&report_path)
-            .with_context(|| format!("invalid {}", report_path.display()))?;
-        self.finalize_run_record(run.id, true, None);
-        self.clear_agent_error();
+        if let Err(err) = crate::data::memory::validate_dream_report_file(&report_path) {
+            self.record_agent_error(format!("invalid dream report: {err}"));
+            return Ok(());
+        }
         self.transition_to_phase(Phase::Done)?;
         Ok(())
     }

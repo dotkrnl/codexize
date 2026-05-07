@@ -707,10 +707,15 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
 
 #[test]
 fn full_table_dot_color_tracks_quota_not_score() {
-    let mut high_score_no_quota = model_with_axis_score("gpt-alpha", 1.0, 0);
+    // Use two different vendors so the per-vendor visibility floor admits
+    // both rows even though `alpha` has zero quota (which collapses its
+    // pool weight to 0 under the >10% visibility rule).
+    let mut high_score_no_quota =
+        vendor_model_with_axis_score(VendorKind::Codex, "gpt-alpha", 1.0, 0);
     high_score_no_quota.current_score = 99.0;
     high_score_no_quota.quota_percent = Some(0);
-    let mut low_score_full_quota = model_with_axis_score("gpt-beta", 1.0, 1);
+    let mut low_score_full_quota =
+        vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 1.0, 1);
     low_score_full_quota.current_score = 1.0;
     low_score_full_quota.quota_percent = Some(100);
     let models = vec![high_score_no_quota, low_score_full_quota];
@@ -1076,8 +1081,12 @@ fn full_table_orders_by_build_score_descending() {
 
 #[test]
 fn full_table_renders_vendor_label_on_every_row() {
+    // Tied phase scores so both same-vendor rows clear the >10% pool
+    // weight visibility threshold. The intent is to assert the vendor
+    // label is rendered on consecutive same-vendor rows, not to drive any
+    // particular ranking outcome.
     let m1 = vendor_model_with_axis_score(VendorKind::Claude, "claude-alpha", 100.0, 0);
-    let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 50.0, 0);
+    let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 100.0, 0);
     let models = vec![m1, m2];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);

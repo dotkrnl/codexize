@@ -50,13 +50,15 @@ fn unscored_model(vendor: VendorKind, name: &str, display_order: usize) -> Cache
 }
 
 #[test]
-fn visible_models_includes_top_3_per_phase_by_ipbr_score() {
+fn visible_models_keeps_models_above_pool_weight_threshold() {
+    // Three Claude models with bunched phase scores share the pool roughly
+    // evenly (each weight ≫ 10%), while a much lower-scored peer's weight
+    // collapses below the visibility threshold. The per-vendor floor still
+    // admits one Claude row, but it picks the strongest, not the bottom.
     let models = vec![
         ipbr_model(VendorKind::Claude, "claude-a", 95.0, Some(80)),
-        ipbr_model(VendorKind::Claude, "claude-b", 90.0, Some(80)),
-        ipbr_model(VendorKind::Claude, "claude-c", 85.0, Some(80)),
-        // Lowest-scored Claude model — outside the top-3 union for any
-        // phase, even though quota is healthy.
+        ipbr_model(VendorKind::Claude, "claude-b", 94.0, Some(80)),
+        ipbr_model(VendorKind::Claude, "claude-c", 93.0, Some(80)),
         ipbr_model(VendorKind::Claude, "claude-d", 10.0, Some(100)),
     ];
     let visible = visible_models(&models);
@@ -66,38 +68,51 @@ fn visible_models_includes_top_3_per_phase_by_ipbr_score() {
     assert!(visible.contains("claude-c"));
     assert!(
         !visible.contains("claude-d"),
-        "lowest-scored model should not enter top-3 across any phase"
+        "a model whose pool weight stays below 10% should not be visible"
     );
 }
 
 #[test]
-fn visible_models_backfills_missing_vendors_via_display_order() {
+fn visible_models_backfills_missing_vendors_by_build_rank() {
     let models = vec![
         ipbr_model(VendorKind::Claude, "claude-top", 95.0, Some(80)),
         ipbr_model(VendorKind::Codex, "codex-top", 95.0, Some(80)),
         ipbr_model(VendorKind::Gemini, "gemini-top", 95.0, Some(80)),
-        // Two unscored Kimi models: backfill must pick the one with the
-        // lower `display_order`, ignoring cosmetic `current_score`.
+        // Two Kimi models — the per-vendor floor must pick the higher
+        // ipbr Build score, not the lower `display_order` or any
+        // cosmetic summary score.
         CachedModel {
-            current_score: 60.0,
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                idea: Some(40.0),
+                planning: Some(40.0),
+                build: Some(40.0),
+                review: Some(40.0),
+            },
+            current_score: 99.0,
             display_order: 0,
-            ..unscored_model(VendorKind::Kimi, "kimi-first", 0)
+            ..ipbr_model(VendorKind::Kimi, "kimi-weak", 40.0, Some(80))
         },
         CachedModel {
-            current_score: 99.0,
+            ipbr_phase_scores: crate::selection::IpbrPhaseScores {
+                idea: Some(60.0),
+                planning: Some(60.0),
+                build: Some(60.0),
+                review: Some(60.0),
+            },
+            current_score: 50.0,
             display_order: 5,
-            ..unscored_model(VendorKind::Kimi, "kimi-later", 5)
+            ..ipbr_model(VendorKind::Kimi, "kimi-strong", 60.0, Some(80))
         },
     ];
     let visible = visible_models(&models);
 
     assert!(
-        visible.contains("kimi-first"),
-        "backfill should follow inventory display_order"
+        visible.contains("kimi-strong"),
+        "vendor floor should pick the highest ipbr Build score"
     );
     assert!(
-        !visible.contains("kimi-later"),
-        "cosmetic current_score must not promote a later inventory entry"
+        !visible.contains("kimi-weak"),
+        "neither display_order nor cosmetic current_score should promote the weaker peer"
     );
 }
 

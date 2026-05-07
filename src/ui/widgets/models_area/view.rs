@@ -18,8 +18,8 @@ use crate::model_names;
 use crate::selection::{
     CachedModel, QuotaError, VendorKind,
     config::SelectionPhase,
-    display::{phase_rank, visible_models},
-    ranking::{candidate_pool_weights, phase_rank_score},
+    display::{build_rank_order, phase_rank, visible_models},
+    ranking::candidate_pool_weights,
 };
 use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
@@ -190,23 +190,7 @@ fn render_full_table(
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .collect();
-    // Order rows by ipbr Build phase rank (rank 1 first). Unranked models
-    // sort to the bottom so cosmetic summaries cannot lift them above
-    // ipbr-ranked peers.
-    visible_models_list.sort_by(|a, b| {
-        let rank_a = phase_rank_score(a, SelectionPhase::Build);
-        let rank_b = phase_rank_score(b, SelectionPhase::Build);
-        match (rank_a, rank_b) {
-            (Some(sa), Some(sb)) => sb
-                .partial_cmp(&sa)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.vendor.cmp(&b.vendor))
-                .then_with(|| a.name.cmp(&b.name)),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.vendor.cmp(&b.vendor).then_with(|| a.name.cmp(&b.name)),
-        }
-    });
+    visible_models_list.sort_by(|a, b| build_rank_order(a, b));
     let mut lines: Vec<Line<'static>> = Vec::new();
     for model in visible_models_list {
         let label = vendor_label(model.vendor);
@@ -441,17 +425,17 @@ fn render_compact_quota(
         VendorKind::Gemini,
         VendorKind::Opencode,
     ];
-    // Pick the vendor's representative by inventory ordering
-    // (`display_order`, then name). Cosmetic `current_score` cannot drive
-    // visibility — that role belongs to ipbr phase rank in the full table
-    // and to inventory order here.
+    // Pick each vendor's representative by `build_rank_order` so the
+    // compact strip mirrors the full table's ranking. Cosmetic
+    // `current_score` cannot drive visibility — ipbr Build phase rank is
+    // the authoritative signal, with name as the alphabetical tiebreaker.
     let mut vendors_to_render = Vec::new();
     for vendor in order {
-        if let Some(model) = models.iter().filter(|m| m.vendor == vendor).min_by(|a, b| {
-            a.display_order
-                .cmp(&b.display_order)
-                .then_with(|| a.name.cmp(&b.name))
-        }) {
+        if let Some(model) = models
+            .iter()
+            .filter(|m| m.vendor == vendor)
+            .min_by(|a, b| build_rank_order(a, b))
+        {
             vendors_to_render.push((vendor, model));
         }
     }

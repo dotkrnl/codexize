@@ -65,9 +65,10 @@ async fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndRe
             .await
             .map(live_map_kimi)
             .map_err(|e| e.to_string()),
-        VendorKind::Opencode => {
-            Err("opencode quota provider is not wired in this selection layer yet".to_string())
-        }
+        VendorKind::Opencode => providers::opencode::load_live_models_async()
+            .await
+            .map(live_map_opencode)
+            .map_err(|e| e.to_string()),
     }
 }
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
@@ -180,6 +181,17 @@ fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     }
     let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
     (mapped, resets)
+}
+fn live_map_opencode(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
+    // Opencode runs on a single Go-tier dollar pool, so any non-None entry
+    // returned by the provider applies to every opencode-routed model name
+    // the heuristic asks about. Surface a single shared key — the per-model
+    // heuristic in `logic::selection::quota` handles the lookup.
+    let quota = models.into_iter().find_map(|m| m.quota_percent);
+    (
+        BTreeMap::from([(providers::opencode::SHARED_QUOTA_KEY.to_string(), quota)]),
+        BTreeMap::from([(providers::opencode::SHARED_QUOTA_KEY.to_string(), None)]),
+    )
 }
 fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     // Kimi only has one effective model (kimi-latest); expose it under that

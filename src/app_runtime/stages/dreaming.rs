@@ -30,8 +30,7 @@ impl App {
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
-        let dream_report_path =
-            crate::logic::memory::dream_report_path(&memory_root, round);
+        let dream_report_path = crate::logic::memory::dream_report_path(&memory_root, round);
         if let Some(parent) = dream_report_path.parent()
             && let Err(err) = std::fs::create_dir_all(parent)
         {
@@ -149,8 +148,7 @@ impl App {
         self.clear_agent_error();
         let session_dir = session_state::session_dir(&self.state.session_id);
         let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
-        let report_path =
-            crate::logic::memory::dream_report_path(&memory_root, round);
+        let report_path = crate::logic::memory::dream_report_path(&memory_root, round);
         if let Err(err) = crate::data::memory::validate_dream_report_file(&report_path) {
             self.record_agent_error(format!("invalid dream report: {err}"));
             return Ok(());

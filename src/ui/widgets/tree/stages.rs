@@ -18,6 +18,25 @@ fn node(
         leaf_run_id: None,
     }
 }
+
+fn group_runs_into_round_nodes(runs: &[&RunRecord]) -> Vec<Node> {
+    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
+    for run in runs {
+        rounds.entry(run.round).or_default().push(*run);
+    }
+    rounds
+        .into_iter()
+        .map(|(round_num, round_runs)| {
+            node(
+                format!("Round {}", round_num),
+                NodeKind::Round,
+                rollup_status(&round_runs),
+                "",
+                round_runs.iter().map(|r| agent_run_node(r)).collect(),
+            )
+        })
+        .collect()
+}
 /// Boundary rounds — the rounds at which final-validation has run, sorted
 /// ascending and deduplicated. Iteration N's round range is bounded above
 /// by `iteration_boundaries(state)[N - 1]` (when present); when absent the
@@ -124,22 +143,7 @@ pub(super) fn build_review_stage(state: &SessionState, stage_key: &str, label: &
     let latest = latest_attempts(&runs);
     let status = stage_status_from_runs(&latest, state, stage_key);
     let summary = stage_summary(state, stage_key, label, &latest);
-    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
-    for run in &runs {
-        rounds.entry(run.round).or_default().push(*run);
-    }
-    let children = rounds
-        .into_iter()
-        .map(|(round_num, round_runs)| {
-            node(
-                format!("Round {}", round_num),
-                NodeKind::Round,
-                rollup_status(&round_runs),
-                "",
-                round_runs.iter().map(|r| agent_run_node(r)).collect(),
-            )
-        })
-        .collect();
+    let children = group_runs_into_round_nodes(&runs);
     node(label, NodeKind::Stage, status, summary, children)
 }
 pub(super) fn build_builder_stage(state: &SessionState, iteration: u32) -> Node {
@@ -471,22 +475,7 @@ pub(super) fn build_dreaming_stage(state: &SessionState) -> Node {
             },
         }
     };
-    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
-    for run in &runs {
-        rounds.entry(run.round).or_default().push(*run);
-    }
-    let children = rounds
-        .into_iter()
-        .map(|(round_num, round_runs)| {
-            node(
-                format!("Round {}", round_num),
-                NodeKind::Round,
-                rollup_status(&round_runs),
-                "",
-                round_runs.iter().map(|run| agent_run_node(run)).collect(),
-            )
-        })
-        .collect();
+    let children = group_runs_into_round_nodes(&runs);
     node("Dreaming", NodeKind::Stage, status, "", children)
 }
 /// Shared scaffolding for the iteration-scoped trio's tail two stages.
@@ -514,22 +503,7 @@ fn build_per_iteration_stage(
     } else {
         (per_iteration_terminal_status(&latest), String::new())
     };
-    let mut rounds: BTreeMap<u32, Vec<&RunRecord>> = BTreeMap::new();
-    for run in &runs {
-        rounds.entry(run.round).or_default().push(*run);
-    }
-    let children = rounds
-        .into_iter()
-        .map(|(round_num, round_runs)| {
-            node(
-                format!("Round {}", round_num),
-                NodeKind::Round,
-                rollup_status(&round_runs),
-                "",
-                round_runs.iter().map(|r| agent_run_node(r)).collect(),
-            )
-        })
-        .collect();
+    let children = group_runs_into_round_nodes(&runs);
     node(
         iteration_label(label, iteration),
         NodeKind::Stage,

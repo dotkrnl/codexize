@@ -131,7 +131,9 @@ pub fn memory_glob_from_session_path(path: &Path) -> PathBuf {
 }
 
 pub fn dream_report_path(memory_root: &Path, round: u32) -> PathBuf {
-    memory_root.join("dreams").join(format!("dream-{round:04}.toml"))
+    memory_root
+        .join("dreams")
+        .join(format!("dream-{round:04}.toml"))
 }
 
 pub fn parse_manifest_toml(text: &str) -> anyhow::Result<MemoryManifest> {

@@ -273,8 +273,6 @@ impl App {
             self.capture_round_base(&round_dir);
         }
         self.agent_line_count = 0;
-        self.live_summary_cached_text.clear();
-        self.live_summary_cached_mtime = None;
         self.rebuild_tree_view(None);
         // Phase transitions are an automatic re-enable point for progress
         // follow: re-engage and snap focus to the running stage / latest run.
@@ -285,7 +283,13 @@ impl App {
         // Re-engage tail-follow on phase change so the new stage's transcript
         // streams into view.
         self.set_follow_tail(true);
+        // Notify before clearing the live-summary cache so the outgoing
+        // phase's last "what I was doing" line lands in the body of the
+        // ntfy push — that's the answer to "what just happened?" for a
+        // review pause or a final pipeline-done.
         self.maybe_emit_phase_notification(next_phase);
+        self.live_summary_cached_text.clear();
+        self.live_summary_cached_mtime = None;
         Ok(())
     }
     /// Set `block_origin` on the session and transition into

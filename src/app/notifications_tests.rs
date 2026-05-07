@@ -218,6 +218,120 @@ fn interactive_wait_rising_edge_emits_once_until_next_prompt() {
 }
 
 #[test]
+fn phase_wait_event_carries_last_live_summary() {
+    let mut app = app_in_phase(Phase::SpecReviewRunning);
+    app.live_summary_cached_text = "drafted §3 about caching layer invariants".to_string();
+
+    app.transition_to_phase(Phase::SpecReviewPaused)
+        .expect("transition succeeds");
+
+    let events = app.notification_events_for_test();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].context.last_live_summary.as_deref(),
+        Some("drafted §3 about caching layer invariants"),
+        "phase-wait notifications should surface the live summary"
+    );
+    assert!(
+        events[0].context.last_agent_response.is_none(),
+        "phase-wait notifications must not carry an agent response"
+    );
+}
+
+#[test]
+fn modal_decision_phases_skip_live_summary() {
+    // Skip-to-impl and git-guard prompts are modal decisions where the
+    // live summary would just echo the prompt; the App should leave the
+    // field empty so the body stays a single sentence.
+    for phase in [Phase::SkipToImplPending, Phase::GitGuardPending] {
+        let mut app = app_in_phase(Phase::BrainstormRunning);
+        app.live_summary_cached_text = "should not surface here".to_string();
+
+        app.transition_to_phase(phase).expect("transition succeeds");
+
+        let events = app.notification_events_for_test();
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0].context.last_live_summary.is_none(),
+            "{phase:?} should not carry a live summary"
+        );
+    }
+}
+
+#[test]
+fn pipeline_done_event_carries_last_live_summary() {
+    let mut app = app_in_phase(Phase::FinalValidation(1));
+    app.live_summary_cached_text = "ran final validation, all green".to_string();
+
+    app.transition_to_phase(Phase::Done)
+        .expect("done transition succeeds");
+
+    let events = app.notification_events_for_test();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].context.last_live_summary.as_deref(),
+        Some("ran final validation, all green")
+    );
+}
+
+#[test]
+fn interactive_wait_event_carries_last_agent_response() {
+    // Distinct window-name / run-id from the rising-edge test above so the
+    // process-global runner registry (`request_run_label_*`) cannot leak
+    // between this test and the rising-edge case under cargo's parallel
+    // runner.
+    const RUN_ID: u64 = 71;
+    const WINDOW: &str = "[brainstorm-context]";
+    let mut state = state_in_phase(Phase::BrainstormRunning);
+    let mut run = running_run(RUN_ID, "brainstorm", true);
+    run.window_name = WINDOW.to_string();
+    state.agent_runs.push(run);
+    let mut app = mk_app(state);
+    app.enable_notifications_for_test();
+    app.current_run_id = Some(RUN_ID);
+    crate::runner::register_test_run_id(WINDOW, RUN_ID);
+    crate::runner::request_run_label_active_for_test(WINDOW);
+    // Brief on the same run is the live summary; it must NOT be picked
+    // up for an interactive-run wait — the agent's question is what the
+    // operator wants to read.
+    app.messages.push(Message {
+        ts: chrono::Utc::now(),
+        run_id: RUN_ID,
+        kind: MessageKind::Brief,
+        sender: MessageSender::Agent {
+            model: "codex-latest".to_string(),
+            vendor: "openai".to_string(),
+        },
+        text: "live summary that should not surface".to_string(),
+    });
+    app.messages.push(Message {
+        ts: chrono::Utc::now(),
+        run_id: RUN_ID,
+        kind: MessageKind::AgentText,
+        sender: MessageSender::Agent {
+            model: "codex-latest".to_string(),
+            vendor: "openai".to_string(),
+        },
+        text: "Should I keep going on the migration plan?".to_string(),
+    });
+    crate::runner::request_run_label_interactive_input_for_test(WINDOW);
+
+    app.runtime_tick_after_data_drain();
+
+    let events = app.notification_events_for_test();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].reason, NotificationReason::InteractiveRunWait);
+    assert_eq!(
+        events[0].context.last_agent_response.as_deref(),
+        Some("Should I keep going on the migration plan?")
+    );
+    assert!(
+        events[0].context.last_live_summary.is_none(),
+        "interactive-run waits must not carry a live summary"
+    );
+}
+
+#[test]
 fn stage_starts_retries_and_mid_run_errors_do_not_emit_events() {
     let mut app = app_in_phase(Phase::IdeaInput);
 

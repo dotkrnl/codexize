@@ -92,7 +92,7 @@ impl App {
     }
 
     fn notification_context_for_phase(&self, phase: Phase) -> NotificationContext {
-        match phase {
+        let mut context = match phase {
             Phase::BlockedNeedsUser => {
                 let stage = self
                     .state
@@ -130,21 +130,36 @@ impl App {
                 None,
                 None,
             ),
+        };
+        // Phase waits surface "what was the agent doing when this fired?" —
+        // the live-summary line is the right answer. Skip-to-impl and
+        // git-guard prompts are modal decisions where the live summary
+        // would just repeat the prompt, so omit it there.
+        if phase_carries_live_summary(phase) {
+            context.last_live_summary = self.last_live_summary_text();
         }
+        context
     }
 
     fn notification_context_for_done(&self) -> NotificationContext {
-        self.notification_context_for_stage("pipeline")
+        let mut context = self.notification_context_for_stage("pipeline");
+        context.last_live_summary = self.last_live_summary_text();
+        context
     }
 
     fn notification_context_for_run(&self, run: &RunRecord) -> NotificationContext {
-        self.notification_context(
+        let mut context = self.notification_context(
             run.stage.clone(),
             run.task_id,
             Some(run.round),
             Some(run.attempt),
             Some(run.id),
-        )
+        );
+        // Interactive-run waits surface the agent's question itself, so
+        // the last `AgentText` for this run is what the operator wants
+        // to read on the lock screen.
+        context.last_agent_response = self.last_agent_response_text(run.id);
+        context
     }
 
     fn notification_context_for_stage(&self, stage: &str) -> NotificationContext {
@@ -170,6 +185,28 @@ impl App {
             last_live_summary: None,
             last_agent_response: None,
         }
+    }
+
+    fn last_live_summary_text(&self) -> Option<String> {
+        let cached = self.live_summary_cached_text.trim();
+        if !cached.is_empty() {
+            return Some(self.live_summary_cached_text.clone());
+        }
+        self.messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message.kind, MessageKind::Brief))
+            .map(|message| message.text.clone())
+    }
+
+    fn last_agent_response_text(&self, run_id: u64) -> Option<String> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|message| {
+                message.run_id == run_id && matches!(message.kind, MessageKind::AgentText)
+            })
+            .map(|message| message.text.clone())
     }
 
     #[cfg(test)]
@@ -215,6 +252,15 @@ fn stage_for_block_origin(origin: BlockOrigin) -> &'static str {
         BlockOrigin::Simplification => "simplifier",
         BlockOrigin::Dreaming => "dreaming",
     }
+}
+
+/// True when the phase represents "the agent paused, here's what it was
+/// doing": a live-summary excerpt is then the right context to surface in
+/// the notification body. Skip-to-impl and git-guard prompts are modal
+/// decisions where the live summary would just echo the prompt itself, so
+/// they opt out and let the lead sentence stand alone.
+fn phase_carries_live_summary(phase: Phase) -> bool {
+    !matches!(phase, Phase::SkipToImplPending | Phase::GitGuardPending)
 }
 
 fn phase_round(phase: Phase) -> Option<u32> {

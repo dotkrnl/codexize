@@ -46,6 +46,19 @@ fn make_entry_with_order(
     }
 }
 
+fn make_ipbr_entry(name: &str, vendor: &str, match_key: &str) -> DashboardEntry {
+    let mut entry = make_entry(name, vendor, 80.0, 78.0);
+    entry.score_source = ScoreSource::Ipbr;
+    entry.ipbr_row_matched = true;
+    entry.ipbr_match_key = Some(match_key.to_string());
+    entry.route_underlying_vendor = (vendor == "opencode").then_some(VendorKind::Claude);
+    entry
+}
+
+fn opencode_available() -> BTreeSet<VendorKind> {
+    BTreeSet::from([VendorKind::Claude, VendorKind::Opencode])
+}
+
 fn make_quota_payload(entries: &[(&str, &str, Option<u8>)]) -> QuotaPayload {
     let mut payload: QuotaPayload = BTreeMap::new();
     for (vendor, name, quota) in entries {
@@ -469,6 +482,105 @@ fn quota_heuristic_fallback_when_no_exact_match() {
     assert_eq!(models.len(), 1);
     // Should get quota via heuristic (Claude models share quota)
     assert_eq!(models[0].quota_percent, Some(75));
+}
+
+#[test]
+fn dedup_keeps_opencode_when_quota_is_strictly_higher_than_direct_route() {
+    let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
+    let mut routed = direct.clone();
+    routed.name = "opencode/claude-opus-4-7".to_string();
+    routed.vendor = "opencode".to_string();
+    routed.route_underlying_vendor = Some(VendorKind::Claude);
+    let quotas = make_quota_payload(&[
+        ("claude", "claude-opus-4-7", Some(40)),
+        ("opencode", "opencode/claude-opus-4-7", Some(80)),
+    ]);
+
+    let models = assemble_universe(
+        vec![direct, routed],
+        quotas,
+        BTreeMap::new(),
+        &opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Opencode);
+    assert_eq!(models[0].name, "opencode/claude-opus-4-7");
+    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(models[0].route_underlying_vendor, Some(VendorKind::Claude));
+}
+
+#[test]
+fn dedup_falls_back_to_direct_route_for_ties_and_unknown_quotas() {
+    for (direct_quota, opencode_quota) in [
+        (Some(80), Some(80)),
+        (Some(80), None),
+        (None, None),
+        (Some(90), Some(80)),
+    ] {
+        let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
+        let mut routed = direct.clone();
+        routed.name = "opencode/claude-opus-4-7".to_string();
+        routed.vendor = "opencode".to_string();
+        routed.route_underlying_vendor = Some(VendorKind::Claude);
+        let quotas = make_quota_payload(&[
+            ("claude", "claude-opus-4-7", direct_quota),
+            ("opencode", "opencode/claude-opus-4-7", opencode_quota),
+        ]);
+
+        let models = assemble_universe(
+            vec![direct, routed],
+            quotas,
+            BTreeMap::new(),
+            &opencode_available(),
+        );
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].vendor, VendorKind::Claude);
+        assert_eq!(models[0].name, "claude-opus-4-7");
+    }
+}
+
+#[test]
+fn dedup_prefers_any_known_quota_over_unknown_quota() {
+    let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
+    let mut routed = direct.clone();
+    routed.name = "opencode/claude-opus-4-7".to_string();
+    routed.vendor = "opencode".to_string();
+    routed.route_underlying_vendor = Some(VendorKind::Claude);
+    let quotas = make_quota_payload(&[
+        ("claude", "claude-opus-4-7", None),
+        ("opencode", "opencode/claude-opus-4-7", Some(1)),
+    ]);
+
+    let models = assemble_universe(
+        vec![direct, routed],
+        quotas,
+        BTreeMap::new(),
+        &opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Opencode);
+    assert_eq!(models[0].quota_percent, Some(1));
+}
+
+#[test]
+fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
+    let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4-7");
+
+    let models = assemble_universe(
+        vec![routed],
+        BTreeMap::new(),
+        BTreeMap::new(),
+        &opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Opencode);
+    assert_eq!(models[0].quota_percent, None);
+    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(models[0].route_underlying_vendor, Some(VendorKind::Claude));
 }
 
 #[test]

@@ -13,6 +13,7 @@ use super::types::{CachedModel, QuotaError, ScoreSource, VendorKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::dashboard::{self, DashboardModel};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// Build the canonical model universe from already-resolved snapshots.
 ///
@@ -158,12 +159,77 @@ pub fn assemble_universe(
         models.retain(|m| m.vendor != VendorKind::Kimi);
         models.push(canonical);
     }
+    models = deduplicate_routed_models(models);
     // Stamp fallback:overall provenance for zero-as-missing and truly-missing
     // axes, and emit selection.zero_as_missing counters.
     for model in &mut models {
         stamp_selection_provenance(model);
     }
     models
+}
+fn deduplicate_routed_models(models: Vec<CachedModel>) -> Vec<CachedModel> {
+    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (index, model) in models.iter().enumerate() {
+        if let Some(key) = &model.ipbr_match_key {
+            groups.entry(key.clone()).or_default().push(index);
+        }
+    }
+    let mut drop_indexes = HashSet::new();
+    for indexes in groups.values().filter(|indexes| indexes.len() > 1) {
+        let best_direct = indexes
+            .iter()
+            .copied()
+            .filter(|index| models[*index].vendor != VendorKind::Opencode)
+            .min_by(|a, b| compare_route_candidate(&models[*a], &models[*b]));
+        let best_opencode = indexes
+            .iter()
+            .copied()
+            .filter(|index| models[*index].vendor == VendorKind::Opencode)
+            .min_by(|a, b| compare_route_candidate(&models[*a], &models[*b]));
+        let (Some(direct_index), Some(opencode_index)) = (best_direct, best_opencode) else {
+            continue;
+        };
+        // The stored ipbr key is the identity authority here; route names can
+        // differ even when both entries launch the same underlying model.
+        let survivor = if opencode_quota_wins(
+            models[opencode_index].quota_percent,
+            models[direct_index].quota_percent,
+        ) {
+            opencode_index
+        } else {
+            direct_index
+        };
+        for index in indexes {
+            if *index != survivor {
+                drop_indexes.insert(*index);
+            }
+        }
+    }
+    models
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, model)| (!drop_indexes.contains(&index)).then_some(model))
+        .collect()
+}
+fn compare_route_candidate(a: &CachedModel, b: &CachedModel) -> Ordering {
+    compare_quota_for_candidate(a.quota_percent, b.quota_percent)
+        .then_with(|| a.display_order.cmp(&b.display_order))
+        .then_with(|| a.name.cmp(&b.name))
+}
+fn compare_quota_for_candidate(a: Option<u8>, b: Option<u8>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.cmp(&a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+fn opencode_quota_wins(opencode: Option<u8>, direct: Option<u8>) -> bool {
+    match (opencode, direct) {
+        (Some(opencode), Some(direct)) => opencode > direct,
+        (Some(_), None) => true,
+        _ => false,
+    }
 }
 /// Merge a freshly-fetched quota map (keyed by `VendorKind`) into the cached
 /// payload (keyed by vendor string). Successfully-refreshed vendors overwrite

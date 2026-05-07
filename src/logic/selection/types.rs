@@ -85,6 +85,11 @@ pub struct CachedModel {
     /// normally `None`; opencode-routed models use it for eligibility and
     /// effort suffix decisions while still displaying `vendor = Opencode`.
     pub route_underlying_vendor: Option<VendorKind>,
+    /// Opencode sub-provider (`opencode` or `opencode-go`). The bare `name`
+    /// stays ipbr-compatible; the launch boundary qualifies it with this
+    /// prefix so spawn calls reach the correct opencode tier. `None` for
+    /// direct vendors.
+    pub route_provider: Option<String>,
     pub quota_percent: Option<u8>,
     pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,

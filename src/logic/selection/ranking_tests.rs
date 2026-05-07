@@ -20,6 +20,7 @@ fn sample_cached_model() -> CachedModel {
         ipbr_row_matched: false,
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 1,

@@ -17,6 +17,7 @@ fn dashboard_model(name: &str, vendor: &str) -> dashboard::DashboardModel {
         fallback_from: None,
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
     }
 }
 
@@ -38,6 +39,7 @@ fn sample_cached_model() -> CachedModel {
         fallback_from: None,
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
     }
 }
 

@@ -48,7 +48,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor) = chosen;
+        let (model, vendor_kind, vendor, route_provider) = chosen;
         let is_human_blocked = self
             .state
             .builder
@@ -88,6 +88,7 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
+            route_provider: route_provider.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
@@ -136,6 +137,7 @@ impl App {
                     round,
                     model,
                     vendor,
+                    route_provider,
                     window_name,
                     effort,
                     modes,

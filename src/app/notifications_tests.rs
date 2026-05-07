@@ -46,6 +46,7 @@ fn running_run(id: u64, stage: &str, interactive: bool) -> RunRecord {
         attempt: 1,
         model: "codex-latest".to_string(),
         vendor: "openai".to_string(),
+        route_provider: None,
         window_name: format!("[{stage}]"),
         started_at: chrono::Utc::now(),
         ended_at: None,

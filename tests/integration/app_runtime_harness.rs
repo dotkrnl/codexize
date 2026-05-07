@@ -77,6 +77,7 @@ fn agent_run_summary_is_constructible_from_public_surface() {
         attempt: 0,
         model: "gpt-test".to_string(),
         vendor: "test-vendor".to_string(),
+        route_provider: None,
         window_name: "codexize-run-7-planning".to_string(),
         started_at: Utc::now(),
         ended_at: None,

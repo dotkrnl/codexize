@@ -17,6 +17,7 @@ fn model(name: &str, score: f64) -> DashboardModel {
         ipbr_row_matched: false,
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -66,6 +67,59 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
     assert_eq!(merged[0].vendor, "opencode");
     assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
     assert_eq!(merged[0].route_underlying_vendor, Some(VendorKind::Codex));
+    assert_eq!(merged[0].route_provider.as_deref(), Some("opencode"));
+}
+
+#[test]
+fn opencode_go_inventory_surfaces_with_route_provider_when_ipbr_matches() {
+    // Drives the headline use case: deepseek lives only under
+    // `opencode-go`, has an ipbr scoreboard row by `display_name =
+    // "deepseek-v4-flash"`, and must reach the universe with
+    // route_provider = "opencode-go" so the launch path qualifies it
+    // correctly rather than falling back to the zen-tier `opencode/`.
+    let mut inventory = Vec::new();
+    append_opencode_inventory(
+        &mut inventory,
+        vec![
+            crate::data::providers::opencode::OpencodeModelMeta {
+                id: "deepseek-v4-flash".to_string(),
+                provider_id: "opencode-go".to_string(),
+                display_name: None,
+                api_npm: Some("@ai-sdk/openai-compatible".to_string()),
+                underlying_vendor: None,
+            },
+        ],
+    );
+    let scores = parse_ipbr_scoreboard(
+        r#"
+        [[models]]
+        display_name = "deepseek-v4-flash"
+        canonical_id = "deepseek/deepseek-v4-flash"
+        vendor = "deepseek"
+
+        [models.scores]
+        i_adj = 70.0
+        p_adj = 71.0
+        b_adj = 72.0
+        r = 73.0
+        "#,
+    )
+    .unwrap();
+
+    let merged = merge_with_warnings(inventory, scores).models;
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].name, "deepseek-v4-flash");
+    assert_eq!(merged[0].vendor, "opencode");
+    assert_eq!(
+        merged[0].ipbr_match_key.as_deref(),
+        Some("deepseek-v4-flash")
+    );
+    assert_eq!(
+        merged[0].route_provider.as_deref(),
+        Some("opencode-go"),
+        "opencode-go inventory must propagate the sub-provider so the launch boundary qualifies it correctly",
+    );
 }
 
 fn fixture_cached_models() -> Vec<CachedModel> {
@@ -110,6 +164,7 @@ fn fixture_cached_models() -> Vec<CachedModel> {
             ipbr_row_matched: true,
             ipbr_match_key: Some(entry.name.clone()),
             route_underlying_vendor: None,
+        route_provider: None,
             quota_percent: Some(80),
             quota_resets_at: None,
             display_order: entry.display_order,

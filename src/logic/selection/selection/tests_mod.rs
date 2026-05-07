@@ -32,6 +32,7 @@ fn sample_model_with_score(vendor: VendorKind, name: &str, quota: u8, score: f64
         ipbr_row_matched: true,
         ipbr_match_key: Some(name.to_string()),
         route_underlying_vendor: None,
+        route_provider: None,
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,

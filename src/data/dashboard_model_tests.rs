@@ -49,6 +49,7 @@ fn inventory(name: &str, order: usize) -> InventoryEntry {
         vendor: String::new(),
         display_order: order,
         route_underlying_vendor: None,
+        route_provider: None,
     }
 }
 
@@ -58,6 +59,7 @@ fn vendor_inventory(name: &str, vendor: &str, order: usize) -> InventoryEntry {
         vendor: vendor.to_string(),
         display_order: order,
         route_underlying_vendor: None,
+        route_provider: None,
     }
 }
 

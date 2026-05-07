@@ -112,24 +112,41 @@ pub fn extract_go_tier_spend(stats_text: &str) -> Result<f64> {
     }
     Ok(total)
 }
-/// Enumerate models advertised by opencode for the `opencode` provider.
-/// Cascades local CLI → hardcoded fallback. The cascade does not retry on
-/// each call: a single CLI failure in this process drops us to the snapshot.
+/// Enumerate models advertised by opencode across both the `opencode` and
+/// `opencode-go` providers. Cascades local CLI → hardcoded fallback per
+/// provider so a transient failure on one branch does not erase the other.
 pub fn enumerate_models() -> Vec<OpencodeModelMeta> {
-    enumerate_with_cli_text(run_models_command().ok().as_deref())
+    enumerate_with_cli_texts(
+        run_models_command(OPENCODE_PROVIDER).ok().as_deref(),
+        run_models_command(OPENCODE_GO_PROVIDER).ok().as_deref(),
+    )
 }
-/// Enumeration with the CLI invocation factored out so cascade behavior is
-/// fixture-testable: pass `None` to simulate CLI failure, or a captured
-/// verbose output to simulate success.
-pub fn enumerate_with_cli_text(cli_text: Option<&str>) -> Vec<OpencodeModelMeta> {
+/// Enumeration with the CLI invocations factored out so cascade behavior is
+/// fixture-testable per provider. Each `Option<&str>` may carry the CLI
+/// output for that provider; passing `None` simulates CLI failure for that
+/// branch and triggers the hardcoded fallback for the same provider.
+pub fn enumerate_with_cli_texts(
+    opencode_text: Option<&str>,
+    opencode_go_text: Option<&str>,
+) -> Vec<OpencodeModelMeta> {
+    let mut models = enumerate_provider(opencode_text, OPENCODE_PROVIDER);
+    models.extend(enumerate_provider(opencode_go_text, OPENCODE_GO_PROVIDER));
+    models
+}
+fn enumerate_provider(cli_text: Option<&str>, provider: &str) -> Vec<OpencodeModelMeta> {
     if let Some(text) = cli_text {
-        let parsed = parse_verbose_models(text);
+        let parsed: Vec<OpencodeModelMeta> = parse_verbose_models(text)
+            .into_iter()
+            .filter(|m| m.provider_id == provider)
+            .collect();
         if !parsed.is_empty() {
             return parsed;
         }
     }
-    hardcoded_fallback_models()
+    hardcoded_fallback_for(provider)
 }
+const OPENCODE_PROVIDER: &str = "opencode";
+const OPENCODE_GO_PROVIDER: &str = "opencode-go";
 /// Parse the multi-block output of `opencode models opencode --verbose`.
 /// Each block is an `opencode/<id>` route header followed by a pretty-printed
 /// JSON object. We rely on the JSON braces — not the route header — for
@@ -156,31 +173,50 @@ pub fn parse_verbose_models(text: &str) -> Vec<OpencodeModelMeta> {
 }
 /// Static snapshot used when the local CLI cannot be reached. Refresh as
 /// opencode adds models. Underlying vendors are best-effort: leave `None`
-/// when the resale provenance is not obvious from the model id.
-fn hardcoded_fallback_models() -> Vec<OpencodeModelMeta> {
-    [
-        ("big-pickle", None),
-        ("gpt-5-nano", Some(VendorKind::Codex)),
-        ("hy3-preview-free", None),
-        ("minimax-m2.5-free", Some(VendorKind::Kimi)),
-        ("nemotron-3-super-free", None),
-    ]
-    .into_iter()
-    .map(|(id, underlying)| OpencodeModelMeta {
-        id: id.to_string(),
-        provider_id: "opencode".to_string(),
-        display_name: None,
-        api_npm: None,
-        underlying_vendor: underlying,
-    })
-    .collect()
+/// when the resale provenance is not obvious from the model id. Only the
+/// `opencode-go` rows that ipbr actually scores are listed; opencode-only
+/// resale ids without an ipbr counterpart are still merge-dropped, but
+/// keeping them visible here lets the fallback path round-trip parity with
+/// the live CLI for tests and for any future ipbr coverage.
+fn hardcoded_fallback_for(provider: &str) -> Vec<OpencodeModelMeta> {
+    let entries: &[(&str, Option<VendorKind>)] = match provider {
+        OPENCODE_PROVIDER => &[
+            ("big-pickle", None),
+            ("gpt-5-nano", Some(VendorKind::Codex)),
+            ("hy3-preview-free", None),
+            ("minimax-m2.5-free", Some(VendorKind::Kimi)),
+            ("nemotron-3-super-free", None),
+        ],
+        OPENCODE_GO_PROVIDER => &[
+            ("deepseek-v4-flash", None),
+            ("deepseek-v4-pro", None),
+            ("glm-5", None),
+            ("glm-5.1", None),
+            ("kimi-k2.5", Some(VendorKind::Kimi)),
+            ("kimi-k2.6", Some(VendorKind::Kimi)),
+            ("qwen3.5-plus", None),
+            ("qwen3.6-plus", None),
+        ],
+        _ => &[],
+    };
+    entries
+        .iter()
+        .map(|(id, underlying)| OpencodeModelMeta {
+            id: (*id).to_string(),
+            provider_id: provider.to_string(),
+            display_name: None,
+            api_npm: None,
+            underlying_vendor: *underlying,
+        })
+        .collect()
 }
-fn run_models_command() -> Result<String> {
-    run_opencode_command(
-        ["models", "opencode", "--verbose"],
-        "opencode models opencode --verbose",
-        "opencode models output was not UTF-8",
-    )
+fn run_models_command(provider: &str) -> Result<String> {
+    let label = format!("opencode models {provider} --verbose");
+    let utf8_context: &'static str = match provider {
+        OPENCODE_GO_PROVIDER => "opencode-go models output was not UTF-8",
+        _ => "opencode models output was not UTF-8",
+    };
+    run_opencode_command(["models", provider, "--verbose"], &label, utf8_context)
 }
 fn run_stats_command() -> Result<String> {
     let days = STATS_WINDOW_DAYS.to_string();

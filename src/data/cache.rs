@@ -88,6 +88,11 @@ pub struct DashboardEntry {
     pub ipbr_match_key: Option<String>,
     #[serde(default)]
     pub route_underlying_vendor: Option<VendorKind>,
+    /// Opencode sub-provider (`opencode` or `opencode-go`). Persisted so a
+    /// cached entry survives a restart and the launch boundary can still
+    /// pick the right tier qualifier without re-querying the CLI.
+    #[serde(default)]
+    pub route_provider: Option<String>,
     pub display_order: usize,
     #[serde(default)]
     pub fallback_from: Option<String>,

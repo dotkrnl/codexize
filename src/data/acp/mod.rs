@@ -124,6 +124,10 @@ impl AcpLaunchPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
     pub vendor: VendorKind, pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
+    /// Opencode sub-provider for the requested model (`opencode` or
+    /// `opencode-go`). The launch boundary uses this to qualify a bare
+    /// `model` with the right tier prefix; `None` for direct vendors.
+    pub route_provider: Option<String>,
     pub requested_effort: EffortLevel, pub effective_effort: EffortLevel,
     pub interactive: bool, pub modes: LaunchModes, pub policy: AcpLaunchPolicy,
 }

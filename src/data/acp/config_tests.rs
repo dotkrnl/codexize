@@ -7,6 +7,7 @@ fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
         cwd: PathBuf::from("workspace"),
         prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: "gpt-5.5".to_string(),
+        route_provider: None,
         requested_effort: EffortLevel::Normal,
         effective_effort: EffortLevel::Low,
         interactive: false,
@@ -148,6 +149,33 @@ fn opencode_launch_preserves_provider_qualified_model() {
             .get("CODEXIZE_ACP_MODEL")
             .map(String::as_str),
         Some("opencode/big-pickle")
+    );
+}
+
+#[test]
+fn opencode_go_route_provider_drives_launch_qualifier() {
+    // route_provider = "opencode-go" must reach the spawn as
+    // `opencode-go/<id>` so the Go-tier API URL is hit, not the zen tier.
+    // Without route_provider the launch would default to `opencode/<id>`,
+    // which would 404 against opencode-go-only models like deepseek.
+    let request = AcpLaunchRequest {
+        model: "deepseek-v4-flash".to_string(),
+        route_provider: Some("opencode-go".to_string()),
+        ..sample_request(VendorKind::Opencode)
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve opencode-go");
+
+    assert_eq!(resolved.session.model, "opencode-go/deepseek-v4-flash");
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_MODEL")
+            .map(String::as_str),
+        Some("opencode-go/deepseek-v4-flash")
     );
 }
 

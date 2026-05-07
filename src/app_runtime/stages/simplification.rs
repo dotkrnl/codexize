@@ -68,6 +68,7 @@ impl App {
                     model.name.clone(),
                     model.vendor,
                     vendor_tag(model.vendor).to_string(),
+                    model.route_provider.clone(),
                 )
             })
             .or_else(|| self.round_stage_model("simplifier", round))
@@ -75,7 +76,7 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Build, effort, modes.cheap)
             });
-        let Some((model, vendor_kind, vendor)) = chosen else {
+        let Some((model, vendor_kind, vendor, route_provider)) = chosen else {
             self.record_agent_error("no model available for simplifier".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -115,6 +116,7 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
+            route_provider: route_provider.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
@@ -156,6 +158,7 @@ impl App {
                     round,
                     model,
                     vendor,
+                    route_provider,
                     window_name,
                     effort,
                     modes,

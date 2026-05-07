@@ -11,6 +11,12 @@ pub enum EffortLevel {
 }
 pub struct AgentRun {
     pub model: String,
+    /// Opencode sub-provider for the chosen model (`opencode` or
+    /// `opencode-go`). Threaded through to the ACP launch so a bare model
+    /// id like `deepseek-v4-flash` reaches the right opencode tier.
+    /// `None` for direct vendors and for opencode entries that originated
+    /// before this field was wired.
+    pub route_provider: Option<String>,
     pub prompt_path: PathBuf,
     pub effort: EffortLevel,
     pub modes: LaunchModes,

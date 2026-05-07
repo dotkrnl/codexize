@@ -119,6 +119,12 @@ pub struct RunRecord {
     pub attempt: u32,
     pub model: String,
     pub vendor: String,
+    /// Opencode sub-provider (`opencode` or `opencode-go`). Persisted so
+    /// resume / retry can re-launch through the right tier without
+    /// reconsulting the universe. `None` for direct vendors and for
+    /// records written before this field was added.
+    #[serde(default)]
+    pub route_provider: Option<String>,
     /// Persisted key retained for schema compatibility with existing runs.
     pub window_name: String,
     pub started_at: chrono::DateTime<chrono::Utc>,

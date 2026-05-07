@@ -21,6 +21,7 @@ pub(super) fn build_managed_acp_launch(
         cwd,
         prompt: PromptPayload::File(run.prompt_path.clone()),
         model: run.model.clone(),
+        route_provider: run.route_provider.clone(),
         // The current launch sites already pass the codexize-computed effective
         // effort. Task 2 keeps artifact/finalization ownership in codexize and
         // defers the requested-vs-effective UI split to the later ACP UX work.

@@ -14,6 +14,7 @@ fn running_run(id: u64) -> RunRecord {
         attempt: 1,
         model: "kimi-latest".to_string(),
         vendor: "moonshotai".to_string(),
+        route_provider: None,
         window_name: "[Test]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

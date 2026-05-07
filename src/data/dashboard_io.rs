@@ -95,6 +95,10 @@ pub struct DashboardModel {
     pub ipbr_row_matched: bool,
     pub ipbr_match_key: Option<String>,
     pub route_underlying_vendor: Option<crate::selection::VendorKind>,
+    /// Opencode sub-provider this row was advertised under (`opencode` or
+    /// `opencode-go`). Carried so the ACP launch boundary can qualify the
+    /// bare `name` with the right tier prefix. `None` for direct vendors.
+    pub route_provider: Option<String>,
     pub display_order: usize,
     /// Set when this model's score was borrowed from a same-stem sibling
     /// because the ranking API has no entry for it yet. Holds the sibling's
@@ -201,6 +205,7 @@ async fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
             vendor,
             display_order: i,
             route_underlying_vendor: None,
+            route_provider: None,
         });
     }
     anyhow::ensure!(!entries.is_empty(), "models list returned no entries");
@@ -212,7 +217,11 @@ pub(crate) fn append_opencode_inventory(
 ) {
     let start = inventory.len();
     inventory.extend(models.into_iter().enumerate().filter_map(|(i, meta)| {
-        if meta.provider_id != "opencode" {
+        // Both `opencode` (zen tier) and `opencode-go` (Go tier) ride the
+        // same shared quota and surface as `vendor = "opencode"` in the UI;
+        // they only diverge at ACP launch time, where route_provider picks
+        // the qualifier. Other provider ids (openrouter, etc.) stay out.
+        if meta.provider_id != "opencode" && meta.provider_id != "opencode-go" {
             return None;
         }
         let name = meta.id.trim().to_ascii_lowercase();
@@ -224,6 +233,7 @@ pub(crate) fn append_opencode_inventory(
             vendor: "opencode".to_string(),
             display_order: start + i,
             route_underlying_vendor: meta.underlying_vendor,
+            route_provider: Some(meta.provider_id),
         })
     }));
 }

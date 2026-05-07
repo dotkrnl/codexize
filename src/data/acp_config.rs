@@ -53,7 +53,11 @@ impl AcpConfig {
             AcpShellCommandPolicy::FullAccess => ("full-access", Vec::new()),
             AcpShellCommandPolicy::Allowlist(c) => ("allowlist", c.clone()),
         };
-        let launch_model = launch_model_for_vendor(request.vendor, &request.model);
+        let launch_model = launch_model_for_vendor(
+            request.vendor,
+            request.route_provider.as_deref(),
+            &request.model,
+        );
         let entries = [
             ("vendor", vendor_kind_to_str(request.vendor).to_string()),
             ("model", launch_model.clone()),
@@ -137,11 +141,19 @@ fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDe
     AcpAgentDefinition { vendor, program: program.to_string(), args, env: BTreeMap::new() }
 }
 #[rustfmt::skip]
-fn launch_model_for_vendor(vendor: VendorKind, model: &str) -> String {
+fn launch_model_for_vendor(
+    vendor: VendorKind,
+    route_provider: Option<&str>,
+    model: &str,
+) -> String {
     if vendor == VendorKind::Opencode && !model.contains('/') {
         // opencode's ACP `model` config advertises provider-qualified values
-        // (`opencode/<id>`), while inventory stores bare ids for ipbr matching.
-        format!("opencode/{model}")
+        // (`opencode/<id>` for the zen tier, `opencode-go/<id>` for the Go
+        // tier), while inventory stores bare ids for ipbr matching. Default
+        // to the legacy `opencode` qualifier when route_provider is unset
+        // so cached entries written before this field landed still launch.
+        let qualifier = route_provider.unwrap_or("opencode");
+        format!("{qualifier}/{model}")
     } else {
         model.to_string()
     }

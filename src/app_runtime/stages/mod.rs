@@ -93,12 +93,13 @@ impl App {
         phase: SelectionPhase,
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, VendorKind, String)> {
+    ) -> Option<(String, VendorKind, String, Option<String>)> {
         if let Some(model) = override_model {
             return Some((
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
+                model.route_provider.clone(),
             ));
         }
         let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
@@ -106,6 +107,7 @@ impl App {
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
+            outcome.model.route_provider.clone(),
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -117,12 +119,13 @@ impl App {
         used_models: &[(VendorKind, String)],
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, VendorKind, String)> {
+    ) -> Option<(String, VendorKind, String, Option<String>)> {
         if let Some(model) = override_model {
             return Some((
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
+                model.route_provider.clone(),
             ));
         }
         let outcome =
@@ -131,6 +134,7 @@ impl App {
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
+            outcome.model.route_provider.clone(),
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -146,6 +150,7 @@ impl App {
         round: u32,
         model: String,
         vendor: String,
+        route_provider: Option<String>,
         window_name: String,
         effort: EffortLevel,
         mut modes: LaunchModes,
@@ -171,6 +176,7 @@ impl App {
             attempt,
             model,
             vendor,
+            route_provider,
             window_name,
             effort,
             modes,
@@ -259,13 +265,16 @@ impl App {
             _ => false,
         }
     }
-    fn session_selected_model_for_validator(&mut self) -> Option<(String, VendorKind, String)> {
+    fn session_selected_model_for_validator(
+        &mut self,
+    ) -> Option<(String, VendorKind, String, Option<String>)> {
         let name = self.state.selected_model.as_ref()?.clone();
         let model = self.models.iter().find(|m| m.name == name)?;
         Some((
             model.name.clone(),
             model.vendor,
             vendor_tag(model.vendor).to_string(),
+            model.route_provider.clone(),
         ))
     }
     /// Look up the most-recent run on a stage for the given round and
@@ -278,7 +287,11 @@ impl App {
     /// task's attempt=1 is newer than an earlier task's attempt=2, and
     /// the simplifier should follow the model the round most recently
     /// settled on.
-    fn round_stage_model(&self, stage: &str, round: u32) -> Option<(String, VendorKind, String)> {
+    fn round_stage_model(
+        &self,
+        stage: &str,
+        round: u32,
+    ) -> Option<(String, VendorKind, String, Option<String>)> {
         let last = self
             .state
             .agent_runs
@@ -290,6 +303,7 @@ impl App {
             last.model.clone(),
             vendor_kind,
             vendor_tag(vendor_kind).to_string(),
+            last.route_provider.clone(),
         ))
     }
 }

@@ -56,7 +56,7 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, vendor_kind, vendor) = chosen;
+        let (model, vendor_kind, vendor, route_provider) = chosen;
         let prompt_path = session_dir.join("prompts").join(format!("coder-r{r}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -90,6 +90,7 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
+            route_provider: route_provider.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
@@ -129,6 +130,7 @@ impl App {
                     r,
                     model,
                     vendor,
+                    route_provider,
                     window_name,
                     effort,
                     modes,

@@ -12,6 +12,11 @@ pub(crate) struct InventoryEntry {
     pub(crate) vendor: String,
     pub(crate) display_order: usize,
     pub(crate) route_underlying_vendor: Option<VendorKind>,
+    /// Opencode sub-provider this row was advertised under (`opencode` or
+    /// `opencode-go`). The bare `name` stays ipbr-compatible; route_provider
+    /// is what the launch boundary qualifies the model with so the spawn
+    /// reaches the right opencode tier. `None` for non-opencode entries.
+    pub(crate) route_provider: Option<String>,
 }
 /// Canonicalized score record produced by score ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
@@ -116,6 +121,7 @@ pub(crate) fn merge_with_warnings(
                 &scores[*score_index],
                 None,
                 route_underlying_vendor,
+                inv.route_provider,
             ));
         } else if inv.vendor == "opencode" {
             continue;
@@ -126,6 +132,7 @@ pub(crate) fn merge_with_warnings(
                 sc,
                 None,
                 inv.route_underlying_vendor,
+                inv.route_provider,
             ));
         } else if let Some(sc) = sibling_score(&inv.name, &scores) {
             models.push(dashboard_model_from_score(
@@ -134,6 +141,7 @@ pub(crate) fn merge_with_warnings(
                 sc,
                 Some(sc.name.clone()),
                 inv.route_underlying_vendor,
+                inv.route_provider,
             ));
         } else {
             models.push(empty_inventory_model(
@@ -141,6 +149,7 @@ pub(crate) fn merge_with_warnings(
                 inv.vendor,
                 inv.display_order + 10_000,
                 inv.route_underlying_vendor,
+                inv.route_provider,
             ));
         }
     }
@@ -152,6 +161,7 @@ pub(crate) fn merge_with_warnings(
                 sc.name.clone(),
                 &sc.vendor,
                 sc,
+                None,
                 None,
                 None,
             ));
@@ -183,6 +193,7 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
                 None
             },
             route_underlying_vendor: None,
+            route_provider: None,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -197,6 +208,7 @@ pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
                 inv.vendor,
                 inv.display_order,
                 inv.route_underlying_vendor,
+                inv.route_provider,
             )
         })
         .collect()
@@ -206,6 +218,7 @@ fn empty_inventory_model(
     vendor: String,
     display_order: usize,
     route_underlying_vendor: Option<VendorKind>,
+    route_provider: Option<String>,
 ) -> DashboardModel {
     DashboardModel {
         name,
@@ -220,6 +233,7 @@ fn empty_inventory_model(
         ipbr_row_matched: false,
         ipbr_match_key: None,
         route_underlying_vendor,
+        route_provider,
         display_order,
         fallback_from: None,
     }
@@ -260,6 +274,7 @@ pub fn synthesize_sibling(
         ipbr_row_matched: false,
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
@@ -338,6 +353,7 @@ fn dashboard_model_from_score(
     sc: &ScoreEntry,
     fallback_from: Option<String>,
     route_underlying_vendor: Option<VendorKind>,
+    route_provider: Option<String>,
 ) -> DashboardModel {
     let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
@@ -372,6 +388,7 @@ fn dashboard_model_from_score(
             None
         },
         route_underlying_vendor,
+        route_provider,
         display_order: sc.display_order,
         fallback_from,
     }

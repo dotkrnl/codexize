@@ -13,6 +13,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         attempt: 1,
         model: "claude-opus-4-7".to_string(),
         vendor: "anthropic".to_string(),
+        route_provider: None,
         window_name: "[Brainstorm]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

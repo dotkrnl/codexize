@@ -47,7 +47,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor) = chosen;
+        let (model, vendor_kind, vendor, route_provider) = chosen;
         let completed = self.state.builder.done_task_ids();
         let id_floor = self.state.builder.max_task_id();
         let prompt = recovery_sharding_prompt(
@@ -70,6 +70,7 @@ impl App {
         session_state::transitions::mark_latest_pipeline_stage_running(&mut self.state, "sharding");
         let run = AgentRun {
             model: model.clone(),
+            route_provider: route_provider.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
@@ -109,6 +110,7 @@ impl App {
                     round,
                     model,
                     vendor,
+                    route_provider,
                     window_name,
                     effort,
                     modes,

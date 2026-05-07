@@ -62,6 +62,7 @@ pub fn assemble_universe(
             ipbr_row_matched: e.ipbr_row_matched,
             ipbr_match_key: e.ipbr_match_key,
             route_underlying_vendor: e.route_underlying_vendor,
+            route_provider: e.route_provider,
             display_order: e.display_order,
             fallback_from: e.fallback_from,
         })
@@ -113,6 +114,7 @@ pub fn assemble_universe(
                 ipbr_row_matched: m.ipbr_row_matched,
                 ipbr_match_key: m.ipbr_match_key,
                 route_underlying_vendor: m.route_underlying_vendor,
+                route_provider: m.route_provider,
                 quota_percent,
                 quota_resets_at,
                 display_order: m.display_order,
@@ -332,6 +334,7 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
             ipbr_row_matched: m.ipbr_row_matched,
             ipbr_match_key: m.ipbr_match_key.clone(),
             route_underlying_vendor: m.route_underlying_vendor,
+            route_provider: m.route_provider.clone(),
             display_order: m.display_order,
             fallback_from: m.fallback_from.clone(),
         })

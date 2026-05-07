@@ -49,7 +49,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor) = chosen;
+        let (model, vendor_kind, vendor, route_provider) = chosen;
         let _ = std::fs::remove_file(&plan_path);
         let prompt_path = session_dir.join("prompts").join("planning.md");
         if let Some(parent) = prompt_path.parent() {
@@ -70,6 +70,7 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
+            route_provider: route_provider.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,
@@ -120,6 +121,7 @@ impl App {
                     1,
                     model,
                     vendor,
+                    route_provider,
                     window_name,
                     effort,
                     modes,

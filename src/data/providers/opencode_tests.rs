@@ -106,24 +106,70 @@ fn parse_verbose_returns_empty_for_garbage() {
 
 #[test]
 fn enumerate_falls_back_to_hardcoded_when_cli_text_missing() {
-    let models = enumerate_with_cli_text(None);
+    let models = enumerate_with_cli_texts(None, None);
     assert!(!models.is_empty(), "fallback list must not be empty");
-    assert!(models.iter().all(|m| m.provider_id == "opencode"));
-    assert!(models.iter().any(|m| m.id == "gpt-5-nano"));
+    assert!(
+        models
+            .iter()
+            .any(|m| m.provider_id == "opencode" && m.id == "gpt-5-nano"),
+        "opencode fallback must include gpt-5-nano"
+    );
+    assert!(
+        models
+            .iter()
+            .any(|m| m.provider_id == "opencode-go" && m.id == "deepseek-v4-flash"),
+        "opencode-go fallback must include deepseek-v4-flash"
+    );
 }
 
 #[test]
 fn enumerate_falls_back_when_cli_text_parses_to_nothing() {
-    let models = enumerate_with_cli_text(Some("nothing parseable here"));
-    assert!(!models.is_empty());
+    let models = enumerate_with_cli_texts(Some("nothing parseable here"), None);
     assert!(models.iter().any(|m| m.id == "gpt-5-nano"));
+    assert!(models.iter().any(|m| m.id == "deepseek-v4-flash"));
 }
 
 #[test]
-fn enumerate_prefers_cli_text_over_fallback() {
-    let models = enumerate_with_cli_text(Some(VERBOSE_FIXTURE));
-    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, vec!["big-pickle", "gpt-5-nano", "kimi-something"]);
+fn enumerate_prefers_cli_text_over_fallback_per_provider() {
+    let go_fixture = r#"opencode-go/deepseek-v4-flash
+{
+  "id": "deepseek-v4-flash",
+  "providerID": "opencode-go",
+  "api": { "npm": "@ai-sdk/openai-compatible" }
+}
+"#;
+    let models = enumerate_with_cli_texts(Some(VERBOSE_FIXTURE), Some(go_fixture));
+    let opencode_ids: Vec<&str> = models
+        .iter()
+        .filter(|m| m.provider_id == "opencode")
+        .map(|m| m.id.as_str())
+        .collect();
+    assert_eq!(
+        opencode_ids,
+        vec!["big-pickle", "gpt-5-nano", "kimi-something"]
+    );
+    let go_ids: Vec<&str> = models
+        .iter()
+        .filter(|m| m.provider_id == "opencode-go")
+        .map(|m| m.id.as_str())
+        .collect();
+    assert_eq!(go_ids, vec!["deepseek-v4-flash"]);
+}
+
+#[test]
+fn enumerate_isolates_provider_text_from_other_branch() {
+    // The verbose fixture is opencode-only; passing it as the opencode-go
+    // text must NOT leak `opencode/...` rows into the opencode-go branch.
+    let models = enumerate_with_cli_texts(None, Some(VERBOSE_FIXTURE));
+    assert!(
+        models
+            .iter()
+            .filter(|m| m.provider_id == "opencode-go")
+            .all(|m| ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5", "glm-5.1",
+                "kimi-k2.5", "kimi-k2.6", "qwen3.5-plus", "qwen3.6-plus"]
+                .contains(&m.id.as_str())),
+        "opencode-go branch must fall back to its hardcoded snapshot when CLI text only matches the other provider"
+    );
 }
 
 #[test]

@@ -21,6 +21,7 @@ fn retry_target_for_run_prefers_task_and_falls_back_to_stage() {
         attempt: 1,
         model: "gpt-5".to_string(),
         vendor: "codex".to_string(),
+        route_provider: None,
         window_name: "coder".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

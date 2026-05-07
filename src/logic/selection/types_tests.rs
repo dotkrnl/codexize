@@ -21,6 +21,7 @@ fn sample_cached_model() -> CachedModel {
         fallback_from: Some("gpt-5".to_string()),
         ipbr_match_key: None,
         route_underlying_vendor: None,
+        route_provider: None,
     }
 }
 

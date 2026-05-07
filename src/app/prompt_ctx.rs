@@ -1,9 +1,9 @@
 use std::{
     collections::HashMap,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
-use crate::logic::memory::memory_root_from_session_path;
+use crate::logic::memory::{memory_root_from_session_path, normalize_absolute};
 pub(super) struct PromptCtx {
     values: HashMap<&'static str, String>,
 }
@@ -81,26 +81,7 @@ impl PromptCtx {
     }
 }
 pub(super) fn resolved_agent_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
-    let mut resolved = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::Prefix(prefix) => resolved.push(prefix.as_os_str()),
-            Component::RootDir => resolved.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = resolved.pop();
-            }
-            Component::Normal(part) => resolved.push(part),
-        }
-    }
-    resolved
+    normalize_absolute(path)
 }
 fn agent_path(path: &Path) -> String {
     resolved_agent_path(path).display().to_string()

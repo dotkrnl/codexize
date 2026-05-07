@@ -130,6 +130,10 @@ pub fn memory_glob_from_session_path(path: &Path) -> PathBuf {
     memory_root_from_session_path(path).join("**")
 }
 
+pub fn dream_report_path(memory_root: &Path, round: u32) -> PathBuf {
+    memory_root.join("dreams").join(format!("dream-{round:04}.toml"))
+}
+
 pub fn parse_manifest_toml(text: &str) -> anyhow::Result<MemoryManifest> {
     Ok(toml::from_str(text)?)
 }
@@ -205,12 +209,15 @@ fn validate_entry(
     Ok(())
 }
 
-fn validate_relative_memory_path(index: usize, field: &str, path: &Path) -> anyhow::Result<()> {
-    if path.is_absolute()
-        || path
+fn is_relative_within_memory(path: &Path) -> bool {
+    !path.is_absolute()
+        && !path
             .components()
             .any(|component| matches!(component, Component::ParentDir))
-    {
+}
+
+fn validate_relative_memory_path(index: usize, field: &str, path: &Path) -> anyhow::Result<()> {
+    if !is_relative_within_memory(path) {
         bail!("entries[{index}]: {field} must be relative within .codexize/memory");
     }
     Ok(())
@@ -227,9 +234,9 @@ fn reject_supersession_cycles(manifest: &MemoryManifest) -> anyhow::Result<()> {
             )
         })
         .collect();
+    let mut visiting = HashSet::new();
+    let mut visited = HashSet::new();
     for entry in &manifest.entries {
-        let mut visiting = HashSet::new();
-        let mut visited = HashSet::new();
         if has_cycle(entry.id.as_str(), &graph, &mut visiting, &mut visited) {
             bail!("circular supersession reference involving {}", entry.id);
         }
@@ -289,11 +296,7 @@ pub fn validate_dream_report(
         bail!("dream changes must not be empty");
     }
     for (i, input) in report.inputs.iter().enumerate() {
-        if input.is_absolute()
-            || input
-                .components()
-                .any(|component| matches!(component, Component::ParentDir))
-        {
+        if !is_relative_within_memory(input) {
             bail!("inputs[{i}] must be relative within .codexize/memory");
         }
         let target = memory_root.join(input);
@@ -312,7 +315,7 @@ pub fn validate_dream_report(
     Ok(())
 }
 
-fn normalize_absolute(path: &Path) -> PathBuf {
+pub(crate) fn normalize_absolute(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {

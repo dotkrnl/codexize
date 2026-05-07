@@ -30,17 +30,16 @@ impl App {
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
         let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
-        let dream_dir = memory_root.join("dreams");
-        if let Err(err) = std::fs::create_dir_all(&dream_dir) {
+        let dream_report_path =
+            crate::logic::memory::dream_report_path(&memory_root, round);
+        if let Some(parent) = dream_report_path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
             self.record_agent_error(format!("error creating dream report dir: {err}"));
             let _ = self.state.save();
             self.rebuild_tree_view(None);
             return false;
         }
-        // The report schema names dream-####.toml but does not define the
-        // counter; use the final-validation round so retries replace the same
-        // audited decision instead of producing competing dream reports.
-        let dream_report_path = dream_dir.join(format!("dream-{round:04}.toml"));
         // Re-entry of Phase::Dreaming(round) always restarts from scratch;
         // remove any prior report so the current attempt does not accidentally
         // finalize against stale output.
@@ -149,9 +148,9 @@ impl App {
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
         let session_dir = session_state::session_dir(&self.state.session_id);
-        let report_path = crate::logic::memory::memory_root_from_session_path(&session_dir)
-            .join("dreams")
-            .join(format!("dream-{round:04}.toml"));
+        let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
+        let report_path =
+            crate::logic::memory::dream_report_path(&memory_root, round);
         if let Err(err) = crate::data::memory::validate_dream_report_file(&report_path) {
             self.record_agent_error(format!("invalid dream report: {err}"));
             return Ok(());

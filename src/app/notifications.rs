@@ -167,6 +167,8 @@ impl App {
             round,
             attempt,
             run_id,
+            last_live_summary: None,
+            last_agent_response: None,
         }
     }
 

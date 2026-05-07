@@ -148,6 +148,8 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
         round: Some(1),
         attempt: Some(1),
         run_id: Some(7),
+        last_live_summary: None,
+        last_agent_response: None,
     };
     let marker = InteractiveWaitMarker {
         run_id: 7,
@@ -183,38 +185,116 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
 }
 
 #[test]
-fn formatter_preserves_context_and_minimal_mode_reduces_detail() {
+fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() {
     let mut config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
-    let event = sample_event(
+    let mut event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::InteractiveRunWait,
         crate::state::Phase::BrainstormRunning,
     );
+    event.context.last_agent_response = Some(
+        "Should I keep going on the migration plan, or focus on tests first?".to_string(),
+    );
+    event.context.last_live_summary = Some("Should not surface here".to_string());
 
     let detailed = format_ntfy_message(&config, &event);
 
-    assert_eq!(detailed.title, "codexize: input needed");
-    assert!(detailed.body.contains("session: Readable Session"));
-    assert!(detailed.body.contains("session_id: session-a"));
-    assert!(detailed.body.contains("phase: Brainstorming"));
-    assert!(detailed.body.contains("stage: brainstorm"));
-    assert!(detailed.body.contains("run_id: 7"));
+    assert_eq!(detailed.title, "codexize: agent is waiting on you");
     assert!(
         detailed
             .body
-            .contains("reason: interactive agent is waiting")
+            .contains("brainstorm agent on \"Readable Session\" is waiting on a reply")
+    );
+    assert!(detailed.body.contains("Last response:"));
+    assert!(
+        detailed
+            .body
+            .contains("Should I keep going on the migration plan")
+    );
+    assert!(
+        !detailed.body.contains("Last activity:"),
+        "interactive wait must surface the agent response, not the live summary"
+    );
+    assert!(
+        !detailed.body.contains("Should not surface here"),
+        "interactive wait should ignore last_live_summary"
     );
     assert!(detailed.body.len() <= NTFY_BODY_MAX_BYTES);
 
     config.detail_mode = NtfyDetailMode::Minimal;
     let minimal = format_ntfy_message(&config, &event);
 
-    assert_eq!(minimal.title, "codexize: input needed");
+    assert_eq!(minimal.title, "codexize: agent is waiting on you");
+    assert!(
+        minimal
+            .body
+            .contains("brainstorm agent on \"Readable Session\" is waiting on a reply")
+    );
+    assert!(
+        !minimal.body.contains("Last response:"),
+        "minimal mode should drop the excerpt line"
+    );
     assert!(minimal.body.len() < detailed.body.len());
-    assert!(minimal.body.contains("input needed"));
-    assert!(minimal.body.contains("session-a"));
-    assert!(minimal.body.contains("brainstorm"));
-    assert!(!minimal.body.contains("Readable Session"));
+}
+
+#[test]
+fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
+    let config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
+
+    let mut spec_review_event = sample_event(
+        NotificationEventKind::InputNeeded,
+        NotificationReason::PhaseWait,
+        crate::state::Phase::SpecReviewPaused,
+    );
+    spec_review_event.context.last_live_summary =
+        Some("drafted §3 about caching layer invariants".to_string());
+
+    let detailed = format_ntfy_message(&config, &spec_review_event);
+    assert_eq!(detailed.title, "codexize: spec ready for review");
+    assert!(
+        detailed
+            .body
+            .contains("Spec review is paused on \"Readable Session\"")
+    );
+    assert!(
+        detailed
+            .body
+            .contains("Last activity: drafted §3 about caching layer invariants")
+    );
+
+    let mut done_event = sample_event(
+        NotificationEventKind::PipelineDone,
+        NotificationReason::PhaseWait,
+        crate::state::Phase::Done,
+    );
+    done_event.context.last_live_summary = Some("ran final validation, all green".to_string());
+
+    let done = format_ntfy_message(&config, &done_event);
+    assert_eq!(done.title, "codexize: pipeline finished");
+    assert!(done.body.contains("Pipeline finished on \"Readable Session\""));
+    assert!(
+        done.body
+            .contains("Last activity: ran final validation, all green")
+    );
+}
+
+#[test]
+fn formatter_excerpts_long_context_lines() {
+    let config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
+    let mut event = sample_event(
+        NotificationEventKind::InputNeeded,
+        NotificationReason::InteractiveRunWait,
+        crate::state::Phase::BrainstormRunning,
+    );
+    event.context.last_agent_response = Some("x".repeat(5_000));
+
+    let formatted = format_ntfy_message(&config, &event);
+
+    assert!(formatted.body.len() <= NTFY_BODY_MAX_BYTES);
+    assert!(
+        formatted.body.contains("..."),
+        "long agent responses must be truncated with an ellipsis"
+    );
 }
 
 #[test]
@@ -229,7 +309,7 @@ fn formatter_normalizes_title_and_truncates_body_on_utf8_boundaries() {
 
     let message = format_ntfy_message(&config, &event);
 
-    assert_eq!(message.title, "codexize: pipeline done");
+    assert_eq!(message.title, "codexize: pipeline finished");
     assert!(message.title.is_ascii());
     assert!(message.body.len() <= NTFY_BODY_MAX_BYTES);
     assert!(
@@ -268,9 +348,13 @@ async fn publisher_posts_to_configured_endpoint_with_formatted_title_and_body() 
     assert_eq!(requests[0].path, "/topic-test");
     assert_eq!(
         requests[0].header("title").as_deref(),
-        Some("codexize: input needed")
+        Some("codexize: spec ready for review")
     );
-    assert!(requests[0].body.contains("session: Readable Session"));
+    assert!(
+        requests[0]
+            .body
+            .contains("Spec review is paused on \"Readable Session\"")
+    );
 }
 
 #[tokio::test]
@@ -387,6 +471,8 @@ fn sample_context(session_id: &str, stage: &str) -> NotificationContext {
         round: Some(2),
         attempt: Some(1),
         run_id: Some(7),
+        last_live_summary: None,
+        last_agent_response: None,
     }
 }
 

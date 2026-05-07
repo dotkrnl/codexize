@@ -61,6 +61,17 @@ pub struct NotificationContext {
     pub round: Option<u32>,
     pub attempt: Option<u32>,
     pub run_id: Option<u64>,
+    /// Last live-summary line (the agent's "what I'm doing" status).
+    /// Populated for phase-wait and pipeline-done notifications so the
+    /// reader sees what the agent had just finished when the pipeline
+    /// stopped for them — it is the right answer to "what just happened?"
+    /// for review pauses and the final "done" ping.
+    pub last_live_summary: Option<String>,
+    /// Last `AgentText` ACP response from the run that is now waiting on
+    /// the user. Populated only for interactive-run waits, where the
+    /// agent's most recent response *is* the question being asked, and
+    /// surfacing it inline saves a context-switch back to the TUI.
+    pub last_agent_response: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,15 +361,9 @@ impl NtfyConfig {
 }
 
 pub(crate) fn format_ntfy_message(config: &NtfyConfig, event: &NotificationEvent) -> NtfyMessage {
-    let raw_title = match event.kind {
-        NotificationEventKind::InputNeeded => "codexize: input needed",
-        NotificationEventKind::PipelineDone => "codexize: pipeline done",
-    };
-    let title = normalize_header_title(raw_title);
-    let body = match config.detail_mode {
-        NtfyDetailMode::Detailed => detailed_body(event),
-        NtfyDetailMode::Minimal => minimal_body(event),
-    };
+    let title = normalize_header_title(&prose_title(event));
+    let include_context = matches!(config.detail_mode, NtfyDetailMode::Detailed);
+    let body = prose_body(event, include_context);
     NtfyMessage {
         title,
         body: truncate_body(body),
@@ -418,84 +423,196 @@ fn ntfy_http_client() -> Result<Client> {
         .context("failed to build ntfy HTTP client")
 }
 
-fn detailed_body(event: &NotificationEvent) -> String {
-    let mut lines = vec![
-        format!("event: {}", event_kind_label(event.kind)),
-        format!("session: {}", event.context.session_label),
-        format!("session_id: {}", event.context.session_id),
-        format!("phase: {}", event.phase.label()),
-        format!("stage: {}", event.context.stage),
-        format!("reason: {}", reason_label(event)),
-    ];
-    if let Some(task_id) = event.context.task_id {
-        lines.push(format!("task_id: {task_id}"));
-    }
-    if let Some(round) = event.context.round {
-        lines.push(format!("round: {round}"));
-    }
-    if let Some(attempt) = event.context.attempt {
-        lines.push(format!("attempt: {attempt}"));
-    }
-    if let Some(run_id) = event.context.run_id {
-        lines.push(format!("run_id: {run_id}"));
-    }
-    lines.join("\n")
-}
+/// Maximum chars to surface from the live-summary or last agent response
+/// in a notification body. Keeps a long ACP message from blowing through
+/// the reader's lock-screen budget while still leaving room for the lead
+/// sentence and context line.
+const NTFY_EXCERPT_MAX_CHARS: usize = 600;
 
-fn minimal_body(event: &NotificationEvent) -> String {
-    format!(
-        "{} | session={} | phase={} | stage={}",
-        event_kind_label(event.kind),
-        event.context.session_id,
-        event.phase.label(),
-        event.context.stage
-    )
-}
-
-fn event_kind_label(kind: NotificationEventKind) -> &'static str {
-    match kind {
-        NotificationEventKind::InputNeeded => "input needed",
-        NotificationEventKind::PipelineDone => "pipeline done",
-    }
-}
-
-fn reason_label(event: &NotificationEvent) -> &'static str {
-    match (event.kind, event.reason, event.phase) {
-        (NotificationEventKind::PipelineDone, _, _) => "pipeline completed",
+/// Headline shown as the ntfy push title — the *only* text most readers
+/// see at a glance, so it gets a per-event hook (which review is paused,
+/// what kind of decision is needed) instead of a generic
+/// "input needed" / "pipeline done".
+fn prose_title(event: &NotificationEvent) -> String {
+    let label = match (event.kind, event.reason, event.phase) {
+        (NotificationEventKind::PipelineDone, _, _) => "pipeline finished",
         (NotificationEventKind::InputNeeded, NotificationReason::InteractiveRunWait, _) => {
-            "interactive agent is waiting"
+            "agent is waiting on you"
         }
         (
             NotificationEventKind::InputNeeded,
             NotificationReason::PhaseWait,
             Phase::SpecReviewPaused,
-        ) => "spec review paused",
+        ) => "spec ready for review",
         (
             NotificationEventKind::InputNeeded,
             NotificationReason::PhaseWait,
             Phase::PlanReviewPaused,
-        ) => "plan review paused",
+        ) => "plan ready for review",
         (
             NotificationEventKind::InputNeeded,
             NotificationReason::PhaseWait,
             Phase::SkipToImplPending,
-        ) => "skip-to-implementation confirmation needed",
+        ) => "skip planning?",
         (
             NotificationEventKind::InputNeeded,
             NotificationReason::PhaseWait,
             Phase::GitGuardPending,
-        ) => "git guard confirmation needed",
+        ) => "review unauthorized commits",
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::DreamingPending,
+        ) => "dreaming decision",
         (
             NotificationEventKind::InputNeeded,
             NotificationReason::PhaseWait,
             Phase::BlockedNeedsUser,
-        ) => {
-            // BlockedNeedsUser has several origins; keep the reason generic enough
-            // for final-validation blocks while stage carries the precise source.
-            "blocked by final validation"
-        }
+        ) => "blocked, needs you",
         (NotificationEventKind::InputNeeded, NotificationReason::PhaseWait, _) => "input needed",
+    };
+    format!("codexize: {label}")
+}
+
+/// Build the prose body shown under the notification title. `include_context`
+/// gates the trailing "Last activity" / "Last response" excerpt so the
+/// `Minimal` detail mode stays a single sentence while `Detailed` adds the
+/// excerpt — which one is appended depends on the event:
+/// - interactive-run waits get the agent's last ACP response (the question);
+/// - phase-wait + pipeline-done get the last live-summary line (what was
+///   in flight when the pipeline stopped for the operator).
+fn prose_body(event: &NotificationEvent, include_context: bool) -> String {
+    let mut body = lead_sentence(event);
+    if include_context && let Some(line) = context_line(event) {
+        body.push_str("\n\n");
+        body.push_str(&line);
     }
+    body
+}
+
+fn lead_sentence(event: &NotificationEvent) -> String {
+    let session = quoted_session(&event.context.session_label);
+    match (event.kind, event.reason, event.phase) {
+        (NotificationEventKind::PipelineDone, _, _) => {
+            format!("Pipeline finished on {session}.")
+        }
+        (NotificationEventKind::InputNeeded, NotificationReason::InteractiveRunWait, _) => {
+            let stage = humanize_stage(&event.context.stage);
+            format!("The {stage} agent on {session} is waiting on a reply.")
+        }
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::SpecReviewPaused,
+        ) => format!("Spec review is paused on {session}. Take a look and decide what's next."),
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::PlanReviewPaused,
+        ) => format!("Plan review is paused on {session}. Take a look and decide what's next."),
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::SkipToImplPending,
+        ) => format!(
+            "Codexize thinks the spec for {session} is solid enough to skip planning. Confirm to skip directly to coding."
+        ),
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::GitGuardPending,
+        ) => format!(
+            "The interactive run on {session} made commits without permission. Decide whether to keep them or reset."
+        ),
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::DreamingPending,
+        ) => format!("Dreaming is queued on {session}. Approve to run it, or skip and finish."),
+        (
+            NotificationEventKind::InputNeeded,
+            NotificationReason::PhaseWait,
+            Phase::BlockedNeedsUser,
+        ) => format!("Final validation is blocked on {session}. You'll need to step in."),
+        (NotificationEventKind::InputNeeded, NotificationReason::PhaseWait, _) => {
+            let stage = humanize_stage(&event.context.stage);
+            format!("Codexize on {session} needs your input at the {stage} stage.")
+        }
+    }
+}
+
+fn context_line(event: &NotificationEvent) -> Option<String> {
+    match event.reason {
+        NotificationReason::InteractiveRunWait => event
+            .context
+            .last_agent_response
+            .as_deref()
+            .and_then(non_empty_excerpt)
+            .map(|excerpt| format!("Last response: {excerpt}")),
+        NotificationReason::PhaseWait => event
+            .context
+            .last_live_summary
+            .as_deref()
+            .and_then(non_empty_excerpt)
+            .map(|excerpt| format!("Last activity: {excerpt}")),
+    }
+}
+
+fn quoted_session(label: &str) -> String {
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        "this session".to_string()
+    } else {
+        format!("\"{trimmed}\"")
+    }
+}
+
+fn humanize_stage(stage: &str) -> String {
+    let cleaned = stage.replace('-', " ");
+    if cleaned.trim().is_empty() {
+        "agent".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn non_empty_excerpt(text: &str) -> Option<String> {
+    let collapsed = collapse_whitespace(text);
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(truncate_chars(&collapsed, NTFY_EXCERPT_MAX_CHARS))
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last_space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !last_space && !out.is_empty() {
+                out.push(' ');
+                last_space = true;
+            }
+        } else {
+            out.push(ch);
+            last_space = false;
+        }
+    }
+    if out.ends_with(' ') {
+        out.pop();
+    }
+    out
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let marker = "...";
+    let keep = max_chars.saturating_sub(marker.chars().count()).max(1);
+    let mut truncated: String = text.chars().take(keep).collect();
+    truncated.push_str(marker);
+    truncated
 }
 
 fn normalize_header_title(title: &str) -> String {

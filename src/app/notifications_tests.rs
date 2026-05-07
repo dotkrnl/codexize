@@ -95,6 +95,12 @@ fn waiting_phase_transitions_emit_input_needed_events() {
             None,
             "git-guard",
         ),
+        (
+            Phase::FinalValidation(1),
+            Phase::DreamingPending,
+            None,
+            "dreaming",
+        ),
     ];
 
     for (from, to, block_origin, expected_stage) in cases {

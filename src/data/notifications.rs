@@ -339,6 +339,7 @@ pub fn phase_needs_input(phase: Phase) -> bool {
             | Phase::PlanReviewPaused
             | Phase::SkipToImplPending
             | Phase::GitGuardPending
+            | Phase::DreamingPending
     )
 }
 

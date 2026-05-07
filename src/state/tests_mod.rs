@@ -369,6 +369,7 @@ fn test_block_origin_round_trip_all_variants() {
         BlockOrigin::BuilderRecovery,
         BlockOrigin::GitGuard,
         BlockOrigin::FinalValidation,
+        BlockOrigin::Dreaming,
     ] {
         let mut state = SessionState::new("rt".to_string());
         state.block_origin = Some(origin);
@@ -440,6 +441,10 @@ fn test_for_stage_maps_known_stages() {
         BlockOrigin::for_stage("final-validation"),
         Some(BlockOrigin::FinalValidation)
     );
+    assert_eq!(
+        BlockOrigin::for_stage("dreaming"),
+        Some(BlockOrigin::Dreaming)
+    );
     // Older `StageIO::stage` strings are intentionally not accepted; they
     // never appear in `RunRecord.stage`.
     assert_eq!(BlockOrigin::for_stage("spec-reviewer"), None);
@@ -465,6 +470,7 @@ fn test_for_stage_covers_all_run_record_stages() {
         "coder",
         "reviewer",
         "recovery",
+        "dreaming",
     ];
     for stage in stages_used_in_start_run_tracking {
         assert!(

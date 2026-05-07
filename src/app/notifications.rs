@@ -211,6 +211,7 @@ fn stage_for_block_origin(origin: BlockOrigin) -> &'static str {
         BlockOrigin::GitGuard => "git-guard",
         BlockOrigin::FinalValidation => "final-validation",
         BlockOrigin::Simplification => "simplifier",
+        BlockOrigin::Dreaming => "dreaming",
     }
 }
 

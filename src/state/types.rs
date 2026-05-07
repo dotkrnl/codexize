@@ -39,6 +39,7 @@ pub enum BlockOrigin {
     GitGuard,
     FinalValidation,
     Simplification,
+    Dreaming,
 }
 impl BlockOrigin {
     /// Map a `RunRecord.stage` string to its block origin.
@@ -58,6 +59,7 @@ impl BlockOrigin {
             "recovery" => Self::BuilderRecovery,
             "final-validation" => Self::FinalValidation,
             "simplifier" => Self::Simplification,
+            "dreaming" => Self::Dreaming,
             _ => return None,
         })
     }

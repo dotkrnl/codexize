@@ -98,6 +98,60 @@ fn launch_translation_preserves_model_and_cheap_derived_effort() {
 }
 
 #[test]
+fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
+    let request = AcpLaunchRequest {
+        model: "gpt-5-nano".to_string(),
+        ..sample_request(VendorKind::Opencode)
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve opencode");
+
+    assert_eq!(resolved.spawn.program, "opencode");
+    assert_eq!(resolved.spawn.args, vec!["acp".to_string()]);
+    assert_eq!(resolved.session.model, "opencode/gpt-5-nano");
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_MODEL")
+            .map(String::as_str),
+        Some("opencode/gpt-5-nano")
+    );
+    assert_eq!(
+        resolved
+            .session
+            .metadata
+            .get("codexize.model")
+            .map(String::as_str),
+        Some("opencode/gpt-5-nano")
+    );
+}
+
+#[test]
+fn opencode_launch_preserves_provider_qualified_model() {
+    let request = AcpLaunchRequest {
+        model: "opencode/big-pickle".to_string(),
+        ..sample_request(VendorKind::Opencode)
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve opencode");
+
+    assert_eq!(resolved.session.model, "opencode/big-pickle");
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_MODEL")
+            .map(String::as_str),
+        Some("opencode/big-pickle")
+    );
+}
+
+#[test]
 fn acp_launches_use_code_permission_mode_even_without_codexize_yolo() {
     let resolved = AcpConfig::default()
         .resolve(&non_yolo_request(VendorKind::Kimi))
@@ -438,6 +492,29 @@ fn available_vendors_follow_configured_programs() {
     assert_eq!(available.len(), 1);
     assert!(available.contains(&VendorKind::Codex));
     assert!(!available.contains(&VendorKind::Claude));
+}
+
+#[test]
+fn available_vendors_include_opencode_only_when_program_is_executable() {
+    let config = AcpConfig::from_agents([
+        AcpAgentDefinition {
+            vendor: VendorKind::Opencode,
+            program: "/definitely/missing/opencode".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        },
+        AcpAgentDefinition {
+            vendor: VendorKind::Codex,
+            program: "/bin/sh".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+        },
+    ]);
+
+    let available = config.available_vendors();
+
+    assert!(available.contains(&VendorKind::Codex));
+    assert!(!available.contains(&VendorKind::Opencode));
 }
 
 fn write_fake_executable(path: &Path) {

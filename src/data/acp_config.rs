@@ -53,9 +53,10 @@ impl AcpConfig {
             AcpShellCommandPolicy::FullAccess => ("full-access", Vec::new()),
             AcpShellCommandPolicy::Allowlist(c) => ("allowlist", c.clone()),
         };
+        let launch_model = launch_model_for_vendor(request.vendor, &request.model);
         let entries = [
             ("vendor", vendor_kind_to_str(request.vendor).to_string()),
-            ("model", request.model.clone()),
+            ("model", launch_model.clone()),
             ("requested_effort", effort_str(request.requested_effort).to_string()),
             ("effective_effort", reasoning_effort.to_string()),
             ("permission_mode", permission_mode.to_string()),
@@ -78,7 +79,7 @@ impl AcpConfig {
             interactive: request.interactive,
             spawn: AcpSpawnSpec { program: agent.program.clone(), args: agent.args.clone(), env },
             session: AcpSessionSpec {
-                cwd, prompt: request.prompt.clone(), model: request.model.clone(),
+                cwd, prompt: request.prompt.clone(), model: launch_model,
                 reasoning_effort, permission_mode, policy, metadata,
             },
         })
@@ -134,6 +135,16 @@ fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDe
         }
     }
     AcpAgentDefinition { vendor, program: program.to_string(), args, env: BTreeMap::new() }
+}
+#[rustfmt::skip]
+fn launch_model_for_vendor(vendor: VendorKind, model: &str) -> String {
+    if vendor == VendorKind::Opencode && !model.contains('/') {
+        // opencode's ACP `model` config advertises provider-qualified values
+        // (`opencode/<id>`), while inventory stores bare ids for ipbr matching.
+        format!("opencode/{model}")
+    } else {
+        model.to_string()
+    }
 }
 #[rustfmt::skip]
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {

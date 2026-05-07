@@ -69,11 +69,11 @@ impl App {
                 key_hint: None,
             });
         }
-        if self.interactive_run_active() {
+        if self.has_running_agent() {
             commands.push(PaletteCommand {
                 name: "interrupt",
                 aliases: &[],
-                help: "Interrupt ACP turn and send a new prompt",
+                help: "Interrupt the running agent and send a new prompt",
                 key_hint: None,
             });
         }

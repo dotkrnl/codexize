@@ -25,6 +25,24 @@ fn running_recovery_run(id: u64) -> RunRecord {
     }
 }
 
+fn running_noninteractive_run(id: u64) -> RunRecord {
+    let mut run = running_recovery_run(id);
+    run.modes.interactive = false;
+    run
+}
+
+fn running_interactive_run(id: u64) -> RunRecord {
+    let mut run = running_recovery_run(id);
+    run.modes.interactive = true;
+    run
+}
+
+fn finished_run(id: u64) -> RunRecord {
+    let mut run = running_recovery_run(id);
+    run.status = RunStatus::Done;
+    run
+}
+
 #[test]
 fn exit_interactive_run_marks_pending_termination_stop_only() {
     // Operator pressing /exit during interactive recovery should mark the run
@@ -69,4 +87,51 @@ fn exit_interactive_run_skips_when_run_not_in_session() {
     app.exit_interactive_run_locally();
 
     assert!(app.pending_termination.is_none());
+}
+
+#[test]
+fn palette_interrupt_registered_for_noninteractive_running_agent() {
+    let mut state = SessionState::new("interrupt-palette-test".to_string());
+    state.agent_runs.push(running_noninteractive_run(10));
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        commands.iter().any(|cmd| cmd.name == "interrupt"),
+        ":interrupt must appear in palette when a non-interactive agent is running"
+    );
+}
+
+#[test]
+fn palette_interrupt_registered_for_interactive_running_agent() {
+    let mut state = SessionState::new("interrupt-palette-test".to_string());
+    state.agent_runs.push(running_interactive_run(11));
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        commands.iter().any(|cmd| cmd.name == "interrupt"),
+        ":interrupt must appear in palette when an interactive agent is running"
+    );
+}
+
+#[test]
+fn palette_interrupt_absent_when_no_agent_running() {
+    let mut state = SessionState::new("interrupt-palette-test".to_string());
+    state.agent_runs.push(finished_run(12));
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        !commands.iter().any(|cmd| cmd.name == "interrupt"),
+        ":interrupt must not appear in palette when no agent is running"
+    );
+}
+
+#[test]
+fn palette_interrupt_absent_with_empty_runs() {
+    let state = SessionState::new("interrupt-palette-test".to_string());
+    let app = mk_app(state);
+    let commands = app.palette_commands();
+    assert!(
+        !commands.iter().any(|cmd| cmd.name == "interrupt"),
+        ":interrupt must not appear in palette when there are no runs"
+    );
 }

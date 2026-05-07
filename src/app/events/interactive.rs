@@ -116,7 +116,7 @@ impl App {
             self.append_user_input_message(run_id, trimmed);
         } else {
             self.push_status(
-                "interactive agent is not running".to_string(),
+                "no running agent to interrupt".to_string(),
                 Severity::Warn,
                 Duration::from_secs(3),
             );

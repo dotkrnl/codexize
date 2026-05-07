@@ -91,6 +91,7 @@ Project Memory:
   - Do not read the entire memory directory or scan the full memory store.
   - Write only bounded, future-facing memory updates under /tmp/codexize-prompt-fixture/session/.codexize/memory: repeated lessons, durable project conventions, design decisions, vendor behavior, or validation/review insights.
   - Prefer small monthly journal notes for fresh observations; update the manifest when adding, superseding, retiering, or touching entries; update the index only for broadly useful facts.
+  - In TOML files (`manifest.toml`, `dream-####.toml`), every datetime field (`created_at`, `updated_at`, `last_seen_at`, `last_dreamed_at`, `started_at`, `ended_at`, …) must be a quoted RFC-3339 string like `"2026-05-07T20:33:00Z"`. Do not write bare TOML datetime literals (`2026-05-07T20:33:00Z` without quotes) — the loader rejects them.
   - Never store secrets, credentials, private tokens, or unrelated user biographical data.
 
 

@@ -8,6 +8,8 @@ use crate::acp::{AcpResolvedLaunch, AcpTextAccumulator, AcpTextBoundary, AcpText
 use crate::state::{Message, MessageKind, MessageSender, RunStatus, SessionState};
 #[cfg(test)]
 use std::cell::Cell;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 use std::{
     fs,
     io::Write,
@@ -357,5 +359,64 @@ impl AcpDiagnostics for RealAcpDiagnostics {
     }
     fn record_event(&self, launch: &ManagedAcpLaunch, event: serde_json::Value) {
         append_acp_event_trace(launch, event);
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(in crate::data::runner) struct FakeDiagState {
+    pub(in crate::data::runner) warnings: Vec<String>,
+    pub(in crate::data::runner) events: Vec<serde_json::Value>,
+}
+
+/// Recording [`AcpDiagnostics`] for runtime tests. Captures every
+/// `persist_warning` and `record_event` call so assertions can verify the
+/// runtime actually fired the cancel-ack `SummaryWarn` messages and JSONL
+/// trace records mandated by the spec.
+#[cfg(test)]
+#[derive(Default, Clone)]
+pub(in crate::data::runner) struct FakeAcpDiagnostics {
+    inner: Arc<Mutex<FakeDiagState>>,
+}
+
+#[cfg(test)]
+impl FakeAcpDiagnostics {
+    pub(in crate::data::runner) fn new() -> Self {
+        Self::default()
+    }
+    pub(in crate::data::runner) fn warnings(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .expect("FakeAcpDiagnostics mutex poisoned")
+            .warnings
+            .clone()
+    }
+    pub(in crate::data::runner) fn events_of_type(&self, kind: &str) -> Vec<serde_json::Value> {
+        self.inner
+            .lock()
+            .expect("FakeAcpDiagnostics mutex poisoned")
+            .events
+            .iter()
+            .filter(|e| e.get("type").and_then(|v| v.as_str()) == Some(kind))
+            .cloned()
+            .collect()
+    }
+}
+
+#[cfg(test)]
+impl AcpDiagnostics for FakeAcpDiagnostics {
+    fn persist_warning(&self, _launch: &ManagedAcpLaunch, text: &str) {
+        self.inner
+            .lock()
+            .expect("FakeAcpDiagnostics mutex poisoned")
+            .warnings
+            .push(text.to_string());
+    }
+    fn record_event(&self, _launch: &ManagedAcpLaunch, event: serde_json::Value) {
+        self.inner
+            .lock()
+            .expect("FakeAcpDiagnostics mutex poisoned")
+            .events
+            .push(event);
     }
 }

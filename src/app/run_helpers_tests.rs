@@ -1,5 +1,5 @@
 use crate::adapters::EffortLevel;
-use crate::app::test_support::mk_app;
+use crate::app::test_support::{mk_app, with_temp_root};
 use crate::state::{LaunchModes, RunRecord, RunStatus, SessionState};
 fn run(stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> RunRecord {
     RunRecord {
@@ -93,49 +93,53 @@ fn task_round_index_is_one_when_no_prior_runs_exist() {
 fn task_effort_for_round_promotes_when_task_round_index_passes_threshold() {
     // Mirrors the spec: a Normal task that has already had three
     // rounds gets bumped to Tough on the fourth.
-    let mut state = fresh_state();
-    let session_dir = crate::state::session_dir(&state.session_id);
-    std::fs::create_dir_all(session_dir.join("artifacts")).unwrap();
-    std::fs::write(
-        session_dir.join("artifacts").join("tasks.toml"),
-        "[[tasks]]\nid = 1\ntitle = \"x\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
-    )
-    .unwrap();
-    for r in 1..=3 {
-        state.agent_runs.push(run("coder", Some(1), r, 1));
-    }
-    let app = mk_app(state);
-    assert_eq!(
-        app.task_effort_for_round(&session_dir, 1, 4),
-        EffortLevel::Tough,
-        "task's 4th round (global round 4) on a Normal task auto-promotes"
-    );
+    with_temp_root(|| {
+        let mut state = fresh_state();
+        let session_dir = crate::state::session_dir(&state.session_id);
+        std::fs::create_dir_all(session_dir.join("artifacts")).unwrap();
+        std::fs::write(
+            session_dir.join("artifacts").join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"x\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+        )
+        .unwrap();
+        for r in 1..=3 {
+            state.agent_runs.push(run("coder", Some(1), r, 1));
+        }
+        let app = mk_app(state);
+        assert_eq!(
+            app.task_effort_for_round(&session_dir, 1, 4),
+            EffortLevel::Tough,
+            "task's 4th round (global round 4) on a Normal task auto-promotes"
+        );
+    });
 }
 #[test]
 fn task_effort_for_round_does_not_promote_when_global_round_is_high_but_task_is_new() {
     // The user's correction case: this task starts late (global round
     // 4 because earlier tasks consumed 1-3) but it's only the task's
     // 1st round, so it must NOT auto-promote yet.
-    let mut state = fresh_state();
-    let session_dir = crate::state::session_dir(&state.session_id);
-    std::fs::create_dir_all(session_dir.join("artifacts")).unwrap();
-    std::fs::write(
-        session_dir.join("artifacts").join("tasks.toml"),
-        "[[tasks]]\nid = 1\ntitle = \"a\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n[[tasks]]\nid = 2\ntitle = \"b\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
-    )
-    .unwrap();
-    for r in 1..=3 {
-        state.agent_runs.push(run("coder", Some(1), r, 1));
-    }
-    let app = mk_app(state);
-    assert_eq!(
-        app.task_effort_for_round(&session_dir, 2, 4),
-        EffortLevel::Normal,
-        "task 2's first round (global round 4) must stay Normal"
-    );
-    assert_eq!(
-        app.task_effort_for_round(&session_dir, 2, 6),
-        EffortLevel::Normal,
-        "task 2's third task-round (global round 6) must stay Normal"
-    );
+    with_temp_root(|| {
+        let mut state = fresh_state();
+        let session_dir = crate::state::session_dir(&state.session_id);
+        std::fs::create_dir_all(session_dir.join("artifacts")).unwrap();
+        std::fs::write(
+            session_dir.join("artifacts").join("tasks.toml"),
+            "[[tasks]]\nid = 1\ntitle = \"a\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n[[tasks]]\nid = 2\ntitle = \"b\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n",
+        )
+        .unwrap();
+        for r in 1..=3 {
+            state.agent_runs.push(run("coder", Some(1), r, 1));
+        }
+        let app = mk_app(state);
+        assert_eq!(
+            app.task_effort_for_round(&session_dir, 2, 4),
+            EffortLevel::Normal,
+            "task 2's first round (global round 4) must stay Normal"
+        );
+        assert_eq!(
+            app.task_effort_for_round(&session_dir, 2, 6),
+            EffortLevel::Normal,
+            "task 2's third task-round (global round 6) must stay Normal"
+        );
+    });
 }

@@ -419,10 +419,43 @@ impl SessionState {
 /// Root directory for all session state. Honors the `CODEXIZE_ROOT` env var
 /// (used by tests to point at a tempdir); defaults to `.codexize` in the
 /// current working directory for normal use.
+///
+/// Under `cfg(test)`, when `CODEXIZE_ROOT` is unset we fall back to a
+/// per-process tempdir instead of the cwd-relative `.codexize`. This is a
+/// safety net so a test that forgets `with_temp_root` (or wires up a
+/// SessionState helper that quietly calls `state.save()`) cannot scribble
+/// `notify-session-*`/`task-rounds-*` directories into the host repo. Tests
+/// that need a controlled root keep using the existing helpers; this only
+/// catches the leakage path.
 pub fn codexize_root() -> PathBuf {
-    std::env::var_os("CODEXIZE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(".codexize"))
+    if let Some(value) = std::env::var_os("CODEXIZE_ROOT") {
+        return PathBuf::from(value);
+    }
+    #[cfg(test)]
+    {
+        test_default_root()
+    }
+    #[cfg(not(test))]
+    {
+        PathBuf::from(".codexize")
+    }
+}
+#[cfg(test)]
+fn test_default_root() -> PathBuf {
+    use std::sync::OnceLock;
+    static TEST_DEFAULT_ROOT: OnceLock<PathBuf> = OnceLock::new();
+    TEST_DEFAULT_ROOT
+        .get_or_init(|| {
+            let path = std::env::temp_dir().join(format!(
+                "codexize-test-default-{}",
+                std::process::id()
+            ));
+            // Best-effort; downstream callers will surface any actual IO
+            // error against the returned path.
+            let _ = std::fs::create_dir_all(&path);
+            path
+        })
+        .clone()
 }
 /// Return the directory path for a given session ID.
 pub fn session_dir(session_id: &str) -> PathBuf {

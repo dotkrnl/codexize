@@ -9,6 +9,32 @@
 use super::tree::{build_tree, current_node_index, node_key_at_path};
 use super::*;
 
+/// Pin `CODEXIZE_ROOT` to a tempdir for the duration of `f`. Use this for
+/// any test that calls into App methods which save session state, write
+/// events, or otherwise touch `session_dir(...)`. Without this, those
+/// writes leak into the host repo's `.codexize/sessions/` directory.
+/// Serialized via `test_fs_lock` since env mutation is process-global.
+pub(crate) fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
+    let _guard = crate::state::test_fs_lock()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let prev_root = std::env::var_os("CODEXIZE_ROOT");
+
+    // SAFETY: env mutation is serialized by `test_fs_lock`.
+    unsafe {
+        std::env::set_var("CODEXIZE_ROOT", temp.path().join(".codexize"));
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    unsafe {
+        match prev_root {
+            Some(v) => std::env::set_var("CODEXIZE_ROOT", v),
+            None => std::env::remove_var("CODEXIZE_ROOT"),
+        }
+    }
+    result.expect("test panicked")
+}
+
 /// Pin `CODEXIZE_ROOT` to a tempdir and chdir into it for the duration of
 /// `f`. Required by prompts that read `CLAUDE.md`/`AGENTS.md` from the
 /// current working directory — the cwd must be empty so the rendered prompt

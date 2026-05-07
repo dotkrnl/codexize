@@ -414,7 +414,7 @@ pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
     );
     // Best-effort: a transient FS error here must not block session creation.
     if let Err(err) = crate::data::memory::ensure_memory_bootstrap(&memory_root) {
-        let _ = state.log_event(&format!("memory_bootstrap_failed: {err:#}"));
+        let _ = state.log_event(format!("memory_bootstrap_failed: {err:#}"));
     }
     state.log_event("session created")?;
     if state.modes.yolo {

@@ -45,6 +45,8 @@ Review:
      handling, test gaps. Uncommitted working-tree changes are NOT in scope —
      review only `base..HEAD`.
 
+This IS the round's last reviewable task — no further coder runs will follow this approval. `refine` is therefore not available: its carryover would either be silently dropped (YOLO skips the simplifier and transitions straight to Done) or only opportunistically applied by the simplifier. You MUST use `approved` (if the delta is acceptable as-is) or `revise` (if the items must land before merge — that re-runs THIS task in the next round). The orchestrator will reject `status = "refine"` on this run.
+
 
 # IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/rounds/003/review.toml — no prose around it.
 # Parse failure = run failure. Use double-quoted strings; triple-quoted for

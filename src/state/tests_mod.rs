@@ -1231,6 +1231,108 @@ fn test_builder_pending_and_running_items() {
 }
 
 #[test]
+fn is_terminal_review_task_is_true_when_only_running_remains() {
+    // The current task is Running; nothing else is selectable. Approving
+    // it would empty the queue, so refine has nowhere to flow.
+    let mut builder = BuilderState::default();
+    builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(1),
+        status: PipelineItemStatus::Approved,
+        title: None,
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "coder".to_string(),
+        task_id: Some(2),
+        round: Some(2),
+        status: PipelineItemStatus::Running,
+        title: None,
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    assert!(builder.is_terminal_review_task());
+}
+
+#[test]
+fn is_terminal_review_task_is_false_when_pending_work_remains() {
+    // A pending task is still queued for a future coder run, so refine
+    // carryover would have a downstream consumer — terminal=false.
+    let mut builder = BuilderState::default();
+    builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "coder".to_string(),
+        task_id: Some(1),
+        round: Some(1),
+        status: PipelineItemStatus::Running,
+        title: None,
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "coder".to_string(),
+        task_id: Some(2),
+        round: None,
+        status: PipelineItemStatus::Pending,
+        title: None,
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    assert!(!builder.is_terminal_review_task());
+}
+
+#[test]
+fn is_terminal_review_task_ignores_approved_and_done_siblings() {
+    // Tasks that are already approved/done don't keep the round alive —
+    // only selectable (Pending / non-superseded Revise) siblings do.
+    let mut builder = BuilderState::default();
+    for status in [
+        PipelineItemStatus::Approved,
+        PipelineItemStatus::Done,
+        PipelineItemStatus::Approved,
+    ] {
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(1),
+            round: Some(1),
+            status,
+            title: None,
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+    }
+    builder.push_pipeline_item(PipelineItem {
+        id: 0,
+        stage: "coder".to_string(),
+        task_id: Some(2),
+        round: Some(2),
+        status: PipelineItemStatus::Running,
+        title: None,
+        mode: None,
+        trigger: None,
+        interactive: None,
+        iteration: 1,
+    });
+    assert!(builder.is_terminal_review_task());
+}
+
+#[test]
 fn test_pipeline_item_toml_roundtrip() {
     let item = PipelineItem {
         id: 1,

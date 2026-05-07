@@ -288,6 +288,11 @@ pub(crate) struct ReviewerPromptInputs<'a> {
     pub(crate) coder_summary_file: Option<&'a Path>,
     pub(crate) review_file: &'a Path,
     pub(crate) live_summary_path: &'a Path,
+    /// True when this is the last reviewable task in the round (no
+    /// further coder runs follow). The reviewer prompt renders an extra
+    /// hard rule and `review::ReviewVerdict::enforce_terminal_review`
+    /// rejects `status = "refine"` post-hoc — see `BuilderState::is_terminal_review_task`.
+    pub(crate) is_terminal_review: bool,
 }
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let mut ctx = PromptCtx::new();
@@ -314,6 +319,11 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let coder_summary_section = inputs.coder_summary_file.map_or(String::new(), |path| {
         formatdoc!("  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n", ctx.path(path), inputs.round)
     });
+    let terminal_review_block = if inputs.is_terminal_review {
+        "\nThis IS the round's last reviewable task — no further coder runs will follow this approval. `refine` is therefore not available: its carryover would either be silently dropped (YOLO skips the simplifier and transitions straight to Done) or only opportunistically applied by the simplifier. You MUST use `approved` (if the delta is acceptable as-is) or `revise` (if the items must land before merge — that re-runs THIS task in the next round). The orchestrator will reject `status = \"refine\"` on this run.\n".to_string()
+    } else {
+        String::new()
+    };
     ctx.set("task_id", inputs.task_id.to_string())
         .set("round", inputs.round.to_string())
         .path_arg("task", inputs.task_file)
@@ -324,6 +334,7 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         .set("prior_reviews", prior_reviews)
         .set("coder_summary_section", coder_summary_section)
         .set("review_scope_text", "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n")
+        .set("terminal_review_block", terminal_review_block)
         .path_arg("review", inputs.review_file)
         .live_arg(inputs.live_summary_path, false)
         .render(include_str!("prompts/reviewer.md"))

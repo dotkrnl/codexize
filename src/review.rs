@@ -69,6 +69,24 @@ pub fn validate(path: &Path) -> Result<ReviewVerdict> {
     }
     Ok(parsed)
 }
+impl ReviewVerdict {
+    /// Reject `refine` on the round's terminal review task. `refine` only
+    /// has a downstream consumer when another coder run follows (carryover
+    /// is drained at the start of the next coder); on the last task that
+    /// channel is gone, so refine is silently dropped in YOLO mode (which
+    /// transitions straight to Done) or only opportunistically applied by
+    /// the simplifier. Either way, an operator-relevant suggestion can
+    /// disappear into the void — force the reviewer to commit to
+    /// `approved` (no carryover) or `revise` (re-run the task) instead.
+    pub fn enforce_terminal_review(&self, is_terminal: bool) -> Result<()> {
+        if is_terminal && self.status == ReviewStatus::Refine {
+            bail!(
+                "status=refine is not allowed on the round's last reviewable task: refine carryover would be dropped (YOLO) or only opportunistically applied by the simplifier; use status=approved or status=revise instead"
+            );
+        }
+        Ok(())
+    }
+}
 #[cfg(test)]
 #[path = "review_tests.rs"]
 mod tests;

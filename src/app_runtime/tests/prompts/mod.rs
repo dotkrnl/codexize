@@ -243,6 +243,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 coder_summary_file: None,
                 review_file: &review_r1,
                 live_summary_path: &live,
+                is_terminal_review: false,
             }),
         );
         let coder_summary_path = round3.join("coder_summary.toml");
@@ -257,6 +258,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 coder_summary_file: Some(&coder_summary_path),
                 review_file: &review_r3,
                 live_summary_path: &live,
+                is_terminal_review: true,
             }),
         );
         assert_prompt_insta_snapshot(

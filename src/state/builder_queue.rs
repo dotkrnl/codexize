@@ -103,6 +103,19 @@ impl BuilderState {
                 || Self::is_selectable_task_item(item)
         })
     }
+    /// True when the currently-Running task is the round's last reviewable
+    /// work item — i.e. once it's approved, no further coder rounds will
+    /// run. Used to gate the reviewer's `refine` verdict: refine carryover
+    /// flows into the *next* coder run, so on a terminal review it would
+    /// either be silently dropped (YOLO mode skips simplification straight
+    /// to Done) or only opportunistically applied by the simplifier.
+    /// Either outcome makes refine an unreliable signal there, and the
+    /// orchestrator forces the reviewer to use approved or revise instead.
+    pub fn is_terminal_review_task(&self) -> bool {
+        !self
+            .pipeline_task_items()
+            .any(|item| item.status != PipelineItemStatus::Running && Self::is_selectable_task_item(item))
+    }
     pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
         if let Some(index) = self.pipeline_items.iter().position(|item| {
             item.stage == "coder"

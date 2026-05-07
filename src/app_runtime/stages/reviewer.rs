@@ -85,6 +85,7 @@ impl App {
         let coder_summary_path = coder_summary_file
             .exists()
             .then_some(coder_summary_file.as_path());
+        let is_terminal_review = self.state.builder.is_terminal_review_task();
         let prompt = reviewer_prompt(ReviewerPromptInputs {
             session_dir: &session_dir,
             task_id,
@@ -94,6 +95,7 @@ impl App {
             coder_summary_file: coder_summary_path,
             review_file: &review_path,
             live_summary_path: &live_summary_path,
+            is_terminal_review,
         });
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
@@ -173,6 +175,12 @@ impl App {
             .join(format!("{round:03}"))
             .join("review.toml");
         let verdict = review::validate(&review_path)?;
+        // Reject `refine` when this is the round's last reviewable task —
+        // see `ReviewVerdict::enforce_terminal_review` and
+        // `BuilderState::is_terminal_review_task` for the rationale.
+        // Failure here propagates as the reviewer-run failure reason and
+        // the orchestrator will surface a stage error to the operator.
+        verdict.enforce_terminal_review(self.state.builder.is_terminal_review_task())?;
         let summary_text = verdict.summary.trim();
         if !summary_text.is_empty() {
             let kind = match verdict.status {

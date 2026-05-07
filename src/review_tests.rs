@@ -295,6 +295,69 @@ fn review_malformed_toml_fails() {
 }
 
 #[test]
+fn enforce_terminal_review_rejects_refine_on_last_task() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "refine"
+summary = "Mostly good"
+feedback = ["Tighten the names"]
+"#,
+    );
+    let verdict = validate(&path).unwrap();
+    let err = verdict.enforce_terminal_review(true).unwrap_err();
+    let rendered = format!("{err:#}");
+    assert!(
+        rendered.contains("status=refine is not allowed"),
+        "error should explain why refine is forbidden, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("approved") && rendered.contains("revise"),
+        "error should point at the allowed alternatives, got: {rendered}"
+    );
+}
+
+#[test]
+fn enforce_terminal_review_allows_refine_when_more_work_remains() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = write_review(
+        &dir,
+        r#"status = "refine"
+summary = "Mostly good"
+feedback = ["Tighten the names"]
+"#,
+    );
+    let verdict = validate(&path).unwrap();
+    // is_terminal=false → refine is fine; carryover flows to next coder.
+    verdict.enforce_terminal_review(false).unwrap();
+}
+
+#[test]
+fn enforce_terminal_review_allows_approved_and_revise_on_last_task() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let approved_path = write_review(
+        &dir,
+        r#"status = "approved"
+summary = "Looks good"
+"#,
+    );
+    let approved = validate(&approved_path).unwrap();
+    approved.enforce_terminal_review(true).unwrap();
+
+    let revise_path = dir.path().join("revise.toml");
+    std::fs::write(
+        &revise_path,
+        r#"status = "revise"
+summary = "Fix the loop"
+feedback = ["The loop condition is wrong"]
+"#,
+    )
+    .unwrap();
+    let revise = validate(&revise_path).unwrap();
+    revise.enforce_terminal_review(true).unwrap();
+}
+
+#[test]
 fn review_all_status_values_roundtrip() {
     for (toml_val, expected) in [
         ("\"approved\"", ReviewStatus::Approved),

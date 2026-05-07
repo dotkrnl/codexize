@@ -29,7 +29,7 @@ Review:
      intermediate), SKIP the test-pass check — but still require the code
      to build cleanly (compiles / links / type-checks). Completion still
      matters.
-{review_scope_text}
+{review_scope_text}{terminal_review_block}
 
 # IMPORTANT: emit ONLY the TOML below to {review} — no prose around it.
 # Parse failure = run failure. Use double-quoted strings; triple-quoted for

@@ -94,13 +94,24 @@ Status / gaps / new_tasks matrix:
   - needs_human → non-empty gaps, empty new_tasks, no dream fields.
 
 Dream recommendation guidelines:
-  - suggest → new/repeated lessons, design decisions, recovery insights,
-    vendor behavior, memory touched by multiple stages, stale/duplicate or
-    conflicting memory, or a large session that would benefit from compaction.
-    Include a short dream_reason.
-  - skip → trivial change, no durable lesson, memory was not materially read
-    or written, existing memory already captures the lesson, or dreaming would
-    mostly re-read unchanged memory.
+  - Default to "suggest". You are NOT expected to read the full memory
+    store before deciding — recommend dreaming whenever there is plausible
+    reason the completed session could outdate prior memory or add a
+    durable lesson. The dreaming agent does the deeper reconciliation; your
+    job is to flag candidates, not to pre-resolve them. When in doubt,
+    suggest.
+  - suggest → the implemented change may break or update assumptions
+    captured in existing memory (best-guess from manifest/index, no full
+    read required); new or repeated lessons; design decisions; recovery
+    insights; vendor behavior; memory likely touched by multiple stages;
+    stale, duplicate, or conflicting memory; or a large session that would
+    benefit from compaction. Include a short dream_reason.
+  - skip → reserved for sessions with no durable signal: typo fixes, pure
+    formatting/comment edits, dependency bumps with no behavior change, or
+    sessions whose artifacts add no information beyond what existing memory
+    already captures. Memory being absent or sparse is NOT grounds for
+    skip — it is grounds for suggest, since dreaming is how the store
+    grows.
 
 Hard rules (override any default skill behavior):
   - You may not mutate the workspace. You may not write code. Your only

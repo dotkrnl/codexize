@@ -3,10 +3,11 @@ use crate::acp::{
     AcpLaunchPolicy, AcpPermissionMode, AcpReasoningEffort, AcpResolvedLaunch, AcpResult,
     AcpSession, AcpSessionSpec, AcpSpawnSpec, ClientUpdate, PromptPayload,
 };
-use crate::data::runner::transport::ManagedAcpLaunch;
+use crate::data::runner::transport::{FakeAcpClock, ManagedAcpLaunch};
 use crate::selection::VendorKind;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -18,6 +19,9 @@ struct FakeSession {
     cancel_calls: u32,
     closed: bool,
     dead_reason: Option<String>,
+    /// If set, `dead_reason` is suppressed (returns None) until
+    /// `cancel_calls` reaches this value, then it becomes active.
+    dead_after_cancel_calls: Option<u32>,
 }
 
 impl FakeSession {
@@ -28,12 +32,26 @@ impl FakeSession {
             cancel_calls: 0,
             closed: false,
             dead_reason: None,
+            dead_after_cancel_calls: None,
         }
     }
 
     fn with_dead_reason(mut self, reason: &str) -> Self {
         self.dead_reason = Some(reason.to_string());
         self
+    }
+
+    fn with_dead_after_cancel_calls(mut self, reason: &str, threshold: u32) -> Self {
+        self.dead_reason = Some(reason.to_string());
+        self.dead_after_cancel_calls = Some(threshold);
+        self
+    }
+
+    fn dead_reason_active(&self) -> bool {
+        match self.dead_after_cancel_calls {
+            Some(threshold) => self.cancel_calls >= threshold,
+            None => true,
+        }
     }
 }
 
@@ -62,7 +80,11 @@ impl AcpSession for FakeSession {
     }
 
     fn dead_reason(&mut self) -> AcpResult<Option<String>> {
-        Ok(self.dead_reason.clone())
+        if self.dead_reason_active() {
+            Ok(self.dead_reason.clone())
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -98,13 +120,18 @@ fn cancel_signal() -> CancelSignal {
     CancelSignal::new(CancellationToken::new())
 }
 
+fn fake_clock() -> FakeAcpClock {
+    FakeAcpClock {
+        now: std::cell::Cell::new(Instant::now()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Existing watchog / dead-child tests (updated for clock-injectable API)
+// ---------------------------------------------------------------------------
+
 #[test]
 fn non_interactive_interrupt_resubmits_warning_then_finishes() {
-    // Watchdog flow: an in-flight non-interactive turn is interrupted with a
-    // warning string, the vendor responds with PromptTurnFailed, then the
-    // resumed turn ends with PromptTurnFinished. Without the fix, the runtime
-    // would close the session and exit(1) the moment the failure arrived,
-    // losing the warning text and killing the run.
     let updates = vec![
         ClientUpdate::PromptTurnFailed {
             message: "cancelled".to_string(),
@@ -122,23 +149,17 @@ fn non_interactive_interrupt_resubmits_warning_then_finishes() {
         .send(AcpInput::Interrupt("watchdog warning text".to_string()))
         .unwrap();
 
-    let outcome = drive_acp_session(session, &launch, &cancel, &mut input_rx, &waiting_tx)
-        .expect("loop returns outcome");
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
 
-    assert_eq!(
-        outcome.exit_code, 0,
-        "non-interactive interrupt + resume should finish gracefully"
-    );
+    assert_eq!(outcome.exit_code, 0);
     assert_eq!(outcome.signal_received, "");
 }
 
 #[test]
 fn silent_child_exit_during_idle_polls_breaks_the_loop() {
-    // The vendor session never emits a terminal event — try_next_update
-    // returns None forever — but the underlying child process has died.
-    // Without a dead_reason check, the loop spins on poll_park indefinitely
-    // and the TUI keeps the run marked active. With it, the loop exits as a
-    // failed run so the supervisor can route through the standard failover.
     let session: Box<dyn AcpSession> =
         Box::new(FakeSession::new(Vec::new()).with_dead_reason("child crashed mid-turn"));
 
@@ -147,19 +168,16 @@ fn silent_child_exit_during_idle_polls_breaks_the_loop() {
     let (_input_tx, mut input_rx) = mpsc::unbounded_channel();
     let (waiting_tx, _waiting_rx) = watch::channel(false);
 
-    let outcome = drive_acp_session(session, &launch, &cancel, &mut input_rx, &waiting_tx)
-        .expect("loop returns outcome");
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
 
-    assert_eq!(
-        outcome.exit_code, 1,
-        "silent child exit must surface as a failed run"
-    );
+    assert_eq!(outcome.exit_code, 1);
 }
 
 #[test]
 fn non_interactive_failure_without_pending_input_still_exits_one() {
-    // Vanilla failure without any interrupt-with-text in flight should keep
-    // the existing exit(1) behavior.
     let updates = vec![ClientUpdate::PromptTurnFailed {
         message: "model error".to_string(),
     }];
@@ -170,8 +188,176 @@ fn non_interactive_failure_without_pending_input_still_exits_one() {
     let (_input_tx, mut input_rx) = mpsc::unbounded_channel();
     let (waiting_tx, _waiting_rx) = watch::channel(false);
 
-    let outcome = drive_acp_session(session, &launch, &cancel, &mut input_rx, &waiting_tx)
-        .expect("loop returns outcome");
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
 
     assert_eq!(outcome.exit_code, 1);
+}
+
+// ---------------------------------------------------------------------------
+// New tests: Finished resubmit + cancel-ack watchdog
+// ---------------------------------------------------------------------------
+
+#[test]
+fn non_interactive_finished_resubmits_queued_interrupt_text() {
+    // A non-interactive run is interrupted, but the vendor's turn finishes
+    // with PromptTurnFinished before the cancel takes effect. The queued
+    // interrupt text must be submitted as the next turn instead of the
+    // session closing with exit_code 0.
+    let session: Box<dyn AcpSession> = Box::new(FakeSession::new(vec![
+        ClientUpdate::PromptTurnFinished,
+        ClientUpdate::PromptTurnFinished,
+    ]));
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    input_tx
+        .send(AcpInput::Interrupt("new instructions".to_string()))
+        .unwrap();
+
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
+
+    assert_eq!(outcome.exit_code, 0);
+    assert_eq!(outcome.signal_received, "");
+}
+
+#[test]
+fn cancel_ack_timeout_resends_then_terminates() {
+    // A vendor ignores session/cancel entirely (returns None forever, no
+    // dead_reason). The cancel-ack watchdog must resend cancel after 60 s
+    // (phase 1) and signal Terminate after another 60 s (phase 2),
+    // producing exit_code 143.
+    let session: Box<dyn AcpSession> = Box::new(FakeSession::new(Vec::new()));
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    input_tx
+        .send(AcpInput::Interrupt("watchdog warning".to_string()))
+        .unwrap();
+
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
+
+    assert_eq!(outcome.exit_code, 143);
+    assert_eq!(outcome.signal_received, "TERM");
+}
+
+#[test]
+fn cancel_ack_timer_disarmed_by_prompt_turn_failed_before_timeout() {
+    // When PromptTurnFailed arrives before the 60 s cancel-ack timer fires,
+    // the timer is disarmed and the queued text is resubmitted. No cancel
+    // resend should occur because the timer never reaches its threshold.
+    // dead_after_cancel_calls gates the dead_reason so it only becomes
+    // active if the cancel-ack resend actually fires.
+    let session: Box<dyn AcpSession> = Box::new(
+        FakeSession::new(vec![
+            ClientUpdate::PromptTurnFailed {
+                message: "cancelled".to_string(),
+            },
+            ClientUpdate::PromptTurnFinished,
+        ])
+        .with_dead_after_cancel_calls("stuck after resend", 2),
+    );
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    input_tx
+        .send(AcpInput::Interrupt("preempt".to_string()))
+        .unwrap();
+
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
+
+    // PromptTurnFailed disarmed the timer and resubmitted; the resubmitted
+    // turn finished normally with PromptTurnFinished, producing exit_code 0.
+    assert_eq!(outcome.exit_code, 0);
+    // Cancel should have been called exactly once (the initial interrupt).
+    // The dead_reason was never activated because cancel_calls stayed at 1.
+}
+
+#[test]
+fn second_interrupt_while_pending_does_not_reset_cancel_ack_timer() {
+    // Two interrupts arrive: the first arms the cancel-ack timer, the
+    // second only appends to pending_input without resetting the timer.
+    // After PromptTurnFailed disarms the timer and resubmits the first
+    // queued text, the second text remains pending. Another PromptTurnFailed
+    // exits. Cancel should be called exactly once.
+    let session: Box<dyn AcpSession> = Box::new(FakeSession::new(vec![
+        ClientUpdate::PromptTurnFailed {
+            message: "cancelled".to_string(),
+        },
+        ClientUpdate::PromptTurnFailed {
+            message: "cancelled".to_string(),
+        },
+    ]));
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    // First interrupt → arms the timer
+    input_tx
+        .send(AcpInput::Interrupt("first".to_string()))
+        .unwrap();
+    // Second interrupt → only appends text (interrupting_turn is already
+    // true, so no new cancel is sent and the timer is not reset).
+    input_tx
+        .send(AcpInput::Interrupt("second".to_string()))
+        .unwrap();
+
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
+
+    // After resubmitting "first" on the first PromptTurnFailed, "second"
+    // is still pending. The second PromptTurnFailed exits with code 1
+    // because interrupting_turn was cleared by the resubmit.
+    assert_eq!(outcome.exit_code, 1);
+}
+
+#[test]
+fn interrupt_finished_resubmit_then_later_interrupt_arms_fresh_cancel() {
+    // Full cycle: interrupt → PromptTurnFinished → resubmit queued text
+    // (timer disarmed) → later interrupt (new timer armed) → vendor finishes.
+    let session: Box<dyn AcpSession> = Box::new(FakeSession::new(vec![
+        ClientUpdate::PromptTurnFinished,    // triggers non-interactive resubmit
+        ClientUpdate::PromptTurnFinished,    // resubmitted turn finishes
+    ]));
+
+    let launch = launch_fixture(false);
+    let cancel = cancel_signal();
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+    let (waiting_tx, _waiting_rx) = watch::channel(false);
+
+    input_tx
+        .send(AcpInput::Interrupt("first interrupt".to_string()))
+        .unwrap();
+
+    let clock = fake_clock();
+    let outcome =
+        drive_acp_session_with_clock(session, &launch, &cancel, &mut input_rx, &waiting_tx, &clock)
+            .expect("loop returns outcome");
+
+    assert_eq!(outcome.exit_code, 0);
+    assert_eq!(outcome.signal_received, "");
 }

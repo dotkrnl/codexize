@@ -192,9 +192,8 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
         NotificationReason::InteractiveRunWait,
         crate::state::Phase::BrainstormRunning,
     );
-    event.context.last_agent_response = Some(
-        "Should I keep going on the migration plan, or focus on tests first?".to_string(),
-    );
+    event.context.last_agent_response =
+        Some("Should I keep going on the migration plan, or focus on tests first?".to_string());
     event.context.last_live_summary = Some("Should not surface here".to_string());
 
     let detailed = format_ntfy_message(&config, &event);
@@ -271,7 +270,10 @@ fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
 
     let done = format_ntfy_message(&config, &done_event);
     assert_eq!(done.title, "codexize: pipeline finished");
-    assert!(done.body.contains("Pipeline finished on \"Readable Session\""));
+    assert!(
+        done.body
+            .contains("Pipeline finished on \"Readable Session\"")
+    );
     assert!(
         done.body
             .contains("Last activity: ran final validation, all green")

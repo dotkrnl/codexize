@@ -36,7 +36,9 @@ fn task_round_index_is_one_for_a_brand_new_task_at_any_global_round() {
     // so global round 4 is its first task-round (index = 1).
     let mut state = fresh_state();
     for global_round in 1..=3 {
-        state.agent_runs.push(run("coder", Some(1), global_round, 1));
+        state
+            .agent_runs
+            .push(run("coder", Some(1), global_round, 1));
     }
     let app = mk_app(state);
     assert_eq!(app.task_round_index(2, 4), 1);

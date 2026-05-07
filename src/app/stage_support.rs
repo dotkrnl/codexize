@@ -190,7 +190,11 @@ mod auto_tough_tests {
     fn auto_tough_keeps_declared_tough_unchanged() {
         // Already-Tough tasks stay Tough at any task round-index — the
         // rule only escalates upward, never downward.
-        for idx in [1, AUTO_TOUGH_AFTER_TASK_ROUNDS, AUTO_TOUGH_AFTER_TASK_ROUNDS + 1] {
+        for idx in [
+            1,
+            AUTO_TOUGH_AFTER_TASK_ROUNDS,
+            AUTO_TOUGH_AFTER_TASK_ROUNDS + 1,
+        ] {
             assert_eq!(
                 auto_tough_effort(EffortLevel::Tough, idx),
                 EffortLevel::Tough,

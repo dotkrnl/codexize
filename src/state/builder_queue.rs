@@ -112,9 +112,9 @@ impl BuilderState {
     /// Either outcome makes refine an unreliable signal there, and the
     /// orchestrator forces the reviewer to use approved or revise instead.
     pub fn is_terminal_review_task(&self) -> bool {
-        !self
-            .pipeline_task_items()
-            .any(|item| item.status != PipelineItemStatus::Running && Self::is_selectable_task_item(item))
+        !self.pipeline_task_items().any(|item| {
+            item.status != PipelineItemStatus::Running && Self::is_selectable_task_item(item)
+        })
     }
     pub fn ensure_task_for_round(&mut self, round: u32) -> Option<u32> {
         if let Some(index) = self.pipeline_items.iter().position(|item| {

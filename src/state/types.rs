@@ -446,10 +446,8 @@ fn test_default_root() -> PathBuf {
     static TEST_DEFAULT_ROOT: OnceLock<PathBuf> = OnceLock::new();
     TEST_DEFAULT_ROOT
         .get_or_init(|| {
-            let path = std::env::temp_dir().join(format!(
-                "codexize-test-default-{}",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("codexize-test-default-{}", std::process::id()));
             // Best-effort; downstream callers will surface any actual IO
             // error against the returned path.
             let _ = std::fs::create_dir_all(&path);

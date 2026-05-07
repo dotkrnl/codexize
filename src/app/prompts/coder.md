@@ -61,6 +61,10 @@ Hard rules:
     problem to resolve (revert it; don't carry it forward). Leaving the
     tree dirty is a hard failure regardless of test/lint state.
   - No force-push, no history rewrite, no branch deletes.
+  - Never `git add -f` / `git add --force`. If a path is `.gitignore`d,
+    that's the project's choice — leave it out of the commit. If every
+    relevant change happens to be ignored, skip the commit entirely
+    rather than bypassing the ignore.
 
 Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
     status       = "done" | "partial"      # "partial" makes the run retry

@@ -73,6 +73,10 @@ Workspace hygiene (same as the coder follows):
     problem to resolve.
   - No `Co-Authored-By:` trailers or co-author attribution.
   - No force-push, no history rewrite, no branch deletes.
+  - Never `git add -f` / `git add --force`. If a path is `.gitignore`d,
+    that's the project's choice — leave it out of the commit. If every
+    candidate edit happens to be ignored, skip the commit entirely
+    rather than bypassing the ignore.
   - Commit messages must be standalone human prose. No orchestrator
     vocabulary ("task N", "round N", "plan", "shard", "phase", "simplifier")
     or references to this prompt.

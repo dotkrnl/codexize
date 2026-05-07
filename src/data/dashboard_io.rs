@@ -2,6 +2,7 @@ pub use crate::data::dashboard_model::synthesize_sibling;
 use crate::data::dashboard_model::{
     InventoryEntry, ScoreEntry, inv_only, merge_with_warnings, normalize_ipbr_key, scores_only,
 };
+use crate::data::providers::opencode;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -128,7 +129,8 @@ pub async fn load_models_async() -> Result<LoadOutcome> {
     // Load both sources in parallel via two requests
     let (inventory, scores) = tokio::join!(load_inventory(&client), load_scores(&client));
     match (inventory, scores) {
-        (Ok(inv), Ok(sc)) => {
+        (Ok(mut inv), Ok(sc)) => {
+            append_opencode_inventory(&mut inv, opencode::enumerate_models());
             let merged = merge_with_warnings(inv, sc);
             Ok(LoadOutcome::Both {
                 models: merged.models,
@@ -143,10 +145,22 @@ pub async fn load_models_async() -> Result<LoadOutcome> {
         // so this is still a "Both" outcome from the cache's perspective —
         // saving these score-only entries does not discard any cached ipbr
         // data that this fetch already replaced with fresh ipbr data.
-        (Err(_), Ok(sc)) => Ok(LoadOutcome::Both {
-            models: scores_only(sc),
-            warnings: Vec::new(),
-        }),
+        (Err(_), Ok(sc)) => {
+            let mut inv = Vec::new();
+            append_opencode_inventory(&mut inv, opencode::enumerate_models());
+            if inv.is_empty() {
+                Ok(LoadOutcome::Both {
+                    models: scores_only(sc),
+                    warnings: Vec::new(),
+                })
+            } else {
+                let merged = merge_with_warnings(inv, sc);
+                Ok(LoadOutcome::Both {
+                    models: merged.models,
+                    warnings: merged.warnings,
+                })
+            }
+        }
         (Err(e1), Err(e2)) => {
             anyhow::bail!("both sources failed: inventory={e1}, dashboard={e2}")
         }
@@ -186,10 +200,32 @@ async fn load_inventory(client: &Client) -> Result<Vec<InventoryEntry>> {
             name,
             vendor,
             display_order: i,
+            route_underlying_vendor: None,
         });
     }
     anyhow::ensure!(!entries.is_empty(), "models list returned no entries");
     Ok(entries)
+}
+pub(crate) fn append_opencode_inventory(
+    inventory: &mut Vec<InventoryEntry>,
+    models: Vec<opencode::OpencodeModelMeta>,
+) {
+    let start = inventory.len();
+    inventory.extend(models.into_iter().enumerate().filter_map(|(i, meta)| {
+        if meta.provider_id != "opencode" {
+            return None;
+        }
+        let name = meta.id.trim().to_ascii_lowercase();
+        if name.is_empty() {
+            return None;
+        }
+        Some(InventoryEntry {
+            name,
+            vendor: "opencode".to_string(),
+            display_order: start + i,
+            route_underlying_vendor: meta.underlying_vendor,
+        })
+    }));
 }
 async fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
     let body = client

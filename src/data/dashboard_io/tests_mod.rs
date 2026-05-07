@@ -22,6 +22,52 @@ fn model(name: &str, score: f64) -> DashboardModel {
     }
 }
 
+#[test]
+fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() {
+    let mut inventory = Vec::new();
+    append_opencode_inventory(
+        &mut inventory,
+        vec![
+            crate::data::providers::opencode::OpencodeModelMeta {
+                id: "gpt-5-nano".to_string(),
+                provider_id: "opencode".to_string(),
+                display_name: None,
+                api_npm: None,
+                underlying_vendor: Some(VendorKind::Codex),
+            },
+            crate::data::providers::opencode::OpencodeModelMeta {
+                id: "opencode-only-model".to_string(),
+                provider_id: "opencode".to_string(),
+                display_name: None,
+                api_npm: None,
+                underlying_vendor: None,
+            },
+        ],
+    );
+    let scores = parse_ipbr_scoreboard(
+        r#"
+        [[models]]
+        display_name = "gpt-5-nano"
+        vendor = "openai"
+
+        [models.scores]
+        i_adj = 60.0
+        p_adj = 61.0
+        b_adj = 62.0
+        r = 63.0
+        "#,
+    )
+    .unwrap();
+
+    let merged = merge_with_warnings(inventory, scores).models;
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].name, "gpt-5-nano");
+    assert_eq!(merged[0].vendor, "opencode");
+    assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
+    assert_eq!(merged[0].route_underlying_vendor, Some(VendorKind::Codex));
+}
+
 fn fixture_cached_models() -> Vec<CachedModel> {
     let payload: Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/aistupidlevel_2026-04-26_subset.json"

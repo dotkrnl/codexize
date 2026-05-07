@@ -2,7 +2,7 @@ use crate::dashboard::DashboardModel;
 #[cfg(test)]
 use crate::dashboard::IngestEvent;
 use crate::model_names;
-use crate::selection::{IpbrPhaseScores, ScoreSource};
+use crate::selection::{IpbrPhaseScores, ScoreSource, VendorKind};
 #[cfg(test)]
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -11,6 +11,7 @@ pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
     pub(crate) display_order: usize,
+    pub(crate) route_underlying_vendor: Option<VendorKind>,
 }
 /// Canonicalized score record produced by score ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
@@ -100,26 +101,46 @@ pub(crate) fn merge_with_warnings(
     for inv in inventory {
         if let Some(score_index) = ipbr_lookup.matches.get(&normalize_ipbr_key(&inv.name)) {
             consumed_ipbr_scores.insert(*score_index);
+            let route_underlying_vendor = if inv.vendor == "opencode" {
+                // Opencode CLI metadata may omit resale provenance; the
+                // matched ipbr row is the next-stable source for route
+                // eligibility without falling back to model-name guessing.
+                inv.route_underlying_vendor
+                    .or_else(|| vendor_kind_from_score_vendor(&scores[*score_index].vendor))
+            } else {
+                inv.route_underlying_vendor
+            };
             models.push(dashboard_model_from_score(
                 inv.name,
                 &inv.vendor,
                 &scores[*score_index],
                 None,
+                route_underlying_vendor,
             ));
+        } else if inv.vendor == "opencode" {
+            continue;
         } else if let Some(sc) = legacy_score_map.get(&inv.name) {
-            models.push(dashboard_model_from_score(inv.name, &inv.vendor, sc, None));
+            models.push(dashboard_model_from_score(
+                inv.name,
+                &inv.vendor,
+                sc,
+                None,
+                inv.route_underlying_vendor,
+            ));
         } else if let Some(sc) = sibling_score(&inv.name, &scores) {
             models.push(dashboard_model_from_score(
                 inv.name,
                 &inv.vendor,
                 sc,
                 Some(sc.name.clone()),
+                inv.route_underlying_vendor,
             ));
         } else {
             models.push(empty_inventory_model(
                 inv.name,
                 inv.vendor,
                 inv.display_order + 10_000,
+                inv.route_underlying_vendor,
             ));
         }
     }
@@ -131,6 +152,7 @@ pub(crate) fn merge_with_warnings(
                 sc.name.clone(),
                 &sc.vendor,
                 sc,
+                None,
                 None,
             ));
         }
@@ -169,10 +191,22 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
 pub(crate) fn inv_only(inventory: Vec<InventoryEntry>) -> Vec<DashboardModel> {
     inventory
         .into_iter()
-        .map(|inv| empty_inventory_model(inv.name, inv.vendor, inv.display_order))
+        .map(|inv| {
+            empty_inventory_model(
+                inv.name,
+                inv.vendor,
+                inv.display_order,
+                inv.route_underlying_vendor,
+            )
+        })
         .collect()
 }
-fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> DashboardModel {
+fn empty_inventory_model(
+    name: String,
+    vendor: String,
+    display_order: usize,
+    route_underlying_vendor: Option<VendorKind>,
+) -> DashboardModel {
     DashboardModel {
         name,
         vendor,
@@ -185,7 +219,7 @@ fn empty_inventory_model(name: String, vendor: String, display_order: usize) -> 
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
+        route_underlying_vendor,
         display_order,
         fallback_from: None,
     }
@@ -303,6 +337,7 @@ fn dashboard_model_from_score(
     inventory_vendor: &str,
     sc: &ScoreEntry,
     fallback_from: Option<String>,
+    route_underlying_vendor: Option<VendorKind>,
 ) -> DashboardModel {
     let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
@@ -336,9 +371,19 @@ fn dashboard_model_from_score(
         } else {
             None
         },
-        route_underlying_vendor: None,
+        route_underlying_vendor,
         display_order: sc.display_order,
         fallback_from,
+    }
+}
+fn vendor_kind_from_score_vendor(vendor: &str) -> Option<VendorKind> {
+    match vendor {
+        "anthropic" | "claude" => Some(VendorKind::Claude),
+        "codex" | "openai" => Some(VendorKind::Codex),
+        "gemini" | "google" => Some(VendorKind::Gemini),
+        "kimi" | "moonshotai" => Some(VendorKind::Kimi),
+        "opencode" => Some(VendorKind::Opencode),
+        _ => None,
     }
 }
 fn version_stem(name: &str) -> Option<&str> {

@@ -48,6 +48,16 @@ fn inventory(name: &str, order: usize) -> InventoryEntry {
         name: name.to_string(),
         vendor: String::new(),
         display_order: order,
+        route_underlying_vendor: None,
+    }
+}
+
+fn vendor_inventory(name: &str, vendor: &str, order: usize) -> InventoryEntry {
+    InventoryEntry {
+        name: name.to_string(),
+        vendor: vendor.to_string(),
+        display_order: order,
+        route_underlying_vendor: None,
     }
 }
 
@@ -166,6 +176,28 @@ fn merge_keeps_unmatched_inventory_model_visible_and_unscored() {
     assert_eq!(model.score_source, ScoreSource::None);
     assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
     assert!(!model.ipbr_row_matched);
+}
+
+#[test]
+fn merge_drops_opencode_inventory_without_ipbr_match() {
+    let models = merge(
+        vec![
+            vendor_inventory("gpt-5-nano", "opencode", 0),
+            vendor_inventory("opencode-only-model", "opencode", 1),
+        ],
+        vec![ipbr_score("gpt-5-nano", None, &[], 86.0, 1)],
+    );
+
+    assert!(
+        models.iter().any(|model| model.name == "gpt-5-nano"),
+        "ipbr-matched opencode inventory should remain visible"
+    );
+    assert!(
+        !models
+            .iter()
+            .any(|model| model.name == "opencode-only-model"),
+        "opencode inventory with no ipbr row is outside the supported universe"
+    );
 }
 
 #[test]

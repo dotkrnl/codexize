@@ -216,6 +216,60 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
 }
 
 #[test]
+fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let report_path = temp.path().join(".codexize/memory/dreams/dream-0002.toml");
+    let live_summary_path = temp
+        .path()
+        .join(".codexize/sessions/session/artifacts/live_summary.dreaming-r2-a1.txt");
+    let request = AcpLaunchRequest {
+        cwd: temp.path().to_path_buf(),
+        policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
+        ..sample_request(VendorKind::Codex)
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve codex");
+
+    assert_eq!(resolved.session.permission_mode, AcpPermissionMode::Code);
+    assert_eq!(
+        resolved.session.policy.allowed_write_paths,
+        vec![
+            temp.path().join(".codexize/memory/**"),
+            report_path.clone(),
+            live_summary_path.clone()
+        ]
+    );
+    assert!(resolved.session.policy.enforce_readonly_workspace);
+    assert!(matches!(
+        resolved.session.policy.shell_policy,
+        acp::AcpShellCommandPolicy::Allowlist(_)
+    ));
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_ALLOWED_WRITE_PATHS")
+            .cloned(),
+        Some(format!(
+            "{}\n{}\n{}",
+            temp.path().join(".codexize/memory/**").display(),
+            report_path.display(),
+            live_summary_path.display()
+        ))
+    );
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_ENFORCE_READONLY_WORKSPACE")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[test]
 fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let simplification_path = temp.path().join("rounds/001/simplification.toml");

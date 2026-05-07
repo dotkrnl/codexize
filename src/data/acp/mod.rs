@@ -84,14 +84,29 @@ pub struct AcpLaunchPolicy {
 }
 #[rustfmt::skip]
 impl AcpLaunchPolicy {
+    fn readonly_memory_shell_allowlist() -> Vec<String> {
+        ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"]
+            .map(String::from)
+            .to_vec()
+    }
+
     pub fn final_validation(verdict_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
-        let cmds = ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"];
         let verdict_path = verdict_path.into();
         let live_summary_path = live_summary_path.into();
         let memory_glob = memory_glob_from_session_path(&verdict_path);
         Self {
             allowed_write_paths: vec![verdict_path, live_summary_path, memory_glob],
-            shell_policy: AcpShellCommandPolicy::Allowlist(cmds.map(String::from).to_vec()),
+            shell_policy: AcpShellCommandPolicy::Allowlist(Self::readonly_memory_shell_allowlist()),
+            enforce_readonly_workspace: true,
+        }
+    }
+    pub fn dreaming(dream_report_path: impl Into<PathBuf>, live_summary_path: impl Into<PathBuf>) -> Self {
+        let dream_report_path = dream_report_path.into();
+        let live_summary_path = live_summary_path.into();
+        let memory_glob = memory_glob_from_session_path(&dream_report_path);
+        Self {
+            allowed_write_paths: vec![memory_glob, dream_report_path, live_summary_path],
+            shell_policy: AcpShellCommandPolicy::Allowlist(Self::readonly_memory_shell_allowlist()),
             enforce_readonly_workspace: true,
         }
     }

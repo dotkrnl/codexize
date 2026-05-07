@@ -22,6 +22,7 @@ pub mod selection_assembly;
 pub mod selection_quota;
 pub mod snapshot;
 pub mod synthetic_artifacts;
+pub mod tmux;
 pub mod validation;
 pub mod warmup;
 pub use crate::data::events::{DataEvent, DataOutcome, DataRequest, dispatch};

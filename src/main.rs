@@ -141,6 +141,10 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         }
     }
     let mut terminal_guard = TerminalGuard::start()?;
+    // When running inside tmux, label the active window with the working
+    // directory so an operator with several codexize panes can tell them
+    // apart at a glance. No-op outside tmux.
+    codexize::data::tmux::maybe_set_window_title();
     if preflight::check(terminal_guard.terminal_mut())? == preflight::PreflightOutcome::Exit {
         let mut terminal = terminal_guard.into_terminal();
         tui::stop(&mut terminal)?;

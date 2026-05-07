@@ -113,13 +113,9 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
     let mut pending_input = VecDeque::new();
     let mut waiting_for_interactive_prompt = false;
     let mut interrupting_turn = false;
-    let mut cancel_sent_at: Option<Instant> = None;
-    let mut cancel_resend_at: Option<Instant> = None;
+    let mut watchdog = CancelAckWatchdog::new();
     let outcome = loop {
         if let Some(reason) = cancel.pending_reason() {
-            // Loop exits below; timer state is irrelevant beyond this point.
-            let _ = cancel_sent_at.take();
-            let _ = cancel_resend_at.take();
             let _ = waiting_for_input.send_replace(false);
             thought_text.finish_turn(launch, MessageKind::AgentThought);
             agent_text.finish_turn(launch, MessageKind::AgentText);
@@ -151,11 +147,10 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                         session.cancel_prompt().map_err(|err| anyhow!("{err}"))?;
                         interrupting_turn = true;
                         let _ = waiting_for_input.send_replace(false);
-                        // Arm the cancel-ack watchdog. A second :interrupt
-                        // while a cancel is already pending appends to
-                        // pending_input but does NOT reset these timers.
-                        cancel_sent_at = Some(clock.now());
-                        cancel_resend_at = None;
+                        // A second :interrupt while a cancel is already pending
+                        // appends to pending_input but does NOT re-arm the
+                        // watchdog timers.
+                        watchdog.arm(clock.now());
                     }
                 }
             }
@@ -167,8 +162,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                 .map_err(|err| anyhow!("{err}"))?;
             waiting_for_interactive_prompt = false;
             interrupting_turn = false;
-            cancel_sent_at = None;
-            cancel_resend_at = None;
+            watchdog.clear();
         }
         let event = session
             .try_next_update()
@@ -189,8 +183,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
             Some(AcpRuntimeEvent::PromptTurnFinished) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
                 agent_text.finish_turn(launch, MessageKind::AgentText);
-                cancel_sent_at = None;
-                cancel_resend_at = None;
+                watchdog.clear();
                 if launch.resolved.interactive {
                     if let Some(text) = pending_input.pop_front() {
                         let _ = waiting_for_input.send_replace(false);
@@ -205,15 +198,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                         let _ = waiting_for_input.send_replace(true);
                     }
                     clock.park();
-                    check_cancel_ack(
-                        &mut session,
-                        launch,
-                        cancel,
-                        &mut cancel_sent_at,
-                        &mut cancel_resend_at,
-                        clock,
-                        diagnostics,
-                    )?;
+                    watchdog.tick(&mut session, launch, cancel, clock, diagnostics)?;
                     continue;
                 }
                 // Non-interactive resubmit: when interrupting_turn is set
@@ -257,8 +242,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
             Some(AcpRuntimeEvent::PromptTurnFailed { .. }) => {
                 thought_text.finish_turn(launch, MessageKind::AgentThought);
                 agent_text.finish_turn(launch, MessageKind::AgentText);
-                cancel_sent_at = None;
-                cancel_resend_at = None;
+                watchdog.clear();
                 // Watchdog warnings (and any other interrupt-with-text)
                 // cancel the in-flight ACP turn and leave the resumption text
                 // queued in pending_input. If we got here from such an
@@ -275,15 +259,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                         waiting_for_interactive_prompt = false;
                     }
                     clock.park();
-                    check_cancel_ack(
-                        &mut session,
-                        launch,
-                        cancel,
-                        &mut cancel_sent_at,
-                        &mut cancel_resend_at,
-                        clock,
-                        diagnostics,
-                    )?;
+                    watchdog.tick(&mut session, launch, cancel, clock, diagnostics)?;
                     continue;
                 }
                 if launch.resolved.interactive && interrupting_turn {
@@ -291,15 +267,7 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
                     interrupting_turn = false;
                     let _ = waiting_for_input.send_replace(true);
                     clock.park();
-                    check_cancel_ack(
-                        &mut session,
-                        launch,
-                        cancel,
-                        &mut cancel_sent_at,
-                        &mut cancel_resend_at,
-                        clock,
-                        diagnostics,
-                    )?;
+                    watchdog.tick(&mut session, launch, cancel, clock, diagnostics)?;
                     continue;
                 }
                 let _ = waiting_for_input.send_replace(false);
@@ -333,62 +301,80 @@ pub(super) fn drive_acp_session_with_clock<C: AcpClock, D: AcpDiagnostics>(
             | Some(AcpRuntimeEvent::SessionTitleUpdated { .. })
             | None => clock.park(),
         }
-        check_cancel_ack(
-            &mut session,
-            launch,
-            cancel,
-            &mut cancel_sent_at,
-            &mut cancel_resend_at,
-            clock,
-            diagnostics,
-        )?;
+        watchdog.tick(&mut session, launch, cancel, clock, diagnostics)?;
     };
     Ok(outcome)
 }
 
-/// Evaluate the local cancel-ack watchdog. If the first 60-second window has
-/// elapsed since the initial cancel was sent, resend `session.cancel_prompt()`
-/// once, emit a `SummaryWarn` dashboard message, log `acp_cancel_resent`, and
-/// arm a second 60-second window. If that second window also elapses without a
-/// terminal ACP event, emit a second `SummaryWarn` message, log
-/// `acp_cancel_timeout_terminate`, and signal `AcpCancelReason::Terminate` so
-/// the existing exit_code 143 / vendor-failover path takes over on the next
-/// loop iteration.
-fn check_cancel_ack<C: AcpClock, D: AcpDiagnostics>(
-    session: &mut Box<dyn AcpSession>,
-    launch: &ManagedAcpLaunch,
-    cancel: &CancelSignal,
-    cancel_sent_at: &mut Option<Instant>,
-    cancel_resend_at: &mut Option<Instant>,
-    clock: &C,
-    diagnostics: &D,
-) -> Result<()> {
-    let Some(sent_at) = *cancel_sent_at else {
-        return Ok(());
-    };
-    let now = clock.now();
-    let elapsed = now.duration_since(sent_at);
-    if cancel_resend_at.is_none() && elapsed >= Duration::from_secs(CANCEL_ACK_RESEND_SECS) {
-        // First 60 s expiry: resend cancel once and arm second window.
-        session.cancel_prompt().map_err(|err| anyhow!("{err}"))?;
-        *cancel_resend_at = Some(now);
-        let msg = "ACP cancel not acknowledged after 60s; resending cancel. If still unresponsive after another 60s the run will be terminated.";
-        diagnostics.persist_warning(launch, msg);
-        diagnostics.record_event(
-            launch,
-            serde_json::json!({
-                "type": "acp_cancel_resent",
-                "ts": chrono::Utc::now().to_rfc3339(),
-                "run": find_launch_run_id(launch),
-                "window": launch.window_name,
-                "elapsed_ms": elapsed.as_millis(),
-            }),
-        );
-        return Ok(());
+/// Local cancel-ack watchdog state. Tracks when the first cancel was sent
+/// to the ACP session and, after a resend, when that resend went out — so
+/// the loop can escalate to `AcpCancelReason::Terminate` if the vendor
+/// never acknowledges the cancel.
+struct CancelAckWatchdog {
+    sent_at: Option<Instant>,
+    resend_at: Option<Instant>,
+}
+
+impl CancelAckWatchdog {
+    fn new() -> Self {
+        Self {
+            sent_at: None,
+            resend_at: None,
+        }
     }
-    if let Some(resend_at) = *cancel_resend_at {
-        let elapsed_since_resend = now.duration_since(resend_at);
-        if elapsed_since_resend >= Duration::from_secs(CANCEL_ACK_TERMINATE_SECS) {
+
+    fn arm(&mut self, now: Instant) {
+        self.sent_at = Some(now);
+        self.resend_at = None;
+    }
+
+    fn clear(&mut self) {
+        self.sent_at = None;
+        self.resend_at = None;
+    }
+
+    /// Evaluate the watchdog. If the first 60-second window has elapsed
+    /// since the initial cancel, resend `session.cancel_prompt()` once,
+    /// emit a `SummaryWarn` dashboard message, log `acp_cancel_resent`,
+    /// and arm a second 60-second window. If that second window also
+    /// elapses without a terminal ACP event, emit a second `SummaryWarn`,
+    /// log `acp_cancel_timeout_terminate`, and signal
+    /// `AcpCancelReason::Terminate` so the existing exit_code 143 /
+    /// vendor-failover path takes over on the next loop iteration.
+    fn tick<C: AcpClock, D: AcpDiagnostics>(
+        &mut self,
+        session: &mut Box<dyn AcpSession>,
+        launch: &ManagedAcpLaunch,
+        cancel: &CancelSignal,
+        clock: &C,
+        diagnostics: &D,
+    ) -> Result<()> {
+        let Some(sent_at) = self.sent_at else {
+            return Ok(());
+        };
+        let now = clock.now();
+        let elapsed = now.duration_since(sent_at);
+        if self.resend_at.is_none() && elapsed >= Duration::from_secs(CANCEL_ACK_RESEND_SECS) {
+            // First 60 s expiry: resend cancel once and arm second window.
+            session.cancel_prompt().map_err(|err| anyhow!("{err}"))?;
+            self.resend_at = Some(now);
+            let msg = "ACP cancel not acknowledged after 60s; resending cancel. If still unresponsive after another 60s the run will be terminated.";
+            diagnostics.persist_warning(launch, msg);
+            diagnostics.record_event(
+                launch,
+                serde_json::json!({
+                    "type": "acp_cancel_resent",
+                    "ts": chrono::Utc::now().to_rfc3339(),
+                    "run": find_launch_run_id(launch),
+                    "window": launch.window_name,
+                    "elapsed_ms": elapsed.as_millis(),
+                }),
+            );
+            return Ok(());
+        }
+        if let Some(resend_at) = self.resend_at
+            && now.duration_since(resend_at) >= Duration::from_secs(CANCEL_ACK_TERMINATE_SECS)
+        {
             // Second 60 s expiry: escalate to Terminate so the existing
             // vendor-failover path takes over.
             let msg = "ACP cancel still not acknowledged after 120s; terminating run, vendor failover will follow.";
@@ -404,11 +390,10 @@ fn check_cancel_ack<C: AcpClock, D: AcpDiagnostics>(
                 }),
             );
             cancel.signal(AcpCancelReason::Terminate);
-            *cancel_sent_at = None;
-            *cancel_resend_at = None;
+            self.clear();
         }
+        Ok(())
     }
-    Ok(())
 }
 
 pub(super) async fn finalize_managed_acp_launch(

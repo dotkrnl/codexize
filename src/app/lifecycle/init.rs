@@ -149,9 +149,7 @@ impl App {
                     .log_event(format!("journal_pruned: removed={n} retention_months={retention}"));
             }
             Err(err) => {
-                let _ = app
-                    .state
-                    .log_event(format!("journal_prune_failed: {err:#}"));
+                let _ = app.state.log_event(format!("journal_prune_failed: {err}"));
             }
         }
         // Populate the model strip immediately from whatever the cache holds.

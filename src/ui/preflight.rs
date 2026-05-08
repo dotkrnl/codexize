@@ -324,6 +324,9 @@ fn run_acp_install_modals_if_missing(
     Ok(())
 }
 
+// The nested poll/read shape keeps crossterm's two-step API explicit for the
+// modal input loop; collapsing it obscures which operation can block.
+#[allow(clippy::collapsible_if)]
 fn run_acp_install_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,

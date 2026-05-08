@@ -76,6 +76,8 @@ pub struct RunnerView {
 pub struct PathsView {
     pub cache_root: PathBuf,
     pub sessions_root: PathBuf,
+    // TODO(AC-5): runs_root has no consumer; wire when a top-level run-artifact
+    // subsystem exists instead of silently implying completed runtime plumbing.
     pub runs_root: PathBuf,
     pub memory_root: PathBuf,
 }

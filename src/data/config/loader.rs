@@ -1039,8 +1039,6 @@ fn push_explicit_string_array(
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::super::defaults::emit_annotated;

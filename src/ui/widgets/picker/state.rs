@@ -52,6 +52,7 @@ pub struct SessionPicker {
     create_modes: Modes,
     palette: PaletteState,
     status_line: StatusLine,
+    config_panel: Option<crate::ui::config_panel::ConfigPanelState>,
     /// Directory containing per-session subdirectories. Resolved from
     /// the loaded `Config` (`paths.sessions_root` when explicitly set;
     /// otherwise the legacy `state::codexize_root().join("sessions")`)
@@ -96,6 +97,7 @@ impl SessionPicker {
             create_modes,
             palette: PaletteState::default(),
             status_line: StatusLine::new(),
+            config_panel: None,
             sessions_root,
             memory_root_override,
         })
@@ -142,6 +144,20 @@ impl SessionPicker {
         }
     }
     fn handle_key(&mut self, key: KeyEvent) -> Result<KeyAction> {
+        if let Some(panel) = self.config_panel.as_mut() {
+            match panel.handle_key(key) {
+                crate::ui::config_panel::PanelOutcome::KeepOpen => return Ok(KeyAction::Continue),
+                crate::ui::config_panel::PanelOutcome::Close => {
+                    self.config_panel = None;
+                    return Ok(KeyAction::Continue);
+                }
+                crate::ui::config_panel::PanelOutcome::Saved => {
+                    self.reload_config();
+                    self.config_panel = None;
+                    return Ok(KeyAction::Continue);
+                }
+            }
+        }
         if let Some(kind) = self.confirm_modal {
             return self.handle_modal_key(key, kind);
         }
@@ -329,11 +345,11 @@ impl SessionPicker {
             }
         }
     }
-    fn execute_palette_command(&mut self, name: &str, args: &str) -> Result<KeyAction> {
+    fn execute_palette_command(&mut self, name: &str, _args: &str) -> Result<KeyAction> {
         match name {
             "quit" => Ok(KeyAction::Quit),
             "new" | "idea" => {
-                let trimmed = args.trim();
+                let trimmed = _args.trim();
                 if !trimmed.is_empty() {
                     return self.create_session_now(trimmed);
                 }
@@ -342,8 +358,26 @@ impl SessionPicker {
                 self.input_cursor = 0;
                 Ok(KeyAction::Continue)
             }
+            "config" => {
+                let path = crate::data::config::paths::config_path();
+                match crate::data::config::loader::load_from_path(&path) {
+                    Ok(config) => {
+                        self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open(
+                            &config, path, true,
+                        ));
+                    }
+                    Err(err) => {
+                        self.status_line.push(
+                            format!("config: {err:#}"),
+                            Severity::Error,
+                            Duration::from_secs(4),
+                        );
+                    }
+                }
+                Ok(KeyAction::Continue)
+            }
             "show-archived" => {
-                match args.trim() {
+                match _args.trim() {
                     "on" => self.show_archived = true,
                     "off" => self.show_archived = false,
                     _ => self.show_archived = !self.show_archived,
@@ -361,6 +395,25 @@ impl SessionPicker {
             }
             "restore" => self.handle_restore(),
             _ => Ok(KeyAction::Continue),
+        }
+    }
+    fn reload_config(&mut self) {
+        let path = crate::data::config::paths::config_path();
+        if let Ok(config) = crate::data::config::loader::load_from_path(&path) {
+            self.sessions_root = config
+                .paths
+                .sessions_root
+                .value()
+                .parse()
+                .unwrap_or_else(|_| default_sessions_root());
+            self.memory_root_override = config
+                .paths
+                .memory_root
+                .value()
+                .parse()
+                .ok()
+                .filter(|p: &PathBuf| !p.as_os_str().is_empty());
+            let _ = self.refresh();
         }
     }
     fn create_session_now(&mut self, idea: &str) -> Result<KeyAction> {
@@ -448,9 +501,9 @@ pub fn create_session(
     state.save()?;
     let memory_root = match memory_root_override {
         Some(root) => root.to_path_buf(),
-        None => crate::logic::memory::memory_root_from_session_path(
-            &session_state::session_dir(&session_id),
-        ),
+        None => crate::logic::memory::memory_root_from_session_path(&session_state::session_dir(
+            &session_id,
+        )),
     };
     // Best-effort: a transient FS error here must not block session creation.
     if let Err(err) = crate::data::memory::ensure_memory_bootstrap(&memory_root) {

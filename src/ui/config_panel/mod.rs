@@ -79,7 +79,7 @@ const FIELDS: &[FieldMeta] = &[
         key: "ntfy.topic",
         label: "topic",
         kind: FieldKind::String,
-        description: "Notification topic. Empty disables delivery; r reveals the full value and g regenerates it.",
+        description: "Notification topic. Empty disables delivery; r reveals the full value and q regenerates it.",
         secret: true,
     },
     FieldMeta {
@@ -333,7 +333,7 @@ const SECTIONS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Editing {
+pub(crate) enum Editing {
     Integer,
     String,
     Choice {
@@ -366,16 +366,17 @@ pub(crate) struct ConfigPanelState {
     selected_section: usize,
     selected_field: usize,
     status: String,
-    editing: Option<Editing>,
+    pub(crate) editing: Option<Editing>,
     edit_buffer: String,
     reveal_topic: bool,
     conflict: Option<ConflictBanner>,
-    dirty: bool,
+    pub(crate) dirty: bool,
     save_error: Option<String>,
+    pub(crate) read_only: bool,
 }
 
 impl ConfigPanelState {
-    pub(crate) fn open(config: &Config, path: PathBuf) -> Self {
+    pub(crate) fn open(config: &Config, path: PathBuf, read_only: bool) -> Self {
         let opened_mtime = mtime(&path);
         Self {
             config: config.clone(),
@@ -383,18 +384,26 @@ impl ConfigPanelState {
             opened_mtime,
             selected_section: 1,
             selected_field: 1,
-            status: "config open".to_string(),
+            status: if read_only {
+                "read-only mode · press e to edit".to_string()
+            } else {
+                "config open".to_string()
+            },
             editing: None,
             edit_buffer: String::new(),
             reveal_topic: false,
             conflict: None,
             dirty: false,
             save_error: None,
+            read_only,
         }
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> PanelOutcome {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+        if !self.read_only
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('s')
+        {
             self.save(false);
             return if self.conflict.is_none() && self.save_error.is_none() {
                 PanelOutcome::Saved
@@ -422,6 +431,11 @@ impl ConfigPanelState {
                     PanelOutcome::Close
                 }
             }
+            KeyCode::Char('e') if self.read_only => {
+                self.read_only = false;
+                self.status = "edit mode enabled".to_string();
+                PanelOutcome::KeepOpen
+            }
             KeyCode::Up => {
                 self.move_field(-1);
                 PanelOutcome::KeepOpen
@@ -436,7 +450,9 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Enter => {
-                self.activate_field();
+                if !self.read_only {
+                    self.activate_field();
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('j') => {
@@ -448,14 +464,18 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('d') => {
-                self.reset_field();
+                if !self.read_only {
+                    self.reset_field();
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('D') => {
-                let section = self.current_section().to_string();
-                let count = self.section_override_count(&section);
-                self.conflict = Some(ConflictBanner::ResetSectionPrompt { section, count });
-                self.status = format!("reset section? {count} overrides");
+                if !self.read_only {
+                    let section = self.current_section().to_string();
+                    let count = self.section_override_count(&section);
+                    self.conflict = Some(ConflictBanner::ResetSectionPrompt { section, count });
+                    self.status = format!("reset section? {count} overrides");
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('r') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
@@ -467,9 +487,11 @@ impl ConfigPanelState {
                 };
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Char('g') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
-                self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
-                self.status = "regenerate topic? y/n".to_string();
+            KeyCode::Char('q') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
+                if !self.read_only {
+                    self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
+                    self.status = "regenerate topic? y/n".to_string();
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Tab => {
@@ -1260,16 +1282,20 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
 }
 
 fn footer_line(state: &ConfigPanelState, width: usize) -> String {
-    let hotkeys: &[&str] = match &state.editing {
-        Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
-        Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
-        None => &[
-            "Tab section",
-            "Enter edit",
-            "d default",
-            "Esc close",
-            "Ctrl-S save",
-        ],
+    let hotkeys: &[&str] = if state.read_only {
+        &["Tab section", "e edit", "Esc close"]
+    } else {
+        match &state.editing {
+            Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
+            Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
+            None => &[
+                "Tab section",
+                "Enter edit",
+                "d default",
+                "Esc close",
+                "Ctrl-S save",
+            ],
+        }
     };
     let mut first = String::new();
     for item in hotkeys {
@@ -1475,7 +1501,7 @@ mod tests {
             "$HOME/.codexize/sessions/with/a/very/long/path/that/wraps",
         )
         .unwrap();
-        ConfigPanelState::open(&config, PathBuf::from("/tmp/example/config.toml"))
+        ConfigPanelState::open(&config, PathBuf::from("/tmp/example/config.toml"), false)
     }
 
     #[test]

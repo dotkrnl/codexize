@@ -277,7 +277,7 @@ impl App {
             (*self.config).clone()
         });
         self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open(
-            &config, path,
+            &config, path, false,
         ));
     }
     pub(crate) fn config_panel_reset_focused_section(&mut self) {

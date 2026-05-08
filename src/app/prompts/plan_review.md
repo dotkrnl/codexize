@@ -1,5 +1,4 @@
-{project_doc_instr}You review an implementation plan. NON-INTERACTIVE — no clarifying
-questions, no source-code edits, no VCS, no test runs.
+{project_doc_instr}You review an implementation plan. NON-INTERACTIVE — no questions, code edits, VCS, or test runs.
 
 Inputs:
   Plan: {plan_path}
@@ -37,17 +36,16 @@ You have exactly two jobs. Do both, do nothing else:
      {review_path} as bullets prefixed `edge case:` so the coder sees
      them when reading the review.
 
-You DO NOT make new design decisions. The plan's chosen approach is the
-spec's contract; the reviewer doesn't get a vote.
-  - Don't propose a different architecture, alternative implementation,
-    different module boundaries, different data shape, or any "have you
-    considered…" rewrite.
-  - Don't extend the plan with new steps that aren't already required by
-    a spec sentence the plan misses (those go through Job 1 instead).
-  - Don't pick between two valid ways to satisfy the spec — multiple
-    valid implementations is NOT a defect, leave the choice to the coder.
-  - For an edge case the spec is silent on, your job is to surface it in
-    the review, NOT to write the resolution into the plan.
+You don't make new design decisions; the plan's approach is the spec's
+contract.
+  - No alternative architecture, module boundaries, data shape, or
+    "have you considered…" rewrites.
+  - No new plan steps unless a spec sentence the plan missed mandates one
+    (Job 1 path).
+  - No picking between valid implementations — multiple valid options is
+    not a defect; leave the choice to the coder.
+  - For spec-silent edge cases, surface them in the review; never write
+    the resolution into the plan.
 
 Do NOT flag: cosmetic concerns (typos/grammar/wording/style/formatting/
 structural polish), missing low-level implementation detail, or
@@ -64,10 +62,8 @@ to restore the structure faithfully, record a blocking review note that
 requests a re-plan. Do not approve a schema-less plan by treating it as a
 cosmetic issue.
 
-Memory side-quest (optional, low effort): if the plan↔spec pass exposed a
-planning lesson worth remembering across sessions (a recurring edge case
-the plan missed, a structural ambiguity that keeps showing up, a pattern
-that misled past plans), append a short note under `.codexize/memory/**`.
-One observation, not a writeup. Skip if nothing surfaced.
+Memory side-quest (optional, low effort): if a planning lesson surfaced
+(recurring missed edge case, structural ambiguity, misleading pattern),
+append one short observation under `.codexize/memory/**`. Skip if nothing surfaced.
 {memory_context}
 {instr}

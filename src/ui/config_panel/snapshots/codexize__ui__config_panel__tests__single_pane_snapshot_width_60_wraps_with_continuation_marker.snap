@@ -1,0 +1,20 @@
+---
+source: src/ui/config_panel/mod.rs
+expression: text
+---
+"codexize · config · /tmp/example/config.toml                "
+"Section: paths                                              "
+"> cache_root           │ $HOME/.codexize/cache         (def)"
+"↪   sessions_root        │ $HOME/.codexize/sessio…  override"
+"  runs_root            │ $HOME/.codexize/runs          (def)"
+"  memory_root          │ $HOME/.codexize/memory        (def)"
+"────────────────────────────────────────────────────────────"
+"Root for cache files. $HOME and ~/ are expanded at load.    "
+"Enter edit · d default · Esc close · Ctrl-S save  |  config…"
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "
+"                                                            "

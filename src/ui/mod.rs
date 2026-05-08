@@ -1,6 +1,7 @@
 //! Canonical home for terminal UI, rendering, and UI-only view state.
 pub mod chrome;
 pub mod clock;
+pub(crate) mod config_panel;
 pub mod focus_caps;
 pub mod footer;
 pub mod input_editor;

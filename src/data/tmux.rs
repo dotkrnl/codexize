@@ -7,11 +7,11 @@
 //! because it works regardless of the user's `allow-rename` setting,
 //! which is off by default in modern tmux.
 use std::path::Path;
-/// If running inside tmux, set the active window's name to
-/// `codexize: <dirname>` (where `<dirname>` is the basename of the
-/// current working directory). Best-effort: silently no-ops outside
-/// tmux, when `tmux` is not on `PATH`, when the cwd has no usable
-/// basename, or when the rename subprocess otherwise fails.
+/// If running inside tmux, set the active window's name to the
+/// basename of the current working directory. Best-effort: silently
+/// no-ops outside tmux, when `tmux` is not on `PATH`, when the cwd
+/// has no usable basename, or when the rename subprocess otherwise
+/// fails.
 pub fn maybe_set_window_title() {
     if std::env::var_os("TMUX").is_none() {
         return;
@@ -22,10 +22,9 @@ pub fn maybe_set_window_title() {
     let Some(name) = directory_basename(&cwd) else {
         return;
     };
-    let title = format!("codexize: {name}");
     let _ = std::process::Command::new("tmux")
         .arg("rename-window")
-        .arg(&title)
+        .arg(&name)
         .status();
 }
 fn directory_basename(path: &Path) -> Option<String> {

@@ -125,8 +125,6 @@ pub fn load_from_path(path: &Path) -> Result<Config, LoadError> {
 /// resolving `$HOME` / `~` in the `[paths]` and `[acp.install]` values.
 pub fn load_str(text: &str) -> Result<Config, LoadError> {
     let doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
-        let line = e.span().map(|s| s.start).unwrap_or(0);
-        let _ = line;
         LoadError::Parse(format!("{e}"))
     })?;
 

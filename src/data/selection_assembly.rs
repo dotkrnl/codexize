@@ -9,12 +9,19 @@ use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
 use std::collections::BTreeSet;
-pub async fn assemble_models_async(available_vendors: &BTreeSet<VendorKind>) -> (Vec<CachedModel>, Vec<QuotaError>) {
-    let loaded = cache::load();
-    assemble_with_refresh(loaded, available_vendors).await
+use std::path::Path;
+pub async fn assemble_models_async(
+    cache_dir: &Path,
+    available_vendors: &BTreeSet<VendorKind>,
+) -> (Vec<CachedModel>, Vec<QuotaError>) {
+    let loaded = cache::load(cache_dir);
+    assemble_with_refresh(cache_dir, loaded, available_vendors).await
 }
-pub fn assemble_from_cached_only(available_vendors: &BTreeSet<VendorKind>) -> Vec<CachedModel> {
-    let loaded = cache::load();
+pub fn assemble_from_cached_only(
+    cache_dir: &Path,
+    available_vendors: &BTreeSet<VendorKind>,
+) -> Vec<CachedModel> {
+    let loaded = cache::load(cache_dir);
     assemble_from_loaded_with_available(&loaded, available_vendors)
 }
 pub fn assemble_from_loaded(loaded: &LoadedCache, available_vendors: &BTreeSet<VendorKind>) -> Vec<CachedModel> {
@@ -45,6 +52,7 @@ fn assemble_from_loaded_with_available(
     pure::assemble_universe(dashboard, quotas, resets, available_vendors)
 }
 async fn assemble_with_refresh(
+    cache_dir: &Path,
     loaded: LoadedCache,
     available_vendors: &BTreeSet<VendorKind>,
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
@@ -71,7 +79,7 @@ async fn assemble_with_refresh(
             }) => {
                 quota_errors.extend(pure::dashboard_warnings_to_quota_errors(warnings));
                 let entries = pure::dashboard_models_to_entries(&fresh);
-                let _ = cache::save_dashboard(&entries);
+                let _ = cache::save_dashboard(cache_dir, &entries);
                 entries
             }
             Err(e) => {
@@ -101,8 +109,8 @@ async fn assemble_with_refresh(
         quota_errors.extend(fresh_errors);
         quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas);
         reset_payload = pure::merge_reset_payload(&cached_resets, fresh_resets);
-        let _ = cache::save_quotas(&quota_payload);
-        let _ = cache::save_quota_resets(&reset_payload);
+        let _ = cache::save_quotas(cache_dir, &quota_payload);
+        let _ = cache::save_quota_resets(cache_dir, &reset_payload);
     } else {
         quota_payload = cached_quota;
         reset_payload = cached_resets;

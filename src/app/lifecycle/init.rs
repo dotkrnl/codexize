@@ -68,7 +68,7 @@ impl App {
             visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Fetching {
-                rx: spawn_refresh(acp_config.available_vendors()),
+                rx: spawn_refresh(paths_view.cache_root.clone(), acp_config.available_vendors()),
                 started_at: Instant::now(),
             },
             selected: current,
@@ -138,7 +138,7 @@ impl App {
         // Populate the model strip immediately from whatever the cache holds.
         // The background refresh spawned above will replace this if any section
         // is expired.
-        let loaded = cache::load();
+        let loaded = cache::load(&app.paths.cache_root);
         let cached = crate::data::selection_assembly::assemble_from_loaded(&loaded, &acp_config.available_vendors());
         if !cached.is_empty() {
             let cache_has_expired_section = startup_cache_has_expired_section(&loaded);

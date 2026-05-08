@@ -53,8 +53,8 @@ fn sample_resets() -> ResetPayload {
 #[test]
 fn save_and_load_dashboard() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    let loaded = load_at(dir.path());
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    let loaded = load(dir.path());
     let dash = loaded.dashboard.unwrap();
     assert!(!dash.expired);
     assert_eq!(dash.data.len(), 1);
@@ -65,8 +65,8 @@ fn save_and_load_dashboard() {
 #[test]
 fn save_and_load_quotas() {
     let dir = TempDir::new().unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-    let loaded = load_at(dir.path());
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
+    let loaded = load(dir.path());
     let q = loaded.quotas.unwrap();
     assert!(!q.expired);
     assert_eq!(
@@ -78,8 +78,8 @@ fn save_and_load_quotas() {
 #[test]
 fn save_and_load_quota_resets() {
     let dir = TempDir::new().unwrap();
-    save_quota_resets_at(dir.path(), &sample_resets()).unwrap();
-    let loaded = load_at(dir.path());
+    save_quota_resets(dir.path(), &sample_resets()).unwrap();
+    let loaded = load(dir.path());
     let resets = loaded.quota_resets.unwrap();
     assert!(!resets.expired);
     assert_eq!(
@@ -115,7 +115,7 @@ fn current_version_cache_without_quota_resets_loads() {
     )
     .unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
 
     assert!(loaded.quotas.is_some());
     assert!(loaded.quota_resets.is_none());
@@ -161,7 +161,7 @@ fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
     )
     .unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
 
     assert!(
         loaded.dashboard.is_none(),
@@ -212,9 +212,9 @@ fn save_after_version_mismatch_preserves_quotas() {
 
     // Saving a fresh dashboard should rewrite the file at v4 while
     // carrying the existing quota section forward untouched.
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some(), "v4 dashboard rewritten on save");
     let quotas = loaded
         .quotas
@@ -262,7 +262,7 @@ fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
     )
     .unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     let entry = loaded
         .dashboard
         .expect("dashboard section should load")
@@ -293,13 +293,13 @@ fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
 #[test]
 fn sections_are_independent() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    let loaded = load_at(dir.path());
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some());
     assert!(loaded.quotas.is_none());
 
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-    let loaded = load_at(dir.path());
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some());
     assert!(loaded.quotas.is_some());
 }
@@ -307,14 +307,14 @@ fn sections_are_independent() {
 #[test]
 fn version_mismatch_drops_dashboard_only() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
     let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     file.version = 999;
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(
         loaded.dashboard.is_none(),
         "dashboard payload is dropped on any version mismatch"
@@ -328,14 +328,14 @@ fn version_mismatch_drops_dashboard_only() {
 #[test]
 fn v2_cache_file_drops_dashboard_only() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
     let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     file.version = 2;
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_none());
     assert!(
         loaded.quotas.is_some(),
@@ -356,13 +356,13 @@ fn v3_cache_preserves_axis_provenance() {
         ),
         ("edgecases".to_string(), "fallback:overall".to_string()),
     ]);
-    save_dashboard_at(
+    save_dashboard(
         dir.path(),
         &sample_entries_with_provenance(provenance.clone()),
     )
     .unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     let dashboard = loaded.dashboard.unwrap();
     assert_eq!(dashboard.data[0].axis_provenance, provenance);
 }
@@ -370,7 +370,7 @@ fn v3_cache_preserves_axis_provenance() {
 #[test]
 fn ttl_expiry_dashboard() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
     let path = dir.path().join("models.json");
     let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     if let Some(ref mut s) = file.dashboard {
@@ -378,14 +378,14 @@ fn ttl_expiry_dashboard() {
     }
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.unwrap().expired);
 }
 
 #[test]
 fn ttl_expiry_quotas() {
     let dir = TempDir::new().unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
     let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     if let Some(ref mut s) = file.quotas {
@@ -393,14 +393,14 @@ fn ttl_expiry_quotas() {
     }
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.quotas.unwrap().expired);
 }
 
 #[test]
 fn atomic_write_produces_valid_json() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
     let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
     let file: CacheFile = serde_json::from_str(&text).unwrap();
     assert_eq!(file.version, CACHE_VERSION);
@@ -409,8 +409,8 @@ fn atomic_write_produces_valid_json() {
 #[test]
 fn cache_file_omits_legacy_rank_and_weight_fields() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
 
     let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -445,7 +445,7 @@ fn cache_file_omits_legacy_rank_and_weight_fields() {
 #[test]
 fn missing_cache_file_returns_empty() {
     let dir = TempDir::new().unwrap();
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_none());
     assert!(loaded.quotas.is_none());
 }
@@ -454,7 +454,7 @@ fn missing_cache_file_returns_empty() {
 fn corrupt_cache_file_returns_empty() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("models.json"), "not json at all").unwrap();
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_none());
     assert!(loaded.quotas.is_none());
 }
@@ -462,10 +462,10 @@ fn corrupt_cache_file_returns_empty() {
 #[test]
 fn save_dashboard_preserves_existing_quotas() {
     let dir = TempDir::new().unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some());
     assert!(loaded.quotas.is_some());
 }
@@ -473,73 +473,47 @@ fn save_dashboard_preserves_existing_quotas() {
 #[test]
 fn save_quotas_preserves_existing_dashboard() {
     let dir = TempDir::new().unwrap();
-    save_dashboard_at(dir.path(), &sample_entries()).unwrap();
-    save_quotas_at(dir.path(), &sample_quotas()).unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
 
-    let loaded = load_at(dir.path());
+    let loaded = load(dir.path());
     assert!(loaded.dashboard.is_some());
     assert!(loaded.quotas.is_some());
 }
 
-fn with_home_override<R>(dir: &TempDir, f: impl FnOnce() -> R) -> R {
-    let _guard = crate::state::test_fs_lock()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let original = std::env::var_os("HOME");
-    // SAFETY: serialized via test_fs_lock; restored unconditionally.
-    unsafe {
-        std::env::set_var("HOME", dir.path());
-    }
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe {
-        match original {
-            Some(value) => std::env::set_var("HOME", value),
-            None => std::env::remove_var("HOME"),
-        }
-    }
-    outcome.unwrap()
+#[test]
+fn explicit_dir_round_trip_writes_under_supplied_path() {
+    // The public API takes an explicit cache directory; the operator's
+    // configured `paths.cache_root` flows in from the App layer, and
+    // every entry point must persist under exactly the directory it was
+    // handed.
+    let dir = TempDir::new().unwrap();
+    save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
+
+    let path = dir.path().join("models.json");
+    assert!(path.exists(), "expected cache file at {path:?}");
+
+    let loaded = load(dir.path());
+    let dash = loaded.dashboard.expect("dashboard section round-trips");
+    assert_eq!(dash.data[0].name, "claude-sonnet");
+    let quotas = loaded.quotas.expect("quota section round-trips");
+    assert_eq!(
+        quotas
+            .data
+            .get("claude")
+            .unwrap()
+            .get("claude-sonnet")
+            .unwrap(),
+        &Some(75)
+    );
 }
 
 #[test]
-fn public_load_save_wrappers_round_trip_via_home() {
+fn load_returns_empty_when_supplied_dir_is_missing() {
     let dir = TempDir::new().unwrap();
-    with_home_override(&dir, || {
-        // Both public save wrappers must persist under
-        // $HOME/.codexize/cache/models.json without any explicit path.
-        save_dashboard(&sample_entries()).unwrap();
-        save_quotas(&sample_quotas()).unwrap();
-
-        let path = dir
-            .path()
-            .join(".codexize")
-            .join("cache")
-            .join("models.json");
-        assert!(path.exists(), "expected default-dir cache file at {path:?}");
-
-        // The public load wrapper reads through the same default dir
-        // and surfaces both sections written above.
-        let loaded = load();
-        let dash = loaded.dashboard.expect("dashboard section round-trips");
-        assert_eq!(dash.data[0].name, "claude-sonnet");
-        let quotas = loaded.quotas.expect("quota section round-trips");
-        assert_eq!(
-            quotas
-                .data
-                .get("claude")
-                .unwrap()
-                .get("claude-sonnet")
-                .unwrap(),
-            &Some(75)
-        );
-    });
-}
-
-#[test]
-fn public_load_returns_empty_when_default_dir_is_missing() {
-    let dir = TempDir::new().unwrap();
-    with_home_override(&dir, || {
-        let loaded = load();
-        assert!(loaded.dashboard.is_none());
-        assert!(loaded.quotas.is_none());
-    });
+    let missing = dir.path().join("does-not-exist");
+    let loaded = load(&missing);
+    assert!(loaded.dashboard.is_none());
+    assert!(loaded.quotas.is_none());
 }

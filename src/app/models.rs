@@ -5,20 +5,27 @@ use crate::{
 };
 use ratatui::style::Color;
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
-pub(crate) fn spawn_refresh(available_vendors: BTreeSet<VendorKind>) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
+pub(crate) fn spawn_refresh(
+    cache_dir: PathBuf,
+    available_vendors: BTreeSet<VendorKind>,
+) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
         tokio::spawn(async move {
-            let _ = tx.send(crate::data::selection_assembly::assemble_models_async(&available_vendors).await);
+            let _ = tx.send(
+                crate::data::selection_assembly::assemble_models_async(&cache_dir, &available_vendors).await,
+            );
         });
     } else {
-        let _ = tx.send(crate::data::async_bridge::block_on_io(
-            crate::data::selection_assembly::assemble_models_async(&available_vendors),
-        ));
+        let cache_dir_owned = cache_dir;
+        let _ = tx.send(crate::data::async_bridge::block_on_io(async move {
+            crate::data::selection_assembly::assemble_models_async(&cache_dir_owned, &available_vendors).await
+        }));
     }
     rx
 }
@@ -113,7 +120,7 @@ impl App {
                 };
                 if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching {
-                        rx: spawn_refresh(self.available_vendors()),
+                        rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors()),
                         started_at: Instant::now(),
                     };
                 }
@@ -122,7 +129,7 @@ impl App {
     }
     pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
-            rx: spawn_refresh(self.available_vendors()),
+            rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors()),
             started_at: Instant::now(),
         };
     }

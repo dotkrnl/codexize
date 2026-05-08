@@ -350,11 +350,11 @@ impl SessionPicker {
             }
         }
     }
-    fn execute_palette_command(&mut self, name: &str, _args: &str) -> Result<KeyAction> {
+    fn execute_palette_command(&mut self, name: &str, args: &str) -> Result<KeyAction> {
         match name {
             "quit" => Ok(KeyAction::Quit),
             "new" | "idea" => {
-                let trimmed = _args.trim();
+                let trimmed = args.trim();
                 if !trimmed.is_empty() {
                     return self.create_session_now(trimmed);
                 }
@@ -364,12 +364,36 @@ impl SessionPicker {
                 Ok(KeyAction::Continue)
             }
             "config" => {
+                let initial = match args.trim() {
+                    "" => None,
+                    non_empty => match crate::ui::config_panel::lookup_section(non_empty) {
+                        crate::ui::config_panel::SectionLookup::Exact(name)
+                        | crate::ui::config_panel::SectionLookup::UniquePrefix(name) => Some(name),
+                        crate::ui::config_panel::SectionLookup::Ambiguous(matches) => {
+                            self.status_line.push(
+                                format!("config: ambiguous section ({})", matches.join("|")),
+                                Severity::Error,
+                                Duration::from_secs(4),
+                            );
+                            return Ok(KeyAction::Continue);
+                        }
+                        crate::ui::config_panel::SectionLookup::Unknown => {
+                            self.status_line.push(
+                                format!("config: unknown section \"{non_empty}\""),
+                                Severity::Error,
+                                Duration::from_secs(4),
+                            );
+                            return Ok(KeyAction::Continue);
+                        }
+                    },
+                };
                 let path = crate::data::config::paths::config_path();
                 match crate::data::config::loader::load_from_path(&path) {
                     Ok(config) => {
-                        self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open(
-                            &config, path, true,
-                        ));
+                        self.config_panel =
+                            Some(crate::ui::config_panel::ConfigPanelState::open_at(
+                                &config, path, true, initial,
+                            ));
                     }
                     Err(err) => {
                         self.status_line.push(
@@ -382,7 +406,7 @@ impl SessionPicker {
                 Ok(KeyAction::Continue)
             }
             "show-archived" => {
-                match _args.trim() {
+                match args.trim() {
                     "on" => self.show_archived = true,
                     "off" => self.show_archived = false,
                     _ => self.show_archived = !self.show_archived,

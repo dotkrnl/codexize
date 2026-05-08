@@ -947,6 +947,33 @@ fn config_panel_read_only_mode_ignores_mutation_keys() {
 }
 
 #[test]
+fn picker_config_with_section_arg_jumps_to_section() {
+    let mut picker = test_picker("", 0);
+    picker.input_mode = false;
+    picker
+        .execute_palette_command("config", "acp.po")
+        .expect("palette dispatch");
+    let panel = picker.config_panel.as_ref().expect("panel open");
+    assert_eq!(panel.current_section_name(), "acp.policy");
+}
+
+#[test]
+fn picker_config_with_unknown_section_errors_and_does_not_open() {
+    let mut picker = test_picker("", 0);
+    picker.input_mode = false;
+    picker
+        .execute_palette_command("config", "definitely-not-a-section")
+        .expect("palette dispatch");
+    assert!(picker.config_panel.is_none());
+    let status = picker
+        .status_line
+        .render()
+        .expect("status line")
+        .to_string();
+    assert!(status.to_lowercase().contains("unknown"));
+}
+
+#[test]
 fn config_panel_e_toggles_read_only_off() {
     let mut picker = test_picker("", 0);
     picker.input_mode = false;

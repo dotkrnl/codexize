@@ -263,7 +263,7 @@ impl App {
                 false
             }
             "config" => {
-                self.open_config_panel();
+                self.open_config_panel_with_arg(args);
                 false
             }
             "config-reset-section" => {

@@ -136,6 +136,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         palette: palette::PaletteState::default(),
         command_return_target: None,
         config_panel: None,
+        last_config_section: None,
     };
     for run in app
         .state

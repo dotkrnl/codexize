@@ -258,6 +258,58 @@ fn ctrl_s_with_invalid_inline_buffer_aborts_save_and_keeps_edit() {
 }
 
 #[test]
+fn palette_config_with_exact_section_arg_jumps_to_section() {
+    let state = SessionState::new("config-jump".to_string());
+    let mut app = mk_app(state);
+    app.execute_palette_input("config ntfy");
+    let panel = app.config_panel.as_ref().expect("panel open");
+    assert_eq!(panel.current_section_name(), "ntfy");
+}
+
+#[test]
+fn palette_config_with_unique_prefix_jumps_to_section() {
+    let state = SessionState::new("config-prefix".to_string());
+    let mut app = mk_app(state);
+    app.execute_palette_input("config acp.po");
+    let panel = app.config_panel.as_ref().expect("panel open");
+    assert_eq!(panel.current_section_name(), "acp.policy");
+}
+
+#[test]
+fn palette_config_with_unknown_section_arg_errors_and_does_not_open() {
+    let state = SessionState::new("config-unknown".to_string());
+    let mut app = mk_app(state);
+    app.execute_palette_input("config nope");
+    assert!(app.config_panel.is_none());
+    let status = app
+        .status_line
+        .borrow()
+        .render()
+        .expect("status line")
+        .to_string();
+    assert!(status.to_lowercase().contains("unknown"));
+}
+
+#[test]
+fn config_panel_remembers_last_section_within_app() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let state = SessionState::new("config-memory".to_string());
+    let mut app = mk_app(state);
+    app.execute_palette_input("config acp.policy");
+    // Close via Esc → should record acp.policy as the last-viewed section.
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.last_config_section.as_deref(), Some("acp.policy"));
+
+    app.execute_palette_input("config");
+    let panel = app.config_panel.as_ref().expect("panel reopens");
+    assert_eq!(
+        panel.current_section_name(),
+        "acp.policy",
+        "no-arg :config must restore the last-viewed section in the same App"
+    );
+}
+
+#[test]
 fn palette_config_refuses_too_narrow_terminal() {
     let state = SessionState::new("config-palette-test".to_string());
     let mut app = mk_app(state);

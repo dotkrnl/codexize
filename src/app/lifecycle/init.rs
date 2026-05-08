@@ -142,6 +142,7 @@ impl App {
             palette: palette::PaletteState::default(),
             command_return_target: None,
             config_panel: None,
+            last_config_section: None,
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);

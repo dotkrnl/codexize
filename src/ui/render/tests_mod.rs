@@ -94,6 +94,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         palette: super::super::palette::PaletteState::default(),
         command_return_target: None,
         config_panel: None,
+        last_config_section: None,
     };
     for run in app
         .state

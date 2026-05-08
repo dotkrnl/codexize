@@ -376,13 +376,24 @@ pub(crate) struct ConfigPanelState {
 }
 
 impl ConfigPanelState {
-    pub(crate) fn open(config: &Config, path: PathBuf, read_only: bool) -> Self {
+    /// Pre-positions the panel on `initial_section` if the name resolves;
+    /// otherwise falls back to the default section. Used by `:config`,
+    /// `:config <section>`, and the App's last-viewed-section memory.
+    pub(crate) fn open_at(
+        config: &Config,
+        path: PathBuf,
+        read_only: bool,
+        initial_section: Option<&str>,
+    ) -> Self {
         let opened_mtime = mtime(&path);
-        Self {
+        let selected_section = initial_section
+            .and_then(|name| SECTIONS.iter().position(|s| *s == name))
+            .unwrap_or(1);
+        let mut state = Self {
             config: config.clone(),
             path,
             opened_mtime,
-            selected_section: 1,
+            selected_section,
             selected_field: 1,
             status: if read_only {
                 "read-only mode · press e to edit".to_string()
@@ -396,7 +407,13 @@ impl ConfigPanelState {
             dirty: false,
             save_error: None,
             read_only,
-        }
+        };
+        state.select_first_field_in_current_section();
+        state
+    }
+
+    pub(crate) fn current_section_name(&self) -> &'static str {
+        self.current_section()
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> PanelOutcome {
@@ -1059,6 +1076,36 @@ pub(crate) fn terminal_too_narrow_message() -> &'static str {
     "terminal too narrow (need ≥50 cols)"
 }
 
+/// Result of matching a positional `:config <section>` argument against the
+/// known section names. Exact match wins so `:config ntfy` doesn't trip
+/// on the longer `ntfy.events*` siblings.
+pub(crate) enum SectionLookup {
+    Exact(&'static str),
+    UniquePrefix(&'static str),
+    Ambiguous(Vec<&'static str>),
+    Unknown,
+}
+
+pub(crate) fn lookup_section(arg: &str) -> SectionLookup {
+    let needle = arg.trim();
+    if needle.is_empty() {
+        return SectionLookup::Unknown;
+    }
+    if let Some(name) = SECTIONS.iter().copied().find(|s| *s == needle) {
+        return SectionLookup::Exact(name);
+    }
+    let matches: Vec<&'static str> = SECTIONS
+        .iter()
+        .copied()
+        .filter(|s| s.starts_with(needle))
+        .collect();
+    match matches.len() {
+        0 => SectionLookup::Unknown,
+        1 => SectionLookup::UniquePrefix(matches[0]),
+        _ => SectionLookup::Ambiguous(matches),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn field_index_for_test(key: &str) -> usize {
     FIELDS.iter().position(|f| f.key == key).expect("field key")
@@ -1536,7 +1583,12 @@ mod tests {
             "$HOME/.codexize/sessions/with/a/very/long/path/that/wraps",
         )
         .unwrap();
-        ConfigPanelState::open(&config, PathBuf::from("/tmp/example/config.toml"), false)
+        ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            None,
+        )
     }
 
     #[test]

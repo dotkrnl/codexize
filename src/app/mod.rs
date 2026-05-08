@@ -312,6 +312,11 @@ pub struct App {
     pub(crate) palette: palette::PaletteState,
     pub(crate) command_return_target: Option<CommandReturnTarget>,
     pub(crate) config_panel: Option<config_panel::ConfigPanelState>,
+    /// Section name surfaced the last time the config panel closed, so
+    /// reopening it within the same App restores that context. Reset to
+    /// None across launches; the panel falls back to the default section
+    /// when None or when the remembered section is no longer registered.
+    pub(crate) last_config_section: Option<String>,
 }
 fn default_expansion(
     row: &VisibleNodeRow,

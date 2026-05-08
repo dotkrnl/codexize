@@ -261,7 +261,7 @@ impl App {
             _ => false,
         }
     }
-    pub(crate) fn open_config_panel(&mut self) {
+    pub(crate) fn open_config_panel_with_arg(&mut self, arg: &str) {
         if !crate::ui::config_panel::can_open(self.body_inner_width as u16) {
             self.push_status(
                 crate::ui::config_panel::terminal_too_narrow_message().to_string(),
@@ -270,14 +270,37 @@ impl App {
             );
             return;
         }
+        let initial = match arg.trim() {
+            "" => self.last_config_section.as_deref(),
+            non_empty => match crate::ui::config_panel::lookup_section(non_empty) {
+                crate::ui::config_panel::SectionLookup::Exact(name)
+                | crate::ui::config_panel::SectionLookup::UniquePrefix(name) => Some(name),
+                crate::ui::config_panel::SectionLookup::Ambiguous(matches) => {
+                    self.push_status(
+                        format!("config: ambiguous section ({})", matches.join("|")),
+                        Severity::Warn,
+                        Duration::from_secs(4),
+                    );
+                    return;
+                }
+                crate::ui::config_panel::SectionLookup::Unknown => {
+                    self.push_status(
+                        format!("config: unknown section \"{non_empty}\""),
+                        Severity::Warn,
+                        Duration::from_secs(4),
+                    );
+                    return;
+                }
+            },
+        };
         let path = crate::data::config::paths::config_path();
         let config = crate::data::config::loader::load_from_path(&path).unwrap_or_else(|_| {
             // If the file cannot be read while opening the panel, keep the
             // modal usable from the launch-time config and let save surface IO.
             (*self.config).clone()
         });
-        self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open(
-            &config, path, false,
+        self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open_at(
+            &config, path, false, initial,
         ));
     }
     pub(crate) fn config_panel_reset_focused_section(&mut self) {
@@ -295,13 +318,16 @@ impl App {
         let Some(panel) = self.config_panel.as_mut() else {
             return false;
         };
-        match panel.handle_key(key) {
+        let outcome = panel.handle_key(key);
+        match outcome {
             crate::ui::config_panel::PanelOutcome::KeepOpen => false,
             crate::ui::config_panel::PanelOutcome::Close => {
+                self.remember_last_config_section();
                 self.config_panel = None;
                 false
             }
             crate::ui::config_panel::PanelOutcome::Saved => {
+                self.remember_last_config_section();
                 self.reload_config_after_save();
                 self.config_panel = None;
                 self.push_status(
@@ -311,6 +337,11 @@ impl App {
                 );
                 false
             }
+        }
+    }
+    fn remember_last_config_section(&mut self) {
+        if let Some(panel) = self.config_panel.as_ref() {
+            self.last_config_section = Some(panel.current_section_name().to_string());
         }
     }
     /// Re-read the unified config from disk and refresh the cached

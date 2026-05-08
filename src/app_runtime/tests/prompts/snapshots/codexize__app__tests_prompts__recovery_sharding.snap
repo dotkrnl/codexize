@@ -17,10 +17,9 @@ Read any `## Recovery Notes` sections in spec/plan FIRST — they list
 superseded task ids and the reasons; don't re-create work that was
 deliberately removed.
 
-The recovered plan is expected to keep plan-schema v1. Read `## Acceptance
-Criteria` first and map each task back to the relevant `AC-N` blocks. Use
-`## Dependencies and Sequence` for ordering and respect `## Path Boundaries`
-when deciding scope.
+Read the recovered plan's `## Acceptance Criteria` first and map each task
+back to the relevant `AC-N` blocks. Use `## Dependencies and Sequence` for
+ordering and respect `## Path Boundaries` when deciding scope.
 
 # IMPORTANT: completed task ids: 1, 2.
 # Every new task id MUST be strictly greater than 5; the

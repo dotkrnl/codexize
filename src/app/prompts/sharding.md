@@ -6,10 +6,10 @@ Inputs:
   Spec: {spec}
   Plan: {plan}
 
-The plan is expected to use plan-schema v1. Read the `## Acceptance Criteria`
-section first and map every task back to the relevant `AC-N` blocks. Read
-`## Dependencies and Sequence` for ordering, and treat `## Path Boundaries`
-as hard scope limits while sizing tasks.
+Read the plan's `## Acceptance Criteria` section first and map every task
+back to the relevant `AC-N` blocks. Read `## Dependencies and Sequence` for
+ordering, and treat `## Path Boundaries` as hard scope limits while sizing
+tasks.
 
 Sizing:
   - Target ~100_000 tokens of implementation effort per task — fits one

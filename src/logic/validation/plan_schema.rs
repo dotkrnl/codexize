@@ -1,7 +1,5 @@
 use std::fmt;
 
-pub const PLAN_SCHEMA_V1_MARKER: &str = "<!-- plan-schema: v1 -->";
-
 const TOP_LEVEL_SECTIONS: [&str; 4] = [
     "Goal Description",
     "Acceptance Criteria",
@@ -247,8 +245,7 @@ mod tests {
     use super::*;
 
     fn valid_plan() -> String {
-        r#"<!-- plan-schema: v1 -->
-# Example Plan
+        r#"# Example Plan
 
 ## Goal Description
 Ship the feature.

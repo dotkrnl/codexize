@@ -384,33 +384,34 @@ fn enter_final_validation_rejects_illegal_source_phase() {
 }
 
 #[test]
-fn plan_review_to_sharding_skips_validation_without_marker() {
+fn plan_review_to_sharding_blocks_unstructured_plan() {
     with_temp_root(|| {
-        let mut state = SessionState::new("legacy-plan-passthrough".to_string());
+        let mut state = SessionState::new("unstructured-plan".to_string());
         state.current_phase = Phase::PlanReviewRunning;
         write_plan_artifact(
             &state.session_id,
-            r#"# Legacy Plan
+            r#"# Unstructured Plan
 
-## Not The New Schema
-Still acceptable because it has no marker.
+## Not The Schema
+Missing every required section.
 "#,
         );
 
-        execute_transition(&mut state, Phase::ShardingRunning).expect("legacy plan passes");
-        assert_eq!(state.current_phase, Phase::ShardingRunning);
+        let err = execute_transition(&mut state, Phase::ShardingRunning).expect_err("must reject");
+        let message = format!("{err:#}");
+        assert!(message.contains("plan schema validation failed"));
+        assert_eq!(state.current_phase, Phase::PlanReviewRunning);
     });
 }
 
 #[test]
-fn plan_review_to_sharding_blocks_invalid_marked_plan() {
+fn plan_review_to_sharding_blocks_invalid_plan() {
     with_temp_root(|| {
-        let mut state = SessionState::new("invalid-marked-plan".to_string());
+        let mut state = SessionState::new("invalid-plan".to_string());
         state.current_phase = Phase::PlanReviewRunning;
         write_plan_artifact(
             &state.session_id,
-            r#"<!-- plan-schema: v1 -->
-# Invalid Plan
+            r#"# Invalid Plan
 
 ## Goal Description
 Ship the feature.
@@ -446,14 +447,13 @@ Floor.
 }
 
 #[test]
-fn recovery_plan_review_to_sharding_blocks_invalid_marked_plan() {
+fn recovery_plan_review_to_sharding_blocks_invalid_plan() {
     with_temp_root(|| {
         let mut state = SessionState::new("invalid-recovery-plan".to_string());
         state.current_phase = Phase::BuilderRecoveryPlanReview(2);
         write_plan_artifact(
             &state.session_id,
-            r#"<!-- plan-schema: v1 -->
-# Invalid Recovery Plan
+            r#"# Invalid Recovery Plan
 
 ## Goal Description
 Ship the feature.

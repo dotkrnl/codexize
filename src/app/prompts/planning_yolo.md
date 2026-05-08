@@ -39,15 +39,12 @@ Once trade-offs are resolved, do TWO things IN THIS ORDER:
   1. UPDATE {spec} in place to reflect every accepted decision. If you change
      the body, also update its TL;DR so the two stay consistent — an agent
      reading ONLY the spec must not be surprised by anything in the plan.
-  2. Write {plan} using the required plan schema below. If you are editing an
-     existing plan, preserve `<!-- plan-schema: v1 -->` exactly and keep it as
-     the first line. If you are generating a new plan, emit that marker as the
-     first line of the file.
+  2. Write {plan} using the required plan schema below. The four `##` headings
+     are mandatory and must appear in the order shown.
 
 Required plan schema for {plan}:
 
 ```markdown
-<!-- plan-schema: v1 -->
 # <Plan Title>
 
 ## Goal Description

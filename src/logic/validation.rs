@@ -3,7 +3,7 @@ use anyhow::bail;
 use serde::{Deserialize, Serialize};
 
 pub mod plan_schema;
-pub use plan_schema::{PLAN_SCHEMA_V1_MARKER, PlanSchemaIssue, validate_plan_schema};
+pub use plan_schema::{PlanSchemaIssue, validate_plan_schema};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidationStatus {

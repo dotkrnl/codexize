@@ -9,7 +9,7 @@ use crate::logic::pipeline::phase::Phase;
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
-use crate::logic::validation::{PLAN_SCHEMA_V1_MARKER, validate_plan_schema};
+use crate::logic::validation::validate_plan_schema;
 use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState, session_dir};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -72,17 +72,6 @@ fn validate_plan_schema_transition(state: &SessionState, to: Phase) -> Result<()
         .join("plan.md");
     let plan_text = std::fs::read_to_string(&plan_path)
         .with_context(|| format!("failed to read {}", plan_path.display()))?;
-
-    // The marker is the legacy/validated split point: only the first non-blank
-    // line counts, so later comments cannot silently opt a legacy plan into the
-    // stricter gate after prose has already started.
-    let has_marker = plan_text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .is_some_and(|line| line == PLAN_SCHEMA_V1_MARKER);
-    if !has_marker {
-        return Ok(());
-    }
 
     if let Err(issues) = validate_plan_schema(&plan_text) {
         let rendered = issues

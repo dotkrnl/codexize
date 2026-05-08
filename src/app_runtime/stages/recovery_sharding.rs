@@ -57,7 +57,7 @@ impl App {
             &tasks_path,
             &completed,
             id_floor,
-            self.memory_view.max_topics_per_read,
+            self.prompt_meta(),
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);

@@ -46,7 +46,7 @@ impl App {
         }
         let attempt = self.attempt_for("sharding", None, 1);
         let live_summary_path = self.live_summary_path_for_run("sharding", None, 1, attempt);
-        let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path, self.memory_view.max_topics_per_read);
+        let prompt = sharding_prompt(&spec_path, &plan_path, &tasks_path, &live_summary_path, self.prompt_meta());
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;

@@ -18,7 +18,7 @@ fn simplifier_prompt_includes_refine_carryover() {
         &simplification,
         &live,
         &carryover,
-        6,
+        PromptMeta::with_topics(6),
     );
 
     assert!(
@@ -38,7 +38,7 @@ fn simplifier_prompt_omits_refine_block_when_empty() {
     let simplification = session_dir.join("rounds/001/simplification.toml");
     let live = session_dir.join("artifacts/live_summary.txt");
 
-    let prompt = simplifier_prompt(&session_dir, &review_scope, &simplification, &live, &[], 6);
+    let prompt = simplifier_prompt(&session_dir, &review_scope, &simplification, &live, &[], PromptMeta::with_topics(6));
 
     assert!(
         !prompt.contains("Refine carryover"),

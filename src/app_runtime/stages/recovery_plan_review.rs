@@ -62,7 +62,7 @@ impl App {
             &recovery_path,
             &live_summary_path,
             &plan_review_path,
-            self.memory_view.max_topics_per_read,
+            self.prompt_meta(),
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);

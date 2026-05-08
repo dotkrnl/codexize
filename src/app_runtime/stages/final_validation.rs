@@ -79,7 +79,7 @@ impl App {
             &verdict_path,
             &live_summary_path,
             Some(&simplification_path),
-            self.memory_view.max_topics_per_read,
+            self.prompt_meta(),
         );
         let prompt_path = session_dir
             .join("prompts")

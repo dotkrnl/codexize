@@ -27,6 +27,21 @@ impl App {
         self.paths.sessions_root.join(&self.state.session_id)
     }
 
+    /// Build a per-call `PromptMeta` from this App's loaded `Config`.
+    /// Carries `memory.max_topics_per_read` and an explicit memory_root
+    /// override (when the operator set `paths.memory_root`) so every
+    /// prompt template renders with the operator's configured values.
+    pub(crate) fn prompt_meta(&self) -> crate::app::prompts::PromptMeta {
+        crate::app::prompts::PromptMeta {
+            max_topics_per_read: self.memory_view.max_topics_per_read,
+            memory_root: if self.config.paths.memory_root.is_explicit() {
+                Some(self.paths.memory_root.clone())
+            } else {
+                None
+            },
+        }
+    }
+
     /// Resolve the memory root for this App's session.
     ///
     /// When `paths.memory_root` is explicitly set in `~/.codexize/config.toml`,

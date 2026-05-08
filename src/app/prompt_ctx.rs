@@ -4,22 +4,50 @@ use std::{
 };
 
 use crate::logic::memory::{memory_root_from_session_path, normalize_absolute};
+
+/// Per-call prompt configuration drawn from the loaded `Config`.
+///
+/// `max_topics_per_read` is the literal substituted into the
+/// `{max_topics_per_read}` slot of the memory_context template.
+/// `memory_root` is `Some(_)` when the operator explicitly set
+/// `paths.memory_root`, in which case it overrides the
+/// session-derived memory location everywhere — including inside the
+/// memory-context block. When `None`, `memory_arg` falls back to
+/// deriving the root from the supplied session/artifact path so
+/// off-App callers (tests, snapshot fixtures) keep the prior behavior.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PromptMeta {
+    pub max_topics_per_read: u32,
+    pub memory_root: Option<PathBuf>,
+}
+
+impl PromptMeta {
+    /// Test-only convenience: build a meta with no memory_root override.
+    /// Production callers go through `App::prompt_meta()` which captures
+    /// the operator's configured override when present.
+    #[cfg(test)]
+    pub(crate) fn with_topics(max_topics_per_read: u32) -> Self {
+        Self {
+            max_topics_per_read,
+            memory_root: None,
+        }
+    }
+}
+
 pub(super) struct PromptCtx {
     values: HashMap<&'static str, String>,
     max_topics_per_read: u32,
+    memory_root_override: Option<PathBuf>,
 }
 impl PromptCtx {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(meta: PromptMeta) -> Self {
         let mut ctx = Self {
             values: HashMap::new(),
-            max_topics_per_read: 6,
+            max_topics_per_read: meta.max_topics_per_read,
+            memory_root_override: meta.memory_root,
         };
         ctx.set("project_doc_instr", project_doc_instr());
         ctx
-    }
-    pub(super) fn set_max_topics_per_read(&mut self, v: u32) -> &mut Self {
-        self.max_topics_per_read = v;
-        self
     }
     pub(super) fn set(&mut self, key: &'static str, value: impl Into<String>) -> &mut Self {
         self.values.insert(key, value.into());
@@ -56,7 +84,10 @@ impl PromptCtx {
         self.set("instr", Self::render_values(template, [("path", path)]))
     }
     pub(super) fn memory_arg(&mut self, session_or_artifact_path: impl AsRef<Path>) -> &mut Self {
-        let memory_root = memory_root_from_session_path(session_or_artifact_path.as_ref());
+        let memory_root = match &self.memory_root_override {
+            Some(root) => root.clone(),
+            None => memory_root_from_session_path(session_or_artifact_path.as_ref()),
+        };
         let rendered = Self::render_values(
             include_str!("prompts/memory_context.md"),
             [
@@ -110,7 +141,7 @@ fn project_doc_instr() -> String {
 }
 #[cfg(test)]
 pub(crate) fn live_summary_instruction(path: &Path) -> String {
-    let ctx = PromptCtx::new();
+    let ctx = PromptCtx::new(PromptMeta::with_topics(6));
     PromptCtx::render_values(
         include_str!("prompts/live_summary.md"),
         [("path", ctx.path(path))],
@@ -118,7 +149,7 @@ pub(crate) fn live_summary_instruction(path: &Path) -> String {
 }
 #[cfg(test)]
 pub(crate) fn live_summary_instruction_interactive(path: &Path) -> String {
-    let ctx = PromptCtx::new();
+    let ctx = PromptCtx::new(PromptMeta::with_topics(6));
     PromptCtx::render_values(
         include_str!("prompts/live_summary_interactive.md"),
         [("path", ctx.path(path))],

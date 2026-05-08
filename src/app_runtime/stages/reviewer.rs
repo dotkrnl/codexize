@@ -97,7 +97,7 @@ impl App {
             review_file: &review_path,
             live_summary_path: &live_summary_path,
             is_terminal_review,
-            max_topics_per_read: self.memory_view.max_topics_per_read,
+            meta: self.prompt_meta(),
         };
         // ReviewRound dispatch: cadence-driven full-alignment audit when the
         // round number is a non-zero multiple of `full_review_interval`.

@@ -1,14 +1,13 @@
-use super::prompt_ctx::{PromptCtx, resolved_agent_path};
+use super::prompt_ctx::{PromptCtx, PromptMeta, resolved_agent_path};
 use indoc::formatdoc;
 use std::path::{Path, PathBuf};
 pub(crate) fn spec_review_prompt(
     spec_path: &str,
     review_path: &str,
     live_summary_path: &str,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     ctx.path_arg("spec_path", spec_path)
         .path_arg("review_path", review_path)
         .memory_arg(spec_path)
@@ -21,10 +20,9 @@ pub(crate) fn plan_review_prompt(
     review_path: &str,
     round: u32,
     live_summary_path: &str,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     let review_path = ctx.path(review_path);
     let review_dir = Path::new(&review_path)
         .parent()
@@ -56,10 +54,9 @@ pub(crate) fn brainstorm_prompt(
     summary_path: &str,
     live_summary_path: &str,
     yolo: bool,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     let summary_path = ctx.path(summary_path);
     let skip_proposal_path = Path::new(&summary_path)
         .parent()
@@ -84,10 +81,9 @@ pub(crate) fn planning_prompt(
     plan_path: &Path,
     live_summary_path: &Path,
     yolo: bool,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     let reviews = if review_paths.is_empty() {
         "(no spec reviews available — work from the spec alone)".to_string()
     } else {
@@ -115,10 +111,9 @@ pub(crate) fn sharding_prompt(
     plan_path: &Path,
     tasks_path: &Path,
     live_summary_path: &Path,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .path_arg("tasks", tasks_path)
@@ -132,10 +127,9 @@ pub(crate) fn final_validation_prompt(
     verdict_path: &Path,
     live_summary_path: &Path,
     simplification_path: Option<&Path>,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     let simplification_block = match simplification_path {
         Some(path) if path.exists() => formatdoc!(
             "\nSimplification context (advisory only — the simplifier's self-report; do not let it override your independent judgment):\n  {}\n",
@@ -156,10 +150,9 @@ pub(crate) fn dreaming_prompt(
     session_dir: &Path,
     dream_report_path: &Path,
     live_summary_path: &Path,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     ctx.path_arg("session_dir", session_dir)
         .path_arg("dream_report", dream_report_path)
         .live_arg(live_summary_path, false)
@@ -178,10 +171,9 @@ pub(crate) fn recovery_prompt(
     live_summary_path: &Path,
     recovery_path: &Path,
     interactive: bool,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     let template = if interactive {
         include_str!("prompts/recovery_interactive.md")
     } else {
@@ -214,10 +206,9 @@ pub(crate) fn recovery_plan_review_prompt(
     recovery_path: &Path,
     live_summary_path: &Path,
     plan_review_output_path: &Path,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .path_arg("review", triggering_review_path)
@@ -234,10 +225,9 @@ pub(crate) fn recovery_sharding_prompt(
     tasks_output_path: &Path,
     completed_ids: &[u32],
     id_floor: u32,
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+    let mut ctx = PromptCtx::new(meta);
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .ids("completed", completed_ids, "none")
@@ -247,18 +237,28 @@ pub(crate) fn recovery_sharding_prompt(
         .live_arg(live_summary_path, false)
         .render(include_str!("prompts/recovery_sharding.md"))
 }
-pub(crate) fn coder_prompt(
-    session_dir: &Path,
-    task_id: u32,
-    round: u32,
-    task_file: &Path,
-    live_summary_path: &Path,
-    resume: bool,
-    refine_carryover: &[String],
-    max_topics_per_read: u32,
-) -> String {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read);
+pub(crate) struct CoderPromptInputs<'a> {
+    pub(crate) session_dir: &'a Path,
+    pub(crate) task_id: u32,
+    pub(crate) round: u32,
+    pub(crate) task_file: &'a Path,
+    pub(crate) live_summary_path: &'a Path,
+    pub(crate) resume: bool,
+    pub(crate) refine_carryover: &'a [String],
+    pub(crate) meta: PromptMeta,
+}
+pub(crate) fn coder_prompt(inputs: CoderPromptInputs<'_>) -> String {
+    let CoderPromptInputs {
+        session_dir,
+        task_id,
+        round,
+        task_file,
+        live_summary_path,
+        resume,
+        refine_carryover,
+        meta,
+    } = inputs;
+    let mut ctx = PromptCtx::new(meta);
     let prev_review = if round > 1 {
         let p = session_dir
             .join("rounds")
@@ -315,7 +315,7 @@ pub(crate) struct ReviewerPromptInputs<'a> {
     /// hard rule and `review::ReviewVerdict::enforce_terminal_review`
     /// rejects `status = "refine"` post-hoc — see `BuilderState::is_terminal_review_task`.
     pub(crate) is_terminal_review: bool,
-    pub(crate) max_topics_per_read: u32,
+    pub(crate) meta: PromptMeta,
 }
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
     let ctx = build_reviewer_ctx(&inputs);
@@ -330,8 +330,7 @@ pub(crate) fn reviewer_full_alignment_prompt(inputs: ReviewerPromptInputs<'_>) -
 }
 
 fn build_reviewer_ctx(inputs: &ReviewerPromptInputs<'_>) -> PromptCtx {
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(inputs.max_topics_per_read);
+    let mut ctx = PromptCtx::new(inputs.meta.clone());
     let prior_reviews = if inputs.round > 1 {
         format!(
             "  Prior reviews for this task (read first; do not repeat their feedback):\n{}\n",
@@ -381,7 +380,7 @@ pub(crate) fn simplifier_prompt(
     simplification_path: &Path,
     live_summary_path: &Path,
     refine_carryover: &[String],
-    max_topics_per_read: u32,
+    meta: PromptMeta,
 ) -> String {
     let refine_block = if refine_carryover.is_empty() {
         String::new()
@@ -395,9 +394,8 @@ pub(crate) fn simplifier_prompt(
                 .join("\n")
         )
     };
-    let mut ctx = PromptCtx::new();
-    ctx.set_max_topics_per_read(max_topics_per_read)
-        .path_arg("spec_path", session_dir.join("artifacts/spec.md"))
+    let mut ctx = PromptCtx::new(meta);
+    ctx.path_arg("spec_path", session_dir.join("artifacts/spec.md"))
         .path_arg("plan_path", session_dir.join("artifacts/plan.md"))
         .path_arg("review_scope_path", review_scope_file)
         .path_arg("simplification_path", simplification_path)

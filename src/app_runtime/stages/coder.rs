@@ -1,6 +1,6 @@
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
-    coder_prompt, read_review_scope, task_toml_for, write_review_scope_artifact,
+    CoderPromptInputs, coder_prompt, read_review_scope, task_toml_for, write_review_scope_artifact,
 };
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
@@ -75,16 +75,16 @@ impl App {
         } else {
             session_state::transitions::take_pending_refine_feedback(&mut self.state)
         };
-        let prompt = coder_prompt(
-            &session_dir,
+        let prompt = coder_prompt(CoderPromptInputs {
+            session_dir: &session_dir,
             task_id,
-            r,
-            &task_file,
-            &live_summary_path,
+            round: r,
+            task_file: &task_file,
+            live_summary_path: &live_summary_path,
             resume,
-            &refine_carryover,
-            self.memory_view.max_topics_per_read,
-        );
+            refine_carryover: &refine_carryover,
+            meta: self.prompt_meta(),
+        });
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;

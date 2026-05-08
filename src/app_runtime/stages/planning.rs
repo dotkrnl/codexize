@@ -63,7 +63,7 @@ impl App {
             &plan_path,
             &live_summary_path,
             modes.yolo,
-            self.memory_view.max_topics_per_read,
+            self.prompt_meta(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);

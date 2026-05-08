@@ -103,7 +103,7 @@ impl App {
             &simplification_path,
             &live_summary_path,
             &refine_carryover,
-            self.memory_view.max_topics_per_read,
+            self.prompt_meta(),
         );
         let prompt_path = session_dir
             .join("prompts")

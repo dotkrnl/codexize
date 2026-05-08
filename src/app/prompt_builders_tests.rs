@@ -32,6 +32,52 @@ fn simplifier_prompt_includes_refine_carryover() {
 }
 
 #[test]
+fn brainstorm_prompt_inlines_prior_attempts_pointer_when_supplied() {
+    // Wires the prior_attempts_path argument all the way through to the
+    // rendered template. The block must point at the supplied path and
+    // tell the agent not to re-ask answered questions.
+    let prior = PathBuf::from("/tmp/codexize-test-session/prompts/brainstorm-prior-attempts-r1.md");
+    let prompt = brainstorm_prompt(
+        "fictional idea",
+        "/tmp/codexize-test-session/artifacts/spec.md",
+        "/tmp/codexize-test-session/artifacts/session_summary.toml",
+        "/tmp/codexize-test-session/artifacts/live.txt",
+        false,
+        Some(&prior),
+        PromptMeta::with_topics(6),
+    );
+    assert!(
+        prompt.contains("brainstorm-prior-attempts-r1.md"),
+        "prior-attempts path must appear in rendered prompt:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("Do NOT re-ask"),
+        "directive against re-asking must appear in rendered prompt:\n{prompt}"
+    );
+}
+
+#[test]
+fn brainstorm_prompt_omits_prior_attempts_block_when_none() {
+    let prompt = brainstorm_prompt(
+        "fictional idea",
+        "/tmp/codexize-test-session/artifacts/spec.md",
+        "/tmp/codexize-test-session/artifacts/session_summary.toml",
+        "/tmp/codexize-test-session/artifacts/live.txt",
+        false,
+        None,
+        PromptMeta::with_topics(6),
+    );
+    assert!(
+        !prompt.contains("Prior failed attempts"),
+        "no prior-attempts block expected when path is None:\n{prompt}"
+    );
+    assert!(
+        !prompt.contains("{prior_attempts_block}"),
+        "the placeholder must be substituted away even when empty:\n{prompt}"
+    );
+}
+
+#[test]
 fn simplifier_prompt_omits_refine_block_when_empty() {
     let session_dir = PathBuf::from("/tmp/codexize-test-session");
     let review_scope = session_dir.join("rounds/001/review_scope.toml");

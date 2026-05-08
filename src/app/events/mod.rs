@@ -301,7 +301,39 @@ impl App {
                 self.config_panel = None;
                 false
             }
-            crate::ui::config_panel::PanelOutcome::Saved => false,
+            crate::ui::config_panel::PanelOutcome::Saved => {
+                self.reload_config_after_save();
+                self.config_panel = None;
+                self.push_status(
+                    "saved · in effect immediately".to_string(),
+                    Severity::Info,
+                    Duration::from_secs(3),
+                );
+                false
+            }
+        }
+    }
+    /// Re-read the unified config from disk and refresh the cached
+    /// `Arc<Config>` plus its derived `view::*` snapshots so subsystems
+    /// driven off `self.paths`, `self.memory_view`, and `self.ui_view`
+    /// observe the new values without re-launching the App.
+    pub(crate) fn reload_config_after_save(&mut self) {
+        let path = crate::data::config::paths::config_path();
+        match crate::data::config::loader::load_from_path(&path) {
+            Ok(loaded) => {
+                let arc = std::sync::Arc::new(loaded);
+                self.paths = arc.paths_view();
+                self.memory_view = arc.memory_view();
+                self.ui_view = arc.ui_view();
+                self.config = arc;
+            }
+            Err(err) => {
+                self.push_status(
+                    format!("config reload failed: {err}"),
+                    Severity::Warn,
+                    Duration::from_secs(4),
+                );
+            }
         }
     }
     pub(crate) fn handle_app_command(&mut self, command: AppCommand) -> bool {

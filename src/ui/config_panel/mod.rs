@@ -405,7 +405,13 @@ impl ConfigPanelState {
             && key.code == KeyCode::Char('s')
         {
             self.save(false);
-            return if self.conflict.is_none() && self.save_error.is_none() {
+            // Save is only successful when the inline-edit buffer (if any)
+            // committed cleanly, the file write hit no IO error, and no
+            // mtime conflict was detected. Anything else keeps the panel
+            // open so the operator sees the diagnostic.
+            let saved =
+                self.editing.is_none() && self.conflict.is_none() && self.save_error.is_none();
+            return if saved {
                 PanelOutcome::Saved
             } else {
                 PanelOutcome::KeepOpen
@@ -824,7 +830,7 @@ impl ConfigPanelState {
             Ok(()) => {
                 self.opened_mtime = mtime(&self.path);
                 self.dirty = false;
-                self.status = "saved · applies on next launch".to_string();
+                self.status = "saved · in effect immediately".to_string();
             }
             Err(err) => {
                 self.save_error = Some(err.to_string());
@@ -1051,6 +1057,26 @@ impl ConfigPanelState {
 
 pub(crate) fn terminal_too_narrow_message() -> &'static str {
     "terminal too narrow (need ≥50 cols)"
+}
+
+#[cfg(test)]
+pub(crate) fn field_index_for_test(key: &str) -> usize {
+    FIELDS.iter().position(|f| f.key == key).expect("field key")
+}
+
+#[cfg(test)]
+impl ConfigPanelState {
+    pub(crate) fn set_focus_for_test(&mut self, field_idx: usize) {
+        self.selected_field = field_idx;
+        self.selected_section = SECTIONS
+            .iter()
+            .position(|s| *s == FIELDS[field_idx].section)
+            .expect("section for field");
+    }
+
+    pub(crate) fn set_edit_buffer_for_test(&mut self, buffer: String) {
+        self.edit_buffer = buffer;
+    }
 }
 
 pub(crate) fn can_open(width: u16) -> bool {
@@ -1322,7 +1348,7 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
         reason
     } else if state.dirty {
         format!(
-            "unsaved · {} changes · applies on next launch",
+            "unsaved · {} changes · applies after Ctrl-S",
             dirty_count(state)
         )
     } else {

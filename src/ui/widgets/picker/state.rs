@@ -154,6 +154,11 @@ impl SessionPicker {
                 crate::ui::config_panel::PanelOutcome::Saved => {
                     self.reload_config();
                     self.config_panel = None;
+                    self.status_line.push(
+                        "saved · in effect immediately".to_string(),
+                        Severity::Info,
+                        Duration::from_secs(3),
+                    );
                     return Ok(KeyAction::Continue);
                 }
             }

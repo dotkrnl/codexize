@@ -5,6 +5,7 @@ mod acp_events;
 pub mod adapters;
 pub mod artifacts;
 pub(crate) mod async_bridge;
+pub mod atomic;
 pub mod cache;
 pub mod cache_lock;
 pub mod dashboard_io;

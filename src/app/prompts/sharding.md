@@ -6,6 +6,11 @@ Inputs:
   Spec: {spec}
   Plan: {plan}
 
+The plan is expected to use plan-schema v1. Read the `## Acceptance Criteria`
+section first and map every task back to the relevant `AC-N` blocks. Read
+`## Dependencies and Sequence` for ordering, and treat `## Path Boundaries`
+as hard scope limits while sizing tasks.
+
 Sizing:
   - Target ~100_000 tokens of implementation effort per task — fits one
     coding session without context compaction. Decompose only along natural
@@ -29,7 +34,8 @@ Required fields per task:
   - description      outcome-oriented (multi-line TOML string allowed). NOT
                      a patch recipe — the planner already established the
                      shape; preserve it. Cover required outcomes, dependencies,
-                     acceptance checks, and interfaces/touchpoints.
+                     acceptance checks, interfaces/touchpoints, and the `AC-N`
+                     items the task satisfies.
   - test             concrete verification steps, OR `"not testable —
                      <one-line reason>"` for scaffolding tasks (reviewer
                      skips test-pass check, still requires the build to be

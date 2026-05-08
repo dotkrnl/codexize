@@ -50,8 +50,45 @@ Once trade-offs are resolved, do TWO things IN THIS ORDER:
   1. UPDATE {spec} in place to reflect every accepted decision. If you change
      the body, also update its TL;DR so the two stay consistent — an agent
      reading ONLY the spec must not be surprised by anything in the plan.
-  2. Write {plan} starting with a TL;DR (3–6 bullets summarising key
-     sequencing/interface decisions, skimmable in 30 sec), then the body.
+  2. Write {plan} using the required plan schema below. If you are editing an
+     existing plan, preserve `<!-- plan-schema: v1 -->` exactly and keep it as
+     the first line. If you are generating a new plan, emit that marker as the
+     first line of the file.
+
+Required plan schema for {plan}:
+
+```markdown
+<!-- plan-schema: v1 -->
+# <Plan Title>
+
+## Goal Description
+<one short paragraph>
+
+## Acceptance Criteria
+- AC-1: <title>
+  - Positive Tests (expected to PASS):
+    - <case>
+  - Negative Tests (expected to FAIL):
+    - <case>
+- AC-2: ...
+
+## Path Boundaries
+
+### Upper Bound (Maximum Scope)
+<the most comprehensive acceptable implementation — a ceiling>
+
+### Lower Bound (Minimum Scope)
+<the minimum viable implementation — a floor>
+
+### Allowed Choices
+- Can use: <list>
+- Cannot use: <list>
+
+## Dependencies and Sequence
+1. Milestone 1: <description>
+   - Phase A: ...
+2. Milestone 2: ...
+```
 
 Plan shape: an execution map for coordination — sequencing & dependencies
 (what order matters and why), interfaces / integration points / execution

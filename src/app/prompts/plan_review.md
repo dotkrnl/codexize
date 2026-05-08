@@ -5,6 +5,11 @@ Inputs:
   Plan: {plan_path}
   Spec: {spec_path}{prior_block}
 
+Schema gate: `plan.md` is required to use plan-schema v1. The first non-blank
+line must be exactly `<!-- plan-schema: v1 -->`, and the plan must keep the
+exact `##` headings `Goal Description`, `Acceptance Criteria`,
+`Path Boundaries`, and `Dependencies and Sequence` in that order.
+
 You have exactly two jobs. Do both, do nothing else:
 
   1. CORRECT INCONSISTENCIES THAT WOULD MISLEAD A CODER. Things that, if
@@ -54,6 +59,11 @@ the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
 {review_path} saying so. Do NOT invent issues.
+
+If the schema marker or required headings are missing and the smallest safe
+patch is not enough to restore them faithfully, record a blocking review note
+that requests a re-plan. Do not approve a schema-less plan by treating it as a
+cosmetic issue.
 
 Memory side-quest (optional, low effort): if the plan↔spec pass exposed a
 planning lesson worth remembering across sessions (a recurring edge case

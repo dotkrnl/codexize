@@ -21,8 +21,8 @@ pub use client::{AcpConnector, AcpSession, SubprocessConnector};
 // orchestration concerns rather than JSON-RPC transport, so they live alongside
 // `data::acp` instead of inflating the transport directory's footprint.
 pub use super::acp_config::{
-    AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_local_program,
-    program_is_executable, should_offer_claude_acp_install, should_offer_codex_acp_install,
+    AcpAgentDefinition, AcpConfig, claude_acp_install_root, claude_acp_local_program_for,
+    program_is_executable, should_offer_claude_acp_install_for, should_offer_codex_acp_install,
 };
 pub use super::acp_events::{
     AcpRuntimeEvent, AcpTextAccumulator, AcpTextBoundary, AcpTextEvent, ClientTextKind,

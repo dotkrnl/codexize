@@ -20,7 +20,7 @@ fn render_preflight_buf(scenario: Scenario, width: u16, height: u16) -> Buffer {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_preflight_modal(frame, scenario))
+        .draw(|frame| render_preflight_modal(frame, scenario, std::path::Path::new("")))
         .unwrap();
     terminal.backend().buffer().clone()
 }
@@ -43,7 +43,7 @@ fn expected_dialog_rect(width: u16, height: u16, content_h: usize) -> Rect {
 
 fn scenario_body_line_count(scenario: Scenario, width: u16, height: u16) -> usize {
     let area = Rect::new(0, 0, width, height);
-    let (_, body_copy, _) = preflight_modal_content(scenario);
+    let (_, body_copy, _) = preflight_modal_content(scenario, std::path::Path::new(""));
     preflight_body_lines(area, body_copy).len()
 }
 

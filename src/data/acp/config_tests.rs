@@ -423,7 +423,7 @@ fn claude_acp_local_program_lives_under_home_codexize_acp() {
         std::env::set_var("HOME", home.path());
     }
 
-    let program = claude_acp_local_program();
+    let program = claude_acp_local_program_for(&claude_acp_install_root());
 
     unsafe {
         match prev_home {
@@ -458,13 +458,15 @@ fn claude_acp_install_prompt_requires_claude_cli_and_missing_acp() {
         std::env::set_var("PATH", fake_bin.path());
     }
 
-    assert!(!should_offer_claude_acp_install());
+    let install_root = claude_acp_install_root();
+
+    assert!(!should_offer_claude_acp_install_for(&install_root));
 
     write_fake_executable(&fake_bin.path().join("claude"));
-    assert!(should_offer_claude_acp_install());
+    assert!(should_offer_claude_acp_install_for(&install_root));
 
     write_fake_executable(&fake_bin.path().join("claude-agent-acp"));
-    assert!(!should_offer_claude_acp_install());
+    assert!(!should_offer_claude_acp_install_for(&install_root));
 
     unsafe {
         match prev_home {

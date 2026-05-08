@@ -25,7 +25,10 @@ enum ModalAction {
     Exit,
     Ignore,
 }
-fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Line<'static>) {
+fn preflight_modal_content(
+    scenario: Scenario,
+    claude_acp_root: &std::path::Path,
+) -> (&'static str, Vec<String>, Line<'static>) {
     match scenario {
         Scenario::NoGitEmpty => {
             let title = " No git repository ";
@@ -111,7 +114,7 @@ fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Li
             )
         }
         Scenario::ClaudeAcpMissing => {
-            let root = crate::acp::claude_acp_install_root();
+            let root = claude_acp_root;
             let title = " Claude ACP not installed ";
             (
                 title,
@@ -133,8 +136,12 @@ fn preflight_modal_content(scenario: Scenario) -> (&'static str, Vec<String>, Li
         }
     }
 }
-fn render_preflight_modal(frame: &mut Frame<'_>, scenario: Scenario) {
-    let (title, body_copy, keymap_line) = preflight_modal_content(scenario);
+fn render_preflight_modal(
+    frame: &mut Frame<'_>,
+    scenario: Scenario,
+    claude_acp_root: &std::path::Path,
+) {
+    let (title, body_copy, keymap_line) = preflight_modal_content(scenario, claude_acp_root);
     let body_lines = preflight_body_lines(frame.area(), body_copy);
     render_modal_overlay(
         frame,
@@ -191,7 +198,10 @@ fn preflight_keymap_line(actions: &[(&str, Color, &str, Option<Color>, &str)]) -
     }
     Line::from(spans)
 }
-pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
+pub fn check(
+    terminal: &mut AppTerminal,
+    claude_acp_root: &std::path::Path,
+) -> Result<PreflightOutcome> {
     let has_git = backend::detect_git();
     let root = codexize_root();
     let codexize_entry = match std::env::current_dir() {
@@ -203,7 +213,7 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     };
     if has_git {
         if backend::detect_ignored(&root) {
-            run_acp_install_modals_if_missing(terminal)?;
+            run_acp_install_modals_if_missing(terminal, claude_acp_root)?;
             return Ok(PreflightOutcome::Continue);
         }
         if run_gitignore_modal(terminal, Scenario::GitExistsNotIgnored, &codexize_entry)?
@@ -211,7 +221,7 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
         {
             return Ok(PreflightOutcome::Exit);
         }
-        run_acp_install_modals_if_missing(terminal)?;
+        run_acp_install_modals_if_missing(terminal, claude_acp_root)?;
         return Ok(PreflightOutcome::Continue);
     }
     let scenario = if backend::has_existing_files() {
@@ -222,7 +232,7 @@ pub fn check(terminal: &mut AppTerminal) -> Result<PreflightOutcome> {
     if run_git_init_modal(terminal, scenario, &codexize_entry)? == PreflightOutcome::Exit {
         return Ok(PreflightOutcome::Exit);
     }
-    run_acp_install_modals_if_missing(terminal)?;
+    run_acp_install_modals_if_missing(terminal, claude_acp_root)?;
     Ok(PreflightOutcome::Continue)
 }
 fn run_git_init_modal(
@@ -232,7 +242,7 @@ fn run_git_init_modal(
 ) -> Result<PreflightOutcome> {
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
+            render_preflight_modal(frame, scenario, std::path::Path::new(""));
         })?;
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
@@ -269,7 +279,7 @@ fn run_gitignore_modal(
 ) -> Result<PreflightOutcome> {
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
+            render_preflight_modal(frame, scenario, std::path::Path::new(""));
         })?;
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
@@ -290,49 +300,63 @@ fn run_gitignore_modal(
         }
     }
 }
-fn run_acp_install_modals_if_missing(terminal: &mut AppTerminal) -> Result<()> {
+fn run_acp_install_modals_if_missing(
+    terminal: &mut AppTerminal,
+    claude_acp_root: &std::path::Path,
+) -> Result<()> {
     if crate::acp::should_offer_codex_acp_install() {
         run_acp_install_modal(
             terminal,
             Scenario::CodexAcpMissing,
+            claude_acp_root,
             backend::install_codex_acp,
         )?;
     }
-    if crate::acp::should_offer_claude_acp_install() {
+    if crate::acp::should_offer_claude_acp_install_for(claude_acp_root) {
+        let root = claude_acp_root.to_path_buf();
         run_acp_install_modal(
             terminal,
             Scenario::ClaudeAcpMissing,
-            backend::install_claude_acp,
+            claude_acp_root,
+            move || backend::install_claude_acp(&root),
         )?;
     }
     Ok(())
 }
+
 fn run_acp_install_modal(
     terminal: &mut AppTerminal,
     scenario: Scenario,
-    install: fn() -> Result<()>,
+    claude_acp_root: &std::path::Path,
+    install: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
+    // `install` is a FnOnce so it can capture state; it is called at
+    // most once on Accept (the fn returns immediately after).
+    let mut install = Some(install);
     loop {
         terminal.draw(|frame| {
-            render_preflight_modal(frame, scenario);
+            render_preflight_modal(frame, scenario, claude_acp_root);
         })?;
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            match classify_optional_modal_key(key.code) {
-                ModalAction::Accept => {
-                    install()?;
-                    return Ok(());
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
                 }
-                ModalAction::Skip | ModalAction::Exit => return Ok(()),
-                ModalAction::Ignore => {}
+                match classify_optional_modal_key(key.code) {
+                    ModalAction::Accept => {
+                        if let Some(f) = install.take() {
+                            f()?;
+                        }
+                        return Ok(());
+                    }
+                    ModalAction::Skip | ModalAction::Exit => return Ok(()),
+                    ModalAction::Ignore => {}
+                }
             }
         }
     }
 }
+
 fn classify_required_modal_key(key: KeyCode) -> ModalAction {
     match key {
         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => ModalAction::Accept,

@@ -214,7 +214,15 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     // directory so an operator with several codexize panes can tell them
     // apart at a glance. No-op outside tmux.
     codexize::data::tmux::maybe_set_window_title();
-    if preflight::check(terminal_guard.terminal_mut())? == preflight::PreflightOutcome::Exit {
+    let config = std::sync::Arc::new(codexize::data::config::load_or_default()
+        .unwrap_or_else(|e| {
+            eprintln!("config: using defaults: {e}");
+            codexize::data::config::Config::baked_defaults()
+        }));
+    let install_view = config.acp_install_view();
+    if preflight::check(terminal_guard.terminal_mut(), &install_view.claude_acp_root)?
+        == preflight::PreflightOutcome::Exit
+    {
         let mut terminal = terminal_guard.into_terminal();
         tui::stop(&mut terminal)?;
         return Ok(());
@@ -255,11 +263,6 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
             )
         }
     };
-    let config = std::sync::Arc::new(codexize::data::config::load_or_default()
-        .unwrap_or_else(|e| {
-            eprintln!("config: using defaults: {e}");
-            codexize::data::config::Config::baked_defaults()
-        }));
     let diag = config.diagnostics_view();
     codexize::diagnostics::init_session_tracing(&session_id, &diag)?;
     if !resume_warnings.is_empty() {

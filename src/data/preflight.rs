@@ -172,9 +172,9 @@ pub fn run_git_init() -> Result<()> {
     }
     Ok(())
 }
-pub fn install_claude_acp() -> Result<()> {
-    let root = crate::acp::claude_acp_install_root();
-    fs::create_dir_all(&root).with_context(|| format!("failed to create {}", root.display()))?;
+pub fn install_claude_acp(install_root: &Path) -> Result<()> {
+    let root = install_root;
+    fs::create_dir_all(root).with_context(|| format!("failed to create {}", root.display()))?;
     let status = Command::new("npm")
         .args([
             "install",

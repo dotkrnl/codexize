@@ -138,7 +138,7 @@ impl AcpConfig {
 impl Default for AcpConfig {
     fn default() -> Self {
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let local = claude_acp_local_program();
+        let local = claude_acp_local_program_for(&claude_acp_install_root());
         let claude = if path_is_executable(&local) { local.display().to_string() } else { "claude-agent-acp".into() };
         Self::from_agents([
             agent_def(VendorKind::Claude, &claude, Vec::new()),
@@ -156,13 +156,14 @@ pub fn claude_acp_install_root() -> PathBuf {
         .join(".codexize").join("acp")
 }
 #[rustfmt::skip]
-pub fn claude_acp_local_program() -> PathBuf {
-    claude_acp_install_root().join("node_modules").join(".bin").join("claude-agent-acp")
+pub fn claude_acp_local_program_for(install_root: &Path) -> PathBuf {
+    install_root.join("node_modules").join(".bin").join("claude-agent-acp")
 }
 #[rustfmt::skip]
-pub fn should_offer_claude_acp_install() -> bool {
+pub fn should_offer_claude_acp_install_for(install_root: &Path) -> bool {
     program_is_executable(CLAUDE_CLI)
-        && !(path_is_executable(&claude_acp_local_program()) || program_is_executable("claude-agent-acp"))
+        && !(path_is_executable(&claude_acp_local_program_for(install_root))
+             || program_is_executable("claude-agent-acp"))
 }
 #[rustfmt::skip]
 pub fn should_offer_codex_acp_install() -> bool {

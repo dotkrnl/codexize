@@ -333,6 +333,15 @@ const SECTIONS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SearchState {
+    pub(crate) query: String,
+    /// Field indices that match `query`. Recomputed on every keystroke
+    /// so the result list and `selected` cursor stay in sync.
+    pub(crate) results: Vec<usize>,
+    pub(crate) selected: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Editing {
     Integer,
     String,
@@ -373,6 +382,7 @@ pub(crate) struct ConfigPanelState {
     pub(crate) dirty: bool,
     save_error: Option<String>,
     pub(crate) read_only: bool,
+    pub(crate) searching: Option<SearchState>,
 }
 
 impl ConfigPanelState {
@@ -407,6 +417,7 @@ impl ConfigPanelState {
             dirty: false,
             save_error: None,
             read_only,
+            searching: None,
         };
         state.select_first_field_in_current_section();
         state
@@ -417,6 +428,9 @@ impl ConfigPanelState {
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> PanelOutcome {
+        if self.searching.is_some() {
+            return self.handle_search_key(key);
+        }
         if !self.read_only
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('s')
@@ -554,8 +568,94 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
+            KeyCode::Char('/') => {
+                self.open_search();
+                PanelOutcome::KeepOpen
+            }
             _ => PanelOutcome::KeepOpen,
         }
+    }
+
+    fn open_search(&mut self) {
+        let mut state = SearchState {
+            query: String::new(),
+            results: Vec::new(),
+            selected: 0,
+        };
+        Self::recompute_search_results(&mut state);
+        self.status = "search · type to filter".to_string();
+        self.searching = Some(state);
+    }
+
+    fn recompute_search_results(state: &mut SearchState) {
+        let needle = state.query.to_lowercase();
+        state.results = FIELDS
+            .iter()
+            .enumerate()
+            .filter(|(_, meta)| {
+                if needle.is_empty() {
+                    return true;
+                }
+                meta.key.to_lowercase().contains(&needle)
+                    || meta.label.to_lowercase().contains(&needle)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+        if state.selected >= state.results.len() {
+            state.selected = state.results.len().saturating_sub(1);
+        }
+    }
+
+    fn handle_search_key(&mut self, key: KeyEvent) -> PanelOutcome {
+        let Some(mut search) = self.searching.take() else {
+            return PanelOutcome::KeepOpen;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.status = "search cancelled".to_string();
+                return PanelOutcome::KeepOpen;
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = search.results.get(search.selected).copied() {
+                    let meta = FIELDS[idx];
+                    if let Some(section_idx) =
+                        SECTIONS.iter().position(|s| *s == meta.section)
+                    {
+                        self.selected_section = section_idx;
+                    }
+                    self.selected_field = idx;
+                    self.status = format!("jumped to {}", meta.key);
+                } else {
+                    self.status = "no match".to_string();
+                }
+                return PanelOutcome::KeepOpen;
+            }
+            KeyCode::Up => {
+                if !search.results.is_empty() {
+                    search.selected = wrap_index(search.selected, search.results.len(), -1);
+                }
+            }
+            KeyCode::Down => {
+                if !search.results.is_empty() {
+                    search.selected = wrap_index(search.selected, search.results.len(), 1);
+                }
+            }
+            KeyCode::Backspace => {
+                search.query.pop();
+                Self::recompute_search_results(&mut search);
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                search.query.push(c);
+                Self::recompute_search_results(&mut search);
+            }
+            _ => {}
+        }
+        self.searching = Some(search);
+        PanelOutcome::KeepOpen
     }
 
     fn handle_banner_key(&mut self, key: KeyEvent) -> Option<PanelOutcome> {
@@ -1152,7 +1252,70 @@ impl Widget for ConfigPanelWidget<'_> {
         }
         Paragraph::new(lines).render(area, buf);
         render_dropdown(self.state, area, buf);
+        render_search_overlay(self.state, area, buf);
     }
+}
+
+fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
+    let Some(search) = state.searching.as_ref() else {
+        return;
+    };
+    if area.width < MIN_WIDTH {
+        return;
+    }
+
+    // Center the overlay horizontally; leave a generous body underneath.
+    // Width clamps between 30 and area_width-4 so the box stays inset
+    // even on narrow terminals.
+    let overlay_w = area.width.saturating_sub(4).max(30).min(area.width);
+    let max_results: u16 = 8;
+    let overlay_h = (search.results.len() as u16).min(max_results) + 4; // input + border + status
+    let overlay_h = overlay_h.min(area.height);
+    if overlay_h < 5 {
+        return;
+    }
+    let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
+    let overlay_y = area.y + 2; // beneath the title line
+    let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
+    Clear.render(rect, buf);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let inner_w = overlay_w.saturating_sub(2) as usize;
+    lines.push(Line::from(fit_cell(
+        &format!("/ {}_", search.query),
+        inner_w,
+    )));
+    lines.push(Line::from("─".repeat(inner_w)));
+    if search.results.is_empty() {
+        lines.push(Line::from(fit_cell("no fields match", inner_w)));
+    } else {
+        let max_rows = (overlay_h.saturating_sub(4)) as usize;
+        let total = search.results.len();
+        let win_start = search
+            .selected
+            .saturating_sub(max_rows.saturating_sub(1))
+            .min(total.saturating_sub(max_rows.min(total)));
+        for (offset, field_idx) in search
+            .results
+            .iter()
+            .enumerate()
+            .skip(win_start)
+            .take(max_rows)
+        {
+            let meta = FIELDS[*field_idx];
+            let marker = if offset == search.selected { '>' } else { ' ' };
+            let row = format!("{marker} {} · {}", meta.key, meta.description);
+            lines.push(Line::from(fit_cell(&row, inner_w)));
+        }
+    }
+    lines.push(Line::from(fit_cell(
+        "↑↓ select · Enter jump · Esc cancel",
+        inner_w,
+    )));
+
+    Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL))
+        .render(rect, buf);
 }
 
 fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
@@ -1846,6 +2009,62 @@ mod tests {
         focus_field(&mut state, "ntfy.enabled");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         insta::assert_snapshot!(render_to_text(&state, 80, 18));
+    }
+
+    #[test]
+    fn slash_opens_search_and_typing_filters_results() {
+        let mut state = state_with_overrides();
+        state.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        let search = state.searching.as_ref().expect("search opened");
+        // Empty query lists every field.
+        assert_eq!(search.results.len(), FIELDS.len());
+
+        for c in "retry".chars() {
+            state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        let search = state.searching.as_ref().expect("still searching");
+        assert!(!search.results.is_empty());
+        for &idx in &search.results {
+            let key = FIELDS[idx].key;
+            assert!(
+                key.contains("retry") || FIELDS[idx].label.contains("retry"),
+                "result {key} must match query 'retry'"
+            );
+        }
+    }
+
+    #[test]
+    fn enter_in_search_jumps_to_field_across_sections() {
+        let mut state = state_with_overrides();
+        // Start on "ntfy"; jump to a field in "memory" via search.
+        state.selected_section = SECTIONS.iter().position(|s| *s == "ntfy").unwrap();
+        state.select_first_field_in_current_section();
+        state.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for c in "max_topics".chars() {
+            state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.searching.is_none(), "Enter must close search");
+        assert_eq!(state.current_section_name(), "memory");
+        assert_eq!(
+            state.current_meta().unwrap().key,
+            "memory.max_topics_per_read"
+        );
+    }
+
+    #[test]
+    fn esc_in_search_closes_overlay_without_jumping() {
+        let mut state = state_with_overrides();
+        let section_before = state.selected_section;
+        let field_before = state.selected_field;
+        state.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for c in "memory".chars() {
+            state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(state.searching.is_none());
+        assert_eq!(state.selected_section, section_before);
+        assert_eq!(state.selected_field, field_before);
     }
 
     #[test]

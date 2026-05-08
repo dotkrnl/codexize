@@ -334,8 +334,8 @@ const SECTIONS: &[&str] = &[
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Editing {
-    Integer { original: String },
-    String { original: String },
+    Integer,
+    String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -590,11 +590,7 @@ impl ConfigPanelState {
     fn handle_edit_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                if let Some(Editing::Integer { original } | Editing::String { original }) =
-                    self.editing.take()
-                {
-                    self.edit_buffer = original;
-                }
+                self.editing = None;
                 self.status = "edit cancelled".to_string();
             }
             KeyCode::Tab => {
@@ -608,7 +604,7 @@ impl ConfigPanelState {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                if matches!(self.editing, Some(Editing::Integer { .. })) {
+                if matches!(self.editing, Some(Editing::Integer)) {
                     if c.is_ascii_digit() {
                         self.edit_buffer.push(c);
                     }
@@ -616,11 +612,13 @@ impl ConfigPanelState {
                     self.edit_buffer.push(c);
                 }
             }
-            KeyCode::Up if matches!(self.editing, Some(Editing::Integer { .. })) => {
-                self.nudge_integer(1);
+            KeyCode::Up if matches!(self.editing, Some(Editing::Integer)) => {
+                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) { 10 } else { 1 };
+                self.nudge_integer(delta);
             }
-            KeyCode::Down if matches!(self.editing, Some(Editing::Integer { .. })) => {
-                self.nudge_integer(-1);
+            KeyCode::Down if matches!(self.editing, Some(Editing::Integer)) => {
+                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) { -10 } else { -1 };
+                self.nudge_integer(delta);
             }
             _ => {}
         }
@@ -635,14 +633,14 @@ impl ConfigPanelState {
             FieldKind::Enum(_) => self.cycle_enum(1),
             FieldKind::Integer { .. } => {
                 let value = self.value_for(meta);
-                self.edit_buffer = value.clone();
-                self.editing = Some(Editing::Integer { original: value });
+                self.edit_buffer = value;
+                self.editing = Some(Editing::Integer);
                 self.status = format!("editing {}", meta.key);
             }
             FieldKind::String => {
                 let value = self.value_for(meta);
-                self.edit_buffer = value.clone();
-                self.editing = Some(Editing::String { original: value });
+                self.edit_buffer = value;
+                self.editing = Some(Editing::String);
                 self.status = format!("editing {}", meta.key);
             }
             FieldKind::List | FieldKind::Map => {
@@ -725,6 +723,12 @@ impl ConfigPanelState {
 
     fn save(&mut self, overwrite: bool) {
         self.save_error = None;
+        if self.editing.is_some() {
+            self.accept_edit();
+        }
+        if self.editing.is_some() {
+            return;
+        }
         if let Some(reason) = self.current_validation_error() {
             self.status = reason;
             return;
@@ -754,8 +758,15 @@ impl ConfigPanelState {
     }
 
     fn nudge_integer(&mut self, delta: i64) {
-        let current = self.edit_buffer.parse::<i64>().unwrap_or(0);
-        self.edit_buffer = current.saturating_add(delta).max(0).to_string();
+        let min = self
+            .current_meta()
+            .and_then(|m| match m.kind {
+                FieldKind::Integer { min } => Some(min as i64),
+                _ => None,
+            })
+            .unwrap_or(0);
+        let current = self.edit_buffer.parse::<i64>().unwrap_or(min);
+        self.edit_buffer = current.saturating_add(delta).max(min).to_string();
     }
 
     fn current_section(&self) -> &'static str {
@@ -879,7 +890,7 @@ impl ConfigPanelState {
                 .journal_retention_months
                 .value()
                 .to_string(),
-            "acp.agents.claude.env" => format!("{:?}", self.config.acp.agents.claude.env.value()),
+            "acp.agents.claude.env" => format_map(self.config.acp.agents.claude.env.value()),
             _ => String::new(),
         }
     }
@@ -1142,7 +1153,7 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
     } else if state.dirty {
         format!(
             "unsaved · {} changes · applies on next launch",
-            dirty_count(&state.config)
+            dirty_count(state)
         )
     } else {
         state.status.clone()
@@ -1171,20 +1182,12 @@ fn field_indices_for(section: &str) -> Vec<usize> {
         .collect()
 }
 
-fn dirty_count(config: &Config) -> usize {
+fn dirty_count(state: &ConfigPanelState) -> usize {
     FIELDS
         .iter()
         .filter(|meta| match meta.key {
             "meta.version" => false,
-            _ => {
-                mutate::get_value(config, meta.key).is_ok() && {
-                    // Source tags already encode the sparse-save contract; count
-                    // override-tagged rows so default-equal explicit values do not
-                    // inflate the footer after loader normalization.
-                    let panel = ConfigPanelState::open(config, PathBuf::new());
-                    panel.source_for(meta) == "override"
-                }
-            }
+            _ => state.source_for(meta) == "override",
         })
         .count()
 }
@@ -1253,6 +1256,14 @@ fn format_list(values: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!("[{parts}]")
+}
+
+fn format_map(map: &std::collections::BTreeMap<String, String>) -> String {
+    let parts: Vec<String> = map
+        .iter()
+        .map(|(k, v)| format!("{k} = \"{v}\""))
+        .collect();
+    format!("{{ {} }}", parts.join(", "))
 }
 
 fn wrap_index(current: usize, len: usize, delta: isize) -> usize {

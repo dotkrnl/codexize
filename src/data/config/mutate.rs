@@ -13,7 +13,9 @@ use std::collections::BTreeMap;
 
 use super::defaults::emit_annotated;
 use super::fmt::format_string_array as format_array;
-use super::schema::{AcpAgentSection, AcpAgents, Config, LogLevel, NtfyDetailMode, Override, ShellPolicy};
+use super::schema::{
+    AcpAgentSection, AcpAgents, Config, LogLevel, NtfyDetailMode, Override, ShellPolicy,
+};
 
 #[derive(Debug)]
 pub enum MutationError {
@@ -121,7 +123,11 @@ pub fn get_value(config: &Config, key: &str) -> Result<String, MutationError> {
                 .cloned()
                 .ok_or_else(|| MutationError::UnknownKey {
                     key: key.to_string(),
-                    suggestion: super::util::nearest(env_key, &env.keys().map(|s| s.as_str()).collect::<Vec<_>>(), 4),
+                    suggestion: super::util::nearest(
+                        env_key,
+                        &env.keys().map(|s| s.as_str()).collect::<Vec<_>>(),
+                        4,
+                    ),
                 })?
         }
 
@@ -588,7 +594,11 @@ fn agent_for<'a>(
         "opencode" => Ok(&agents.opencode),
         _ => Err(MutationError::UnknownKey {
             key: format!("acp.agents.{vendor}"),
-            suggestion: super::util::nearest(vendor, &["claude", "codex", "gemini", "kimi", "opencode"], 4),
+            suggestion: super::util::nearest(
+                vendor,
+                &["claude", "codex", "gemini", "kimi", "opencode"],
+                4,
+            ),
         }),
     }
 }
@@ -605,7 +615,11 @@ fn agent_for_mut<'a>(
         "opencode" => Ok(&mut agents.opencode),
         _ => Err(MutationError::UnknownKey {
             key: format!("acp.agents.{vendor}"),
-            suggestion: super::util::nearest(vendor, &["claude", "codex", "gemini", "kimi", "opencode"], 4),
+            suggestion: super::util::nearest(
+                vendor,
+                &["claude", "codex", "gemini", "kimi", "opencode"],
+                4,
+            ),
         }),
     }
 }
@@ -787,7 +801,6 @@ fn all_settable_keys() -> Vec<&'static str> {
         "memory.journal_retention_months",
     ]
 }
-
 
 #[cfg(test)]
 mod tests {

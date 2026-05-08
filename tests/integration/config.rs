@@ -169,8 +169,7 @@ fn env_pair_set_unset_and_reserved_namespace_rejected() {
     cli::run_get("acp.agents.claude.env.FOO", &mut out).unwrap();
     assert_eq!(s(out).trim(), "bar");
 
-    let err =
-        cli::run_set("acp.agents.claude.env.CODEXIZE_ACP_X", "y", &mut buf()).unwrap_err();
+    let err = cli::run_set("acp.agents.claude.env.CODEXIZE_ACP_X", "y", &mut buf()).unwrap_err();
     assert!(err.to_string().contains("CODEXIZE_ACP_"));
 
     cli::run_unset("acp.agents.claude.env.FOO", &mut buf()).unwrap();

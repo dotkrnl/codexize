@@ -18,13 +18,21 @@ pub(crate) fn spawn_refresh(
     if tokio::runtime::Handle::try_current().is_ok() {
         tokio::spawn(async move {
             let _ = tx.send(
-                crate::data::selection_assembly::assemble_models_async(&cache_dir, &available_vendors).await,
+                crate::data::selection_assembly::assemble_models_async(
+                    &cache_dir,
+                    &available_vendors,
+                )
+                .await,
             );
         });
     } else {
         let cache_dir_owned = cache_dir;
         let _ = tx.send(crate::data::async_bridge::block_on_io(async move {
-            crate::data::selection_assembly::assemble_models_async(&cache_dir_owned, &available_vendors).await
+            crate::data::selection_assembly::assemble_models_async(
+                &cache_dir_owned,
+                &available_vendors,
+            )
+            .await
         }));
     }
     rx
@@ -69,7 +77,8 @@ impl App {
         crate::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
-        ).available_vendors()
+        )
+        .available_vendors()
     }
     pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.models = models;

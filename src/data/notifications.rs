@@ -363,7 +363,9 @@ impl NotificationRuntime {
             let last = last_error
                 .map(|err| format!("{err:#}"))
                 .unwrap_or_else(|| "unknown publish error".to_string());
-            let _ = tx.send(format!("ntfy publish failed after {attempts} attempts: {last}"));
+            let _ = tx.send(format!(
+                "ntfy publish failed after {attempts} attempts: {last}"
+            ));
         });
         self.pending_sends.push(handle);
     }
@@ -387,9 +389,7 @@ impl NotificationRuntime {
                 let _ = handle.await;
             }
         };
-        tokio::time::timeout(timeout, wait_all)
-            .await
-            .is_ok()
+        tokio::time::timeout(timeout, wait_all).await.is_ok()
     }
 
     #[cfg(test)]

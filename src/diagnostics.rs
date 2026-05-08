@@ -49,8 +49,8 @@ pub fn init_session_tracing(session_id: &str, diag: &DiagnosticsView) -> Result<
         .open(&path)
         .with_context(|| format!("failed to open diagnostics log {}", path.display()))?;
     let default_level = diag.log_level.as_str();
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
     let file = Arc::new(Mutex::new(file));
     let writer = (move || SharedFileWriter {
         file: Arc::clone(&file),
@@ -64,9 +64,7 @@ pub fn init_session_tracing(session_id: &str, diag: &DiagnosticsView) -> Result<
             .with_writer(writer)
             .boxed()
     } else {
-        tracing_subscriber::fmt::layer()
-            .with_writer(writer)
-            .boxed()
+        tracing_subscriber::fmt::layer().with_writer(writer).boxed()
     };
     tracing_subscriber::registry()
         .with(filter)

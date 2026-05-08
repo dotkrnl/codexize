@@ -163,11 +163,27 @@ fn prompt_insta_snapshots_match_fixtures() {
         ];
         assert_prompt_insta_snapshot(
             "planning_interactive",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, false, None, PromptMeta::with_topics(6)),
+            &planning_prompt(
+                &spec,
+                &spec_reviews,
+                &plan,
+                &live,
+                false,
+                None,
+                PromptMeta::with_topics(6),
+            ),
         );
         assert_prompt_insta_snapshot(
             "planning_yolo",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, true, None, PromptMeta::with_topics(6)),
+            &planning_prompt(
+                &spec,
+                &spec_reviews,
+                &plan,
+                &live,
+                true,
+                None,
+                PromptMeta::with_topics(6),
+            ),
         );
         assert_prompt_insta_snapshot(
             "sharding",
@@ -240,7 +256,15 @@ fn prompt_insta_snapshots_match_fixtures() {
         );
         assert_prompt_insta_snapshot(
             "recovery_sharding",
-            &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5, PromptMeta::with_topics(6)),
+            &recovery_sharding_prompt(
+                &spec,
+                &plan,
+                &live,
+                &tasks_path,
+                &[1, 2],
+                5,
+                PromptMeta::with_topics(6),
+            ),
         );
         let coder_r1 = coder_prompt(CoderPromptInputs {
             session_dir: &session_dir,
@@ -305,7 +329,14 @@ fn prompt_insta_snapshots_match_fixtures() {
         );
         assert_prompt_insta_snapshot(
             "simplifier",
-            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live, &[], PromptMeta::with_topics(6)),
+            &simplifier_prompt(
+                &session_dir,
+                &review_scope_r1,
+                &simplification,
+                &live,
+                &[],
+                PromptMeta::with_topics(6),
+            ),
         );
         assert_prompt_insta_snapshot(
             "simplifier_with_refine",

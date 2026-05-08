@@ -200,7 +200,10 @@ fn prune_journal_entries_keeps_recent_and_drops_old() {
 
     let pruned = prune_journal_entries(&memory_root, 12).unwrap();
 
-    assert_eq!(pruned, 2, "12-mo retention drops the two strictly-older files");
+    assert_eq!(
+        pruned, 2,
+        "12-mo retention drops the two strictly-older files"
+    );
     assert!(recent.exists());
     assert!(edge.exists(), "the cutoff month is preserved");
     assert!(!old.exists());

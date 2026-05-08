@@ -97,9 +97,7 @@ pub fn prune_journal_entries(memory_root: &Path, retention_months: u32) -> Resul
             continue;
         };
         let file_index = (year as i64) * 12 + (month as i64 - 1);
-        if file_index < cutoff_index
-            && fs::remove_file(&path).is_ok()
-        {
+        if file_index < cutoff_index && fs::remove_file(&path).is_ok() {
             pruned += 1;
         }
     }

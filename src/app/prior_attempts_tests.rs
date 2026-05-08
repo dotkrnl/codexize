@@ -49,8 +49,7 @@ fn msg(run_id: u64, kind: MessageKind, text: &str) -> Message {
 #[test]
 fn no_prior_runs_returns_none() {
     let dir = tempfile::TempDir::new().unwrap();
-    let result =
-        write_prior_attempts_transcript(dir.path(), &[], &[], "brainstorm", 1);
+    let result = write_prior_attempts_transcript(dir.path(), &[], &[], "brainstorm", 1);
     assert!(result.is_none());
     assert!(
         !dir.path().join("prompts").exists(),
@@ -67,8 +66,7 @@ fn prior_runs_without_relevant_messages_returns_none() {
         msg(1, MessageKind::Started, "agent started"),
         msg(1, MessageKind::Brief, "summary"),
     ];
-    let result =
-        write_prior_attempts_transcript(dir.path(), &messages, &runs, "brainstorm", 1);
+    let result = write_prior_attempts_transcript(dir.path(), &messages, &runs, "brainstorm", 1);
     assert!(result.is_none());
 }
 
@@ -91,13 +89,18 @@ fn writes_one_section_per_attempt_in_order() {
         .expect("transcript should be written");
     assert_eq!(
         path,
-        dir.path().join("prompts").join("brainstorm-prior-attempts-r1.md")
+        dir.path()
+            .join("prompts")
+            .join("brainstorm-prior-attempts-r1.md")
     );
     let body = std::fs::read_to_string(&path).unwrap();
     let a1 = body.find("## Attempt 1").unwrap();
     let a2 = body.find("## Attempt 2").unwrap();
     let a3 = body.find("## Attempt 3").unwrap();
-    assert!(a1 < a2 && a2 < a3, "attempts must render in ascending order");
+    assert!(
+        a1 < a2 && a2 < a3,
+        "attempts must render in ascending order"
+    );
     assert!(body.contains("**operator:** use sqlite"));
     assert!(body.contains("**agent:** got it. what schema?"));
     assert!(body.contains("**operator:** two tables"));

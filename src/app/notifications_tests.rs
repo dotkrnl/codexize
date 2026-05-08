@@ -1,7 +1,9 @@
 use crate::app::test_support::{mk_app, with_temp_root};
-use crate::data::config::view::NtfyEventsView;
 use crate::data::config::schema::NtfyDetailMode;
-use crate::data::notifications::{NotificationEventKind, NotificationReason, NotificationParams, NotificationRuntime};
+use crate::data::config::view::NtfyEventsView;
+use crate::data::notifications::{
+    NotificationEventKind, NotificationParams, NotificationReason, NotificationRuntime,
+};
 use crate::state::{
     BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
     SessionState,
@@ -400,9 +402,8 @@ async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_phase
             Phase::FinalValidation(1),
             "shutdown-drain",
         ));
-        app.notification_runtime = NotificationRuntime::from_params_for_test(
-            test_ntfy_params(&server.url()),
-        );
+        app.notification_runtime =
+            NotificationRuntime::from_params_for_test(test_ntfy_params(&server.url()));
 
         app.transition_to_phase(Phase::Done)
             .expect("done transition succeeds");

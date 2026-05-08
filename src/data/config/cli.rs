@@ -524,12 +524,19 @@ mod tests {
         let cfg1 = ntfy_reset_topic().expect("first mint");
         let original_created_at = *cfg1.ntfy.created_at.value();
         let topic1 = cfg1.ntfy.topic.value().clone();
-        assert!(original_created_at.is_some(), "created_at must be set on first mint");
+        assert!(
+            original_created_at.is_some(),
+            "created_at must be set on first mint"
+        );
         assert!(!topic1.is_empty());
 
         run_unset("ntfy.topic", &mut out_string()).unwrap();
         let cfg2 = ntfy_reset_topic().expect("second mint after unset");
-        assert_ne!(cfg2.ntfy.topic.value(), &topic1, "topic should have changed");
+        assert_ne!(
+            cfg2.ntfy.topic.value(),
+            &topic1,
+            "topic should have changed"
+        );
         // created_at round-trips through RFC3339 (seconds-only), so compare
         // at second precision rather than expecting nanosecond equality.
         assert_eq!(

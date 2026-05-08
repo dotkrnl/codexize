@@ -24,7 +24,10 @@ pub fn assemble_from_cached_only(
     let loaded = cache::load(cache_dir);
     assemble_from_loaded_with_available(&loaded, available_vendors)
 }
-pub fn assemble_from_loaded(loaded: &LoadedCache, available_vendors: &BTreeSet<VendorKind>) -> Vec<CachedModel> {
+pub fn assemble_from_loaded(
+    loaded: &LoadedCache,
+    available_vendors: &BTreeSet<VendorKind>,
+) -> Vec<CachedModel> {
     assemble_from_loaded_with_available(loaded, available_vendors)
 }
 fn assemble_from_loaded_with_available(

@@ -124,9 +124,9 @@ pub fn load_from_path(path: &Path) -> Result<Config, LoadError> {
 /// Parse a TOML string into a [`Config`], applying validation and
 /// resolving `$HOME` / `~` in the `[paths]` and `[acp.install]` values.
 pub fn load_str(text: &str) -> Result<Config, LoadError> {
-    let doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
-        LoadError::Parse(format!("{e}"))
-    })?;
+    let doc: DocumentMut = text
+        .parse()
+        .map_err(|e: toml_edit::TomlError| LoadError::Parse(format!("{e}")))?;
 
     let mut config = Config::baked_defaults();
     let known_top: &[&str] = &[

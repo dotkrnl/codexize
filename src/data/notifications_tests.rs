@@ -276,10 +276,7 @@ fn event_gates_suppress_disabled_events() {
     let context = sample_context("session-gate", "brainstorm");
 
     // phase_wait and interactive_wait are disabled
-    runtime.emit_phase_wait(
-        crate::state::Phase::SpecReviewPaused,
-        context.clone(),
-    );
+    runtime.emit_phase_wait(crate::state::Phase::SpecReviewPaused, context.clone());
     runtime.emit_interactive_wait(
         crate::state::Phase::BrainstormRunning,
         context.clone(),
@@ -293,7 +290,10 @@ fn event_gates_suppress_disabled_events() {
     runtime.emit_pipeline_done(crate::state::Phase::Done, context);
 
     assert_eq!(runtime.events().len(), 1);
-    assert_eq!(runtime.events()[0].kind, NotificationEventKind::PipelineDone);
+    assert_eq!(
+        runtime.events()[0].kind,
+        NotificationEventKind::PipelineDone
+    );
 }
 
 fn assert_topic_shape(topic: &str) {

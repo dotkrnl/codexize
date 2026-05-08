@@ -267,7 +267,8 @@ impl App {
         // consistently use `base_sha..HEAD`. `capture_round_base` is
         // idempotent on resume.
         if let Phase::ImplementationRound(round) = next_phase {
-            let round_dir = self.session_dir()
+            let round_dir = self
+                .session_dir()
                 .join("rounds")
                 .join(format!("{round:03}"));
             self.capture_round_base(&round_dir);
@@ -482,9 +483,7 @@ impl App {
         self.pending_view_path = Some(path);
     }
     pub(crate) fn queue_view_of_current_artifact(&mut self, filename: &str) {
-        let path = self.session_dir()
-            .join("artifacts")
-            .join(filename);
+        let path = self.session_dir().join("artifacts").join(filename);
         if path.exists() {
             self.pending_view_path = Some(path);
         }

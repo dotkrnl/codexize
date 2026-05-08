@@ -22,15 +22,11 @@ impl App {
     pub fn new(state: SessionState) -> Self {
         Self::new_with_startup_origin(state, AppStartupOrigin::Default)
     }
-    pub fn new_with_startup_origin(
-        state: SessionState,
-        startup_origin: AppStartupOrigin,
-    ) -> Self {
-        let config = Arc::new(crate::data::config::load_or_default()
-            .unwrap_or_else(|e| {
-                eprintln!("config: using defaults: {e}");
-                crate::data::config::Config::baked_defaults()
-            }));
+    pub fn new_with_startup_origin(state: SessionState, startup_origin: AppStartupOrigin) -> Self {
+        let config = Arc::new(crate::data::config::load_or_default().unwrap_or_else(|e| {
+            eprintln!("config: using defaults: {e}");
+            crate::data::config::Config::baked_defaults()
+        }));
         Self::new_with_startup_origin_and_config(state, startup_origin, config)
     }
     pub fn new_with_startup_origin_and_config(
@@ -38,7 +34,8 @@ impl App {
         startup_origin: AppStartupOrigin,
         config: Arc<crate::data::config::Config>,
     ) -> Self {
-        let ntfy_params = crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
+        let ntfy_params =
+            crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
         let acp_config = crate::acp::AcpConfig::from_config_views(
             &config.acp.agents,
             &config.acp_install_view(),
@@ -77,7 +74,10 @@ impl App {
             visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Fetching {
-                rx: spawn_refresh(paths_view.cache_root.clone(), acp_config.available_vendors()),
+                rx: spawn_refresh(
+                    paths_view.cache_root.clone(),
+                    acp_config.available_vendors(),
+                ),
                 started_at: Instant::now(),
             },
             selected: current,
@@ -154,9 +154,9 @@ impl App {
         match crate::data::memory::prune_journal_entries(&memory_root, retention) {
             Ok(0) => {}
             Ok(n) => {
-                let _ = app
-                    .state
-                    .log_event(format!("journal_pruned: removed={n} retention_months={retention}"));
+                let _ = app.state.log_event(format!(
+                    "journal_pruned: removed={n} retention_months={retention}"
+                ));
             }
             Err(err) => {
                 let _ = app.state.log_event(format!("journal_prune_failed: {err}"));
@@ -166,7 +166,10 @@ impl App {
         // The background refresh spawned above will replace this if any section
         // is expired.
         let loaded = cache::load(&app.paths.cache_root);
-        let cached = crate::data::selection_assembly::assemble_from_loaded(&loaded, &acp_config.available_vendors());
+        let cached = crate::data::selection_assembly::assemble_from_loaded(
+            &loaded,
+            &acp_config.available_vendors(),
+        );
         if !cached.is_empty() {
             let cache_has_expired_section = startup_cache_has_expired_section(&loaded);
             app.set_models(cached);
@@ -240,9 +243,7 @@ impl App {
         // Stamp archival: move old finish stamps to archive/ at session start.
         // Stamps older than the oldest Running record are archived (best effort).
         {
-            let finish_dir = app.session_dir()
-                .join("artifacts")
-                .join("run-finish");
+            let finish_dir = app.session_dir().join("artifacts").join("run-finish");
             let archive_dir = finish_dir.join("archive");
             let oldest_running_timestamp = app
                 .state
@@ -291,11 +292,15 @@ impl App {
     }
 }
 #[cfg(test)]
-fn app_runner_supervisor(config: &std::sync::Arc<crate::data::config::Config>) -> crate::runner::Supervisor {
+fn app_runner_supervisor(
+    config: &std::sync::Arc<crate::data::config::Config>,
+) -> crate::runner::Supervisor {
     let _ = config;
     crate::runner::Supervisor::shared_for_test()
 }
 #[cfg(not(test))]
-fn app_runner_supervisor(config: &std::sync::Arc<crate::data::config::Config>) -> crate::runner::Supervisor {
+fn app_runner_supervisor(
+    config: &std::sync::Arc<crate::data::config::Config>,
+) -> crate::runner::Supervisor {
     crate::runner::Supervisor::new(config.clone())
 }

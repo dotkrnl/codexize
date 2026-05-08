@@ -201,7 +201,12 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", "/definitely/missing/kimi");
     }
 
-    let outcome = std::panic::catch_unwind(|| assemble_from_loaded(&loaded, &crate::acp::AcpConfig::default().available_vendors()));
+    let outcome = std::panic::catch_unwind(|| {
+        assemble_from_loaded(
+            &loaded,
+            &crate::acp::AcpConfig::default().available_vendors(),
+        )
+    });
 
     unsafe {
         match original_available {
@@ -292,7 +297,10 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
         // Cache was just written under the supplied dir, so dashboard +
         // quotas are fresh; the async loader should not need any
         // network refresh.
-        let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async(cache_dir, &crate::acp::AcpConfig::default().available_vendors()));
+        let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async(
+            cache_dir,
+            &crate::acp::AcpConfig::default().available_vendors(),
+        ));
         assert!(
             errors.is_empty(),
             "fresh cache should not trigger refresh errors"

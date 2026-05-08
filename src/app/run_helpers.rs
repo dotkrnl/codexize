@@ -381,7 +381,8 @@ impl App {
     pub(crate) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
         let task_id =
             session_state::transitions::ensure_builder_task_for_round(&mut self.state, round)?;
-        let round_dir = self.session_dir()
+        let round_dir = self
+            .session_dir()
             .join("rounds")
             .join(format!("{round:03}"));
         let _ = std::fs::create_dir_all(&round_dir);

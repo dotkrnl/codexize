@@ -216,10 +216,7 @@ impl App {
     /// suffixed with the attempt number, so they coexist with the
     /// new attempt's outputs and serve as audit trail.
     fn preempt_prior_runs(&mut self, prior_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
-        let prior_ids = prior_runs
-            .iter()
-            .map(|run| run.id)
-            .collect::<BTreeSet<_>>();
+        let prior_ids = prior_runs.iter().map(|run| run.id).collect::<BTreeSet<_>>();
         for run in prior_runs {
             if run.status == RunStatus::Running {
                 self.cancel_run_label(&run.window_name);

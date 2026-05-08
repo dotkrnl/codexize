@@ -215,10 +215,8 @@ impl App {
                 (true, reason)
             }
             "dreaming" => {
-                let report_path = crate::logic::memory::dream_report_path(
-                    &self.memory_root(),
-                    run.round,
-                );
+                let report_path =
+                    crate::logic::memory::dream_report_path(&self.memory_root(), run.round);
                 let reason = (!Self::artifact_present(&report_path))
                     .then(|| Reason::ArtifactMissing.to_string())
                     .or_else(|| {

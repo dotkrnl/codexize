@@ -55,7 +55,7 @@ fn spec_review_paused_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Enter continue"));
@@ -72,7 +72,7 @@ fn plan_review_paused_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Enter continue"));
@@ -90,7 +90,7 @@ fn stage_error_brainstorm_has_edit_idea() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("r retry"));
@@ -107,7 +107,7 @@ fn stage_error_non_brainstorm_no_edit() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("r retry"));
@@ -125,7 +125,7 @@ fn skip_to_impl_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("y accept"));
@@ -143,7 +143,7 @@ fn guard_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("r reset"));
@@ -160,7 +160,7 @@ fn quit_running_agent_modal_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Enter confirm"));
@@ -179,7 +179,7 @@ fn dreaming_decision_exact_string() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Enter run dreaming"));
@@ -197,7 +197,7 @@ fn stage_error_dreaming_has_skip() {
         false,
         false,
         200,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("r retry"));
@@ -214,7 +214,8 @@ fn input_mode_exact_string() {
         FocusCaps::default(),
         true,
         false,
-        200, true
+        200,
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Esc cancel"));
@@ -307,7 +308,15 @@ fn disabled_label_excluded_from_width_tier() {
         (left + SEP_CATEGORY.chars().count() + sys) as u16
     };
 
-    let line_dis = keymap(Phase::IdeaInput, None, caps_disabled, false, false, width, true);
+    let line_dis = keymap(
+        Phase::IdeaInput,
+        None,
+        caps_disabled,
+        false,
+        false,
+        width,
+        true,
+    );
     let text_dis = line_text(&line_dis);
     assert!(
         text_dis.contains("↑↓ move"),
@@ -325,7 +334,15 @@ fn disabled_label_excluded_from_width_tier() {
     // Sanity: with the same caps but the Space binding enabled, that exact
     // width is too narrow for `Space expand` to fit at the Full tier — so
     // tier selection must have observed the disabled label as 0-width.
-    let line_en = keymap(Phase::IdeaInput, None, caps_enabled, false, false, width, true);
+    let line_en = keymap(
+        Phase::IdeaInput,
+        None,
+        caps_enabled,
+        false,
+        false,
+        width,
+        true,
+    );
     let text_en = line_text(&line_en);
     // The enabled rendering at the same width may collapse to a narrower tier;
     // either way, its width must not exceed the budget.
@@ -416,7 +433,15 @@ fn esc_quit_right_anchored_stable_across_phases() {
     let width = 120u16;
 
     let line1 = keymap(Phase::IdeaInput, None, caps, false, false, width, true);
-    let line2 = keymap(Phase::BrainstormRunning, None, caps, false, false, width, true);
+    let line2 = keymap(
+        Phase::BrainstormRunning,
+        None,
+        caps,
+        false,
+        false,
+        width,
+        true,
+    );
 
     let text1 = line_text(&line1);
     let text2 = line_text(&line2);
@@ -465,7 +490,8 @@ fn zero_width_empty() {
         FocusCaps::default(),
         false,
         false,
-        0, true
+        0,
+        true,
     );
     assert!(line.spans.is_empty());
 }
@@ -543,7 +569,7 @@ fn snapshot_pause_modal_width_80() {
         false,
         false,
         80,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Enter"));
@@ -560,7 +586,7 @@ fn snapshot_guard_modal_width_80() {
         false,
         false,
         80,
-        true
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("r"));
@@ -576,7 +602,8 @@ fn snapshot_input_mode_width_80() {
         FocusCaps::default(),
         true,
         false,
-        80, true
+        80,
+        true,
     );
     let text = line_text(&line);
     assert!(text.contains("Esc"));
@@ -593,7 +620,8 @@ fn esc_quit_right_anchored_stable_default_vs_pause_modal() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let modal = keymap(
         Phase::SpecReviewPaused,
@@ -602,7 +630,7 @@ fn esc_quit_right_anchored_stable_default_vs_pause_modal() {
         false,
         false,
         width,
-        true
+        true,
     );
     let default_text = line_text(&default);
     let modal_text = line_text(&modal);
@@ -624,7 +652,8 @@ fn esc_quit_right_anchored_stable_default_vs_guard_modal() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let modal = keymap(
         Phase::GitGuardPending,
@@ -633,7 +662,7 @@ fn esc_quit_right_anchored_stable_default_vs_guard_modal() {
         false,
         false,
         width,
-        true
+        true,
     );
     let default_text = line_text(&default);
     let modal_text = line_text(&modal);
@@ -656,7 +685,8 @@ fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let modal = keymap(
         Phase::SkipToImplPending,
@@ -665,7 +695,7 @@ fn esc_quit_right_anchored_stable_default_vs_skip_to_impl() {
         false,
         false,
         width,
-        true
+        true,
     );
     let default_text = line_text(&default);
     let modal_text = line_text(&modal);
@@ -701,7 +731,8 @@ fn insta_snapshots_cover_footer_rendering() {
             enabled_caps,
             false,
             false,
-            120, true
+            120,
+            true
         ))
     );
     insta::assert_snapshot!(
@@ -712,7 +743,8 @@ fn insta_snapshots_cover_footer_rendering() {
             disabled_expand_caps,
             false,
             false,
-            120, true
+            120,
+            true
         ))
     );
     insta::assert_snapshot!(
@@ -723,7 +755,8 @@ fn insta_snapshots_cover_footer_rendering() {
             FocusCaps::default(),
             false,
             false,
-            80, true
+            80,
+            true
         ))
     );
     insta::assert_snapshot!(
@@ -734,7 +767,8 @@ fn insta_snapshots_cover_footer_rendering() {
             FocusCaps::default(),
             true,
             false,
-            80, true
+            80,
+            true
         ))
     );
     insta::assert_snapshot!(
@@ -745,7 +779,8 @@ fn insta_snapshots_cover_footer_rendering() {
             enabled_caps,
             false,
             true,
-            100, true
+            100,
+            true
         ))
     );
 }
@@ -759,7 +794,8 @@ fn esc_quit_right_anchored_stable_default_vs_stage_error() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let modal = keymap(
         Phase::BrainstormRunning,
@@ -767,7 +803,8 @@ fn esc_quit_right_anchored_stable_default_vs_stage_error() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let default_text = line_text(&default);
     let modal_text = line_text(&modal);
@@ -790,7 +827,8 @@ fn modal_esc_quit_right_anchor_with_fill() {
         FocusCaps::default(),
         false,
         false,
-        width, true
+        width,
+        true,
     );
     let text = line_text(&modal);
     assert!(text.ends_with("Esc quit"));

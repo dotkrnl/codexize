@@ -4,19 +4,20 @@ use crate::{
     selection::{CachedModel, QuotaError, VendorKind},
 };
 use ratatui::style::Color;
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
-pub(crate) fn spawn_refresh() -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
+pub(crate) fn spawn_refresh(available_vendors: BTreeSet<VendorKind>) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
         tokio::spawn(async move {
-            let _ = tx.send(crate::data::selection_assembly::assemble_models_async().await);
+            let _ = tx.send(crate::data::selection_assembly::assemble_models_async(&available_vendors).await);
         });
     } else {
         let _ = tx.send(crate::data::async_bridge::block_on_io(
-            crate::data::selection_assembly::assemble_models_async(),
+            crate::data::selection_assembly::assemble_models_async(&available_vendors),
         ));
     }
     rx
@@ -57,6 +58,12 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
     }
 }
 impl App {
+    fn available_vendors(&self) -> BTreeSet<VendorKind> {
+        crate::acp::AcpConfig::from_config_views(
+            &self.config.acp.agents,
+            &self.config.acp_install_view(),
+        ).available_vendors()
+    }
     pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.models = models;
     }
@@ -106,7 +113,7 @@ impl App {
                 };
                 if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching {
-                        rx: spawn_refresh(),
+                        rx: spawn_refresh(self.available_vendors()),
                         started_at: Instant::now(),
                     };
                 }
@@ -115,7 +122,7 @@ impl App {
     }
     pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
-            rx: spawn_refresh(),
+            rx: spawn_refresh(self.available_vendors()),
             started_at: Instant::now(),
         };
     }

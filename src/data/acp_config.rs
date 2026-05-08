@@ -2,6 +2,8 @@ use crate::acp::{
     AcpError, AcpLaunchPolicy, AcpLaunchRequest, AcpPermissionMode, AcpReasoningEffort,
     AcpResolvedLaunch, AcpResult, AcpSessionSpec, AcpShellCommandPolicy, AcpSpawnSpec,
 };
+use crate::data::config::schema::AcpAgentSection;
+use crate::data::config::view::{AcpAgentView, AcpInstallView};
 use crate::selection::{VendorKind, vendor::vendor_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -88,7 +90,50 @@ impl AcpConfig {
             },
         })
     }
+    pub fn from_config_views(
+        agents: &crate::data::config::schema::AcpAgents,
+        install: &AcpInstallView,
+    ) -> Self {
+        let view_for = |vendor: VendorKind, section: &AcpAgentSection| -> Option<AcpAgentDefinition> {
+            let v = AcpAgentView {
+                enabled: *section.enabled.value(),
+                program: section.program.value().clone(),
+                args: section.args.value().clone(),
+                env: section.env.value().clone(),
+            };
+            if !v.enabled { return None }
+            let program = if vendor == VendorKind::Claude && install.prefer_local_claude_acp {
+                let local = &install.claude_acp_root.join("node_modules").join(".bin").join("claude-agent-acp");
+                if path_is_executable(local) { local.display().to_string() } else { v.program.clone() }
+            } else {
+                v.program.clone()
+            };
+            let def = AcpAgentDefinition { vendor, program, args: v.args, env: v.env };
+            #[cfg(test)]
+            {
+                let key = match vendor {
+                    VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+                    VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                    VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+                    VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+                    VendorKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+                };
+                if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
+                    return Some(AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() });
+                }
+            }
+            Some(def)
+        };
+        let mut defs = Vec::new();
+        if let Some(d) = view_for(VendorKind::Claude, &agents.claude) { defs.push(d) }
+        if let Some(d) = view_for(VendorKind::Codex, &agents.codex) { defs.push(d) }
+        if let Some(d) = view_for(VendorKind::Gemini, &agents.gemini) { defs.push(d) }
+        if let Some(d) = view_for(VendorKind::Kimi, &agents.kimi) { defs.push(d) }
+        if let Some(d) = view_for(VendorKind::Opencode, &agents.opencode) { defs.push(d) }
+        Self::from_agents(defs)
+    }
 }
+
 #[rustfmt::skip]
 impl Default for AcpConfig {
     fn default() -> Self {

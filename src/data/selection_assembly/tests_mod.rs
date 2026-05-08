@@ -199,7 +199,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         std::env::set_var("CODEXIZE_TEST_ACP_KIMI_PROGRAM", "/definitely/missing/kimi");
     }
 
-    let outcome = std::panic::catch_unwind(|| assemble_from_loaded(&loaded));
+    let outcome = std::panic::catch_unwind(|| assemble_from_loaded(&loaded, &crate::acp::AcpConfig::default().available_vendors()));
 
     unsafe {
         match original_available {
@@ -288,7 +288,7 @@ fn assemble_models_uses_default_cache_dir_when_fresh() {
     with_temp_home_cache(dashboard, quotas, || {
         // Cache was just written, so dashboard + quotas are fresh; the
         // async loader should not need any network refresh.
-        let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async());
+        let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async(&crate::acp::AcpConfig::default().available_vendors()));
         assert!(
             errors.is_empty(),
             "fresh cache should not trigger refresh errors"
@@ -310,7 +310,7 @@ fn assemble_from_cached_only_returns_empty_when_no_cache() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    let models = assemble_from_cached_only();
+    let models = assemble_from_cached_only(&crate::acp::AcpConfig::default().available_vendors());
     unsafe {
         match original {
             Some(value) => std::env::set_var("HOME", value),
@@ -325,7 +325,7 @@ fn assemble_from_cached_only_yields_models_when_cache_is_present() {
     let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     with_temp_home_cache(dashboard, quotas, || {
-        let models = assemble_from_cached_only();
+let models = assemble_from_cached_only(&crate::acp::AcpConfig::default().available_vendors());
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "claude-sonnet-4-6");
         assert_eq!(models[0].quota_percent, Some(80));

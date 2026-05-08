@@ -23,7 +23,7 @@ impl App {
         Self::new_with_startup_origin(state, AppStartupOrigin::Default)
     }
     pub fn new_with_startup_origin(
-        mut state: SessionState,
+        state: SessionState,
         startup_origin: AppStartupOrigin,
     ) -> Self {
         let config = Arc::new(crate::data::config::load_or_default()
@@ -31,7 +31,18 @@ impl App {
                 eprintln!("config: using defaults: {e}");
                 crate::data::config::Config::baked_defaults()
             }));
+        Self::new_with_startup_origin_and_config(state, startup_origin, config)
+    }
+    pub fn new_with_startup_origin_and_config(
+        mut state: SessionState,
+        startup_origin: AppStartupOrigin,
+        config: Arc<crate::data::config::Config>,
+    ) -> Self {
         let ntfy_params = crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
+        let acp_config = crate::acp::AcpConfig::from_config_views(
+            &config.acp.agents,
+            &config.acp_install_view(),
+        );
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         if state.builder.task_titles.is_empty() {
             let tasks_path = session_state::session_dir(&state.session_id)
@@ -54,7 +65,7 @@ impl App {
             visible_rows: Vec::new(),
             models: Vec::new(),
             model_refresh: ModelRefreshState::Fetching {
-                rx: spawn_refresh(),
+                rx: spawn_refresh(acp_config.available_vendors()),
                 started_at: Instant::now(),
             },
             selected: current,
@@ -97,7 +108,7 @@ impl App {
             pending_app_exit: false,
             current_run_id: None,
             failed_models,
-            runner_supervisor: app_runner_supervisor(),
+            runner_supervisor: app_runner_supervisor(&config),
             runner_config: crate::runner::RunnerConfig {
                 full_review_interval: config.runner_view().full_review_interval,
             },
@@ -122,7 +133,7 @@ impl App {
         // The background refresh spawned above will replace this if any section
         // is expired.
         let loaded = cache::load();
-        let cached = crate::data::selection_assembly::assemble_from_loaded(&loaded);
+        let cached = crate::data::selection_assembly::assemble_from_loaded(&loaded, &acp_config.available_vendors());
         if !cached.is_empty() {
             let cache_has_expired_section = startup_cache_has_expired_section(&loaded);
             app.set_models(cached);
@@ -247,10 +258,11 @@ impl App {
     }
 }
 #[cfg(test)]
-fn app_runner_supervisor() -> crate::runner::Supervisor {
+fn app_runner_supervisor(config: &std::sync::Arc<crate::data::config::Config>) -> crate::runner::Supervisor {
+    let _ = config;
     crate::runner::Supervisor::shared_for_test()
 }
 #[cfg(not(test))]
-fn app_runner_supervisor() -> crate::runner::Supervisor {
-    crate::runner::Supervisor::new()
+fn app_runner_supervisor(config: &std::sync::Arc<crate::data::config::Config>) -> crate::runner::Supervisor {
+    crate::runner::Supervisor::new(config.clone())
 }

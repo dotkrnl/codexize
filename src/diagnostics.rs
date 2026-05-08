@@ -3,6 +3,7 @@
 //! Routine tracing must never use stdout/stderr once the terminal UI is active.
 //! The subscriber here writes JSON lines into the session directory so debug
 //! logs stay adjacent to events, messages, and per-run ACP traces.
+use crate::data::config::view::DiagnosticsView;
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
@@ -32,7 +33,7 @@ impl Write for SharedFileWriter {
 pub fn session_diagnostics_path(session_id: &str) -> PathBuf {
     crate::state::session_dir(session_id).join(DIAGNOSTICS_LOG)
 }
-pub fn init_session_tracing(session_id: &str) -> Result<()> {
+pub fn init_session_tracing(session_id: &str, diag: &DiagnosticsView) -> Result<()> {
     let path = session_diagnostics_path(session_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -47,7 +48,9 @@ pub fn init_session_tracing(session_id: &str) -> Result<()> {
         .append(true)
         .open(&path)
         .with_context(|| format!("failed to open diagnostics log {}", path.display()))?;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("off"));
+    let default_level = diag.log_level.as_str();
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
     let file = Arc::new(Mutex::new(file));
     let writer = (move || SharedFileWriter {
         file: Arc::clone(&file),

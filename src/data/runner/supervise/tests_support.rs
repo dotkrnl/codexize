@@ -8,7 +8,7 @@ use crate::runner::transport::{AcpCancelReason, AcpInput};
 
 pub(in crate::data::runner) fn test_supervisor() -> &'static Supervisor {
     static SUPERVISOR: std::sync::OnceLock<Supervisor> = std::sync::OnceLock::new();
-    SUPERVISOR.get_or_init(Supervisor::new)
+    SUPERVISOR.get_or_init(|| Supervisor::new(std::sync::Arc::new(crate::data::config::Config::baked_defaults())))
 }
 
 fn test_run_ids() -> &'static DashMap<String, RunId> {

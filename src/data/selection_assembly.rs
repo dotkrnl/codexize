@@ -3,32 +3,22 @@
 //! dashboard refresh, and quota refresh involved in producing the
 //! `CachedModel` list — the logic layer is forbidden to touch any of
 //! these directly (see `scripts/check-layers.sh`).
-use crate::acp::AcpConfig;
 use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
 use std::collections::BTreeSet;
-pub async fn assemble_models_async() -> (Vec<CachedModel>, Vec<QuotaError>) {
+pub async fn assemble_models_async(available_vendors: &BTreeSet<VendorKind>) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load();
-    assemble_with_refresh(loaded, &AcpConfig::default().available_vendors()).await
+    assemble_with_refresh(loaded, available_vendors).await
 }
-/// Build the canonical model universe purely from cached data, performing no
-/// network fetches. Returns an empty vector if the dashboard cache is missing.
-/// Useful at startup to render the model strip immediately while a background
-/// refresh runs.
-pub fn assemble_from_cached_only() -> Vec<CachedModel> {
+pub fn assemble_from_cached_only(available_vendors: &BTreeSet<VendorKind>) -> Vec<CachedModel> {
     let loaded = cache::load();
-    assemble_from_loaded(&loaded)
+    assemble_from_loaded_with_available(&loaded, available_vendors)
 }
-/// Build the canonical model universe from an already-loaded cache snapshot.
-///
-/// Does not consult the network; treats every section as authoritative. The
-/// available-vendor probe still runs because vendor availability is the
-/// caller-policy gate, not part of the cache snapshot.
-pub fn assemble_from_loaded(loaded: &LoadedCache) -> Vec<CachedModel> {
-    assemble_from_loaded_with_available(loaded, &AcpConfig::default().available_vendors())
+pub fn assemble_from_loaded(loaded: &LoadedCache, available_vendors: &BTreeSet<VendorKind>) -> Vec<CachedModel> {
+    assemble_from_loaded_with_available(loaded, available_vendors)
 }
 fn assemble_from_loaded_with_available(
     loaded: &LoadedCache,

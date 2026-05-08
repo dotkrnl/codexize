@@ -1,6 +1,11 @@
 use super::*;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tempfile::tempdir;
+
+fn test_config() -> Arc<crate::data::config::Config> {
+    Arc::new(crate::data::config::Config::baked_defaults())
+}
 
 #[test]
 fn dispatch_probe_returns_missing_when_path_absent() {
@@ -9,7 +14,7 @@ fn dispatch_probe_returns_missing_when_path_absent() {
         DataRequest::ProbeLiveSummary {
             path: dir.path().join("nope.txt"),
         },
-        &crate::runner::Supervisor::new(),
+        &crate::runner::Supervisor::new(test_config()),
     );
     assert_eq!(
         outcome,
@@ -24,7 +29,7 @@ fn dispatch_read_returns_none_when_path_absent() {
         DataRequest::ReadLiveSummary {
             path: dir.path().join("nope.txt"),
         },
-        &crate::runner::Supervisor::new(),
+        &crate::runner::Supervisor::new(test_config()),
     );
     assert_eq!(outcome, DataOutcome::LiveSummaryRead(None));
 }
@@ -37,7 +42,7 @@ fn dispatch_drain_removes_file_after_read() {
 
     let outcome = dispatch(
         DataRequest::DrainLiveSummary { path: path.clone() },
-        &crate::runner::Supervisor::new(),
+        &crate::runner::Supervisor::new(test_config()),
     );
     match outcome {
         DataOutcome::LiveSummaryDrained(Some(snapshot)) => {
@@ -57,14 +62,14 @@ fn dispatch_read_prompt_returns_none_when_missing() {
         DataRequest::ReadPromptBody {
             path: dir.path().join("missing.prompt"),
         },
-        &crate::runner::Supervisor::new(),
+        &crate::runner::Supervisor::new(test_config()),
     );
     assert_eq!(outcome, DataOutcome::PromptBodyRead(None));
 }
 
 #[test]
 fn dispatch_interrupt_returns_false_when_no_active_run() {
-    let supervisor = crate::runner::Supervisor::new();
+    let supervisor = crate::runner::Supervisor::new(test_config());
     let outcome = dispatch(
         DataRequest::InterruptRun {
             run_id: 999,
@@ -77,7 +82,7 @@ fn dispatch_interrupt_returns_false_when_no_active_run() {
 
 #[test]
 fn dispatch_terminate_returns_false_when_no_active_run() {
-    let supervisor = crate::runner::Supervisor::new();
+    let supervisor = crate::runner::Supervisor::new(test_config());
     let outcome = dispatch(DataRequest::TerminateRun { run_id: 999 }, &supervisor);
     assert_eq!(outcome, DataOutcome::Terminated(false));
 }

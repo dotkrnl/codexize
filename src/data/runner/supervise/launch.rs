@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_managed_acp_launch(
+    acp_config: &AcpConfig,
     window_name: &str,
     vendor: VendorKind,
     run: &AgentRun,
@@ -31,7 +32,7 @@ pub(super) fn build_managed_acp_launch(
         modes: run.modes,
         policy,
     };
-    let mut resolved = AcpConfig::default()
+    let mut resolved = acp_config
         .resolve(&request)
         .map_err(|err| anyhow!("{err}"))?;
     ensure_program_exists(&resolved.spawn.program)?;

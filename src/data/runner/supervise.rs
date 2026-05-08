@@ -111,19 +111,21 @@ pub struct Supervisor {
     inner: Arc<SupervisorInner>,
 }
 struct SupervisorInner {
+    config: Arc<crate::data::config::Config>,
     handle: Option<Handle>,
     root_token: CancellationToken,
     runs: DashMap<RunId, RunHandle>,
 }
 impl Default for Supervisor {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(crate::data::config::Config::baked_defaults()))
     }
 }
 impl Supervisor {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<crate::data::config::Config>) -> Self {
         Self {
             inner: Arc::new(SupervisorInner {
+                config,
                 handle: Handle::try_current().ok().or_else(test_runtime_handle),
                 root_token: CancellationToken::new(),
                 runs: DashMap::new(),
@@ -403,7 +405,12 @@ impl Supervisor {
         interactive: bool,
         policy: AcpLaunchPolicy,
     ) -> Result<()> {
+        let acp_config = crate::acp::AcpConfig::from_config_views(
+            &self.inner.config.acp.agents,
+            &self.inner.config.acp_install_view(),
+        );
         let launch = build_managed_acp_launch(
+            &acp_config,
             window_name,
             vendor,
             run,

@@ -255,7 +255,13 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
             )
         }
     };
-    codexize::diagnostics::init_session_tracing(&session_id)?;
+    let config = std::sync::Arc::new(codexize::data::config::load_or_default()
+        .unwrap_or_else(|e| {
+            eprintln!("config: using defaults: {e}");
+            codexize::data::config::Config::baked_defaults()
+        }));
+    let diag = config.diagnostics_view();
+    codexize::diagnostics::init_session_tracing(&session_id, &diag)?;
     if !resume_warnings.is_empty() {
         let _span = warn_span!("resume_warnings", session_id = %session_id).entered();
         for warning in resume_warnings {
@@ -264,7 +270,7 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     }
     let mut state = state::SessionState::load(&session_id)?;
     let _ = state::resume::resume_session(&mut state);
-    let mut app = app::App::new_with_startup_origin(state, startup_origin);
+    let mut app = app::App::new_with_startup_origin_and_config(state, startup_origin, config);
     let mut terminal = terminal_guard.into_terminal();
     let result = app_runtime::run_terminal_app(&mut app, &mut terminal);
     tui::stop(&mut terminal)?;

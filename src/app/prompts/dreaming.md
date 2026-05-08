@@ -35,7 +35,7 @@ Write only `.codexize/memory/**`, including the validated `dream-####.toml`
 report. Preserve outdated information by marking entries superseded rather
 than deleting by default.
 
-Memory side-quest (optional, low effort): before exiting, append a
+Capture lessons (optional, low effort): before exiting, append a
 one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
 non-obvious was learned this round. If nothing was learned, write a single
 line `no new lesson` so the absence is intentional. Use the project's

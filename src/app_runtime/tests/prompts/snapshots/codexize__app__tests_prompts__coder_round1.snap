@@ -81,7 +81,7 @@ If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
 
-Memory side-quest (optional, low effort): before exiting, append a
+Capture lessons (optional, low effort): before exiting, append a
 one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
 non-obvious was learned this round (vendor quirks, architectural
 constraints, pitfalls). If nothing was learned, write a single line

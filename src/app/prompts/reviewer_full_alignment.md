@@ -122,7 +122,7 @@ Rules:
   - Don't repeat feedback from prior reviews unless the coder ignored it
     without good reason — in which case call that out explicitly.
 
-Memory side-quest (optional, low effort): before exiting, append a
+Capture lessons (optional, low effort): before exiting, append a
 one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
 non-obvious was learned this round (recurring patterns, conventions,
 review heuristics). If nothing was learned, write a single line

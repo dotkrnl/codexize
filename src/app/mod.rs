@@ -291,6 +291,8 @@ pub struct App {
     pub(crate) config: std::sync::Arc<crate::data::config::Config>,
     /// Pre-extracted read-only view of `[memory]`.
     pub(crate) memory_view: crate::data::config::view::MemoryView,
+    /// Pre-extracted read-only view of `[ui]`.
+    pub(crate) ui_view: crate::data::config::view::UiView,
     /// Pre-extracted read-only view of `[paths]` with `$HOME` already
     /// expanded at load time. All path resolution inside `App` and its
     /// stages flows through this struct so operators can independently
@@ -352,6 +354,7 @@ pub mod snapshot_support {
             false,
             false,
             width,
+            true,
         )
         .to_string()
         .trim_end()

@@ -125,6 +125,7 @@ impl App {
             input_surface_active || split_owns_input,
             split_open,
             width,
+            self.ui_view.footer_show_keys,
         );
         // Sheet content is owned by the input-mode path only. Modal content
         // is computed independently inside the overlay branch below.
@@ -233,6 +234,7 @@ impl App {
                 false,
                 false,
                 inner_w,
+                true,
             );
             // Backdrop is drawn here (the dashboard owns the underlying TUI
             // that needs to recede); the helper itself does not paint it so
@@ -338,7 +340,11 @@ impl App {
         }
         let mut lines: Vec<Line<'static>> = vec![Line::from(input_spans)];
         let max = max_h as usize;
-        let help_text = "Esc close  Tab complete  Enter run";
+        let help_text = if self.ui_view.colon_palette_show_help {
+            "Esc close  Tab complete  Enter run"
+        } else {
+            ""
+        };
         let help_fits = max >= 2 && (width as usize) >= help_text.chars().count();
         let help_reserve = if help_fits { 1 } else { 0 };
         let suggestion_capacity = max.saturating_sub(1).saturating_sub(help_reserve);

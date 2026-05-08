@@ -11,7 +11,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
-use tracing_subscriber::{EnvFilter, fmt::writer::MakeWriterExt, prelude::*};
+use tracing_subscriber::{EnvFilter, Layer, fmt::writer::MakeWriterExt, prelude::*};
 const DIAGNOSTICS_LOG: &str = "diagnostics.jsonl";
 struct SharedFileWriter {
     file: Arc<Mutex<File>>,
@@ -56,11 +56,18 @@ pub fn init_session_tracing(session_id: &str, diag: &DiagnosticsView) -> Result<
         file: Arc::clone(&file),
     })
     .with_max_level(tracing::Level::TRACE);
-    let layer = tracing_subscriber::fmt::layer()
-        .json()
-        .with_current_span(true)
-        .with_span_list(true)
-        .with_writer(writer);
+    let layer = if diag.json_logs {
+        tracing_subscriber::fmt::layer()
+            .json()
+            .with_current_span(true)
+            .with_span_list(true)
+            .with_writer(writer)
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer()
+            .with_writer(writer)
+            .boxed()
+    };
     tracing_subscriber::registry()
         .with(filter)
         .with(layer)

@@ -1477,7 +1477,15 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> String {
     let val_w = width.saturating_sub(fixed).max(1);
     value = ellipsize_end(&value, val_w);
     let focus = if focused { ">" } else { " " };
-    let name = fit_cell(&format!("{focus} {}", meta.label), name_w);
+    // Promote the second prefix column to the override/dirty marker so
+    // operators can scan a section for overrides without inspecting the
+    // right-aligned source tag.
+    let dirty = if state.source_for(meta) == "override" {
+        "*"
+    } else {
+        " "
+    };
+    let name = fit_cell(&format!("{focus}{dirty}{}", meta.label), name_w);
     format!("{name} │ {value:<val_w$} {tag:>TAG_WIDTH$}")
 }
 
@@ -1527,18 +1535,25 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
 }
 
 fn footer_line(state: &ConfigPanelState, width: usize) -> String {
-    let hotkeys: &[&str] = if state.read_only {
-        &["Tab section", "e edit", "Esc close"]
+    let hotkeys: &[&str] = if state.searching.is_some() {
+        &["↑↓ select", "Enter jump", "Esc cancel"]
+    } else if state.read_only {
+        &["Tab section", "/ search", "e edit", "Esc close"]
     } else {
         match &state.editing {
             Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
             Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
+            // Order matters: the renderer drops trailing entries that no
+            // longer fit, so the high-frequency keys come first to survive
+            // narrow widths.
             None => &[
                 "Tab section",
                 "Enter edit",
-                "d default",
-                "Esc close",
                 "Ctrl-S save",
+                "Esc close",
+                "d default",
+                "/ search",
+                "D reset section",
             ],
         }
     };

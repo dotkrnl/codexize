@@ -1,6 +1,5 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 1717
 expression: "render_to_text(&state, 80, 18)"
 ---
 "codexize · config · /tmp/example/config.toml                                    "
@@ -9,8 +8,8 @@ expression: "render_to_text(&state, 80, 18)"
 "────────────────────────────────────────────────────────────────────────────────"
 "> enabled              │ true                                              (def)"
 "  server               │ ┌────────┐fy.sh                                   (def)"
-"  topic                │ │> true  │abcdef                               override"
-"  detail_mode          │ │  false │                                     override"
+" *topic                │ │> true  │abcdef                               override"
+" *detail_mode          │ │  false │                                     override"
 "  retry_attempts       │ └────────┘                                        (def)"
 "  retry_delay_ms       │ 250                                               (def)"
 "  http_timeout_secs    │ 10                                                (def)"

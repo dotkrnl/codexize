@@ -831,33 +831,25 @@ impl ConfigPanelState {
         }
     }
 
+    fn open_choice(&mut self, meta: &FieldMeta, variants: &[&'static str]) {
+        let options: Vec<String> = variants.iter().map(|s| (*s).to_string()).collect();
+        let current = self.value_for(meta);
+        let selected = options.iter().position(|v| v == &current).unwrap_or(0);
+        self.editing = Some(Editing::Choice {
+            key: meta.key,
+            options,
+            selected,
+        });
+        self.status = format!("choose {}", meta.key);
+    }
+
     fn activate_field(&mut self) {
         let Some(meta) = self.current_meta().copied() else {
             return;
         };
         match meta.kind {
-            FieldKind::Bool => {
-                let options: Vec<String> = BOOL_OPTIONS.iter().map(|s| (*s).to_string()).collect();
-                let current = self.value_for(&meta);
-                let selected = options.iter().position(|v| v == &current).unwrap_or(0);
-                self.editing = Some(Editing::Choice {
-                    key: meta.key,
-                    options,
-                    selected,
-                });
-                self.status = format!("choose {}", meta.key);
-            }
-            FieldKind::Enum(variants) => {
-                let options: Vec<String> = variants.iter().map(|v| (*v).to_string()).collect();
-                let current = self.value_for(&meta);
-                let selected = options.iter().position(|v| v == &current).unwrap_or(0);
-                self.editing = Some(Editing::Choice {
-                    key: meta.key,
-                    options,
-                    selected,
-                });
-                self.status = format!("choose {}", meta.key);
-            }
+            FieldKind::Bool => self.open_choice(&meta, BOOL_OPTIONS),
+            FieldKind::Enum(variants) => self.open_choice(&meta, variants),
             FieldKind::Integer { .. } => {
                 let value = self.value_for(&meta);
                 self.edit_buffer = value;

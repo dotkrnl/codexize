@@ -618,9 +618,7 @@ impl ConfigPanelState {
             KeyCode::Enter => {
                 if let Some(idx) = search.results.get(search.selected).copied() {
                     let meta = FIELDS[idx];
-                    if let Some(section_idx) =
-                        SECTIONS.iter().position(|s| *s == meta.section)
-                    {
+                    if let Some(section_idx) = SECTIONS.iter().position(|s| *s == meta.section) {
                         self.selected_section = section_idx;
                     }
                     self.selected_field = idx;
@@ -630,15 +628,11 @@ impl ConfigPanelState {
                 }
                 return PanelOutcome::KeepOpen;
             }
-            KeyCode::Up => {
-                if !search.results.is_empty() {
-                    search.selected = wrap_index(search.selected, search.results.len(), -1);
-                }
+            KeyCode::Up if !search.results.is_empty() => {
+                search.selected = wrap_index(search.selected, search.results.len(), -1);
             }
-            KeyCode::Down => {
-                if !search.results.is_empty() {
-                    search.selected = wrap_index(search.selected, search.results.len(), 1);
-                }
+            KeyCode::Down if !search.results.is_empty() => {
+                search.selected = wrap_index(search.selected, search.results.len(), 1);
             }
             KeyCode::Backspace => {
                 search.query.pop();
@@ -2024,6 +2018,30 @@ mod tests {
         focus_field(&mut state, "ntfy.enabled");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         insta::assert_snapshot!(render_to_text(&state, 80, 18));
+    }
+
+    #[test]
+    fn rendered_overrides_show_dirty_marker_source_tag_and_tab_suffix() {
+        // The override fixture sets ntfy.topic + ntfy.detail_mode + paths.sessions_root.
+        // Verify the three operator-facing override signals are wired into render output:
+        // (1) `*` dirty prefix on the field rows, (2) right-aligned `override` source
+        // tag, and (3) `*` suffix on tab-bar entries for override-bearing sections.
+        let state = state_with_overrides();
+        let text = render_to_text(&state, 120, 20);
+        assert!(text.contains(" *topic"), "missing dirty prefix on topic");
+        assert!(
+            text.contains(" *detail_mode"),
+            "missing dirty prefix on detail_mode"
+        );
+        assert!(text.contains("override"), "missing override source tag");
+        assert!(
+            text.contains("▾ntfy*"),
+            "missing override suffix on active ntfy tab"
+        );
+        assert!(
+            text.contains("▸paths*"),
+            "missing override suffix on inactive paths tab"
+        );
     }
 
     #[test]

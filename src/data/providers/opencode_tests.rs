@@ -172,6 +172,10 @@ fn enumerate_isolates_provider_text_from_other_branch() {
                 "glm-5.1",
                 "kimi-k2.5",
                 "kimi-k2.6",
+                "mimo-v2.5",
+                "mimo-v2.5-pro",
+                "minimax-m2.5",
+                "minimax-m2.7",
                 "qwen3.5-plus",
                 "qwen3.6-plus"
             ]

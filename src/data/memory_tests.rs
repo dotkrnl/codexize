@@ -170,3 +170,73 @@ reason = "Kept the index concise."
 
     assert!(format!("{err:#}").contains("missing input"));
 }
+
+#[test]
+fn prune_journal_entries_keeps_recent_and_drops_old() {
+    use chrono::{Datelike, Utc};
+    let dir = tempfile::TempDir::new().unwrap();
+    let memory_root = dir.path().join(".codexize/memory");
+    let journal = memory_root.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+
+    let now = Utc::now();
+    let now_index = (now.year() as i64) * 12 + (now.month() as i64 - 1);
+    let stem = |idx: i64| {
+        let year = (idx.div_euclid(12)) as i32;
+        let month = (idx.rem_euclid(12) + 1) as u32;
+        format!("{year:04}-{month:02}")
+    };
+
+    let recent = journal.join(format!("{}.md", stem(now_index)));
+    let edge = journal.join(format!("{}.md", stem(now_index - 11)));
+    let old = journal.join(format!("{}.md", stem(now_index - 12)));
+    let very_old = journal.join(format!("{}.md", stem(now_index - 24)));
+    let manual_note = journal.join("notes.md");
+    write(&recent, "# now\n");
+    write(&edge, "# 11 months ago\n");
+    write(&old, "# 12 months ago\n");
+    write(&very_old, "# 24 months ago\n");
+    write(&manual_note, "# operator note\n");
+
+    let pruned = prune_journal_entries(&memory_root, 12).unwrap();
+
+    assert_eq!(pruned, 2, "12-mo retention drops the two strictly-older files");
+    assert!(recent.exists());
+    assert!(edge.exists(), "the cutoff month is preserved");
+    assert!(!old.exists());
+    assert!(!very_old.exists());
+    assert!(
+        manual_note.exists(),
+        "non-YYYY-MM entries are preserved by the prune helper"
+    );
+}
+
+#[test]
+fn prune_journal_entries_noops_when_directory_missing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let memory_root = dir.path().join(".codexize/memory");
+    std::fs::create_dir_all(&memory_root).unwrap();
+    // No journal/ subdir; the helper must not error and must not create
+    // any directory of its own.
+    let pruned = prune_journal_entries(&memory_root, 6).unwrap();
+    assert_eq!(pruned, 0);
+    assert!(!memory_root.join("journal").exists());
+}
+
+#[test]
+fn prune_journal_entries_skips_when_retention_is_zero() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let memory_root = dir.path().join(".codexize/memory");
+    let journal = memory_root.join("journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    let ancient = journal.join("1970-01.md");
+    write(&ancient, "# pin\n");
+
+    let pruned = prune_journal_entries(&memory_root, 0).unwrap();
+
+    assert_eq!(pruned, 0);
+    assert!(
+        ancient.exists(),
+        "retention=0 must not erase the operator's lessons"
+    );
+}

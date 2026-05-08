@@ -135,6 +135,24 @@ impl App {
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);
+        // Once-per-launch journal retention sweep: drop monthly entries older
+        // than `[memory] journal_retention_months`. Failures are logged-only
+        // — pruning is best-effort and must not block session startup.
+        let memory_root = app.memory_root();
+        let retention = app.memory_view.journal_retention_months;
+        match crate::data::memory::prune_journal_entries(&memory_root, retention) {
+            Ok(0) => {}
+            Ok(n) => {
+                let _ = app
+                    .state
+                    .log_event(format!("journal_pruned: removed={n} retention_months={retention}"));
+            }
+            Err(err) => {
+                let _ = app
+                    .state
+                    .log_event(format!("journal_prune_failed: {err:#}"));
+            }
+        }
         // Populate the model strip immediately from whatever the cache holds.
         // The background refresh spawned above will replace this if any section
         // is expired.

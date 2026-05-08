@@ -8,6 +8,7 @@ pub use crate::logic::memory::{
     MemoryStatus, MemoryTier, memory_glob_from_session_path, memory_root_from_session_path,
 };
 use anyhow::{Context, Result};
+use chrono::{Datelike, Utc};
 use std::fs;
 use std::path::Path;
 
@@ -41,6 +42,85 @@ pub fn validate_manifest_file(path: &Path) -> Result<MemoryManifest> {
         .with_context(|| format!("memory manifest has no parent: {}", path.display()))?;
     crate::logic::memory::validate_manifest(&manifest, root, Path::is_file)?;
     Ok(manifest)
+}
+
+/// Drop journal/<YYYY-MM>.md entries older than `retention_months`.
+///
+/// `retention_months` is read from `[memory] journal_retention_months`
+/// (validated `>= 1`); the loader rejects values below that floor so we
+/// can treat the input as positive. The cutoff is "first day of the
+/// month that sits exactly `retention_months` ago" — a file dated the
+/// same month as the cutoff is kept; older files are removed.
+///
+/// Returns the number of files removed. Missing journal directory and
+/// individual entries with non-`YYYY-MM` filenames are silently
+/// preserved — pruning is best-effort and must not delete state the
+/// operator dropped in there manually.
+pub fn prune_journal_entries(memory_root: &Path, retention_months: u32) -> Result<u32> {
+    if retention_months == 0 {
+        // Defensive: schema validates >= 1, but treating 0 as "prune everything"
+        // would delete the operator's lessons; skip instead so a stale on-disk
+        // value can't trigger destructive behavior.
+        return Ok(0);
+    }
+    let journal_dir = memory_root.join("journal");
+    if !journal_dir.exists() {
+        return Ok(0);
+    }
+    let now = Utc::now();
+    // Cutoff is the year/month that is `retention_months - 1` calendar
+    // months before the current month: keep that month and everything
+    // after, drop strictly older. Computing in absolute month index keeps
+    // the year-rollover case correct.
+    let now_index = (now.year() as i64) * 12 + (now.month() as i64 - 1);
+    let cutoff_index = now_index - (retention_months as i64) + 1;
+
+    let mut pruned = 0u32;
+    let mut dir = match fs::read_dir(&journal_dir) {
+        Ok(d) => d,
+        Err(_) => return Ok(0),
+    };
+    while let Some(entry) = dir.next().transpose().ok().flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+        let ext = path.extension().and_then(|s| s.to_str());
+        if ext != Some("md") {
+            continue;
+        }
+        let Some((year, month)) = parse_journal_stem(stem) else {
+            continue;
+        };
+        let file_index = (year as i64) * 12 + (month as i64 - 1);
+        if file_index < cutoff_index
+            && fs::remove_file(&path).is_ok()
+        {
+            pruned += 1;
+        }
+    }
+    Ok(pruned)
+}
+
+fn parse_journal_stem(stem: &str) -> Option<(i32, u32)> {
+    // Accept exactly `YYYY-MM` (the journal naming convention used by
+    // every memory-aware agent prompt). Any other shape is preserved.
+    let mut parts = stem.split('-');
+    let year_part = parts.next()?;
+    let month_part = parts.next()?;
+    if parts.next().is_some() || year_part.len() != 4 || month_part.len() != 2 {
+        return None;
+    }
+    let year: i32 = year_part.parse().ok()?;
+    let month: u32 = month_part.parse().ok()?;
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    Some((year, month))
 }
 
 pub fn validate_dream_report_file(path: &Path) -> Result<DreamReport> {

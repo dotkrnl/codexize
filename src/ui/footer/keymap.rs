@@ -300,7 +300,11 @@ pub fn keymap(
     input_mode: bool,
     split_open: bool,
     width: u16,
+    show_keys: bool,
 ) -> Line<'static> {
+    if width == 0 || !show_keys {
+        return Line::from(vec![]);
+    }
     let caps_fn = |cap: Option<Capability>| -> bool {
         match cap {
             None => true,
@@ -309,9 +313,6 @@ pub fn keymap(
             Some(Capability::Split) => caps.can_split,
         }
     };
-    if width == 0 {
-        return Line::from(vec![]);
-    }
     if input_mode && split_open {
         return render_keymap_line(&[&split_input_bindings()], &caps_fn, width);
     }

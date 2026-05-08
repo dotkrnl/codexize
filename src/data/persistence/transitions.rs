@@ -9,7 +9,8 @@ use crate::logic::pipeline::phase::Phase;
 use crate::logic::pipeline::transitions::{
     FinishedRunRecord, SIMPLIFICATION_ATTEMPT_CAP, VALIDATION_ATTEMPT_CAP, validate_transition,
 };
-use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState};
+use crate::logic::validation::{PLAN_SCHEMA_V1_MARKER, validate_plan_schema};
+use crate::state::{BlockOrigin, LaunchModes, RunStatus, SectionPart, SessionState, session_dir};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::path::Path;
@@ -21,6 +22,7 @@ use std::path::Path;
 /// only final-validation blocks may take it.
 pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     validate_transition(&state.current_phase, &to).map_err(|e| anyhow::anyhow!("{e}"))?;
+    validate_plan_schema_transition(state, to)?;
     if matches!(state.current_phase, Phase::BlockedNeedsUser)
         && matches!(to, Phase::Done)
         && state.block_origin != Some(BlockOrigin::FinalValidation)
@@ -48,6 +50,49 @@ pub fn execute_transition(state: &mut SessionState, to: Phase) -> Result<()> {
     state
         .save()
         .context("failed to save state after transition")?;
+    Ok(())
+}
+
+fn validate_plan_schema_transition(state: &SessionState, to: Phase) -> Result<()> {
+    let should_validate = matches!(
+        (state.current_phase, to),
+        (Phase::PlanReviewRunning, Phase::ShardingRunning)
+            | (Phase::PlanReviewPaused, Phase::ShardingRunning)
+            | (
+                Phase::BuilderRecoveryPlanReview(_),
+                Phase::BuilderRecoverySharding(_)
+            )
+    );
+    if !should_validate {
+        return Ok(());
+    }
+
+    let plan_path = session_dir(&state.session_id)
+        .join("artifacts")
+        .join("plan.md");
+    let plan_text = std::fs::read_to_string(&plan_path)
+        .with_context(|| format!("failed to read {}", plan_path.display()))?;
+
+    // The marker is the legacy/validated split point: only the first non-blank
+    // line counts, so later comments cannot silently opt a legacy plan into the
+    // stricter gate after prose has already started.
+    let has_marker = plan_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line == PLAN_SCHEMA_V1_MARKER);
+    if !has_marker {
+        return Ok(());
+    }
+
+    if let Err(issues) = validate_plan_schema(&plan_text) {
+        let rendered = issues
+            .into_iter()
+            .map(|issue| format!("- {issue}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!("plan schema validation failed:\n{rendered}");
+    }
+
     Ok(())
 }
 /// Set `block_origin` and transition to `BlockedNeedsUser`. The single throat

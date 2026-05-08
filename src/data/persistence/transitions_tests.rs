@@ -171,6 +171,14 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
     result.unwrap()
 }
 
+fn write_plan_artifact(session_id: &str, body: &str) {
+    let path = crate::state::session_dir(session_id)
+        .join("artifacts")
+        .join("plan.md");
+    std::fs::create_dir_all(path.parent().expect("plan parent")).unwrap();
+    std::fs::write(path, body).unwrap();
+}
+
 #[test]
 fn force_ship_rejected_without_final_validation_origin() {
     with_temp_root(|| {
@@ -372,5 +380,111 @@ fn enter_final_validation_rejects_illegal_source_phase() {
         assert!(format!("{err:#}").contains("Cannot transition"));
         assert_eq!(state.validation_attempts, 0);
         assert_eq!(state.current_phase, Phase::IdeaInput);
+    });
+}
+
+#[test]
+fn plan_review_to_sharding_skips_validation_without_marker() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("legacy-plan-passthrough".to_string());
+        state.current_phase = Phase::PlanReviewRunning;
+        write_plan_artifact(
+            &state.session_id,
+            r#"# Legacy Plan
+
+## Not The New Schema
+Still acceptable because it has no marker.
+"#,
+        );
+
+        execute_transition(&mut state, Phase::ShardingRunning).expect("legacy plan passes");
+        assert_eq!(state.current_phase, Phase::ShardingRunning);
+    });
+}
+
+#[test]
+fn plan_review_to_sharding_blocks_invalid_marked_plan() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("invalid-marked-plan".to_string());
+        state.current_phase = Phase::PlanReviewRunning;
+        write_plan_artifact(
+            &state.session_id,
+            r#"<!-- plan-schema: v1 -->
+# Invalid Plan
+
+## Goal Description
+Ship the feature.
+
+## Acceptance Criteria
+- AC-1: cover the main path
+  - Positive Tests (expected to PASS):
+    - accepts a valid input
+
+## Path Boundaries
+
+### Upper Bound (Maximum Scope)
+Ceiling.
+
+### Lower Bound (Minimum Scope)
+Floor.
+
+### Allowed Choices
+- Can use: existing helpers
+- Cannot use: (none)
+
+## Dependencies and Sequence
+1. Milestone 1: implement it.
+"#,
+        );
+
+        let err = execute_transition(&mut state, Phase::ShardingRunning).expect_err("must reject");
+        let message = format!("{err:#}");
+        assert!(message.contains("plan schema validation failed"));
+        assert!(message.contains("missing-negative-tests-bullet"));
+        assert_eq!(state.current_phase, Phase::PlanReviewRunning);
+    });
+}
+
+#[test]
+fn recovery_plan_review_to_sharding_blocks_invalid_marked_plan() {
+    with_temp_root(|| {
+        let mut state = SessionState::new("invalid-recovery-plan".to_string());
+        state.current_phase = Phase::BuilderRecoveryPlanReview(2);
+        write_plan_artifact(
+            &state.session_id,
+            r#"<!-- plan-schema: v1 -->
+# Invalid Recovery Plan
+
+## Goal Description
+Ship the feature.
+
+## Acceptance Criteria
+- AC-1: cover the main path
+  - Positive Tests (expected to PASS):
+    - accepts a valid input
+  - Negative Tests (expected to FAIL):
+    - rejects an invalid input
+
+## Path Boundaries
+
+### Upper Bound (Maximum Scope)
+Ceiling.
+
+### Lower Bound (Minimum Scope)
+Floor.
+
+### Allowed Choices
+- Can use: existing helpers
+
+## Dependencies and Sequence
+1. Milestone 1: implement it.
+"#,
+        );
+
+        let err = execute_transition(&mut state, Phase::BuilderRecoverySharding(2))
+            .expect_err("must reject");
+        let message = format!("{err:#}");
+        assert!(message.contains("missing-allowed-choices-line"));
+        assert_eq!(state.current_phase, Phase::BuilderRecoveryPlanReview(2));
     });
 }

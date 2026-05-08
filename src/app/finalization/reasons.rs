@@ -216,7 +216,7 @@ impl App {
             }
             "dreaming" => {
                 let report_path = crate::logic::memory::dream_report_path(
-                    &crate::logic::memory::memory_root_from_session_path(&session_dir),
+                    &self.memory_root(),
                     run.round,
                 );
                 let reason = (!Self::artifact_present(&report_path))

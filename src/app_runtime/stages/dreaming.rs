@@ -29,7 +29,7 @@ impl App {
         };
         let session_id = self.state.session_id.clone();
         let session_dir = session_state::session_dir(&session_id);
-        let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
+        let memory_root = self.memory_root();
         let dream_report_path = crate::logic::memory::dream_report_path(&memory_root, round);
         if let Some(parent) = dream_report_path.parent()
             && let Err(err) = std::fs::create_dir_all(parent)
@@ -148,8 +148,7 @@ impl App {
         // does not leave the run stuck in Running state.
         self.finalize_run_record(run.id, true, None);
         self.clear_agent_error();
-        let session_dir = session_state::session_dir(&self.state.session_id);
-        let memory_root = crate::logic::memory::memory_root_from_session_path(&session_dir);
+        let memory_root = self.memory_root();
         let report_path = crate::logic::memory::dream_report_path(&memory_root, round);
         if let Err(err) = crate::data::memory::validate_dream_report_file(&report_path) {
             self.record_agent_error(format!("invalid dream report: {err}"));

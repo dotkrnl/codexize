@@ -26,6 +26,25 @@ impl App {
     pub(crate) fn session_dir(&self) -> std::path::PathBuf {
         self.paths.sessions_root.join(&self.state.session_id)
     }
+
+    /// Resolve the memory root for this App's session.
+    ///
+    /// When `paths.memory_root` is explicitly set in `~/.codexize/config.toml`,
+    /// the override is authoritative — every memory consumer (dreaming
+    /// stage, prompt context, finalization reasons, picker bootstrap)
+    /// reads from the configured location. When the value is the baked
+    /// default we fall back to `memory_root_from_session_path` so that
+    /// tests and standalone tools whose session dirs sit under an
+    /// arbitrary `.codexize/sessions` ancestor (e.g. tempdir-based
+    /// fixtures) keep deriving a sibling `memory/` directory beside
+    /// their session tree.
+    pub(crate) fn memory_root(&self) -> std::path::PathBuf {
+        if self.config.paths.memory_root.is_explicit() {
+            self.paths.memory_root.clone()
+        } else {
+            crate::logic::memory::memory_root_from_session_path(&self.session_dir())
+        }
+    }
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
             .agent_runs

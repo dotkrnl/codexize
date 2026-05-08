@@ -1,5 +1,6 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 1784
 expression: text
 ---
 "codexize · config · /tmp/example/config.toml                "
@@ -7,10 +8,10 @@ expression: text
 "▸acp.agents.claude  ▸runner  ▾paths*  ▸ui  ▸ui.colon_palette"
 "▸ui.footer  ▸diagnostics  ▸memory                           "
 "────────────────────────────────────────────────────────────"
-"> cache_root           │ $HOME/.codexize/cache         (def)"
+"> cache_root           │ .codexize/cache               (def)"
 "   *sessions_root        │ $HOME/.codexize/sessions…  overri"
-"  runs_root            │ $HOME/.codexize/runs          (def)"
-"  memory_root          │ $HOME/.codexize/memory        (def)"
+"  runs_root            │ .codexize/runs                (def)"
+"  memory_root          │ .codexize/memory              (def)"
 "────────────────────────────────────────────────────────────"
 "Root for cache files. $HOME and ~/ are expanded at load.    "
 "Tab section · Enter edit · Ctrl-S save · Esc close  |  conf…"

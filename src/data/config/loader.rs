@@ -694,9 +694,17 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// differs from the baked default get emitted; sections containing zero
 /// such fields disappear entirely.
 pub fn save_atomic(config: &Config) -> Result<(), LoadError> {
-    let path = config_path();
+    save_atomic_to(&config_path(), config)
+}
+
+/// Variant of [`save_atomic`] that targets `path` directly. The CLI
+/// `validate <path>` and the integration tests exercise non-default
+/// paths through `CODEXIZE_CONFIG`, but anything that already holds a
+/// resolved path (e.g. the ntfy-alias rewrite) calls this directly so
+/// it doesn't have to go back through the env.
+pub fn save_atomic_to(path: &Path, config: &Config) -> Result<(), LoadError> {
     let bytes = render_sparse(config).into_bytes();
-    crate::data::atomic::atomic_write(&path, &bytes)
+    crate::data::atomic::atomic_write(path, &bytes)
         .map_err(|e| LoadError::Io(std::io::Error::other(format!("{e:#}"))))
 }
 
@@ -1247,6 +1255,16 @@ mod tests {
         let toml = "[acp.agents.claude.env]\nCODEXIZE_ACP_FOO = \"x\"\n";
         let err = load_str(toml).unwrap_err();
         assert!(err.to_string().contains("CODEXIZE_ACP_"), "{err}");
+    }
+
+    #[test]
+    fn load_from_path_missing_file_returns_baked_defaults() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let absent = dir.path().join("nope.toml");
+        assert!(!absent.exists());
+        let cfg = load_from_path(&absent).expect("missing file is the baked-defaults path");
+        assert_eq!(cfg, Config::baked_defaults());
+        assert!(!absent.exists(), "loader must not write on missing-file");
     }
 
     #[test]

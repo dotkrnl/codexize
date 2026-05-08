@@ -81,7 +81,6 @@ pub struct AcpLaunchPolicy {
     pub allowed_write_paths: Vec<PathBuf>,
     pub shell_policy: AcpShellCommandPolicy,
     pub enforce_readonly_workspace: bool,
-    pub memory_write_check: bool,
 }
 #[rustfmt::skip]
 impl AcpLaunchPolicy {
@@ -94,7 +93,6 @@ impl AcpLaunchPolicy {
     pub fn final_validation(
         verdict_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
-        memory_write_check: bool,
     ) -> Self {
         let verdict_path = verdict_path.into();
         let live_summary_path = live_summary_path.into();
@@ -103,13 +101,11 @@ impl AcpLaunchPolicy {
             allowed_write_paths: vec![verdict_path, live_summary_path, memory_glob],
             shell_policy: AcpShellCommandPolicy::Allowlist(Self::readonly_memory_shell_allowlist()),
             enforce_readonly_workspace: true,
-            memory_write_check,
         }
     }
     pub fn dreaming(
         dream_report_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
-        memory_write_check: bool,
     ) -> Self {
         let dream_report_path = dream_report_path.into();
         let live_summary_path = live_summary_path.into();
@@ -118,14 +114,12 @@ impl AcpLaunchPolicy {
             allowed_write_paths: vec![memory_glob, dream_report_path, live_summary_path],
             shell_policy: AcpShellCommandPolicy::Allowlist(Self::readonly_memory_shell_allowlist()),
             enforce_readonly_workspace: true,
-            memory_write_check,
         }
     }
     /// Simplifier writes/commits repo files; workspace not read-only, shell unrestricted.
     pub fn simplifier(
         simplification_path: impl Into<PathBuf>,
         live_summary_path: impl Into<PathBuf>,
-        memory_write_check: bool,
     ) -> Self {
         let simplification_path = simplification_path.into();
         let memory_glob = memory_glob_from_session_path(&simplification_path);
@@ -133,7 +127,6 @@ impl AcpLaunchPolicy {
             allowed_write_paths: vec![simplification_path, live_summary_path.into(), memory_glob],
             shell_policy: AcpShellCommandPolicy::FullAccess,
             enforce_readonly_workspace: false,
-            memory_write_check,
         }
     }
 }

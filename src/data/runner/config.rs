@@ -1,8 +1,7 @@
 //! Runner-side configuration knobs.
 //!
 //! Currently houses the periodic-review cadence (`full_review_interval`).
-//! Stack C of the same plan adds `memory_write_check` here as a sibling
-//! field; keep this module the single home for runner-level operator knobs.
+//! Keep this module the single home for runner-level operator knobs.
 
 /// Runner-level config knobs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,17 +12,12 @@ pub struct RunnerConfig {
     /// `0` disables the feature so every round uses the regular reviewer.
     /// Default `5` matches the spec — operator-tunable, no CLI flag.
     pub full_review_interval: u32,
-    /// Whether to surface a soft TUI warning when an agent run completes
-    /// without updating the monthly journal file in `.codexize/memory/journal/`.
-    /// Default `true`.
-    pub memory_write_check: bool,
 }
 
 impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
             full_review_interval: 5,
-            memory_write_check: true,
         }
     }
 }

@@ -121,11 +121,7 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&verdict_path),
-                crate::acp::AcpLaunchPolicy::final_validation(
-                    &verdict_path,
-                    &live_summary_path,
-                    self.runner_config.memory_write_check,
-                ),
+                crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
             )
         };
         match launch_result {

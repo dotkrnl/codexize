@@ -1443,11 +1443,7 @@ fn acp_launch_with_final_validation_policy_rejects_workspace_mutation() {
                 "final-validation-run",
                 &artifacts_dir,
                 Some(&verdict_path),
-                crate::acp::AcpLaunchPolicy::final_validation(
-                    &verdict_path,
-                    &live_summary_path,
-                    true,
-                ),
+                crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
             )
             .expect("launch ACP run");
 

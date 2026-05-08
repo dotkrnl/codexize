@@ -33,41 +33,6 @@ struct ManagedAcpRunResult {
     head_before: String,
     git_status_before: Option<String>,
     enforce_readonly: bool,
-    journal_mtime_before: Option<std::time::SystemTime>,
-}
-fn get_journal_mtime(cwd: &std::path::Path) -> Option<std::time::SystemTime> {
-    fs::metadata(journal_path(cwd))
-        .and_then(|m| m.modified())
-        .ok()
-}
-
-const MEMORY_DELTA_WARNING: &str =
-    "round produced no memory delta (consider capturing non-obvious lessons in the journal)";
-
-/// Decide whether a soft memory-write delta warning should be surfaced.
-///
-/// Returns `Some(warning_text)` when `memory_write_check` is enabled, the
-/// ACP exited successfully (`exit_code == 0`), and the journal file's mtime
-/// has not changed since `journal_mtime_before` was captured on round entry.
-/// Returns `None` in every other case.  The caller persists the warning via
-/// [`crate::runner::transport::persist_system_warning`] but **never** blocks
-/// a transition — the function's return type makes the soft/non-blocking
-/// contract explicit.
-fn memory_write_delta_warning(
-    memory_write_check: bool,
-    exit_code: i32,
-    cwd: &std::path::Path,
-    journal_mtime_before: Option<std::time::SystemTime>,
-) -> Option<&'static str> {
-    if !memory_write_check || exit_code != 0 {
-        return None;
-    }
-    let mtime_after = get_journal_mtime(cwd);
-    if mtime_after == journal_mtime_before {
-        Some(MEMORY_DELTA_WARNING)
-    } else {
-        None
-    }
 }
 
 fn run_managed_acp_launch(
@@ -78,11 +43,6 @@ fn run_managed_acp_launch(
 ) -> ManagedAcpRunResult {
     let head_before = git_rev_parse_head().unwrap_or_default();
     let enforce_readonly = launch.resolved.session.policy.enforce_readonly_workspace;
-    let journal_mtime_before = if launch.resolved.session.policy.memory_write_check {
-        get_journal_mtime(&launch.resolved.session.cwd)
-    } else {
-        None
-    };
     // Final validation is allowed to update its ignored artifact files, so the
     // ACP-side write allowlist carries those exact paths while the runner
     // enforces that no git-visible workspace state changes during the run.
@@ -99,15 +59,9 @@ fn run_managed_acp_launch(
         head_before,
         git_status_before,
         enforce_readonly,
-        journal_mtime_before,
     }
 }
 
-fn journal_path(cwd: &std::path::Path) -> std::path::PathBuf {
-    let now = chrono::Utc::now();
-    cwd.join(".codexize/memory/journal")
-        .join(format!("{}.md", now.format("%Y-%m")))
-}
 fn run_managed_acp_loop(
     launch: &ManagedAcpLaunch,
     cancel: &CancelSignal,
@@ -493,14 +447,6 @@ pub(super) async fn finalize_managed_acp_launch(
                 &outcome.signal_received,
             )
             .await;
-            if let Some(warning) = memory_write_delta_warning(
-                launch.resolved.session.policy.memory_write_check,
-                outcome.exit_code,
-                &launch.resolved.session.cwd,
-                result.journal_mtime_before,
-            ) {
-                crate::runner::transport::persist_system_warning(&launch, warning);
-            }
             let _ = waiting_for_input.send_replace(false);
             let _ = fs::remove_file(&launch.cause_path);
         }

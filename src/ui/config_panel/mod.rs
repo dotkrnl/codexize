@@ -24,8 +24,7 @@ use std::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const MIN_WIDTH: u16 = 50;
-const TWO_PANE_WIDTH: u16 = 80;
-const SECTION_WIDTH: usize = 22;
+const TAB_SEPARATOR: &str = "  ";
 const TAG_WIDTH: usize = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -496,6 +495,34 @@ impl ConfigPanelState {
             KeyCode::Char('g') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
                 self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
                 self.status = "regenerate topic? y/n".to_string();
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Tab => {
+                self.move_section(1);
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::BackTab => {
+                self.move_section(-1);
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('[') => {
+                self.selected_section = 0;
+                self.select_first_field_in_current_section();
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char(']') => {
+                self.selected_section = SECTIONS.len().saturating_sub(1);
+                self.select_first_field_in_current_section();
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('g') => {
+                self.select_first_field_in_current_section();
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('G') => {
+                if let Some(last) = field_indices_for(self.current_section()).last() {
+                    self.selected_field = *last;
+                }
                 PanelOutcome::KeepOpen
             }
             _ => PanelOutcome::KeepOpen,
@@ -996,11 +1023,7 @@ impl Widget for ConfigPanelWidget<'_> {
             Paragraph::new(terminal_too_narrow_message()).render(area, buf);
             return;
         }
-        let mut lines = if area.width >= TWO_PANE_WIDTH {
-            two_pane_lines(self.state, area.width, area.height)
-        } else {
-            single_pane_lines(self.state, area.width, area.height)
-        };
+        let mut lines = adaptive_lines(self.state, area.width, area.height);
         lines.truncate(area.height as usize);
         while lines.len() < area.height as usize {
             lines.push(Line::from(""));
@@ -1009,40 +1032,22 @@ impl Widget for ConfigPanelWidget<'_> {
     }
 }
 
-fn two_pane_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
+fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
     let w = width as usize;
-    let right_w = w.saturating_sub(SECTION_WIDTH + 3).max(1);
     let mut lines = Vec::new();
     lines.push(Line::from(header_text(&state.path, w)));
-    let body_h = height.saturating_sub(4) as usize;
-    let fields = visible_fields(state);
-    for row in 0..body_h {
-        let left = section_line(state, row, SECTION_WIDTH);
-        let right = if row == 0 {
-            fit_cell(state.current_section(), right_w)
-        } else if row - 1 < fields.len() {
-            field_row(state, fields[row - 1], right_w)
-        } else {
-            String::new()
-        };
-        lines.push(Line::from(format!("{left} │ {right}")));
+    let tab_lines = tab_bar_lines(state, w);
+    for line in tab_lines {
+        lines.push(Line::from(line));
     }
     lines.push(Line::from("─".repeat(w)));
-    lines.push(Line::from(help_text(state, w)));
-    lines.push(Line::from(footer_line(state, w)));
-    lines
-}
-
-fn single_pane_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
-    let w = width as usize;
-    let mut lines = Vec::new();
-    lines.push(Line::from(header_text(&state.path, w)));
-    lines.push(Line::from(format!("Section: {}", state.current_section())));
-    let body_h = height.saturating_sub(5) as usize;
-    for (pos, idx) in visible_fields(state).into_iter().take(body_h).enumerate() {
+    let used = lines.len();
+    let body_h = height.saturating_sub(used as u16 + 2) as usize;
+    let fields = visible_fields(state);
+    for (pos, idx) in fields.into_iter().take(body_h).enumerate() {
         let row = field_row(state, idx, w);
         let row = if pos > 0 && state.value_for(&FIELDS[idx]).width() > value_width(w) {
-            format!("↪ {}", field_row(state, idx, w.saturating_sub(2)))
+            format!("  {}", field_row(state, idx, w))
         } else {
             row
         };
@@ -1054,21 +1059,40 @@ fn single_pane_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<L
     lines
 }
 
-fn section_line(state: &ConfigPanelState, row: usize, width: usize) -> String {
-    let Some(section) = SECTIONS.get(row) else {
-        return " ".repeat(width);
-    };
-    let marker = if row == state.selected_section {
-        "▾"
-    } else {
-        "▸"
-    };
-    let dirty = if state.section_override_count(section) > 0 {
-        "*"
-    } else {
-        " "
-    };
-    fit_cell(&format!("{marker} {section:<18}{dirty}"), width)
+fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for (i, section) in SECTIONS.iter().enumerate() {
+        let active = i == state.selected_section;
+        let dirty = state.section_override_count(section) > 0;
+        let label = match (active, dirty) {
+            (true, true) => format!("▾{section}*"),
+            (true, false) => format!("▾{section}"),
+            (false, true) => format!("▸{section}*"),
+            (false, false) => format!("▸{section}"),
+        };
+        let sep = if current.is_empty() {
+            String::new()
+        } else {
+            TAB_SEPARATOR.to_string()
+        };
+        let candidate = format!("{current}{sep}{label}");
+        if candidate.width() <= width {
+            current = candidate;
+        } else {
+            if !current.is_empty() {
+                lines.push(fit_cell(&current, width));
+            }
+            current = label;
+        }
+        if i == SECTIONS.len() - 1 && !current.is_empty() {
+            lines.push(fit_cell(&current, width));
+        }
+    }
+    if lines.is_empty() {
+        lines.push(fit_cell(&current, width));
+    }
+    lines
 }
 
 fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> String {
@@ -1135,7 +1159,7 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
 }
 
 fn footer_line(state: &ConfigPanelState, width: usize) -> String {
-    let hotkeys = ["Enter edit", "d default", "Esc close", "Ctrl-S save"];
+    let hotkeys = ["Tab section", "Enter edit", "d default", "Esc close", "Ctrl-S save"];
     let mut first = String::new();
     for item in hotkeys {
         let next = if first.is_empty() {
@@ -1347,30 +1371,77 @@ mod tests {
     }
 
     #[test]
-    fn two_pane_snapshot_width_120() {
+    fn adaptive_snapshot_width_120() {
         let state = state_with_overrides();
         insta::assert_snapshot!(render_to_text(&state, 120, 20));
     }
 
     #[test]
-    fn two_pane_snapshot_width_80_keeps_primary_hotkeys() {
+    fn adaptive_snapshot_width_80_keeps_primary_hotkeys() {
         let state = state_with_overrides();
         let text = render_to_text(&state, 80, 18);
         assert!(text.contains("Ctrl-S save"));
         assert!(text.contains("Esc close"));
         assert!(text.contains("d default"));
         assert!(text.contains("Enter edit"));
+        assert!(text.contains("Tab section"));
         insta::assert_snapshot!(text);
     }
 
     #[test]
-    fn single_pane_snapshot_width_60_wraps_with_continuation_marker() {
+    fn adaptive_snapshot_width_60_shows_tab_bar() {
         let mut state = state_with_overrides();
         state.selected_section = SECTIONS.iter().position(|s| *s == "paths").unwrap();
         state.select_first_field_in_current_section();
         let text = render_to_text(&state, 60, 16);
-        assert!(text.contains("↪"));
+        assert!(text.contains("▸meta"));
+        assert!(text.contains("▾paths"));
         insta::assert_snapshot!(text);
+    }
+
+    #[test]
+    fn tab_cycles_sections_with_wrap() {
+        let mut state = state_with_overrides();
+        state.selected_section = 0;
+        state.select_first_field_in_current_section();
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(state.current_section(), SECTIONS[1]);
+        for _ in 0..SECTIONS.len() - 1 {
+            state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+        assert_eq!(state.current_section(), SECTIONS[0]);
+    }
+
+    #[test]
+    fn shift_tab_cycles_sections_reverse() {
+        let mut state = state_with_overrides();
+        state.selected_section = 0;
+        state.select_first_field_in_current_section();
+        state.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(state.current_section(), *SECTIONS.last().unwrap());
+    }
+
+    #[test]
+    fn bracket_keys_jump_first_last_section() {
+        let mut state = state_with_overrides();
+        state.selected_section = 5;
+        state.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE));
+        assert_eq!(state.selected_section, 0);
+        state.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        assert_eq!(state.selected_section, SECTIONS.len() - 1);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn g_G_jumps_first_last_field() {
+        let mut state = state_with_overrides();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "ntfy").unwrap();
+        state.selected_field = 5;
+        state.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let fields = field_indices_for(state.current_section());
+        assert_eq!(state.selected_field, fields[0]);
+        state.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        assert_eq!(state.selected_field, *fields.last().unwrap());
     }
 
     #[test]

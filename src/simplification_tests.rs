@@ -7,24 +7,20 @@ fn write_verdict(dir: &tempfile::TempDir, content: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn simplified_with_commits_parses() {
+fn simplified_parses() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_verdict(
         &dir,
         r#"status = "simplified"
 summary = "Renamed two helpers and inlined a single-use function."
-commits = ["abc123", "def456"]
-files_touched = ["src/foo.rs", "src/bar.rs"]
 "#,
     );
     let verdict = validate(&path).unwrap();
     assert_eq!(verdict.status, SimplificationStatus::Simplified);
-    assert_eq!(verdict.commits.len(), 2);
-    assert_eq!(verdict.files_touched.len(), 2);
 }
 
 #[test]
-fn no_changes_with_empty_arrays_parses() {
+fn no_changes_parses() {
     let dir = tempfile::TempDir::new().unwrap();
     let path = write_verdict(
         &dir,
@@ -34,8 +30,6 @@ summary = "Diff was already tight; nothing worth touching."
     );
     let verdict = validate(&path).unwrap();
     assert_eq!(verdict.status, SimplificationStatus::NoChanges);
-    assert!(verdict.commits.is_empty());
-    assert!(verdict.files_touched.is_empty());
 }
 
 #[test]
@@ -75,34 +69,6 @@ summary = "wrong status name"
     );
     let err = validate(&path).unwrap_err();
     assert!(format!("{err:#}").contains("malformed simplification TOML"));
-}
-
-#[test]
-fn empty_commit_sha_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = write_verdict(
-        &dir,
-        r#"status = "simplified"
-summary = "renamed something"
-commits = ["abc", "  "]
-"#,
-    );
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("commits[1]"));
-}
-
-#[test]
-fn empty_files_touched_path_fails() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let path = write_verdict(
-        &dir,
-        r#"status = "simplified"
-summary = "renamed something"
-files_touched = ["src/foo.rs", ""]
-"#,
-    );
-    let err = validate(&path).unwrap_err();
-    assert!(format!("{err:#}").contains("files_touched[1]"));
 }
 
 #[test]

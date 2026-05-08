@@ -16,15 +16,10 @@ pub enum SimplificationStatus {
 pub struct SimplificationVerdict {
     pub status: SimplificationStatus,
     pub summary: String,
-    #[serde(default)]
-    pub commits: Vec<String>,
-    #[serde(default)]
-    pub files_touched: Vec<String>,
 }
 /// Parse and validate a simplification TOML file written by the simplifier
-/// stage. The schema mirrors §2.2 of the spec: `simplified`, `no_changes`,
-/// and `skipped` are the only allowed statuses; commits and files_touched
-/// are advisory and may be empty.
+/// stage. `simplified`, `no_changes`, and `skipped` are the only allowed
+/// statuses.
 pub fn validate(path: &Path) -> Result<SimplificationVerdict> {
     let text =
         fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
@@ -32,16 +27,6 @@ pub fn validate(path: &Path) -> Result<SimplificationVerdict> {
         .with_context(|| format!("malformed simplification TOML in {}", path.display()))?;
     if parsed.summary.trim().is_empty() {
         bail!("summary is empty");
-    }
-    for (i, sha) in parsed.commits.iter().enumerate() {
-        if sha.trim().is_empty() {
-            bail!("commits[{i}]: empty sha");
-        }
-    }
-    for (i, p) in parsed.files_touched.iter().enumerate() {
-        if p.trim().is_empty() {
-            bail!("files_touched[{i}]: empty path");
-        }
     }
     Ok(parsed)
 }

@@ -76,10 +76,8 @@ Workspace hygiene (same as the coder follows):
 Before exiting, write `{simplification_path}` in this exact TOML shape
 (REQUIRED; parse failure or schema violation = run failure):
 
-    status        = "simplified" | "no_changes" | "skipped"
-    summary       = "<one-paragraph human-readable summary of what you did>"
-    commits       = ["sha1", "sha2"]   # commits you added; may be empty
-    files_touched = ["src/foo.rs"]      # advisory; output of `git diff --name-only $BASE..HEAD`
+    status  = "simplified" | "no_changes" | "skipped"
+    summary = "<one-paragraph human-readable summary of what you did>"
 
 Status meaning:
   - simplified — you made one or more behavior-preserving edits and

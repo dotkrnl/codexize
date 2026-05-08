@@ -522,7 +522,7 @@ mod tests {
         let _g = EnvGuard::install(&p);
 
         let cfg1 = ntfy_reset_topic().expect("first mint");
-        let original_created_at = cfg1.ntfy.created_at.value().clone();
+        let original_created_at = *cfg1.ntfy.created_at.value();
         let topic1 = cfg1.ntfy.topic.value().clone();
         assert!(original_created_at.is_some(), "created_at must be set on first mint");
         assert!(!topic1.is_empty());

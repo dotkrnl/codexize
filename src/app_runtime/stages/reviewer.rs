@@ -1,10 +1,11 @@
 use crate::adapters::{AgentRun, run_label_with_model};
 use crate::app::prompts::{
-    ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope, reviewer_prompt,
-    rewrite_tasks_for_revise,
+    ReviewerPromptInputs, assigned_revise_task_ids, read_review_scope,
+    reviewer_full_alignment_prompt, reviewer_prompt, rewrite_tasks_for_revise,
 };
 use crate::app::{App, guard};
 use crate::review;
+use crate::runner::select_full_alignment;
 use crate::selection::CachedModel;
 use crate::state::{
     self as session_state, Message, MessageKind, MessageSender, Phase, PipelineItemStatus,
@@ -86,7 +87,7 @@ impl App {
             .exists()
             .then_some(coder_summary_file.as_path());
         let is_terminal_review = self.state.builder.is_terminal_review_task();
-        let prompt = reviewer_prompt(ReviewerPromptInputs {
+        let prompt_inputs = ReviewerPromptInputs {
             session_dir: &session_dir,
             task_id,
             round: r,
@@ -96,7 +97,16 @@ impl App {
             review_file: &review_path,
             live_summary_path: &live_summary_path,
             is_terminal_review,
-        });
+        };
+        // ReviewRound dispatch: cadence-driven full-alignment audit when the
+        // round number is a non-zero multiple of `full_review_interval`.
+        // `interval == 0` and `r == 0` keep the regular reviewer; recovery
+        // rounds run on a separate phase so they cannot land here.
+        let prompt = if select_full_alignment(r, self.runner_config.full_review_interval) {
+            reviewer_full_alignment_prompt(prompt_inputs)
+        } else {
+            reviewer_prompt(prompt_inputs)
+        };
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);
             return false;
@@ -349,5 +359,264 @@ impl App {
             self.enter_simplification_or_done(round, yolo)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::TestLaunchHarness;
+    use crate::app::TestLaunchOutcome;
+    use crate::app::test_support::{mk_app, with_temp_root};
+    use crate::runner::{RunnerConfig, select_full_alignment};
+    use crate::selection::{CachedModel, IpbrPhaseScores, ScoreSource, VendorKind};
+    use crate::state::{
+        self as session_state, BuilderState, Phase, PipelineItem, PipelineItemStatus, SessionState,
+    };
+    use std::collections::{BTreeMap, VecDeque};
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn select_full_alignment_matrix() {
+        // Mirrors the spec's selection rule:
+        //   `interval > 0 && round > 0 && round % interval == 0`.
+        // Recovery rounds run on a separate phase and therefore never land
+        // here, so the table only models `ReviewRound(N)` cadence.
+        for (round, interval, expected) in [
+            (0u32, 5u32, false),
+            (5, 5, true),
+            (3, 5, false),
+            (10, 5, true),
+            (1, 0, false),
+            (5, 0, false),
+        ] {
+            assert_eq!(
+                select_full_alignment(round, interval),
+                expected,
+                "round={round} interval={interval}"
+            );
+        }
+    }
+
+    fn cached_review_model() -> CachedModel {
+        CachedModel {
+            vendor: VendorKind::Codex,
+            name: "review-model".to_string(),
+            overall_score: 0.0,
+            current_score: 0.0,
+            standard_error: 0.0,
+            axes: Vec::new(),
+            axis_provenance: BTreeMap::new(),
+            ipbr_phase_scores: IpbrPhaseScores {
+                review: Some(1.0),
+                ..IpbrPhaseScores::default()
+            },
+            score_source: ScoreSource::Ipbr,
+            ipbr_row_matched: true,
+            ipbr_match_key: Some("review-model".to_string()),
+            route_underlying_vendor: None,
+            route_provider: None,
+            quota_percent: Some(100),
+            quota_resets_at: None,
+            display_order: 0,
+            fallback_from: None,
+        }
+    }
+
+    fn builder_with_running_task(task_id: u32) -> BuilderState {
+        let mut builder = BuilderState::default();
+        builder.push_pipeline_item(PipelineItem {
+            id: 0,
+            stage: "coder".to_string(),
+            task_id: Some(task_id),
+            round: Some(1),
+            status: PipelineItemStatus::Running,
+            title: Some(format!("Task {task_id}")),
+            mode: None,
+            trigger: None,
+            interactive: None,
+            iteration: 1,
+        });
+        builder
+            .task_titles
+            .insert(task_id, format!("Task {task_id}"));
+        builder
+    }
+
+    fn write_round_artifacts(session_dir: &std::path::Path, round: u32, task_id: u32) {
+        std::fs::create_dir_all(session_dir.join("prompts")).unwrap();
+        let round_dir = session_dir.join("rounds").join(format!("{round:03}"));
+        std::fs::create_dir_all(&round_dir).unwrap();
+        std::fs::write(
+            round_dir.join("task.toml"),
+            format!(
+                "id = {task_id}\ntitle = \"x\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            round_dir.join("review_scope.toml"),
+            "base_sha = \"deadbeef\"\n",
+        )
+        .unwrap();
+        let artifacts_dir = session_dir.join("artifacts");
+        std::fs::create_dir_all(&artifacts_dir).unwrap();
+        std::fs::write(
+            artifacts_dir.join("tasks.toml"),
+            format!(
+                "[[tasks]]\nid = {task_id}\ntitle = \"x\"\ndescription = \"d\"\ntest = \"t\"\nestimated_tokens = 1000\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn synthetic_review_with_audit() -> String {
+        // Mirrors what a full-alignment reviewer would write: outer artifact
+        // shape unchanged, the new section lives inside the `summary` block.
+        r##"status = "approved"
+summary = """Aggregate delta is acceptable.
+
+## AC Coverage Audit
+- AC-1: covered — landed in round 1
+Path-Boundary drift: (none)
+Forgotten items in Dependencies and Sequence: (none)
+"""
+feedback = []
+"##
+        .to_string()
+    }
+
+    fn synthetic_review_plain() -> String {
+        r##"status = "approved"
+summary = "Plain review."
+feedback = []
+"##
+        .to_string()
+    }
+
+    #[test]
+    fn review_round_5_with_default_config_uses_full_alignment_prompt() {
+        with_temp_root(|| {
+            // Default `RunnerConfig` carries `full_review_interval = 5`, so
+            // `ReviewRound(5)` MUST select the full-alignment template. The
+            // mocked launch writes a synthetic `review.toml` containing the
+            // new `## AC Coverage Audit` section so we can also verify the
+            // outer artifact stays parseable end-to-end.
+            let session_id = "review-full-alignment-r5".to_string();
+            let session_dir = session_state::session_dir(&session_id);
+            std::fs::create_dir_all(&session_dir).unwrap();
+
+            let mut state = SessionState::new(session_id);
+            state.current_phase = Phase::ReviewRound(5);
+            state.builder = builder_with_running_task(1);
+            write_round_artifacts(&session_dir, 5, 1);
+
+            let mut app = mk_app(state);
+            assert_eq!(app.runner_config, RunnerConfig::default());
+            app.models.push(cached_review_model());
+            app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(synthetic_review_with_audit()),
+                    launch_error: None,
+                }]),
+            })));
+
+            assert!(app.launch_reviewer_with_model(None));
+
+            let prompt = std::fs::read_to_string(session_dir.join("prompts/reviewer-r5.md"))
+                .expect("reviewer prompt written");
+            assert!(
+                prompt.contains("## AC Coverage Audit"),
+                "ReviewRound(5) prompt must instruct full-alignment audit",
+            );
+            assert!(
+                prompt.contains("FULL-ALIGNMENT"),
+                "prompt body must announce the full-alignment scope",
+            );
+
+            let review = std::fs::read_to_string(session_dir.join("rounds/005/review.toml"))
+                .expect("synthetic review artifact written");
+            assert!(
+                review.contains("## AC Coverage Audit"),
+                "artifact MUST carry the new audit section",
+            );
+        });
+    }
+
+    #[test]
+    fn off_cadence_review_rounds_use_the_regular_prompt() {
+        with_temp_root(|| {
+            // `ReviewRound(3)` with the default cadence (5) must keep using
+            // the regular reviewer template. Catches a future change that
+            // accidentally inverts the modulo or drops the `round > 0` guard.
+            let session_id = "review-regular-r3".to_string();
+            let session_dir = session_state::session_dir(&session_id);
+            std::fs::create_dir_all(&session_dir).unwrap();
+
+            let mut state = SessionState::new(session_id);
+            state.current_phase = Phase::ReviewRound(3);
+            state.builder = builder_with_running_task(1);
+            write_round_artifacts(&session_dir, 3, 1);
+
+            let mut app = mk_app(state);
+            app.models.push(cached_review_model());
+            app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(synthetic_review_plain()),
+                    launch_error: None,
+                }]),
+            })));
+
+            assert!(app.launch_reviewer_with_model(None));
+
+            let prompt = std::fs::read_to_string(session_dir.join("prompts/reviewer-r3.md"))
+                .expect("reviewer prompt written");
+            assert!(
+                !prompt.contains("## AC Coverage Audit"),
+                "off-cadence rounds must keep the regular reviewer template",
+            );
+            assert!(
+                !prompt.contains("FULL-ALIGNMENT"),
+                "regular reviewer prompt must not announce full-alignment scope",
+            );
+        });
+    }
+
+    #[test]
+    fn full_review_interval_zero_disables_full_alignment_even_on_multiples() {
+        with_temp_root(|| {
+            // Operator contract: `full_review_interval = 0` disables the
+            // feature entirely — every round, including would-be multiples,
+            // falls through to the regular reviewer.
+            let session_id = "review-disabled".to_string();
+            let session_dir = session_state::session_dir(&session_id);
+            std::fs::create_dir_all(&session_dir).unwrap();
+
+            let mut state = SessionState::new(session_id);
+            state.current_phase = Phase::ReviewRound(10);
+            state.builder = builder_with_running_task(1);
+            write_round_artifacts(&session_dir, 10, 1);
+
+            let mut app = mk_app(state);
+            app.runner_config.full_review_interval = 0;
+            app.models.push(cached_review_model());
+            app.test_launch_harness = Some(Arc::new(Mutex::new(TestLaunchHarness {
+                outcomes: VecDeque::from([TestLaunchOutcome {
+                    exit_code: 0,
+                    artifact_contents: Some(synthetic_review_plain()),
+                    launch_error: None,
+                }]),
+            })));
+
+            assert!(app.launch_reviewer_with_model(None));
+
+            let prompt = std::fs::read_to_string(session_dir.join("prompts/reviewer-r10.md"))
+                .expect("reviewer prompt written");
+            assert!(
+                !prompt.contains("## AC Coverage Audit"),
+                "interval=0 must disable the full-alignment template",
+            );
+        });
     }
 }

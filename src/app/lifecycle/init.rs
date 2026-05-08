@@ -91,6 +91,7 @@ impl App {
             current_run_id: None,
             failed_models,
             runner_supervisor: app_runner_supervisor(),
+            runner_config: crate::runner::RunnerConfig::default(),
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),

@@ -280,6 +280,10 @@ pub struct App {
     pub(crate) yolo_exit_issued: HashSet<u64>,
     pub(crate) yolo_exit_observations: HashMap<u64, YoloExitObservation>,
     pub(crate) runner_supervisor: crate::runner::Supervisor,
+    /// Runner-level operator knobs (full-alignment cadence, etc.). Loaded
+    /// with `Default::default()` today; once a per-project config file
+    /// surfaces these knobs, the loader populates this field instead.
+    pub(crate) runner_config: crate::runner::RunnerConfig,
     pub(crate) notification_runtime: crate::data::notifications::NotificationRuntime,
     pub(crate) interactive_wait_marker: Option<crate::data::notifications::InteractiveWaitMarker>,
     /// Per-run liveness watchdog state. Allocated as part of task 1

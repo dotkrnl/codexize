@@ -39,14 +39,14 @@ fn page_step_leaves_one_line_context() {
 
 #[test]
 fn palette_inner_rows_caps_suggestions() {
-    assert_eq!(palette_inner_rows("", false), 8);
-    assert_eq!(palette_inner_rows("", true), 9);
+    assert_eq!(palette_inner_rows("", false), 9);
+    assert_eq!(palette_inner_rows("", true), 10);
 }
 
 #[test]
 fn palette_overlay_height_respects_list_reserve() {
     assert_eq!(palette_overlay_height("", false, 6), 3);
-    assert_eq!(palette_overlay_height("", false, 20), 10);
+    assert_eq!(palette_overlay_height("", false, 20), 11);
 }
 
 #[test]

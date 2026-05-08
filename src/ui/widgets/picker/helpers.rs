@@ -127,6 +127,12 @@ pub fn palette_commands(selected_archived: bool) -> Vec<PaletteCommand> {
             help: "Permanently delete selected session",
             key_hint: None,
         },
+        PaletteCommand {
+            name: "config",
+            aliases: &["c"],
+            help: "View or edit configuration",
+            key_hint: None,
+        },
     ];
     if selected_archived {
         commands.push(PaletteCommand {

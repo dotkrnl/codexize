@@ -2,6 +2,10 @@ use super::*;
 impl SessionPicker {
     pub(super) fn draw(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+        if let Some(config_panel) = &self.config_panel {
+            crate::ui::config_panel::render(frame, area, config_panel);
+            return;
+        }
         let term_h = area.height;
         let width = area.width;
         let degenerate = term_h < 10;

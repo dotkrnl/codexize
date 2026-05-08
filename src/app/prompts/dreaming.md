@@ -5,7 +5,8 @@ Session: {session_dir}
 Dream report: {dream_report}
 
 Use recent session artifacts plus the project memory index and manifest to
-consolidate durable lessons.
+consolidate durable lessons: promote, merge, supersede, archive, retier,
+and write a brief operator readout.
 
 Working-set rules (read these files only; do not read the whole memory store):
 
@@ -20,26 +21,35 @@ Working-set rules (read these files only; do not read the whole memory store):
 6. Do not read `archived` entries unless an active entry explicitly references
    them.
 
-Consolidation actions:
+Consolidation actions — record every one as a `[[changes]]` block:
 
-- Promote useful journal notes into the appropriate topic files.
-- Merge duplicate or near-duplicate lessons.
-- Mark outdated entries `superseded` instead of deleting by default.
-- Compact `index.md` so it stays below its 200-line / 25 KB budget; demote
-   detail into topic files when the index exceeds the target.
-- Retier entries by recency, salience, and observed usefulness.
-- Add new lessons and design decisions grounded in the completed session's
-  artifacts.
+1. Promote — move durable journal notes into the appropriate topic file
+   (create it if missing). Register new entries in manifest.toml; bump
+   `last_seen_at`/`last_dreamed_at` on entries touched.
+2. Merge — collapse near-duplicate entries; update `supersedes` on the
+   keeper with the merged-away ids.
+3. Supersede — `status = "superseded"` on entries the session has
+   invalidated. Capture the reason in `changes[].reason`.
+4. Archive — when an entry has been `superseded` for 3+ dreams without
+   being referenced, set `status = "archived"`. Archived entries are
+   excluded from manifest discovery and never re-read (working-set rule 6).
+5. Delete — only for entries wrong on entry, or referencing code paths
+   that no longer exist. Record the reason.
+6. Retier — apply this rubric, update `tier` on the entry:
+     - hot  = salience ≥ 4 OR `last_seen_at` < 7 days
+     - warm = salience 2-3 AND `last_seen_at` < 30 days
+     - cold = older / less-used active entries
+7. Compact `index.md` below the 200-line / 25 KB budget; demote detail
+   into topic files when over.
+8. Add new lessons / design decisions grounded in this session's artifacts.
 
-Write only `.codexize/memory/**`, including the validated `dream-####.toml`
-report. Preserve outdated information by marking entries superseded rather
-than deleting by default.
+Write only `.codexize/memory/**`, including the validated `dream-####.toml` report.
 
 Write `{dream_report}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     schema_version = 1
     status         = "completed"
-    summary        = "<one-paragraph human-readable summary of this dream — required, non-empty>"
+    summary        = "<operator-facing one-paragraph readout: key promotions, merges, archivals, and any caveat the operator should know — required, non-empty>"
     started_at     = "<RFC-3339 quoted string, e.g. \"2026-05-07T22:00:00Z\">"
     ended_at       = "<RFC-3339 quoted string, must be >= started_at>"
     inputs         = ["index.md", "manifest.toml", "..."]   # required, non-empty
@@ -58,11 +68,9 @@ Write `{dream_report}` as TOML (REQUIRED). No prose around it; parse failure or 
     target = "<entry id, file path, or anchor like index.md#section — non-empty>"
     reason = "<one-line justification — non-empty>"
 
-Capture lessons (optional, low effort): before exiting, append a
-one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
-non-obvious was learned this round. If nothing was learned, write a single
-line `no new lesson` so the absence is intentional. Use the project's
-`write_file` tool for a new monthly journal file, or the existing
-edit/replace tool to append to an existing one.
+Capture lessons (optional, low effort): before exiting, append a one-paragraph
+entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything non-obvious
+was learned. Use `write_file` for a new monthly journal or edit/replace to
+append. Otherwise write `no new lesson` so the absence is intentional.
 {memory_context}
 {instr}

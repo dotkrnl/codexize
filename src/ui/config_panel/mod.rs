@@ -1400,7 +1400,7 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     for (pos, idx) in fields.into_iter().take(body_h).enumerate() {
         let row = field_row(state, idx, w);
         let row = if pos > 0 && state.value_for(&FIELDS[idx]).width() > value_width(w) {
-            format!("  {}", field_row(state, idx, w))
+            format!("  {row}")
         } else {
             row
         };

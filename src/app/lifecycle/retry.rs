@@ -8,7 +8,6 @@ use crate::artifacts::ArtifactKind;
 use crate::logic::rules::retry_phase_for_stage;
 use crate::state::{self as session_state, NodeKind, Phase, PipelineItemStatus, RunStatus};
 use std::collections::BTreeSet;
-use std::fs;
 use std::time::Duration;
 impl App {
     fn cancel_run_label(&self, base: &str) {
@@ -110,23 +109,11 @@ impl App {
             );
             return;
         }
-        let removed_ids = removed_runs
-            .iter()
-            .map(|run| run.id)
-            .collect::<BTreeSet<_>>();
-        for run in &removed_runs {
-            if run.status == RunStatus::Running {
-                self.cancel_run_label(&run.window_name);
-            }
-            let _ = fs::remove_file(self.live_summary_path_for(run));
-            let _ = fs::remove_file(self.finish_stamp_path_for(run));
-        }
-        self.state
-            .agent_runs
-            .retain(|run| !removed_ids.contains(&run.id));
-        let _ = self.state.remove_messages_for_runs(&removed_ids);
-        self.messages
-            .retain(|message| !removed_ids.contains(&message.run_id));
+        // Preserve failed RunRecord rows and their messages so the next
+        // attempt's prompt can include the prior-attempt transcript and
+        // the operator does not have to re-type previously-answered
+        // recovery decisions. Only running runs are preempted.
+        let prior_ids = self.preempt_prior_runs(&removed_runs);
         self.failed_models.retain(|(stage, key_task_id, _), _| {
             *key_task_id != Some(task_id) && stage != "recovery"
         });
@@ -165,8 +152,8 @@ impl App {
             Phase::ImplementationRound(retry_round),
         );
         let _ = self.state.log_event(format!(
-            "palette_retry: task={task_id} removed_runs={}",
-            removed_ids.len()
+            "palette_retry: task={task_id} prior_runs={}",
+            prior_ids.len()
         ));
         let _ = self.state.save();
         self.rebuild_tree_view(None);
@@ -191,7 +178,7 @@ impl App {
             );
             return;
         }
-        let removed_ids = self.remove_retry_runs(&removed_runs);
+        let prior_ids = self.preempt_prior_runs(&removed_runs);
         self.failed_models
             .retain(|(key_stage, key_task_id, _), _| key_stage != stage || key_task_id.is_some());
         self.clear_agent_error();
@@ -203,8 +190,8 @@ impl App {
             session_state::transitions::set_phase_for_operator_retry(&mut self.state, phase);
         }
         let _ = self.state.log_event(format!(
-            "palette_retry: stage={stage} removed_runs={}",
-            removed_ids.len()
+            "palette_retry: stage={stage} prior_runs={}",
+            prior_ids.len()
         ));
         let _ = self.state.save();
         self.rebuild_tree_view(None);
@@ -220,25 +207,30 @@ impl App {
             _ => {}
         }
     }
-    fn remove_retry_runs(&mut self, removed_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
-        let removed_ids = removed_runs
+    /// Preempt the prior runs of a stage so the operator can launch a
+    /// fresh attempt — but keep the failed `RunRecord`s and their
+    /// `messages.toml` rows. The new attempt's prompt builder reads them
+    /// to render the prior-attempts transcript so the operator does not
+    /// have to re-answer questions they already answered upstream. Files
+    /// under `artifacts/` are kept too: every per-attempt path is
+    /// suffixed with the attempt number, so they coexist with the
+    /// new attempt's outputs and serve as audit trail.
+    fn preempt_prior_runs(&mut self, prior_runs: &[crate::state::RunRecord]) -> BTreeSet<u64> {
+        let prior_ids = prior_runs
             .iter()
             .map(|run| run.id)
             .collect::<BTreeSet<_>>();
-        for run in removed_runs {
+        for run in prior_runs {
             if run.status == RunStatus::Running {
                 self.cancel_run_label(&run.window_name);
+                self.finalize_run_record(
+                    run.id,
+                    false,
+                    Some("preempted by operator retry".to_string()),
+                );
             }
-            let _ = fs::remove_file(self.live_summary_path_for(run));
-            let _ = fs::remove_file(self.finish_stamp_path_for(run));
         }
-        self.state
-            .agent_runs
-            .retain(|run| !removed_ids.contains(&run.id));
-        let _ = self.state.remove_messages_for_runs(&removed_ids);
-        self.messages
-            .retain(|message| !removed_ids.contains(&message.run_id));
-        removed_ids
+        prior_ids
     }
     pub(crate) fn go_back(&mut self) {
         use std::fs;

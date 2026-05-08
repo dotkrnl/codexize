@@ -181,6 +181,14 @@ fn run_config_command(command: &ConfigCommand) -> Result<()> {
         ConfigSubcommand::Edit => config_cli::run_edit(io::stdin().is_terminal(), &mut stdout),
     }
 }
+/// Resolve the config for launch. A missing file returns baked defaults
+/// silently; any other loader error (I/O, parse, unknown key, type
+/// mismatch, unsupported version, validation) is fatal so the binary
+/// refuses to launch on a malformed file rather than silently degrading.
+fn load_config_for_launch() -> Result<codexize::data::config::Config> {
+    codexize::data::config::load_or_default().map_err(anyhow::Error::from)
+}
+
 async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     struct TerminalGuard {
         terminal: Option<tui::AppTerminal>,
@@ -209,16 +217,17 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
             }
         }
     }
+    // Load config BEFORE taking over the terminal so any error message
+    // lands on a normal stderr (alternate-screen + raw mode would swallow
+    // it). Missing-file is handled inside the loader as "use baked
+    // defaults"; only true I/O, parse, unknown-key, type-mismatch,
+    // unsupported-version, and validation errors abort launch.
+    let config = std::sync::Arc::new(load_config_for_launch()?);
     let mut terminal_guard = TerminalGuard::start()?;
     // When running inside tmux, label the active window with the working
     // directory so an operator with several codexize panes can tell them
     // apart at a glance. No-op outside tmux.
     codexize::data::tmux::maybe_set_window_title();
-    let config = std::sync::Arc::new(codexize::data::config::load_or_default()
-        .unwrap_or_else(|e| {
-            eprintln!("config: using defaults: {e}");
-            codexize::data::config::Config::baked_defaults()
-        }));
     let install_view = config.acp_install_view();
     if preflight::check(terminal_guard.terminal_mut(), &install_view.claude_acp_root)?
         == preflight::PreflightOutcome::Exit

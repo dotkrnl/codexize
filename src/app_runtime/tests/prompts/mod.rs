@@ -37,6 +37,25 @@ fn assert_memory_block(name: &str, actual: &str) {
     );
 }
 
+fn assert_capture_lessons_block(name: &str, actual: &str) {
+    assert!(
+        actual.contains("Capture lessons"),
+        "{name} prompt must include the Capture lessons paragraph"
+    );
+    assert!(
+        actual.contains(".codexize/memory/journal/"),
+        "{name} prompt must reference the journal directory"
+    );
+    assert!(
+        actual.contains("no new lesson"),
+        "{name} prompt must mention the no-new-lesson fallback"
+    );
+    assert!(
+        actual.contains("write_file"),
+        "{name} prompt must name the write_file tool for journal creation"
+    );
+}
+
 // `with_temp_root_and_cwd` chdir's the entire process; guard tests in
 // `app::guard` shell out to `git` from cwd, so the two cannot run
 // concurrently without serializing.
@@ -157,14 +176,13 @@ fn prompt_insta_snapshots_match_fixtures() {
                 None,
             ),
         );
-        assert_prompt_insta_snapshot(
-            "dreaming",
-            &dreaming_prompt(
-                &session_dir,
-                &session_dir.join("memory/dreams/dream-0001.toml"),
-                &live,
-            ),
+        let dreaming = dreaming_prompt(
+            &session_dir,
+            &session_dir.join("memory/dreams/dream-0001.toml"),
+            &live,
         );
+        assert_capture_lessons_block("dreaming", &dreaming);
+        assert_prompt_insta_snapshot("dreaming", &dreaming);
         assert_prompt_insta_snapshot(
             "recovery_interactive",
             &recovery_prompt(
@@ -210,10 +228,9 @@ fn prompt_insta_snapshots_match_fixtures() {
             "recovery_sharding",
             &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
         );
-        assert_prompt_insta_snapshot(
-            "coder_round1",
-            &coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]),
-        );
+        let coder_r1 = coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]);
+        assert_capture_lessons_block("coder_round1", &coder_r1);
+        assert_prompt_insta_snapshot("coder_round1", &coder_r1);
         let prev_review_path = session_dir.join("rounds/002/review.toml");
         std::fs::create_dir_all(prev_review_path.parent().unwrap()).unwrap();
         std::fs::write(&prev_review_path, "status = \"refine\"\n").unwrap();
@@ -232,20 +249,19 @@ fn prompt_insta_snapshots_match_fixtures() {
                 ],
             ),
         );
-        assert_prompt_insta_snapshot(
-            "reviewer_round1",
-            &reviewer_prompt(ReviewerPromptInputs {
-                session_dir: &session_dir,
-                task_id: 7,
-                round: 1,
-                task_file: &task_file_r1,
-                review_scope_file: &review_scope_r1,
-                coder_summary_file: None,
-                review_file: &review_r1,
-                live_summary_path: &live,
-                is_terminal_review: false,
-            }),
-        );
+        let reviewer_r1 = reviewer_prompt(ReviewerPromptInputs {
+            session_dir: &session_dir,
+            task_id: 7,
+            round: 1,
+            task_file: &task_file_r1,
+            review_scope_file: &review_scope_r1,
+            coder_summary_file: None,
+            review_file: &review_r1,
+            live_summary_path: &live,
+            is_terminal_review: false,
+        });
+        assert_capture_lessons_block("reviewer_round1", &reviewer_r1);
+        assert_prompt_insta_snapshot("reviewer_round1", &reviewer_r1);
         let coder_summary_path = round3.join("coder_summary.toml");
         assert_prompt_insta_snapshot(
             "reviewer_round3_with_summary",

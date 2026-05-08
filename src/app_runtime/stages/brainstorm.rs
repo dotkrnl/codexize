@@ -63,12 +63,20 @@ impl App {
         let summary_path = session_state::session_dir(session_id)
             .join("artifacts")
             .join(ArtifactKind::SessionSummary.filename());
+        let prior_attempts_path = crate::app::prior_attempts::write_prior_attempts_transcript(
+            &session_state::session_dir(session_id),
+            &self.messages,
+            &self.state.agent_runs,
+            "brainstorm",
+            1,
+        );
         let prompt = brainstorm_prompt(
             &idea,
             &spec_path.display().to_string(),
             &summary_path.display().to_string(),
             &live_summary_path.display().to_string(),
             modes.yolo,
+            prior_attempts_path.as_deref(),
             self.prompt_meta(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {

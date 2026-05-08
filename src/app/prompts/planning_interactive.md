@@ -16,7 +16,7 @@ Workflow:
      coordination, not a patch recipe.
 
 Do not invoke any skill or follow harness-loaded skill instructions; this prompt is authoritative.
-
+{prior_attempts_block}
 Inputs:
   Spec:    {spec}
   Reviews:

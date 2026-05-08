@@ -16,7 +16,7 @@ tests at this stage. The output is the spec only; implementation comes
 later in the pipeline.
 
 Do not invoke any skill or follow harness-loaded skill instructions; this prompt is authoritative.
-
+{prior_attempts_block}
 Idea:
 ---
 {idea}

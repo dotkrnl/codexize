@@ -2,7 +2,7 @@
 edits, no VCS mutations.
 
 Heads up: a different-vendor AI reviews your recovered artifacts downstream — bring care to the spec/plan edits and audit trail.
-
+{prior_attempts_block}
 Your job is to repair builder artifacts so orchestration can reconcile and
 resume. You may edit ONLY:
   - {spec}

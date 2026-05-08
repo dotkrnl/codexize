@@ -65,6 +65,13 @@ impl App {
         started.sort_unstable();
         let attempt = self.attempt_for("recovery", None, round);
         let live_summary_path = self.live_summary_path_for_run("recovery", None, round, attempt);
+        let prior_attempts_path = crate::app::prior_attempts::write_prior_attempts_transcript(
+            &session_dir,
+            &self.messages,
+            &self.state.agent_runs,
+            "recovery",
+            round,
+        );
         let prompt = recovery_prompt(
             &spec_path,
             &plan_path,
@@ -76,6 +83,7 @@ impl App {
             &live_summary_path,
             &recovery_path,
             is_human_blocked,
+            prior_attempts_path.as_deref(),
             self.prompt_meta(),
         );
         if let Some(parent) = prompt_path.parent() {

@@ -140,6 +140,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &summary.display().to_string(),
                 &live.display().to_string(),
                 false,
+                None,
                 PromptMeta::with_topics(6),
             ),
         );
@@ -151,6 +152,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &summary.display().to_string(),
                 &live.display().to_string(),
                 true,
+                None,
                 PromptMeta::with_topics(6),
             ),
         );
@@ -161,11 +163,11 @@ fn prompt_insta_snapshots_match_fixtures() {
         ];
         assert_prompt_insta_snapshot(
             "planning_interactive",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, false, PromptMeta::with_topics(6)),
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, false, None, PromptMeta::with_topics(6)),
         );
         assert_prompt_insta_snapshot(
             "planning_yolo",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, true, PromptMeta::with_topics(6)),
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, true, None, PromptMeta::with_topics(6)),
         );
         assert_prompt_insta_snapshot(
             "sharding",
@@ -203,6 +205,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &live,
                 &recovery,
                 true,
+                None,
                 PromptMeta::with_topics(6),
             ),
         );
@@ -219,6 +222,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &live,
                 &recovery,
                 false,
+                None,
                 PromptMeta::with_topics(6),
             ),
         );

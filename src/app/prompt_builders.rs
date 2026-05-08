@@ -1,6 +1,25 @@
 use super::prompt_ctx::{PromptCtx, PromptMeta, resolved_agent_path};
 use indoc::formatdoc;
 use std::path::{Path, PathBuf};
+
+/// Render the `{prior_attempts_block}` slot used by every interactive
+/// stage prompt (brainstorm, planning, recovery). When the caller has a
+/// transcript file from previous failed attempts, this expands to a short
+/// directive pointing the agent at it; when `None`, the slot is empty so
+/// the surrounding template collapses cleanly.
+fn prior_attempts_block(ctx: &PromptCtx, prior_attempts_path: Option<&Path>) -> String {
+    match prior_attempts_path {
+        Some(path) => format!(
+            "\nPrior failed attempts on this stage are at {}.\n\
+             Read it first. Do NOT re-ask any clarifying question the \
+             operator already answered there — treat their stated \
+             decisions as authoritative and pick up where prior attempts \
+             left off.\n",
+            ctx.path(path)
+        ),
+        None => String::new(),
+    }
+}
 pub(crate) fn spec_review_prompt(
     spec_path: &str,
     review_path: &str,
@@ -54,6 +73,7 @@ pub(crate) fn brainstorm_prompt(
     summary_path: &str,
     live_summary_path: &str,
     yolo: bool,
+    prior_attempts_path: Option<&Path>,
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
@@ -67,10 +87,12 @@ pub(crate) fn brainstorm_prompt(
     } else {
         include_str!("prompts/brainstorm_interactive.md")
     };
+    let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
     ctx.set("idea", idea)
         .path_arg("spec_path", spec_path)
         .set("summary_path", summary_path)
         .path_arg("skip_proposal_path", skip_proposal_path)
+        .set("prior_attempts_block", prior_block)
         .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)
@@ -81,6 +103,7 @@ pub(crate) fn planning_prompt(
     plan_path: &Path,
     live_summary_path: &Path,
     yolo: bool,
+    prior_attempts_path: Option<&Path>,
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
@@ -99,9 +122,11 @@ pub(crate) fn planning_prompt(
     } else {
         include_str!("prompts/planning_interactive.md")
     };
+    let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
     ctx.path_arg("spec", spec_path)
         .set("reviews", reviews)
         .path_arg("plan", plan_path)
+        .set("prior_attempts_block", prior_block)
         .memory_arg(spec_path)
         .live_arg(live_summary_path, !yolo)
         .render(template)
@@ -171,6 +196,7 @@ pub(crate) fn recovery_prompt(
     live_summary_path: &Path,
     recovery_path: &Path,
     interactive: bool,
+    prior_attempts_path: Option<&Path>,
     meta: PromptMeta,
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
@@ -179,6 +205,7 @@ pub(crate) fn recovery_prompt(
     } else {
         include_str!("prompts/recovery_noninteractive.md")
     };
+    let prior_block = prior_attempts_block(&ctx, prior_attempts_path);
     ctx.path_arg("spec", spec_path)
         .path_arg("plan", plan_path)
         .path_arg("tasks", tasks_path)
@@ -196,6 +223,7 @@ pub(crate) fn recovery_prompt(
         )
         .ids("completed", completed_task_ids, "(none)")
         .ids("started", started_task_ids, "(none)")
+        .set("prior_attempts_block", prior_block)
         .live_arg(live_summary_path, interactive)
         .render(template)
 }

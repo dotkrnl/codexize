@@ -57,12 +57,20 @@ impl App {
         }
         let attempt = self.attempt_for("planning", None, 1);
         let live_summary_path = self.live_summary_path_for_run("planning", None, 1, attempt);
+        let prior_attempts_path = crate::app::prior_attempts::write_prior_attempts_transcript(
+            &session_dir,
+            &self.messages,
+            &self.state.agent_runs,
+            "planning",
+            1,
+        );
         let prompt = planning_prompt(
             &spec_path,
             &review_paths,
             &plan_path,
             &live_summary_path,
             modes.yolo,
+            prior_attempts_path.as_deref(),
             self.prompt_meta(),
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {

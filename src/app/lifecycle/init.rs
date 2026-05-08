@@ -15,6 +15,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 impl App {
@@ -25,6 +26,12 @@ impl App {
         mut state: SessionState,
         startup_origin: AppStartupOrigin,
     ) -> Self {
+        let config = Arc::new(crate::data::config::load_or_default()
+            .unwrap_or_else(|e| {
+                eprintln!("config: using defaults: {e}");
+                crate::data::config::Config::baked_defaults()
+            }));
+        let ntfy_params = crate::data::notifications::NotificationParams::from_view(&config.ntfy_view());
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         if state.builder.task_titles.is_empty() {
             let tasks_path = session_state::session_dir(&state.session_id)
@@ -91,15 +98,16 @@ impl App {
             current_run_id: None,
             failed_models,
             runner_supervisor: app_runner_supervisor(),
-            runner_config: crate::runner::RunnerConfig::default(),
+            runner_config: crate::runner::RunnerConfig {
+                full_review_interval: config.runner_view().full_review_interval,
+            },
             pending_yolo_toggle_gate: None,
             yolo_exit_issued: HashSet::new(),
             yolo_exit_observations: HashMap::new(),
             watchdog: super::watchdog::WatchdogRegistry::from_env(),
-            notification_runtime: crate::data::notifications::NotificationRuntime::from_config(
-                crate::data::notifications::load_ntfy_config(),
-            ),
+            notification_runtime: crate::data::notifications::NotificationRuntime::new(ntfy_params),
             interactive_wait_marker: None,
+            config,
             #[cfg(test)]
             test_launch_harness: None,
             messages,

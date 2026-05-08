@@ -14,6 +14,7 @@ pub mod paths;
 pub mod schema;
 pub mod view;
 
-pub use loader::{LoadError, save_atomic, save_atomic_to};
+pub use loader::{LoadError, load_or_default, save_atomic, save_atomic_to};
 pub use paths::config_path;
 pub use schema::{Config, Override};
+pub use view::{NtfyEventsView, NtfyView};

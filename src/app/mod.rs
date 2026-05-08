@@ -286,6 +286,10 @@ pub struct App {
     pub(crate) runner_config: crate::runner::RunnerConfig,
     pub(crate) notification_runtime: crate::data::notifications::NotificationRuntime,
     pub(crate) interactive_wait_marker: Option<crate::data::notifications::InteractiveWaitMarker>,
+    /// The loaded unified config, shared across subsystems. Every view
+    /// (ntfy, ACP, runner, paths, diagnostics, memory, UI) is derived
+    /// from this single `Arc<Config>` — load-on-launch, no global static.
+    pub(crate) config: std::sync::Arc<crate::data::config::Config>,
     /// Per-run liveness watchdog state. Allocated as part of task 1
     /// scaffolding; the App-side lifecycle hookup that inserts/removes
     /// entries (and ticks `evaluate`) lands with task 2.

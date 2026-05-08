@@ -1,8 +1,7 @@
 use crate::app::test_support::{mk_app, with_temp_root};
-use crate::data::notifications::{
-    NotificationEventKind, NotificationReason, NotificationRuntime, NtfyConfig, NtfyDetailMode,
-    NtfyPublishPolicy,
-};
+use crate::data::config::view::NtfyEventsView;
+use crate::data::config::schema::NtfyDetailMode;
+use crate::data::notifications::{NotificationEventKind, NotificationReason, NotificationParams, NotificationRuntime};
 use crate::state::{
     BlockOrigin, LaunchModes, Message, MessageKind, MessageSender, Phase, RunRecord, RunStatus,
     SessionState,
@@ -402,9 +401,8 @@ async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_phase
             Phase::FinalValidation(1),
             "shutdown-drain",
         ));
-        app.notification_runtime = NotificationRuntime::from_config_for_test(
-            Some(test_ntfy_config(&server.url())),
-            NtfyPublishPolicy::for_test(1, Duration::ZERO),
+        app.notification_runtime = NotificationRuntime::from_params_for_test(
+            test_ntfy_params(&server.url()),
         );
 
         app.transition_to_phase(Phase::Done)
@@ -426,15 +424,22 @@ async fn shutdown_drain_surfaces_pending_publish_failures_without_changing_phase
     });
 }
 
-fn test_ntfy_config(server: &str) -> NtfyConfig {
-    NtfyConfig {
-        version: 1,
+fn test_ntfy_params(server: &str) -> NotificationParams {
+    NotificationParams {
+        enabled: true,
         server: server.to_string(),
         topic: "topic-test".to_string(),
-        enabled: true,
         detail_mode: NtfyDetailMode::Minimal,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
+        body_max_bytes: 4096,
+        excerpt_max_chars: 600,
+        retry_attempts: 1,
+        retry_delay_ms: 0,
+        http_timeout_secs: 5,
+        events: NtfyEventsView {
+            phase_wait: true,
+            interactive_wait: true,
+            pipeline_done: true,
+        },
     }
 }
 

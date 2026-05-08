@@ -1,44 +1,23 @@
+//! Notification publisher driven by the unified config.
+//!
+//! The old `NtfyConfig` struct and `~/.codexize/ntfy.toml` loader have been
+//! replaced by `NtfyView` / `NtfyEventsView` from `data::config`. All
+//! formerly hardcoded constants (`NTFY_BODY_MAX_BYTES`, retry counts, etc.)
+//! now come from the loaded config via `NotificationParams`.
+
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Utc};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::data::config::schema::NtfyDetailMode;
+use crate::data::config::view::{NtfyEventsView, NtfyView};
 use crate::state::Phase;
 
-pub const DEFAULT_NTFY_SERVER: &str = "https://ntfy.sh";
-pub(crate) const NTFY_BODY_MAX_BYTES: usize = 4096;
-const NTFY_CONFIG_ENV: &str = "CODEXIZE_NTFY_CONFIG";
-const NTFY_CONFIG_VERSION: u32 = 1;
 const TOPIC_BYTES: usize = 16;
 const NTFY_TITLE_MAX_CHARS: usize = 80;
-const DEFAULT_PUBLISH_ATTEMPTS: usize = 3;
-const DEFAULT_PUBLISH_DELAY: Duration = Duration::from_millis(250);
-const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NtfyDetailMode {
-    Detailed,
-    Minimal,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NtfyConfig {
-    pub version: u32,
-    pub server: String,
-    pub topic: String,
-    pub enabled: bool,
-    pub detail_mode: NtfyDetailMode,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationEventKind {
@@ -61,16 +40,7 @@ pub struct NotificationContext {
     pub round: Option<u32>,
     pub attempt: Option<u32>,
     pub run_id: Option<u64>,
-    /// Last live-summary line (the agent's "what I'm doing" status).
-    /// Populated for phase-wait and pipeline-done notifications so the
-    /// reader sees what the agent had just finished when the pipeline
-    /// stopped for them — it is the right answer to "what just happened?"
-    /// for review pauses and the final "done" ping.
     pub last_live_summary: Option<String>,
-    /// Last `AgentText` ACP response from the run that is now waiting on
-    /// the user. Populated only for interactive-run waits, where the
-    /// agent's most recent response *is* the question being asked, and
-    /// surfacing it inline saves a context-switch back to the TUI.
     pub last_agent_response: Option<String>,
 }
 
@@ -81,35 +51,6 @@ pub struct NotificationEvent {
     pub phase: Phase,
     pub context: NotificationContext,
     pub dedupe_key: NotificationDedupeKey,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NtfyMessage {
-    pub(crate) title: String,
-    pub(crate) body: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NtfyPublishPolicy {
-    max_attempts: usize,
-    retry_delay: Duration,
-}
-
-impl NtfyPublishPolicy {
-    fn default_runtime() -> Self {
-        Self {
-            max_attempts: DEFAULT_PUBLISH_ATTEMPTS,
-            retry_delay: DEFAULT_PUBLISH_DELAY,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(max_attempts: usize, retry_delay: Duration) -> Self {
-        Self {
-            max_attempts: max_attempts.max(1),
-            retry_delay,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -138,11 +79,51 @@ pub struct InteractiveWaitMarker {
     pub message_index: usize,
 }
 
+/// Extracted notification parameters for the runtime. Carries all
+/// per-message knobs from the loaded config so the publisher is fully
+/// config-driven.
+#[derive(Debug, Clone)]
+pub struct NotificationParams {
+    pub enabled: bool,
+    pub server: String,
+    pub topic: String,
+    pub detail_mode: NtfyDetailMode,
+    pub body_max_bytes: u64,
+    pub excerpt_max_chars: u32,
+    pub retry_attempts: u32,
+    pub retry_delay_ms: u64,
+    pub http_timeout_secs: u32,
+    pub events: NtfyEventsView,
+}
+
+impl NotificationParams {
+    /// Build params from the loaded config, disabling notifications when
+    /// the topic is empty (the default / "minted later" state).
+    pub fn from_view(ntfy: &NtfyView) -> Self {
+        Self {
+            enabled: ntfy.enabled && !ntfy.topic.is_empty(),
+            server: ntfy.server.clone(),
+            topic: ntfy.topic.clone(),
+            detail_mode: ntfy.detail_mode,
+            body_max_bytes: ntfy.body_max_bytes,
+            excerpt_max_chars: ntfy.excerpt_max_chars,
+            retry_attempts: ntfy.retry_attempts,
+            retry_delay_ms: ntfy.retry_delay_ms,
+            http_timeout_secs: ntfy.http_timeout_secs,
+            events: ntfy.events,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NtfyMessage {
+    pub(crate) title: String,
+    pub(crate) body: String,
+}
+
 pub struct NotificationRuntime {
-    enabled: bool,
-    config: Option<NtfyConfig>,
+    params: NotificationParams,
     client: Option<Client>,
-    policy: NtfyPublishPolicy,
     report_tx: mpsc::UnboundedSender<String>,
     report_rx: mpsc::UnboundedReceiver<String>,
     pending_sends: Vec<JoinHandle<()>>,
@@ -151,14 +132,17 @@ pub struct NotificationRuntime {
     events: Vec<NotificationEvent>,
 }
 
-impl Default for NotificationRuntime {
-    fn default() -> Self {
+impl NotificationRuntime {
+    pub fn new(params: NotificationParams) -> Self {
         let (report_tx, report_rx) = mpsc::unbounded_channel();
+        let client = if params.enabled {
+            ntfy_http_client(params.http_timeout_secs).ok()
+        } else {
+            None
+        };
         Self {
-            enabled: false,
-            config: None,
-            client: None,
-            policy: NtfyPublishPolicy::default_runtime(),
+            params,
+            client,
             report_tx,
             report_rx,
             pending_sends: Vec::new(),
@@ -167,21 +151,27 @@ impl Default for NotificationRuntime {
             events: Vec::new(),
         }
     }
-}
 
-impl NotificationRuntime {
-    pub fn from_config(config: Option<NtfyConfig>) -> Self {
-        Self::from_config_with_policy(config, NtfyPublishPolicy::default_runtime())
-    }
-
-    fn from_config_with_policy(config: Option<NtfyConfig>, policy: NtfyPublishPolicy) -> Self {
+    pub fn new_disabled() -> Self {
         let (report_tx, report_rx) = mpsc::unbounded_channel();
-        let client = config.as_ref().and_then(|_| ntfy_http_client().ok());
         Self {
-            enabled: config.is_some(),
-            config,
-            client,
-            policy,
+            params: NotificationParams {
+                enabled: false,
+                server: String::new(),
+                topic: String::new(),
+                detail_mode: NtfyDetailMode::Detailed,
+                body_max_bytes: 0,
+                excerpt_max_chars: 0,
+                retry_attempts: 0,
+                retry_delay_ms: 0,
+                http_timeout_secs: 0,
+                events: NtfyEventsView {
+                    phase_wait: true,
+                    interactive_wait: true,
+                    pipeline_done: true,
+                },
+            },
+            client: None,
             report_tx,
             report_rx,
             pending_sends: Vec::new(),
@@ -193,18 +183,55 @@ impl NotificationRuntime {
 
     #[cfg(test)]
     pub(crate) fn enabled_for_test() -> Self {
+        let (report_tx, report_rx) = mpsc::unbounded_channel();
         Self {
-            enabled: true,
-            ..Self::default()
+            params: NotificationParams {
+                enabled: true,
+                ..NotificationParams::from_view(&NtfyView {
+                    enabled: true,
+                    server: "https://ntfy.sh".to_string(),
+                    topic: "test-topic".to_string(),
+                    detail_mode: NtfyDetailMode::Minimal,
+                    retry_attempts: 1,
+                    retry_delay_ms: 0,
+                    http_timeout_secs: 5,
+                    body_max_bytes: 4096,
+                    excerpt_max_chars: 600,
+                    events: NtfyEventsView {
+                        phase_wait: true,
+                        interactive_wait: true,
+                        pipeline_done: true,
+                    },
+                })
+            },
+            client: None,
+            report_tx,
+            report_rx,
+            pending_sends: Vec::new(),
+            occurrence: 0,
+            seen: HashSet::new(),
+            events: Vec::new(),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn from_config_for_test(
-        config: Option<NtfyConfig>,
-        policy: NtfyPublishPolicy,
-    ) -> Self {
-        Self::from_config_with_policy(config, policy)
+    pub(crate) fn from_params_for_test(params: NotificationParams) -> Self {
+        let (report_tx, report_rx) = mpsc::unbounded_channel();
+        let client = if params.enabled {
+            ntfy_http_client(params.http_timeout_secs).ok()
+        } else {
+            None
+        };
+        Self {
+            params,
+            client,
+            report_tx,
+            report_rx,
+            pending_sends: Vec::new(),
+            occurrence: 0,
+            seen: HashSet::new(),
+            events: Vec::new(),
+        }
     }
 
     pub fn events(&self) -> &[NotificationEvent] {
@@ -212,7 +239,10 @@ impl NotificationRuntime {
     }
 
     pub fn emit_phase_wait(&mut self, phase: Phase, context: NotificationContext) {
-        if !self.enabled {
+        if !self.params.enabled {
+            return;
+        }
+        if !self.params.events.phase_wait {
             return;
         }
         self.occurrence = self.occurrence.saturating_add(1);
@@ -237,7 +267,10 @@ impl NotificationRuntime {
         context: NotificationContext,
         marker: InteractiveWaitMarker,
     ) {
-        if !self.enabled {
+        if !self.params.enabled {
+            return;
+        }
+        if !self.params.events.interactive_wait {
             return;
         }
         let dedupe_key = NotificationDedupeKey::InteractiveRunWait {
@@ -256,7 +289,10 @@ impl NotificationRuntime {
     }
 
     pub fn emit_pipeline_done(&mut self, phase: Phase, context: NotificationContext) {
-        if !self.enabled {
+        if !self.params.enabled {
+            return;
+        }
+        if !self.params.events.pipeline_done {
             return;
         }
         self.occurrence = self.occurrence.saturating_add(1);
@@ -281,9 +317,13 @@ impl NotificationRuntime {
     }
 
     fn enqueue_publish(&mut self, event: NotificationEvent) {
-        let Some(config) = self.config.clone() else {
-            return;
-        };
+        let server = self.params.server.clone();
+        let topic = self.params.topic.clone();
+        let detail_mode = self.params.detail_mode;
+        let body_max_bytes = self.params.body_max_bytes;
+        let excerpt_max_chars = self.params.excerpt_max_chars;
+        let retry_attempts = self.params.retry_attempts;
+        let retry_delay = Duration::from_millis(self.params.retry_delay_ms);
         let Some(client) = self.client.clone() else {
             let _ = self
                 .report_tx
@@ -297,11 +337,32 @@ impl NotificationRuntime {
             return;
         }
         let tx = self.report_tx.clone();
-        let policy = self.policy;
         let handle = tokio::spawn(async move {
-            if let Err(err) = send_ntfy_with_policy(&client, &config, &event, policy).await {
-                let _ = tx.send(format!("{err:#}"));
+            let subscribe_url = format!("{}/{}", server.trim_end_matches('/'), topic);
+            let title = normalize_header_title(&prose_title(&event));
+            let include_context = matches!(detail_mode, NtfyDetailMode::Detailed);
+            let body = prose_body(&event, include_context, excerpt_max_chars);
+            let message = NtfyMessage {
+                title,
+                body: truncate_body(body, body_max_bytes),
+            };
+            let attempts = retry_attempts.max(1) as usize;
+            let mut last_error: Option<anyhow::Error> = None;
+            for attempt in 1..=attempts {
+                match publish_once_with_client(&client, &subscribe_url, &message).await {
+                    Ok(()) => return,
+                    Err(err) => {
+                        last_error = Some(err);
+                        if attempt < attempts && !retry_delay.is_zero() {
+                            tokio::time::sleep(retry_delay).await;
+                        }
+                    }
+                }
             }
+            let last = last_error
+                .map(|err| format!("{err:#}"))
+                .unwrap_or_else(|| "unknown publish error".to_string());
+            let _ = tx.send(format!("ntfy publish failed after {attempts} attempts: {last}"));
         });
         self.pending_sends.push(handle);
     }
@@ -325,9 +386,9 @@ impl NotificationRuntime {
                 let _ = handle.await;
             }
         };
-        // Leave completed publish reports queued for the app-level poller so
-        // shutdown failures use the same event-log and status-warning path.
-        tokio::time::timeout(timeout, wait_all).await.is_ok()
+        tokio::time::timeout(timeout, wait_all)
+            .await
+            .is_ok()
     }
 
     #[cfg(test)]
@@ -354,56 +415,13 @@ pub fn phase_needs_input(phase: Phase) -> bool {
     )
 }
 
-impl NtfyConfig {
-    pub fn subscribe_url(&self) -> String {
-        format!("{}/{}", self.server.trim_end_matches('/'), self.topic)
-    }
-}
-
-pub(crate) fn format_ntfy_message(config: &NtfyConfig, event: &NotificationEvent) -> NtfyMessage {
-    let title = normalize_header_title(&prose_title(event));
-    let include_context = matches!(config.detail_mode, NtfyDetailMode::Detailed);
-    let body = prose_body(event, include_context);
-    NtfyMessage {
-        title,
-        body: truncate_body(body),
-    }
-}
-
-pub async fn send_ntfy(config: &NtfyConfig, event: &NotificationEvent) -> Result<()> {
-    let client = ntfy_http_client()?;
-    send_ntfy_with_policy(&client, config, event, NtfyPublishPolicy::default_runtime()).await
-}
-
-pub(crate) async fn send_ntfy_with_policy(
+async fn publish_once_with_client(
     client: &Client,
-    config: &NtfyConfig,
-    event: &NotificationEvent,
-    policy: NtfyPublishPolicy,
+    subscribe_url: &str,
+    message: &NtfyMessage,
 ) -> Result<()> {
-    let attempts = policy.max_attempts.max(1);
-    let message = format_ntfy_message(config, event);
-    let mut last_error = None;
-    for attempt in 1..=attempts {
-        match publish_once(client, config, &message).await {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                last_error = Some(err);
-                if attempt < attempts && !policy.retry_delay.is_zero() {
-                    tokio::time::sleep(policy.retry_delay).await;
-                }
-            }
-        }
-    }
-    let last = last_error
-        .map(|err| format!("{err:#}"))
-        .unwrap_or_else(|| "unknown publish error".to_string());
-    bail!("ntfy publish failed after {attempts} attempts: {last}")
-}
-
-async fn publish_once(client: &Client, config: &NtfyConfig, message: &NtfyMessage) -> Result<()> {
     let response = client
-        .post(config.subscribe_url())
+        .post(subscribe_url)
         .header("Title", message.title.as_str())
         .header("Content-Type", "text/plain; charset=utf-8")
         .body(message.body.clone())
@@ -416,23 +434,20 @@ async fn publish_once(client: &Client, config: &NtfyConfig, message: &NtfyMessag
     Ok(())
 }
 
-fn ntfy_http_client() -> Result<Client> {
+fn ntfy_http_client(timeout_secs: u32) -> Result<Client> {
     Client::builder()
-        .timeout(DEFAULT_HTTP_TIMEOUT)
+        .timeout(Duration::from_secs(timeout_secs.max(1) as u64))
         .build()
         .context("failed to build ntfy HTTP client")
 }
 
-/// Maximum chars to surface from the live-summary or last agent response
-/// in a notification body. Keeps a long ACP message from blowing through
-/// the reader's lock-screen budget while still leaving room for the lead
-/// sentence and context line.
-const NTFY_EXCERPT_MAX_CHARS: usize = 600;
+pub(crate) fn generate_topic() -> Result<String> {
+    let mut bytes = [0_u8; TOPIC_BYTES];
+    getrandom::fill(&mut bytes)
+        .map_err(|err| anyhow::anyhow!("failed to generate ntfy topic entropy: {err}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
 
-/// Headline shown as the ntfy push title — the *only* text most readers
-/// see at a glance, so it gets a per-event hook (which review is paused,
-/// what kind of decision is needed) instead of a generic
-/// "input needed" / "pipeline done".
 fn prose_title(event: &NotificationEvent) -> String {
     let label = match (event.kind, event.reason, event.phase) {
         (NotificationEventKind::PipelineDone, _, _) => "pipeline finished",
@@ -474,16 +489,9 @@ fn prose_title(event: &NotificationEvent) -> String {
     format!("codexize: {label}")
 }
 
-/// Build the prose body shown under the notification title. `include_context`
-/// gates the trailing "Last activity" / "Last response" excerpt so the
-/// `Minimal` detail mode stays a single sentence while `Detailed` adds the
-/// excerpt — which one is appended depends on the event:
-/// - interactive-run waits get the agent's last ACP response (the question);
-/// - phase-wait + pipeline-done get the last live-summary line (what was
-///   in flight when the pipeline stopped for the operator).
-fn prose_body(event: &NotificationEvent, include_context: bool) -> String {
+fn prose_body(event: &NotificationEvent, include_context: bool, excerpt_max_chars: u32) -> String {
     let mut body = lead_sentence(event);
-    if include_context && let Some(line) = context_line(event) {
+    if include_context && let Some(line) = context_line(event, excerpt_max_chars) {
         body.push_str("\n\n");
         body.push_str(&line);
     }
@@ -541,19 +549,19 @@ fn lead_sentence(event: &NotificationEvent) -> String {
     }
 }
 
-fn context_line(event: &NotificationEvent) -> Option<String> {
+fn context_line(event: &NotificationEvent, excerpt_max_chars: u32) -> Option<String> {
     match event.reason {
         NotificationReason::InteractiveRunWait => event
             .context
             .last_agent_response
             .as_deref()
-            .and_then(non_empty_excerpt)
+            .and_then(|text| non_empty_excerpt(text, excerpt_max_chars))
             .map(|excerpt| format!("Last response: {excerpt}")),
         NotificationReason::PhaseWait => event
             .context
             .last_live_summary
             .as_deref()
-            .and_then(non_empty_excerpt)
+            .and_then(|text| non_empty_excerpt(text, excerpt_max_chars))
             .map(|excerpt| format!("Last activity: {excerpt}")),
     }
 }
@@ -576,12 +584,12 @@ fn humanize_stage(stage: &str) -> String {
     }
 }
 
-fn non_empty_excerpt(text: &str) -> Option<String> {
+fn non_empty_excerpt(text: &str, max_chars: u32) -> Option<String> {
     let collapsed = collapse_whitespace(text);
     if collapsed.is_empty() {
         return None;
     }
-    Some(truncate_chars(&collapsed, NTFY_EXCERPT_MAX_CHARS))
+    Some(truncate_chars(&collapsed, max_chars as usize))
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -640,133 +648,17 @@ fn normalize_header_title(title: &str) -> String {
     normalized.trim().to_string()
 }
 
-fn truncate_body(body: String) -> String {
-    if body.len() <= NTFY_BODY_MAX_BYTES {
+fn truncate_body(body: String, max_bytes: u64) -> String {
+    let max_bytes = max_bytes as usize;
+    if body.len() <= max_bytes {
         return body;
     }
     let marker = "...";
-    let mut end = NTFY_BODY_MAX_BYTES.saturating_sub(marker.len());
+    let mut end = max_bytes.saturating_sub(marker.len());
     while !body.is_char_boundary(end) {
         end = end.saturating_sub(1);
     }
     format!("{}{}", &body[..end], marker)
-}
-
-pub fn load_ntfy_config() -> Option<NtfyConfig> {
-    load_ntfy_config_at(&ntfy_config_path())
-}
-
-pub fn ensure_ntfy_config(reset: bool) -> Result<NtfyConfig> {
-    ensure_ntfy_config_at(&ntfy_config_path(), reset)
-}
-
-pub(crate) fn load_ntfy_config_at(path: &Path) -> Option<NtfyConfig> {
-    let text = fs::read_to_string(path).ok()?;
-    let config: NtfyConfig = toml::from_str(&text).ok()?;
-    validate_enabled_config(config).ok()
-}
-
-pub(crate) fn ensure_ntfy_config_at(path: &Path, reset: bool) -> Result<NtfyConfig> {
-    if !reset && let Some(config) = load_ntfy_config_at(path) {
-        return Ok(config);
-    }
-
-    let now = Utc::now();
-    let created_at = if reset {
-        load_ntfy_config_at(path)
-            .map(|config| config.created_at)
-            .unwrap_or(now)
-    } else {
-        now
-    };
-    let config = NtfyConfig {
-        version: NTFY_CONFIG_VERSION,
-        server: DEFAULT_NTFY_SERVER.to_string(),
-        topic: generate_topic()?,
-        enabled: true,
-        detail_mode: NtfyDetailMode::Detailed,
-        created_at,
-        updated_at: now,
-    };
-    atomic_write_config(path, &config)?;
-    Ok(config)
-}
-
-pub(crate) fn generate_topic() -> Result<String> {
-    let mut bytes = [0_u8; TOPIC_BYTES];
-    getrandom::fill(&mut bytes)
-        .map_err(|err| anyhow::anyhow!("failed to generate ntfy topic entropy: {err}"))?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-fn ntfy_config_path() -> PathBuf {
-    if let Some(path) = std::env::var_os(NTFY_CONFIG_ENV) {
-        return PathBuf::from(path);
-    }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(".codexize").join("ntfy.toml")
-}
-
-fn validate_enabled_config(config: NtfyConfig) -> Result<NtfyConfig> {
-    if config.version != NTFY_CONFIG_VERSION {
-        bail!("unsupported ntfy config version");
-    }
-    if !config.enabled {
-        bail!("ntfy config is disabled");
-    }
-    if config.server.trim().is_empty() {
-        bail!("ntfy server is empty");
-    }
-    if !valid_topic(&config.topic) {
-        bail!("ntfy topic is invalid");
-    }
-    Ok(config)
-}
-
-fn valid_topic(topic: &str) -> bool {
-    topic.len() >= 22
-        && topic
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-}
-
-fn atomic_write_config(path: &Path, config: &NtfyConfig) -> Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(dir).context("failed to create ntfy config directory")?;
-    let tmp_path = dir.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("ntfy.toml"),
-        std::process::id()
-    ));
-    let text = toml::to_string_pretty(config).context("failed to serialise ntfy config")?;
-    {
-        let mut options = OpenOptions::new();
-        options.create(true).truncate(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut tmp = options
-            .open(&tmp_path)
-            .context("failed to create temp ntfy config file")?;
-        tmp.write_all(text.as_bytes())
-            .context("failed to write temp ntfy config file")?;
-        tmp.sync_all()
-            .context("failed to sync temp ntfy config file")?;
-    }
-    fs::rename(&tmp_path, path).context("failed to rename temp ntfy config file")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .context("failed to set ntfy config permissions")?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

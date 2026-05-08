@@ -1,132 +1,7 @@
 use super::*;
-use std::fs;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-
-#[test]
-#[serial_test::serial]
-fn ntfy_config_env_override_isolated_from_home() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let override_path = dir.path().join("override.toml");
-    let home_path = dir.path().join("home").join(".codexize").join("ntfy.toml");
-    // Environment mutation is process-global, so this serial test restores
-    // both variables before returning to avoid leaking paths into other tests.
-    let previous_override = std::env::var_os("CODEXIZE_NTFY_CONFIG");
-    let previous_home = std::env::var_os("HOME");
-    unsafe {
-        std::env::set_var("CODEXIZE_NTFY_CONFIG", &override_path);
-        std::env::set_var("HOME", dir.path().join("home"));
-    }
-
-    let config = ensure_ntfy_config(false).expect("create override config");
-
-    assert_topic_shape(&config.topic);
-    assert!(override_path.exists());
-    assert!(
-        !home_path.exists(),
-        "override must avoid real/default home path"
-    );
-
-    restore_env_var("CODEXIZE_NTFY_CONFIG", previous_override);
-    restore_env_var("HOME", previous_home);
-}
-
-#[test]
-fn missing_ntfy_config_disables_notifications() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ntfy.toml");
-
-    assert!(load_ntfy_config_at(&path).is_none());
-    assert!(!path.exists(), "load must not create config");
-}
-
-#[test]
-fn invalid_ntfy_config_disables_notifications() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ntfy.toml");
-    fs::write(&path, "not = [valid").expect("write invalid config");
-
-    assert!(load_ntfy_config_at(&path).is_none());
-}
-
-#[test]
-fn ensure_ntfy_config_creates_default_enabled_config() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("nested").join("ntfy.toml");
-
-    let config = ensure_ntfy_config_at(&path, false).expect("create config");
-
-    assert_eq!(config.version, 1);
-    assert_eq!(config.server, DEFAULT_NTFY_SERVER);
-    assert!(config.enabled);
-    assert_eq!(config.detail_mode, NtfyDetailMode::Detailed);
-    assert_eq!(config.created_at, config.updated_at);
-    assert_topic_shape(&config.topic);
-    assert!(path.exists());
-}
-
-#[test]
-fn ensure_ntfy_config_reuses_existing_topic() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ntfy.toml");
-    let first = ensure_ntfy_config_at(&path, false).expect("create config");
-
-    let second = ensure_ntfy_config_at(&path, false).expect("reuse config");
-
-    assert_eq!(second.topic, first.topic);
-    assert_eq!(second.created_at, first.created_at);
-    assert_eq!(second.updated_at, first.updated_at);
-}
-
-#[test]
-fn ensure_ntfy_config_reset_rotates_topic() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ntfy.toml");
-    let first = ensure_ntfy_config_at(&path, false).expect("create config");
-
-    let second = ensure_ntfy_config_at(&path, true).expect("reset config");
-
-    assert_ne!(second.topic, first.topic);
-    assert_eq!(second.created_at, first.created_at);
-    assert!(second.updated_at >= first.updated_at);
-    assert_topic_shape(&second.topic);
-}
-
-#[test]
-fn load_ntfy_config_rejects_disabled_or_invalid_values() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("ntfy.toml");
-    fs::write(
-        &path,
-        r#"
-version = 1
-server = "https://ntfy.sh"
-topic = "abc"
-enabled = false
-detail_mode = "detailed"
-created_at = "2026-05-06T12:00:00Z"
-updated_at = "2026-05-06T12:00:00Z"
-"#,
-    )
-    .expect("write disabled config");
-    assert!(load_ntfy_config_at(&path).is_none());
-
-    fs::write(
-        &path,
-        r#"
-version = 1
-server = ""
-topic = "../bad"
-enabled = true
-detail_mode = "verbose"
-created_at = "not a timestamp"
-updated_at = "2026-05-06T12:00:00Z"
-"#,
-    )
-    .expect("write invalid config");
-    assert!(load_ntfy_config_at(&path).is_none());
-}
 
 #[test]
 fn generated_topics_are_opaque_url_safe_and_unprefixed() {
@@ -186,7 +61,6 @@ fn notification_dedupe_is_process_local_and_suppresses_same_marker() {
 
 #[test]
 fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() {
-    let mut config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
     let mut event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::InteractiveRunWait,
@@ -196,7 +70,7 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
         Some("Should I keep going on the migration plan, or focus on tests first?".to_string());
     event.context.last_live_summary = Some("Should not surface here".to_string());
 
-    let detailed = format_ntfy_message(&config, &event);
+    let detailed = format_ntfy_message(&event, NtfyDetailMode::Detailed, 4096, 600);
 
     assert_eq!(detailed.title, "codexize: agent is waiting on you");
     assert!(
@@ -218,10 +92,9 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
         !detailed.body.contains("Should not surface here"),
         "interactive wait should ignore last_live_summary"
     );
-    assert!(detailed.body.len() <= NTFY_BODY_MAX_BYTES);
+    assert!(detailed.body.len() <= 4096);
 
-    config.detail_mode = NtfyDetailMode::Minimal;
-    let minimal = format_ntfy_message(&config, &event);
+    let minimal = format_ntfy_message(&event, NtfyDetailMode::Minimal, 4096, 600);
 
     assert_eq!(minimal.title, "codexize: agent is waiting on you");
     assert!(
@@ -238,8 +111,6 @@ fn formatter_uses_prose_and_attaches_last_agent_response_for_interactive_wait() 
 
 #[test]
 fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
-    let config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
-
     let mut spec_review_event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::PhaseWait,
@@ -248,7 +119,7 @@ fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
     spec_review_event.context.last_live_summary =
         Some("drafted §3 about caching layer invariants".to_string());
 
-    let detailed = format_ntfy_message(&config, &spec_review_event);
+    let detailed = format_ntfy_message(&spec_review_event, NtfyDetailMode::Detailed, 4096, 600);
     assert_eq!(detailed.title, "codexize: spec ready for review");
     assert!(
         detailed
@@ -268,7 +139,7 @@ fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
     );
     done_event.context.last_live_summary = Some("ran final validation, all green".to_string());
 
-    let done = format_ntfy_message(&config, &done_event);
+    let done = format_ntfy_message(&done_event, NtfyDetailMode::Detailed, 4096, 600);
     assert_eq!(done.title, "codexize: pipeline finished");
     assert!(
         done.body
@@ -282,7 +153,6 @@ fn formatter_attaches_last_live_summary_for_phase_wait_and_pipeline_done() {
 
 #[test]
 fn formatter_excerpts_long_context_lines() {
-    let config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
     let mut event = sample_event(
         NotificationEventKind::InputNeeded,
         NotificationReason::InteractiveRunWait,
@@ -290,9 +160,9 @@ fn formatter_excerpts_long_context_lines() {
     );
     event.context.last_agent_response = Some("x".repeat(5_000));
 
-    let formatted = format_ntfy_message(&config, &event);
+    let formatted = format_ntfy_message(&event, NtfyDetailMode::Detailed, 4096, 600);
 
-    assert!(formatted.body.len() <= NTFY_BODY_MAX_BYTES);
+    assert!(formatted.body.len() <= 4096);
     assert!(
         formatted.body.contains("..."),
         "long agent responses must be truncated with an ellipsis"
@@ -301,7 +171,6 @@ fn formatter_excerpts_long_context_lines() {
 
 #[test]
 fn formatter_normalizes_title_and_truncates_body_on_utf8_boundaries() {
-    let config = test_config(NtfyDetailMode::Detailed, "https://ntfy.example");
     let mut event = sample_event(
         NotificationEventKind::PipelineDone,
         NotificationReason::PhaseWait,
@@ -309,11 +178,11 @@ fn formatter_normalizes_title_and_truncates_body_on_utf8_boundaries() {
     );
     event.context.session_label = "title ".repeat(2000);
 
-    let message = format_ntfy_message(&config, &event);
+    let message = format_ntfy_message(&event, NtfyDetailMode::Detailed, 4096, 600);
 
     assert_eq!(message.title, "codexize: pipeline finished");
     assert!(message.title.is_ascii());
-    assert!(message.body.len() <= NTFY_BODY_MAX_BYTES);
+    assert!(message.body.len() <= 4096);
     assert!(
         message.body.ends_with("..."),
         "truncation marker should be preserved"
@@ -324,85 +193,29 @@ fn formatter_normalizes_title_and_truncates_body_on_utf8_boundaries() {
 #[tokio::test]
 async fn publisher_posts_to_configured_endpoint_with_formatted_title_and_body() {
     let (server, requests) = MockNtfyServer::spawn(vec![MockResponse::ok()]).await;
-    let config = test_config(NtfyDetailMode::Detailed, &server.url());
-    let event = sample_event(
-        NotificationEventKind::InputNeeded,
-        NotificationReason::PhaseWait,
+    let mut params = test_params(NtfyDetailMode::Detailed, &server.url());
+    params.retry_attempts = 1;
+    params.retry_delay_ms = 0;
+    let mut runtime = NotificationRuntime::from_params_for_test(params);
+    let context = sample_context("session-a", "brainstorm");
+
+    runtime.emit_phase_wait(
         crate::state::Phase::SpecReviewPaused,
+        NotificationContext {
+            last_live_summary: None,
+            ..context
+        },
     );
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .expect("client");
+    assert_eq!(runtime.pending_sends_for_test(), 1);
+    let _ = runtime.drain_pending_sends(Duration::from_secs(2)).await;
 
-    send_ntfy_with_policy(
-        &client,
-        &config,
-        &event,
-        NtfyPublishPolicy::for_test(1, Duration::ZERO),
-    )
-    .await
-    .expect("publish succeeds");
-
-    let requests = requests.await.expect("server task");
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path, "/topic-test");
+    let reqs = requests.await.expect("server task");
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].method, "POST");
+    assert_eq!(reqs[0].path, "/topic-test");
     assert_eq!(
-        requests[0].header("title").as_deref(),
+        reqs[0].header("title").as_deref(),
         Some("codexize: spec ready for review")
-    );
-    assert!(
-        requests[0]
-            .body
-            .contains("Spec review is paused on \"Readable Session\"")
-    );
-}
-
-#[tokio::test]
-async fn publisher_retries_non_2xx_and_reports_final_failure() {
-    let (server, requests) = MockNtfyServer::spawn(vec![
-        MockResponse::status(503),
-        MockResponse::status(503),
-        MockResponse::ok(),
-    ])
-    .await;
-    let config = test_config(NtfyDetailMode::Minimal, &server.url());
-    let event = sample_event(
-        NotificationEventKind::PipelineDone,
-        NotificationReason::PhaseWait,
-        crate::state::Phase::Done,
-    );
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .expect("client");
-
-    send_ntfy_with_policy(
-        &client,
-        &config,
-        &event,
-        NtfyPublishPolicy::for_test(3, Duration::ZERO),
-    )
-    .await
-    .expect("eventually succeeds");
-    assert_eq!(requests.await.expect("server task").len(), 3);
-
-    let (server, _requests) =
-        MockNtfyServer::spawn(vec![MockResponse::status(500), MockResponse::status(500)]).await;
-    let mut config = config;
-    config.server = server.url();
-    let err = send_ntfy_with_policy(
-        &client,
-        &config,
-        &event,
-        NtfyPublishPolicy::for_test(2, Duration::ZERO),
-    )
-    .await
-    .expect_err("final non-2xx is an error");
-    assert!(
-        format!("{err:#}").contains("500"),
-        "error should include final HTTP status: {err:#}"
     );
 }
 
@@ -410,11 +223,10 @@ async fn publisher_retries_non_2xx_and_reports_final_failure() {
 async fn runtime_drains_pending_sends_but_honors_timeout() {
     let (server, _requests) =
         MockNtfyServer::spawn(vec![MockResponse::delayed_ok(Duration::from_millis(50))]).await;
-    let config = test_config(NtfyDetailMode::Minimal, &server.url());
-    let mut runtime = NotificationRuntime::from_config_for_test(
-        Some(config),
-        NtfyPublishPolicy::for_test(1, Duration::ZERO),
-    );
+    let mut params = test_params(NtfyDetailMode::Minimal, &server.url());
+    params.retry_attempts = 1;
+    params.retry_delay_ms = 0;
+    let mut runtime = NotificationRuntime::from_params_for_test(params);
 
     runtime.emit_pipeline_done(
         crate::state::Phase::Done,
@@ -426,11 +238,10 @@ async fn runtime_drains_pending_sends_but_honors_timeout() {
 
     let (server, _requests) =
         MockNtfyServer::spawn(vec![MockResponse::delayed_ok(Duration::from_millis(300))]).await;
-    let config = test_config(NtfyDetailMode::Minimal, &server.url());
-    let mut runtime = NotificationRuntime::from_config_for_test(
-        Some(config),
-        NtfyPublishPolicy::for_test(1, Duration::ZERO),
-    );
+    let mut params = test_params(NtfyDetailMode::Minimal, &server.url());
+    params.retry_attempts = 1;
+    params.retry_delay_ms = 0;
+    let mut runtime = NotificationRuntime::from_params_for_test(params);
     runtime.emit_pipeline_done(
         crate::state::Phase::Done,
         sample_context("session-timeout", "pipeline"),
@@ -444,6 +255,48 @@ async fn runtime_drains_pending_sends_but_honors_timeout() {
     );
 }
 
+#[test]
+fn event_gates_suppress_disabled_events() {
+    let params = NotificationParams {
+        enabled: true,
+        server: "https://ntfy.sh".to_string(),
+        topic: "test-topic".to_string(),
+        detail_mode: NtfyDetailMode::Minimal,
+        body_max_bytes: 4096,
+        excerpt_max_chars: 600,
+        retry_attempts: 1,
+        retry_delay_ms: 0,
+        http_timeout_secs: 5,
+        events: NtfyEventsView {
+            phase_wait: false,
+            interactive_wait: false,
+            pipeline_done: true,
+        },
+    };
+    let mut runtime = NotificationRuntime::from_params_for_test(params);
+    let context = sample_context("session-gate", "brainstorm");
+
+    // phase_wait and interactive_wait are disabled
+    runtime.emit_phase_wait(
+        crate::state::Phase::SpecReviewPaused,
+        context.clone(),
+    );
+    runtime.emit_interactive_wait(
+        crate::state::Phase::BrainstormRunning,
+        context.clone(),
+        InteractiveWaitMarker {
+            run_id: 1,
+            message_index: 0,
+        },
+    );
+
+    // pipeline_done is enabled
+    runtime.emit_pipeline_done(crate::state::Phase::Done, context);
+
+    assert_eq!(runtime.events().len(), 1);
+    assert_eq!(runtime.events()[0].kind, NotificationEventKind::PipelineDone);
+}
+
 fn assert_topic_shape(topic: &str) {
     assert_eq!(topic.len(), 32, "16 random bytes encoded as hex");
     assert!(
@@ -452,15 +305,22 @@ fn assert_topic_shape(topic: &str) {
     );
 }
 
-fn test_config(detail_mode: NtfyDetailMode, server: &str) -> NtfyConfig {
-    NtfyConfig {
-        version: 1,
+fn test_params(detail_mode: NtfyDetailMode, server: &str) -> NotificationParams {
+    NotificationParams {
+        enabled: true,
         server: server.to_string(),
         topic: "topic-test".to_string(),
-        enabled: true,
         detail_mode,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
+        body_max_bytes: 4096,
+        excerpt_max_chars: 600,
+        retry_attempts: 3,
+        retry_delay_ms: 250,
+        http_timeout_secs: 10,
+        events: NtfyEventsView {
+            phase_wait: true,
+            interactive_wait: true,
+            pipeline_done: true,
+        },
     }
 }
 
@@ -493,6 +353,21 @@ fn sample_event(
             occurrence: 1,
         },
         context,
+    }
+}
+
+fn format_ntfy_message(
+    event: &NotificationEvent,
+    detail_mode: NtfyDetailMode,
+    body_max_bytes: u64,
+    excerpt_max_chars: u32,
+) -> NtfyMessage {
+    let title = normalize_header_title(&prose_title(event));
+    let include_context = matches!(detail_mode, NtfyDetailMode::Detailed);
+    let body = prose_body(event, include_context, excerpt_max_chars);
+    NtfyMessage {
+        title,
+        body: truncate_body(body, body_max_bytes),
     }
 }
 
@@ -623,14 +498,4 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> RecordedRequest {
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|window| window == b"\r\n\r\n")
-}
-
-fn restore_env_var(key: &str, value: Option<std::ffi::OsString>) {
-    // The caller is a serial test that owns these process-wide variables.
-    unsafe {
-        match value {
-            Some(value) => std::env::set_var(key, value),
-            None => std::env::remove_var(key),
-        }
-    }
 }

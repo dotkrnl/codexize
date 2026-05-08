@@ -8,6 +8,7 @@
 
 pub mod defaults;
 pub mod loader;
+pub mod mutate;
 pub mod paths;
 pub mod schema;
 pub mod view;

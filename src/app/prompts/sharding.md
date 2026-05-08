@@ -12,17 +12,14 @@ ordering, and treat `## Path Boundaries` as hard scope limits while sizing
 tasks.
 
 Sizing:
-  - Target ~100_000 tokens of implementation effort per task — fits one
-    coding session without context compaction. Decompose only along natural
-    seams (subsystem / layer / phase); if the plan fits one ~100k session,
-    a single-task tasks.toml is correct. Prefer ≤10 tasks; exceed only when
-    the plan genuinely demands it.
-  - Each task self-contained: builds on its own (compiles / links /
-    type-checks). It does NOT have to be independently testable —
-    scaffolding/groundwork tasks that only become testable after a later
-    task lands are allowed, as long as they still build cleanly.
-  - Unless a dependency is explicitly listed in a task's description, no
-    task may assume another has shipped first.
+  - Target ~100k tokens per task (one coding session without compaction).
+    Decompose only along natural seams (subsystem / layer / phase); a
+    single-task tasks.toml is fine when the plan fits one session.
+  - Each task self-contained: must build on its own (compile / link /
+    type-check). Independent testability NOT required — scaffolding tasks
+    that only become testable after a later task lands are allowed.
+  - Unless explicitly listed in a task's description, no task may assume
+    another has shipped first.
 
 Coverage: every section of the plan must be covered by at least one task's
 spec/plan refs. Don't drop work; don't invent work outside the plan.
@@ -48,13 +45,11 @@ Required fields per task:
   `lines` is a range like "12-45" or a single number.
 
 Difficulty:
-  - Mark `tough = true` on tasks that need deep reasoning: algorithmic
-    complexity, concurrency, security-sensitive logic, tricky state
-    machines, cross-cutting refactors touching many modules, or code
-    with poor test coverage / documentation that demands careful reading.
-  - Default is `tough = false` (the majority of tasks). When in doubt,
-    leave it false — the system routes extra compute to tough tasks, so
-    over-marking wastes budget.
+  - `tough = true` for tasks needing deep reasoning: algorithmic complexity,
+    concurrency, security-sensitive logic, tricky state machines, cross-
+    cutting refactors, or poorly-covered code that demands careful reading.
+  - Default `tough = false`. When in doubt, leave it false — extra compute
+    is routed to tough tasks, so over-marking wastes budget.
 
 Output: write {tasks} as TOML. No prose around it. Validated programmatically;
 missing/empty fields cause rejection.

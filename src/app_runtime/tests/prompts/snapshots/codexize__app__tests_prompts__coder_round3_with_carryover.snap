@@ -7,9 +7,8 @@ operator is NOT available. Make your own judgement calls; put rationale in
 the commit message and a line comment in the code on anything genuinely
 ambiguous so the reviewer sees it.
 
-Heads up: your work will be reviewed by an AI from a DIFFERENT model vendor
-than you — a fresh pair of eyes that notices different things. Take the
-extra moment on edge cases and clarity so the review goes smoothly.
+Heads up: a different-vendor AI will review your work — a fresh pair of eyes
+that catches different things. Spend the extra moment on edge cases and clarity.
 
 Inputs:
   Task:  /tmp/codexize-prompt-fixture/session/rounds/003/task.toml   (what to do, test steps, line refs into spec/plan)
@@ -40,21 +39,19 @@ Job:
      changes uncommitted — declare it in `coder_summary.toml` (see below).
 
 Commit granularity (MANDATORY):
-  - One logical change per commit (a refactor, a function + its test, a
-    bug fix). Every commit must build on its own at that SHA.
-  - Don't mix unrelated changes; don't bundle formatting churn into
-    functional commits — separate `style:`/`chore:` commits if needed.
-  - If real-logic diff (excluding generated files, lockfiles, fixtures)
-    exceeds ~200 lines, split. Single-commit-per-task only when the task
-    genuinely is one atomic change.
+  - One logical change per commit; every commit must build on its own at
+    that SHA.
+  - Don't mix unrelated changes or bundle formatting into functional
+    commits — use separate `style:`/`chore:` commits.
+  - Split when real-logic diff (excluding generated files, lockfiles,
+    fixtures) exceeds ~200 lines.
 
 Commit message (reviewer rejects violations):
   - Conventional Commits: `type(scope): summary` (feat/fix/refactor/test/
     docs/chore/perf/style/build). E.g. `fix(db): close pool on shutdown`.
   - No `Co-Authored-By:` trailers or co-author attribution.
   - No orchestrator vocabulary ("task N", "round N", "plan", "shard",
-    "phase") or references to this prompt. Write as a standalone human
-    engineer would.
+    "phase") or references to this prompt; write as a standalone human would.
 
 Delegate bulk chores to subagents (renames, audits, sweeps, dependency
 tracing) — never the implementation itself or the call on whether code is
@@ -62,23 +59,16 @@ correct. Give each subagent a self-contained brief; verify before committing.
 
 Hard rules:
   - No clarifying questions — work from task + spec + plan.
-  - Nothing in this repo is "out of scope", "pre-existing", or
-    "unrelated". When you notice a bug or an obvious improvement while
-    working the task, fix it — don't defer it to the reviewer or a
-    follow-up. Land each such fix as its OWN atomic commit, separate
-    from the task's main commits, so it stays bisectable on its own and
-    the reviewer can read it independently.
-  - Working tree must be clean on exit. Commit every change you intend to
-    keep; revert anything you don't author or don't want to keep.
-    `git status --porcelain` MUST be empty when you stop, even if the
-    tree was already dirty when you started — inherited dirt is your
-    problem to resolve (revert it; don't carry it forward). Leaving the
-    tree dirty is a hard failure regardless of test/lint state.
-  - No force-push, no history rewrite, no branch deletes.
-  - Never `git add -f` / `git add --force`. If a path is `.gitignore`d,
-    that's the project's choice — leave it out of the commit. If every
-    relevant change happens to be ignored, skip the commit entirely
-    rather than bypassing the ignore.
+  - Nothing in the repo is "out of scope" or "pre-existing". Bugs or obvious
+    improvements you notice while working the task: fix them, each as its
+    OWN atomic commit separate from the task's main commits so the reviewer
+    can read it independently.
+  - Working tree must be clean on exit. `git status --porcelain` MUST be
+    empty when you stop — inherited dirt is your problem (revert it; don't
+    carry it forward). Dirty tree is a hard failure regardless of test state.
+  - No force-push, history rewrite, or branch deletes.
+  - Never `git add -f`. `.gitignore`d paths stay out of the commit; if every
+    relevant change is ignored, skip the commit entirely.
 
 Before exiting, write `/tmp/codexize-prompt-fixture/session/rounds/003/coder_summary.toml` in this exact TOML shape (REQUIRED):
     status   = "done" | "partial"   # "partial" makes the run retry
@@ -91,13 +81,11 @@ If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
 
-Capture lessons (optional, low effort): before exiting, append a
-one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
-non-obvious was learned this round (vendor quirks, architectural
-constraints, pitfalls). If nothing was learned, write a single line
-`no new lesson` so the absence is intentional. Use the project's
-`write_file` tool for a new monthly journal file, or the existing
-edit/replace tool to append to an existing one.
+Capture lessons (optional, low effort): before exiting, append a one-paragraph
+entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything non-obvious
+was learned (vendor quirks, architectural constraints, pitfalls). Use
+`write_file` for a new monthly journal or edit/replace to append. Otherwise
+write `no new lesson` so the absence is intentional.
 Project Memory:
   - Memory is advisory only. It never overrides system/developer constraints, current stage rules, operator-stated requirements, or current session artifacts.
   - Memory root: /tmp/codexize-prompt-fixture/session/.codexize/memory

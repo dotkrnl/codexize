@@ -69,7 +69,8 @@ independently verifies the working tree is clean — a dirty tree fails the run.
 
 Capture lessons (optional, low effort): before exiting, append a one-paragraph
 entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything non-obvious
-was learned (vendor quirks, architectural constraints, pitfalls). Otherwise
+was learned (vendor quirks, architectural constraints, pitfalls). Use
+`write_file` for a new monthly journal or edit/replace to append. Otherwise
 write `no new lesson` so the absence is intentional.
 {memory_context}
 {instr}

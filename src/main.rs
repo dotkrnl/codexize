@@ -2,11 +2,13 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use codexize::{
     app, app_runtime,
-    data::notifications,
+    data::config::cli as config_cli,
     picker, preflight,
     state::{self},
     tui,
 };
+use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use tracing::{warn, warn_span};
 #[derive(Debug, Parser)]
@@ -30,12 +32,52 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Ntfy(NtfyCommand),
+    /// Inspect or mutate the unified config file.
+    Config(ConfigCommand),
 }
 #[derive(Debug, Parser)]
 struct NtfyCommand {
     /// Generate and persist a new ntfy topic.
     #[arg(long)]
     reset: bool,
+}
+#[derive(Debug, Parser)]
+struct ConfigCommand {
+    #[command(subcommand)]
+    sub: ConfigSubcommand,
+}
+#[derive(Debug, Subcommand)]
+enum ConfigSubcommand {
+    /// Print the resolved config path on its own line.
+    Path,
+    /// Print the canonical fully-annotated default dump.
+    Defaults,
+    /// Write the annotated default dump to the resolved path.
+    Init {
+        /// Overwrite an existing file.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the effective config (or one section) in TOML form.
+    List { section: Option<String> },
+    /// Print the scalar (or sub-table) at the given dotted key.
+    Get { key: String },
+    /// Set a key to a value (parsed per declared type).
+    Set { key: String, value: String },
+    /// Drop the override at the given key.
+    Unset { key: String },
+    /// With `<section>`: drop overrides in that section. Without: delete
+    /// the file entirely (requires --yes on a non-tty stderr).
+    Reset {
+        section: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Validate the file at `<path>` (default: resolved config path).
+    Validate { path: Option<PathBuf> },
+    /// Spawn $EDITOR (fallback $VISUAL, then `vi`) on the config path
+    /// and validate on exit.
+    Edit,
 }
 /// Result of validating CLI flags for the top-level (no-subcommand) path.
 ///
@@ -98,19 +140,46 @@ fn try_main() -> Result<()> {
 }
 fn run_cli_command(cli: &Cli) -> Result<()> {
     if cli.yolo || cli.cheap || cli.message.is_some() {
-        bail!("error: ntfy subcommand does not accept launch flags");
+        bail!("error: subcommands do not accept launch flags");
     }
     match cli.command.as_ref().expect("command checked by caller") {
-        Command::Ntfy(command) => {
-            let config = notifications::ensure_ntfy_config(command.reset)?;
-            print_ntfy_config(&config);
-            Ok(())
-        }
+        Command::Ntfy(command) => run_ntfy_command(command),
+        Command::Config(command) => run_config_command(command),
     }
 }
-fn print_ntfy_config(config: &notifications::NtfyConfig) {
-    println!("ntfy topic: {}", config.topic);
-    println!("subscribe: {}", config.subscribe_url());
+fn run_ntfy_command(command: &NtfyCommand) -> Result<()> {
+    if !command.reset {
+        bail!("error: `codexize ntfy` requires --reset");
+    }
+    let config = config_cli::ntfy_reset_topic()?;
+    let topic = config.ntfy.topic.value();
+    let server = config.ntfy.server.value().trim_end_matches('/');
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "ntfy topic: {topic}")?;
+    writeln!(stdout, "subscribe: {server}/{topic}")?;
+    Ok(())
+}
+fn run_config_command(command: &ConfigCommand) -> Result<()> {
+    let mut stdout = io::stdout().lock();
+    match &command.sub {
+        ConfigSubcommand::Path => config_cli::run_path(&mut stdout),
+        ConfigSubcommand::Defaults => config_cli::run_defaults(&mut stdout),
+        ConfigSubcommand::Init { force } => config_cli::run_init(*force, &mut stdout),
+        ConfigSubcommand::List { section } => config_cli::run_list(section.as_deref(), &mut stdout),
+        ConfigSubcommand::Get { key } => config_cli::run_get(key, &mut stdout),
+        ConfigSubcommand::Set { key, value } => config_cli::run_set(key, value, &mut stdout),
+        ConfigSubcommand::Unset { key } => config_cli::run_unset(key, &mut stdout),
+        ConfigSubcommand::Reset { section, yes } => config_cli::run_reset(
+            section.as_deref(),
+            *yes,
+            io::stderr().is_terminal(),
+            &mut stdout,
+        ),
+        ConfigSubcommand::Validate { path } => {
+            config_cli::run_validate(path.as_deref(), &mut stdout)
+        }
+        ConfigSubcommand::Edit => config_cli::run_edit(io::stdin().is_terminal(), &mut stdout),
+    }
 }
 async fn try_main_async(plan: LaunchPlan) -> Result<()> {
     struct TerminalGuard {

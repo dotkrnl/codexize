@@ -6,6 +6,7 @@
 //! actual readers of these views) lands in later milestones; this module
 //! is the foundation everything else consumes.
 
+pub mod cli;
 pub mod defaults;
 pub mod loader;
 pub mod mutate;

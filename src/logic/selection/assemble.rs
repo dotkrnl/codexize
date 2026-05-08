@@ -167,6 +167,12 @@ pub fn assemble_universe(
         models.retain(|m| m.vendor != VendorKind::Kimi);
         models.push(canonical);
     }
+    synthesize_kimi_latest_sibling(
+        &mut models,
+        &parsed_quotas,
+        &parsed_resets,
+        available_vendors,
+    );
     models = deduplicate_routed_models(models);
     // Stamp fallback:overall provenance for zero-as-missing and truly-missing
     // axes, and emit selection.zero_as_missing counters.
@@ -175,6 +181,86 @@ pub fn assemble_universe(
     }
     models
 }
+/// Returns the `(major, minor)` version parsed from a Kimi name shaped like
+/// `kimi-k2.6` -> `(2, 6)` or `kimi-k2` -> `(2, 0)`. Names with non-version
+/// trailers (`kimi-k2-0905-preview`, `kimi-k2-thinking`, `kimi-shared`)
+/// return `None` so they cannot be picked as "the latest kimi".
+fn parse_kimi_semver(name: &str) -> Option<(u64, u64)> {
+    let lower = name.to_ascii_lowercase();
+    let after_prefix = lower.strip_prefix("kimi-k")?;
+    let (major_str, minor_str) = after_prefix.split_once('.').unwrap_or((after_prefix, ""));
+    if major_str.is_empty() || !major_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if !minor_str.is_empty() && !minor_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let major: u64 = major_str.parse().ok()?;
+    let minor: u64 = if minor_str.is_empty() {
+        0
+    } else {
+        minor_str.parse().ok()?
+    };
+    Some((major, minor))
+}
+
+/// Push a `vendor = Kimi`, `name = "kimi-latest"` sibling of the highest-
+/// semver kimi row already in the universe (whether it surfaced as a direct
+/// Kimi entry or via opencode). The synth carries the source row's ipbr
+/// score data and `ipbr_match_key`, so `deduplicate_routed_models` pairs it
+/// against the opencode-routed sibling and arbitrates by quota — kimi-code
+/// wins above the 20% floor; below it, the higher-quota route wins.
+///
+/// Skipped when Kimi is not in `available_vendors`, when no kimi row has a
+/// clean `<major>.<minor>` semver (e.g. only `kimi-k2-thinking`), or when
+/// the picked source has no `ipbr_match_key` to anchor dedup.
+fn synthesize_kimi_latest_sibling(
+    models: &mut Vec<CachedModel>,
+    parsed_quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+    parsed_resets: &BTreeMap<VendorKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
+    available_vendors: &BTreeSet<VendorKind>,
+) {
+    if !available_vendors.contains(&VendorKind::Kimi) {
+        return;
+    }
+    let source_idx = models
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| vendor::route_identity_for_model(m) == VendorKind::Kimi)
+        .filter_map(|(i, m)| parse_kimi_semver(&m.name).map(|sv| (i, sv)))
+        .max_by(|(_, a), (_, b)| a.cmp(b))
+        .map(|(i, _)| i);
+    let Some(idx) = source_idx else {
+        return;
+    };
+    if models[idx].ipbr_match_key.is_none() {
+        return;
+    }
+    let source = models[idx].clone();
+    let quota_percent = parsed_quotas
+        .get(&VendorKind::Kimi)
+        .and_then(|by_model| by_model.get("kimi-latest"))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_quota_by_heuristic("kimi-latest", VendorKind::Kimi, parsed_quotas));
+    let quota_resets_at = parsed_resets
+        .get(&VendorKind::Kimi)
+        .and_then(|by_model| by_model.get("kimi-latest"))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_reset_by_heuristic("kimi-latest", VendorKind::Kimi, parsed_resets));
+    models.push(CachedModel {
+        vendor: VendorKind::Kimi,
+        name: "kimi-latest".to_string(),
+        route_underlying_vendor: None,
+        route_provider: None,
+        quota_percent,
+        quota_resets_at,
+        fallback_from: None,
+        ..source
+    });
+}
+
 fn deduplicate_routed_models(models: Vec<CachedModel>) -> Vec<CachedModel> {
     let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (index, model) in models.iter().enumerate() {

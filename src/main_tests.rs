@@ -1,5 +1,75 @@
 use super::*;
 use codexize::state::Modes;
+use serial_test::serial;
+use std::ffi::OsString;
+
+/// RAII override of `CODEXIZE_CONFIG`. Mirrors the guard used by the
+/// `data::config::cli` tests so the env mutation is undone even on
+/// panic, and so concurrent tests serialized via `#[serial]` see a
+/// consistent prior value on Drop.
+struct ConfigEnvGuard {
+    prev: Option<OsString>,
+}
+
+impl ConfigEnvGuard {
+    fn set(path: &std::path::Path) -> Self {
+        let prev = std::env::var_os("CODEXIZE_CONFIG");
+        // SAFETY: callers hold the `serial_test` global lock for the
+        // duration of the test, and Drop restores the prior value.
+        unsafe {
+            std::env::set_var("CODEXIZE_CONFIG", path);
+        }
+        Self { prev }
+    }
+}
+
+impl Drop for ConfigEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match self.prev.take() {
+                Some(v) => std::env::set_var("CODEXIZE_CONFIG", v),
+                None => std::env::remove_var("CODEXIZE_CONFIG"),
+            }
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn launch_load_rejects_unsupported_meta_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, b"[meta]\nversion = 2\n").unwrap();
+    let _g = ConfigEnvGuard::set(&path);
+
+    let err = load_config_for_launch().expect_err("v2 must be fatal at launch");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("unsupported [meta] version = 2"),
+        "error mentions the offending version: {msg}"
+    );
+    assert!(
+        msg.contains("version 1"),
+        "error names the supported version: {msg}"
+    );
+}
+
+#[test]
+#[serial]
+fn launch_load_silently_uses_defaults_when_file_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    // File is intentionally not created — exercises the missing-file
+    // fall-through that must NOT be fatal at first launch.
+    let path = dir.path().join("config.toml");
+    let _g = ConfigEnvGuard::set(&path);
+
+    let cfg = load_config_for_launch().expect("missing file falls back to baked defaults");
+    let baked = codexize::data::config::Config::baked_defaults();
+    assert_eq!(
+        cfg.meta.version, baked.meta.version,
+        "missing-file path returns baked defaults, not a synthesized config"
+    );
+}
 
 #[test]
 fn cheap_flag_parses_as_create_mode_seed() {

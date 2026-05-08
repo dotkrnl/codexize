@@ -100,10 +100,7 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
-                crate::acp::AcpLaunchPolicy {
-                    memory_write_check: self.runner_config.memory_write_check,
-                    ..Default::default()
-                },
+                self.default_acp_policy(),
             )
         } else {
             self.runner_supervisor.launch_noninteractive_with_policy(
@@ -114,10 +111,7 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
-                crate::acp::AcpLaunchPolicy {
-                    memory_write_check: self.runner_config.memory_write_check,
-                    ..Default::default()
-                },
+                self.default_acp_policy(),
             )
         };
         match launch_result {

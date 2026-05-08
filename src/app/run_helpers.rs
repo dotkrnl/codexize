@@ -15,6 +15,12 @@ pub(crate) enum OperatorTerminationMarker {
 #[path = "run_helpers_tests.rs"]
 mod tests;
 impl App {
+    pub(crate) fn default_acp_policy(&self) -> crate::acp::AcpLaunchPolicy {
+        crate::acp::AcpLaunchPolicy {
+            memory_write_check: self.runner_config.memory_write_check,
+            ..Default::default()
+        }
+    }
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
             .agent_runs

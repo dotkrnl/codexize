@@ -125,6 +125,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         notification_runtime: crate::data::notifications::NotificationRuntime::new_disabled(),
         interactive_wait_marker: None,
         config: std::sync::Arc::new(crate::data::config::Config::baked_defaults()),
+        paths: crate::data::config::Config::baked_defaults().paths_view(),
         watchdog: super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages: Vec::new(),

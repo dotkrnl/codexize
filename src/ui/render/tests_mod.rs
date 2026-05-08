@@ -16,6 +16,8 @@ use std::{
 fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> App {
     let mut state = SessionState::new("render-test".to_string());
     state.agent_runs = runs;
+    let config = std::sync::Arc::new(crate::data::config::Config::baked_defaults());
+    let paths = config.paths_view();
     let selected_key = node_key_at_path(&nodes, &[0]);
     let visible_rows = flatten_visible_rows(&nodes, |row| row.is_expandable());
     let collapsed_overrides = visible_rows
@@ -76,7 +78,8 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         runner_config: crate::runner::RunnerConfig::default(),
         notification_runtime: crate::data::notifications::NotificationRuntime::new_disabled(),
         interactive_wait_marker: None,
-        config: std::sync::Arc::new(crate::data::config::Config::baked_defaults()),
+        config,
+        paths,
         watchdog: super::super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages,

@@ -51,7 +51,7 @@ impl App {
         session_state::transitions::queue_recovery_sharding(&mut self.state, round);
     }
     pub(crate) fn yolo_exit_stage_artifacts(&self, run: &RunRecord) -> Vec<std::path::PathBuf> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let artifacts = session_dir.join("artifacts");
         let round_dir = session_dir.join("rounds").join(format!("{:03}", run.round));
         match run.stage.as_str() {
@@ -184,7 +184,7 @@ impl App {
         true
     }
     fn yolo_recovery_artifacts_ready(&self, run: &RunRecord) -> bool {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         let recovery_path = session_dir
             .join("rounds")

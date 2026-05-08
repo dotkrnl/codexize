@@ -23,7 +23,7 @@ impl App {
                     .to_string(),
             );
         }
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         let (prev_task_ids, prev_max) = tasks::validate(&tasks_path)
             .ok()
@@ -183,7 +183,7 @@ impl App {
         Ok(())
     }
     pub(crate) fn reconcile_builder_recovery(&mut self, recovery_run_id: u64) -> Result<()> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let artifacts = session_dir.join("artifacts");
         let spec_path = artifacts.join("spec.md");
         let plan_path = artifacts.join("plan.md");
@@ -257,7 +257,7 @@ impl App {
         run: &crate::state::RunRecord,
         round: u32,
     ) -> Result<()> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let plan_review_path = session_dir.join("artifacts").join("plan_review.toml");
         session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "plan-review");
         let verdict = match review::validate(&plan_review_path) {
@@ -390,7 +390,7 @@ impl App {
         run: &crate::state::RunRecord,
         round: u32,
     ) -> Result<()> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let tasks_path = session_dir.join("artifacts").join("tasks.toml");
         session_state::transitions::mark_latest_pipeline_stage_done(&mut self.state, "sharding");
         let parsed = match tasks::validate(&tasks_path) {

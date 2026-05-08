@@ -18,6 +18,14 @@ impl App {
     pub(crate) fn default_acp_policy(&self) -> crate::acp::AcpLaunchPolicy {
         crate::acp::AcpLaunchPolicy::from_policy_defaults(&self.config.acp_policy_view())
     }
+
+    /// Resolve the session directory from the loaded `[paths]` config.
+    /// When `paths.sessions_root` is a relative path (e.g. `.codexize/sessions`
+    /// set via `CODEXIZE_ROOT` in tests), it is resolved against `$HOME`;
+    /// the load-time `$HOME` expansion in [`PathsView`] handles this.
+    pub(crate) fn session_dir(&self) -> std::path::PathBuf {
+        self.paths.sessions_root.join(&self.state.session_id)
+    }
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state
             .agent_runs
@@ -150,7 +158,7 @@ impl App {
         attempt: u32,
     ) -> std::path::PathBuf {
         let run_key = Self::run_key_for(stage, task_id, round, attempt);
-        session_state::session_dir(&self.state.session_id)
+        self.session_dir()
             .join("artifacts")
             .join(format!("live_summary.{run_key}.txt"))
     }
@@ -168,7 +176,7 @@ impl App {
         attempt: u32,
     ) -> std::path::PathBuf {
         let run_key = Self::run_key_for(stage, task_id, round, attempt);
-        session_state::session_dir(&self.state.session_id)
+        self.session_dir()
             .join("artifacts")
             .join("run-finish")
             .join(format!("{run_key}.toml"))
@@ -197,7 +205,7 @@ impl App {
         let task = task_id
             .map(|id| format!("task-{id}"))
             .unwrap_or_else(|| "stage".to_string());
-        session_state::session_dir(&self.state.session_id)
+        self.session_dir()
             .join(".guards")
             .join(format!("{stage}-{task}-r{round}-a{attempt}"))
     }
@@ -214,7 +222,7 @@ impl App {
             return false;
         }
         let dir = self.guard_dir_for(stage, task_id, round, attempt);
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         if stage == "coder" || stage == "simplifier" {
             let _ = guard::capture_coder(&dir, &session_dir, round);
             false
@@ -327,7 +335,7 @@ impl App {
     pub(crate) fn ensure_builder_task_for_round(&mut self, round: u32) -> Option<u32> {
         let task_id =
             session_state::transitions::ensure_builder_task_for_round(&mut self.state, round)?;
-        let round_dir = session_state::session_dir(&self.state.session_id)
+        let round_dir = self.session_dir()
             .join("rounds")
             .join(format!("{round:03}"));
         let _ = std::fs::create_dir_all(&round_dir);

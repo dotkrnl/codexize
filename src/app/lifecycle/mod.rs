@@ -267,7 +267,7 @@ impl App {
         // consistently use `base_sha..HEAD`. `capture_round_base` is
         // idempotent on resume.
         if let Phase::ImplementationRound(round) = next_phase {
-            let round_dir = session_state::session_dir(&self.state.session_id)
+            let round_dir = self.session_dir()
                 .join("rounds")
                 .join(format!("{round:03}"));
             self.capture_round_base(&round_dir);
@@ -316,7 +316,7 @@ impl App {
         use crate::artifacts::SkipToImplKind;
         use crate::synthetic_artifacts::generate_synthetic_artifacts;
         use anyhow::Context;
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         if self.state.skip_to_impl_kind == Some(SkipToImplKind::NothingToDo) {
             self.transition_to_phase(Phase::Done)?;
             self.state.save()?;
@@ -443,7 +443,7 @@ impl App {
         self.complete_run_finalization(&run, None)
     }
     pub(crate) fn editable_artifact(&self) -> Option<std::path::PathBuf> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let artifacts = session_dir.join("artifacts");
         let path = match self.state.current_phase {
             Phase::BrainstormRunning | Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
@@ -482,7 +482,7 @@ impl App {
         self.pending_view_path = Some(path);
     }
     pub(crate) fn queue_view_of_current_artifact(&mut self, filename: &str) {
-        let path = session_state::session_dir(&self.state.session_id)
+        let path = self.session_dir()
             .join("artifacts")
             .join(filename);
         if path.exists() {

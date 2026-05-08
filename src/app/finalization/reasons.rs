@@ -153,7 +153,7 @@ impl App {
         &mut self,
         run: &crate::state::RunRecord,
     ) -> Result<Option<String>> {
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let (has_artifact_check, artifact_reason) = match run.stage.as_str() {
             "brainstorm" | "spec-review" | "planning" | "plan-review" => (
                 true,

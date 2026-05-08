@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::time::Duration;
 impl App {
     fn marker_already_logged(&self, marker: &str) -> bool {
-        let events_path = crate::state::session_dir(&self.state.session_id).join("events.toml");
+        let events_path = self.session_dir().join("events.toml");
         std::fs::read_to_string(&events_path).is_ok_and(|events| events.contains(marker))
     }
     fn request_termination(&mut self, pending: PendingTermination, _window_name: String) {

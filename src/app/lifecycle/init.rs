@@ -44,8 +44,9 @@ impl App {
             &config.acp_install_view(),
         );
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
+        let paths_view = config.paths_view();
         if state.builder.task_titles.is_empty() {
-            let tasks_path = session_state::session_dir(&state.session_id)
+            let tasks_path = paths_view.sessions_root.join(&state.session_id)
                 .join("artifacts")
                 .join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
@@ -119,6 +120,7 @@ impl App {
             notification_runtime: crate::data::notifications::NotificationRuntime::new(ntfy_params),
             interactive_wait_marker: None,
             config,
+            paths: paths_view,
             #[cfg(test)]
             test_launch_harness: None,
             messages,
@@ -176,7 +178,7 @@ impl App {
         // Orphan sweep: remove stale live_summary.*.txt files that do not
         // correspond to a Running run record.
         {
-            let artifacts_dir = session_state::session_dir(&app.state.session_id).join("artifacts");
+            let artifacts_dir = app.session_dir().join("artifacts");
             let running_keys: std::collections::HashSet<String> = app
                 .state
                 .agent_runs
@@ -207,7 +209,7 @@ impl App {
         // Stamp archival: move old finish stamps to archive/ at session start.
         // Stamps older than the oldest Running record are archived (best effort).
         {
-            let finish_dir = session_state::session_dir(&app.state.session_id)
+            let finish_dir = app.session_dir()
                 .join("artifacts")
                 .join("run-finish");
             let archive_dir = finish_dir.join("archive");

@@ -242,7 +242,7 @@ impl App {
     }
     pub(crate) fn go_back(&mut self) {
         use std::fs;
-        let session_dir = session_state::session_dir(&self.state.session_id);
+        let session_dir = self.session_dir();
         let artifacts = session_dir.join("artifacts");
         let prompts = session_dir.join("prompts");
         // Interrupt the running agent (if any) so rewinding takes effect even

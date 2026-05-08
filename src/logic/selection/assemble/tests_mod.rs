@@ -710,3 +710,186 @@ fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
         "dashboard warning: ipbr normalized key 'x' collided"
     );
 }
+
+#[test]
+fn parse_kimi_semver_accepts_clean_versions() {
+    assert_eq!(parse_kimi_semver("kimi-k2.6"), Some((2, 6)));
+    assert_eq!(parse_kimi_semver("kimi-k2"), Some((2, 0)));
+    assert_eq!(parse_kimi_semver("kimi-k1.5"), Some((1, 5)));
+    assert_eq!(parse_kimi_semver("kimi-k10.20"), Some((10, 20)));
+    // Case-insensitive on the prefix.
+    assert_eq!(parse_kimi_semver("KIMI-K2.6"), Some((2, 6)));
+}
+
+#[test]
+fn parse_kimi_semver_rejects_non_version_trailers() {
+    // Dated / suffixed variants must not be picked as the latest kimi.
+    assert_eq!(parse_kimi_semver("kimi-k2-0905-preview"), None);
+    assert_eq!(parse_kimi_semver("kimi-k2-thinking"), None);
+    assert_eq!(parse_kimi_semver("kimi-shared"), None);
+    assert_eq!(parse_kimi_semver("kimi-latest"), None);
+    assert_eq!(parse_kimi_semver("claude-opus-4-7"), None);
+    // Multi-dot patch versions don't fit the (major, minor) shape.
+    assert_eq!(parse_kimi_semver("kimi-k2.6.1"), None);
+}
+
+fn kimi_opencode_available() -> BTreeSet<VendorKind> {
+    BTreeSet::from([VendorKind::Kimi, VendorKind::Opencode])
+}
+
+fn make_opencode_kimi_entry(name: &str, match_key: &str) -> DashboardEntry {
+    let mut entry = make_ipbr_entry(name, "opencode", match_key);
+    entry.route_underlying_vendor = Some(VendorKind::Kimi);
+    entry.route_provider = Some("opencode".to_string());
+    entry
+}
+
+#[test]
+fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
+    // kimi-code's shared pool is at 50% — well above the 20% floor — so the
+    // synthesized direct route must beat the opencode-routed sibling for the
+    // same kimi-2.6 ipbr row.
+    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
+    let quotas = make_quota_payload(&[
+        ("kimi", "kimi-shared", Some(50)),
+        ("opencode", "kimi-k2.6", Some(90)),
+    ]);
+
+    let models = assemble_universe(
+        vec![routed],
+        quotas,
+        BTreeMap::new(),
+        &kimi_opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    let survivor = &models[0];
+    assert_eq!(survivor.vendor, VendorKind::Kimi);
+    assert_eq!(survivor.name, "kimi-latest");
+    assert_eq!(survivor.quota_percent, Some(50));
+    assert_eq!(survivor.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
+    assert_eq!(survivor.route_underlying_vendor, None);
+    assert_eq!(survivor.route_provider, None);
+}
+
+#[test]
+fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher() {
+    // kimi-code below the 20% floor + opencode strictly higher → dedup defers
+    // to opencode for this kimi row.
+    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
+    let quotas = make_quota_payload(&[
+        ("kimi", "kimi-shared", Some(5)),
+        ("opencode", "kimi-k2.6", Some(80)),
+    ]);
+
+    let models = assemble_universe(
+        vec![routed],
+        quotas,
+        BTreeMap::new(),
+        &kimi_opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    let survivor = &models[0];
+    assert_eq!(survivor.vendor, VendorKind::Opencode);
+    assert_eq!(survivor.name, "kimi-k2.6");
+    assert_eq!(survivor.quota_percent, Some(80));
+    assert_eq!(survivor.route_underlying_vendor, Some(VendorKind::Kimi));
+}
+
+#[test]
+fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
+    // Direct quota unknown vs opencode unknown → direct wins per the
+    // existing dedup arm. The synth must still be present so this branch is
+    // reachable for kimi.
+    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
+    let quotas = make_quota_payload(&[]);
+
+    let models = assemble_universe(
+        vec![routed],
+        quotas,
+        BTreeMap::new(),
+        &kimi_opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Kimi);
+    assert_eq!(models[0].name, "kimi-latest");
+    assert_eq!(models[0].quota_percent, None);
+}
+
+#[test]
+fn synth_kimi_latest_skipped_when_no_kimi_semver() {
+    // Only suffixed kimi variants (no k<major>.<minor>) means no row qualifies
+    // as "the latest kimi"; the synth must not fire and opencode keeps the
+    // row uncontested.
+    let routed = make_opencode_kimi_entry("kimi-k2-thinking", "kimi-k2-thinking");
+    let quotas = make_quota_payload(&[
+        ("kimi", "kimi-shared", Some(80)),
+        ("opencode", "kimi-k2-thinking", Some(40)),
+    ]);
+
+    let models = assemble_universe(
+        vec![routed],
+        quotas,
+        BTreeMap::new(),
+        &kimi_opencode_available(),
+    );
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Opencode);
+    assert_eq!(models[0].name, "kimi-k2-thinking");
+}
+
+#[test]
+fn synth_kimi_latest_picks_highest_semver_among_routes() {
+    // With multiple opencode-routed kimis the synth must mirror the highest
+    // semver — kimi-k2.6 here, not kimi-k1.5 — so the dedup pairing lands
+    // against the right opencode sibling.
+    let older = make_opencode_kimi_entry("kimi-k1.5", "kimi-k1-5");
+    let latest = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
+    let quotas = make_quota_payload(&[
+        ("kimi", "kimi-shared", Some(80)),
+        ("opencode", "kimi-k1.5", Some(70)),
+        ("opencode", "kimi-k2.6", Some(70)),
+    ]);
+
+    let models = assemble_universe(
+        vec![older, latest],
+        quotas,
+        BTreeMap::new(),
+        &kimi_opencode_available(),
+    );
+
+    // Surviving rows: kimi-latest (synth, won dedup over kimi-k2.6) and
+    // opencode kimi-k1.5 (different ipbr_match_key, no dedup pair).
+    let kimi_latest = models
+        .iter()
+        .find(|m| m.name == "kimi-latest")
+        .expect("synth kimi-latest should survive dedup with kimi above floor");
+    assert_eq!(kimi_latest.vendor, VendorKind::Kimi);
+    assert_eq!(kimi_latest.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
+    assert!(
+        models.iter().any(|m| m.name == "kimi-k1.5"),
+        "older opencode kimi without a direct sibling stays in the universe"
+    );
+    assert!(
+        !models.iter().any(|m| m.name == "kimi-k2.6"),
+        "kimi-k2.6 opencode entry must be deduped out by the synth"
+    );
+}
+
+#[test]
+fn synth_kimi_latest_skipped_when_kimi_unavailable() {
+    // Without Kimi in available_vendors the synth must not emit a kimi-vendor
+    // row, even when an opencode-routed kimi-2.6 is present.
+    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
+    let quotas = make_quota_payload(&[("opencode", "kimi-k2.6", Some(90))]);
+    let available = BTreeSet::from([VendorKind::Opencode]);
+
+    let models = assemble_universe(vec![routed], quotas, BTreeMap::new(), &available);
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].vendor, VendorKind::Opencode);
+    assert!(!models.iter().any(|m| m.name == "kimi-latest"));
+}

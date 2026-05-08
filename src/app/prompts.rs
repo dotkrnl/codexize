@@ -4,8 +4,8 @@ pub(crate) use super::prompt_builders::dreaming_prompt;
 pub(crate) use super::prompt_builders::{
     ReviewerPromptInputs, brainstorm_prompt, coder_prompt, final_validation_prompt,
     plan_review_prompt, planning_prompt, recovery_plan_review_prompt, recovery_prompt,
-    recovery_sharding_prompt, reviewer_prompt, sharding_prompt, simplifier_prompt,
-    spec_review_prompt,
+    recovery_sharding_prompt, reviewer_full_alignment_prompt, reviewer_prompt, sharding_prompt,
+    simplifier_prompt, spec_review_prompt,
 };
 #[cfg(test)]
 pub(crate) use super::prompt_ctx::{

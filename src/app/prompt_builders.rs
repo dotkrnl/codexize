@@ -295,6 +295,18 @@ pub(crate) struct ReviewerPromptInputs<'a> {
     pub(crate) is_terminal_review: bool,
 }
 pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
+    let ctx = build_reviewer_ctx(&inputs);
+    // The full-alignment template (see `reviewer_full_alignment_prompt`)
+    // diverges only in body; the same context fields fill both.
+    ctx.render(include_str!("prompts/reviewer.md"))
+}
+
+pub(crate) fn reviewer_full_alignment_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
+    let ctx = build_reviewer_ctx(&inputs);
+    ctx.render(include_str!("prompts/reviewer_full_alignment.md"))
+}
+
+fn build_reviewer_ctx(inputs: &ReviewerPromptInputs<'_>) -> PromptCtx {
     let mut ctx = PromptCtx::new();
     let prior_reviews = if inputs.round > 1 {
         format!(
@@ -336,8 +348,8 @@ pub(crate) fn reviewer_prompt(inputs: ReviewerPromptInputs<'_>) -> String {
         .set("review_scope_text", "  4. Check correctness, missing edge cases, broken contracts, bad error\n     handling, test gaps. Uncommitted working-tree changes are NOT in scope —\n     review only `base..HEAD`.\n")
         .set("terminal_review_block", terminal_review_block)
         .path_arg("review", inputs.review_file)
-        .live_arg(inputs.live_summary_path, false)
-        .render(include_str!("prompts/reviewer.md"))
+        .live_arg(inputs.live_summary_path, false);
+    ctx
 }
 pub(crate) fn simplifier_prompt(
     session_dir: &Path,

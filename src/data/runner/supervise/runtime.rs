@@ -33,6 +33,7 @@ struct ManagedAcpRunResult {
     head_before: String,
     git_status_before: Option<String>,
     enforce_readonly: bool,
+    journal_mtime_before: Option<std::time::SystemTime>,
 }
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
@@ -42,6 +43,13 @@ fn run_managed_acp_launch(
 ) -> ManagedAcpRunResult {
     let head_before = git_rev_parse_head().unwrap_or_default();
     let enforce_readonly = launch.resolved.session.policy.enforce_readonly_workspace;
+    let journal_mtime_before = if launch.resolved.session.policy.memory_write_check {
+        fs::metadata(journal_path(&launch.resolved.session.cwd))
+            .and_then(|m| m.modified())
+            .ok()
+    } else {
+        None
+    };
     // Final validation is allowed to update its ignored artifact files, so the
     // ACP-side write allowlist carries those exact paths while the runner
     // enforces that no git-visible workspace state changes during the run.
@@ -58,7 +66,14 @@ fn run_managed_acp_launch(
         head_before,
         git_status_before,
         enforce_readonly,
+        journal_mtime_before,
     }
+}
+
+fn journal_path(cwd: &std::path::Path) -> std::path::PathBuf {
+    let now = chrono::Utc::now();
+    cwd.join(".codexize/memory/journal")
+        .join(format!("{}.md", now.format("%Y-%m")))
 }
 fn run_managed_acp_loop(
     launch: &ManagedAcpLaunch,
@@ -445,6 +460,17 @@ pub(super) async fn finalize_managed_acp_launch(
                 &outcome.signal_received,
             )
             .await;
+            if launch.resolved.session.policy.memory_write_check && outcome.exit_code == 0 {
+                let journal_mtime_after = fs::metadata(journal_path(&launch.resolved.session.cwd))
+                    .and_then(|m| m.modified())
+                    .ok();
+                if journal_mtime_after == result.journal_mtime_before {
+                    crate::runner::transport::persist_system_warning(
+                        &launch,
+                        "round produced no memory delta (consider capturing non-obvious lessons in the journal)",
+                    );
+                }
+            }
             let _ = waiting_for_input.send_replace(false);
             let _ = fs::remove_file(&launch.cause_path);
         }

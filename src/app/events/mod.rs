@@ -128,6 +128,9 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return false;
         }
+        if self.config_panel.is_some() {
+            return self.handle_config_panel_key(key);
+        }
         // Keep Ctrl+C global so palette/input/modal states cannot swallow an
         // operator stop, but preserve the historical quit path when idle.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -256,6 +259,49 @@ impl App {
                 false
             }
             _ => false,
+        }
+    }
+    pub(crate) fn open_config_panel(&mut self) {
+        if !crate::ui::config_panel::can_open(self.body_inner_width as u16) {
+            self.push_status(
+                crate::ui::config_panel::terminal_too_narrow_message().to_string(),
+                Severity::Warn,
+                Duration::from_secs(4),
+            );
+            return;
+        }
+        let path = crate::data::config::paths::config_path();
+        let config = crate::data::config::loader::load_from_path(&path).unwrap_or_else(|_| {
+            // If the file cannot be read while opening the panel, keep the
+            // modal usable from the launch-time config and let save surface IO.
+            (*self.config).clone()
+        });
+        self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open(
+            &config, path,
+        ));
+    }
+    pub(crate) fn config_panel_reset_focused_section(&mut self) {
+        let Some(panel) = self.config_panel.as_mut() else {
+            self.push_status(
+                "config: no focused section".to_string(),
+                Severity::Warn,
+                Duration::from_secs(3),
+            );
+            return;
+        };
+        let _ = panel.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
+    }
+    fn handle_config_panel_key(&mut self, key: KeyEvent) -> bool {
+        let Some(panel) = self.config_panel.as_mut() else {
+            return false;
+        };
+        match panel.handle_key(key) {
+            crate::ui::config_panel::PanelOutcome::KeepOpen => false,
+            crate::ui::config_panel::PanelOutcome::Close => {
+                self.config_panel = None;
+                false
+            }
+            crate::ui::config_panel::PanelOutcome::Saved => false,
         }
     }
     pub(crate) fn handle_app_command(&mut self, command: AppCommand) -> bool {

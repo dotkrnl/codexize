@@ -135,3 +135,38 @@ fn palette_interrupt_absent_with_empty_runs() {
         ":interrupt must not appear in palette when there are no runs"
     );
 }
+
+#[test]
+fn palette_config_registered_and_opens_panel() {
+    let state = SessionState::new("config-palette-test".to_string());
+    let mut app = mk_app(state);
+    let commands = app.palette_commands();
+    let config = commands
+        .iter()
+        .find(|cmd| cmd.name == "config")
+        .expect(":config command registered");
+    assert_eq!(config.aliases, &["cfg"]);
+    assert_eq!(config.key_hint, None);
+
+    app.execute_palette_input("cfg");
+
+    assert!(app.config_panel.is_some());
+}
+
+#[test]
+fn palette_config_refuses_too_narrow_terminal() {
+    let state = SessionState::new("config-palette-test".to_string());
+    let mut app = mk_app(state);
+    app.body_inner_width = 49;
+
+    app.execute_palette_input("config");
+
+    assert!(app.config_panel.is_none());
+    let status = app
+        .status_line
+        .borrow()
+        .render()
+        .expect("status line")
+        .to_string();
+    assert!(status.contains(crate::ui::config_panel::terminal_too_narrow_message()));
+}

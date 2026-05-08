@@ -287,6 +287,9 @@ impl App {
                 frame.render_widget(Paragraph::new(lines), overlay);
             }
         }
+        if let Some(panel) = self.config_panel.as_ref() {
+            crate::ui::config_panel::render(frame, area, panel);
+        }
     }
     /// Compute the bottom-aligned palette overlay height.
     ///

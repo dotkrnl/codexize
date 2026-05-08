@@ -135,6 +135,7 @@ pub(crate) fn mk_app(state: crate::state::SessionState) -> App {
         prev_models_mode: models_area::ModelsAreaMode::default(),
         palette: palette::PaletteState::default(),
         command_return_target: None,
+        config_panel: None,
     };
     for run in app
         .state

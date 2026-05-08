@@ -93,6 +93,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         prev_models_mode: super::super::models_area::ModelsAreaMode::default(),
         palette: super::super::palette::PaletteState::default(),
         command_return_target: None,
+        config_panel: None,
     };
     for run in app
         .state

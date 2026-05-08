@@ -15,6 +15,7 @@ pub(crate) mod models;
 pub use crate::ui::widgets::models_area::view as models_area;
 mod notifications;
 mod observation;
+pub(crate) use crate::ui::config_panel;
 pub(crate) use crate::ui::palette;
 mod prompt_builders;
 mod prompt_ctx;
@@ -309,6 +310,7 @@ pub struct App {
     pub(crate) prev_models_mode: models_area::ModelsAreaMode,
     pub(crate) palette: palette::PaletteState,
     pub(crate) command_return_target: Option<CommandReturnTarget>,
+    pub(crate) config_panel: Option<config_panel::ConfigPanelState>,
 }
 fn default_expansion(
     row: &VisibleNodeRow,

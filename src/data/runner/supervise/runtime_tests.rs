@@ -625,104 +625,94 @@ fn test_get_journal_mtime() {
     let cwd = temp.path();
     let journal_dir = cwd.join(".codexize/memory/journal");
     fs::create_dir_all(&journal_dir).unwrap();
-    
+
     let now = chrono::Utc::now();
     let journal_file = journal_dir.join(format!("{}.md", now.format("%Y-%m")));
-    
+
     assert!(get_journal_mtime(cwd).is_none());
-    
+
     fs::write(&journal_file, "lesson").unwrap();
     assert!(get_journal_mtime(cwd).is_some());
 }
 
-#[tokio::test]
-async fn memory_write_check_logic() {
-    // SessionState::load/save is not thread-safe regarding CODEXIZE_ROOT env var,
-    // so we lock the FS.
-    let _lock = crate::state::test_fs_lock().lock();
+/// Drive the production `memory_write_delta_warning` helper directly so
+/// tests break if the decision logic changes, rather than re-implementing
+/// the if-chain inline.
+#[test]
+fn memory_write_delta_warning_enabled_unchanged() {
     let temp = tempfile::tempdir().unwrap();
     let cwd = temp.path();
-    let root = cwd.join(".codexize");
-    fs::create_dir_all(&root).unwrap();
-    
-    // Use a unique session ID to avoid collisions
-    let session_id = format!("test-memory-{}", std::process::id());
-    unsafe { std::env::set_var("CODEXIZE_ROOT", &root) };
-
-    let journal_dir = root.join("memory/journal");
+    let journal_dir = cwd.join(".codexize/memory/journal");
     fs::create_dir_all(&journal_dir).unwrap();
+
     let now = chrono::Utc::now();
     let journal_file = journal_dir.join(format!("{}.md", now.format("%Y-%m")));
-    
-    // Set up session
-    let session_dir = root.join("sessions").join(&session_id);
-    fs::create_dir_all(&session_dir).unwrap();
-    let mut state = crate::state::SessionState::new(session_id.clone());
-    state.agent_runs.push(crate::state::RunRecord {
-        id: 1,
-        stage: "coder".to_string(),
-        task_id: Some(1),
-        round: 1,
-        attempt: 1,
-        model: "test".to_string(),
-        vendor: "test".to_string(),
-        window_name: "[Test]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: crate::state::RunStatus::Running,
-        error: None,
-        effort: crate::adapters::EffortLevel::Normal,
-        modes: crate::state::LaunchModes::default(),
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-        route_provider: None,
-    });
-    fs::write(session_dir.join("session.toml"), toml::to_string(&state).unwrap()).unwrap();
-    
-    let mut launch = launch_fixture(false);
-    launch.session_id = Some(session_id.clone());
-    launch.resolved.session.cwd = cwd.to_path_buf();
-    
-    // 1. Unchanged mtime with check enabled -> Warning
     fs::write(&journal_file, "initial").unwrap();
     let mtime_before = get_journal_mtime(cwd);
-    
-    launch.resolved.session.policy.memory_write_check = true;
-    let mtime_after = get_journal_mtime(cwd);
-    if mtime_after == mtime_before {
-        crate::runner::transport::persist_system_warning(&launch, "unchanged warning");
-    }
-    
-    let messages = crate::state::SessionState::load_messages(&session_id).unwrap();
-    assert!(messages.iter().any(|m| m.text == "unchanged warning"));
 
-    // 2. Unchanged mtime with check disabled -> No Warning
-    let count_before = crate::state::SessionState::load_messages(&session_id).unwrap().len();
-    launch.resolved.session.policy.memory_write_check = false;
-    if launch.resolved.session.policy.memory_write_check {
-        let mtime_after = get_journal_mtime(cwd);
-        if mtime_after == mtime_before {
-            crate::runner::transport::persist_system_warning(&launch, "should not happen");
-        }
-    }
-    let count_after = crate::state::SessionState::load_messages(&session_id).unwrap().len();
-    assert_eq!(count_before, count_after);
+    let warning = memory_write_delta_warning(true, 0, cwd, mtime_before);
+    assert!(
+        warning.is_some(),
+        "enabled + exit_code 0 + unchanged mtime should produce a warning"
+    );
+    assert_eq!(warning.unwrap(), MEMORY_DELTA_WARNING);
+}
 
-    // 3. Changed mtime with check enabled -> No Warning
-    // Sleep a bit to ensure mtime changes if the FS resolution is low
+#[test]
+fn memory_write_delta_warning_disabled_skips_check() {
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path();
+    let journal_dir = cwd.join(".codexize/memory/journal");
+    fs::create_dir_all(&journal_dir).unwrap();
+
+    let now = chrono::Utc::now();
+    let journal_file = journal_dir.join(format!("{}.md", now.format("%Y-%m")));
+    fs::write(&journal_file, "initial").unwrap();
+    let mtime_before = get_journal_mtime(cwd);
+
+    assert!(
+        memory_write_delta_warning(false, 0, cwd, mtime_before).is_none(),
+        "disabled flag should skip the check entirely"
+    );
+}
+
+#[test]
+fn memory_write_delta_warning_changed_mtime_no_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path();
+    let journal_dir = cwd.join(".codexize/memory/journal");
+    fs::create_dir_all(&journal_dir).unwrap();
+
+    let now = chrono::Utc::now();
+    let journal_file = journal_dir.join(format!("{}.md", now.format("%Y-%m")));
+    fs::write(&journal_file, "initial").unwrap();
+    let mtime_before = get_journal_mtime(cwd);
+
     std::thread::sleep(std::time::Duration::from_millis(10));
     fs::write(&journal_file, "updated").unwrap();
     let mtime_after = get_journal_mtime(cwd);
-    assert!(mtime_after > mtime_before);
-    
-    launch.resolved.session.policy.memory_write_check = true;
-    if mtime_after == mtime_before {
-        crate::runner::transport::persist_system_warning(&launch, "changed but warned");
-    }
-    let messages = crate::state::SessionState::load_messages(&session_id).unwrap();
-    assert!(!messages.iter().any(|m| m.text == "changed but warned"));
-    
-    // Cleanup env var to avoid affecting other tests
-    unsafe { std::env::remove_var("CODEXIZE_ROOT") };
+    assert!(mtime_after > mtime_before, "mtime should have advanced");
+
+    assert!(
+        memory_write_delta_warning(true, 0, cwd, mtime_before).is_none(),
+        "changed mtime should not produce a warning"
+    );
+}
+
+#[test]
+fn memory_write_delta_warning_nonzero_exit_code_no_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path();
+    let journal_dir = cwd.join(".codexize/memory/journal");
+    fs::create_dir_all(&journal_dir).unwrap();
+
+    let now = chrono::Utc::now();
+    let journal_file = journal_dir.join(format!("{}.md", now.format("%Y-%m")));
+    fs::write(&journal_file, "initial").unwrap();
+    let mtime_before = get_journal_mtime(cwd);
+
+    assert!(
+        memory_write_delta_warning(true, 1, cwd, mtime_before).is_none(),
+        "non-zero exit code should not produce a warning even with unchanged mtime"
+    );
 }

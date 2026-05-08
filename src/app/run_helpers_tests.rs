@@ -146,3 +146,19 @@ fn task_effort_for_round_does_not_promote_when_global_round_is_high_but_task_is_
         );
     });
 }
+#[test]
+fn session_dir_matches_runner_path_when_paths_are_default() {
+    // Regression: brainstorm.rs and the runner write artifacts under
+    // `state::session_dir(...)` (cwd-relative `.codexize/sessions/<id>`),
+    // but `App::session_dir()` was reading the baked `$HOME/.codexize/sessions`
+    // default whenever the operator hadn't set `paths.sessions_root` explicitly.
+    // The mismatch made every brainstorm finalize as "missing finish stamp"
+    // because finish_stamp_path_for_run looked under `$HOME/...` while the
+    // wrapper had written to the project-local `.codexize/sessions/...`.
+    with_temp_root(|| {
+        let state = fresh_state();
+        let expected = crate::state::session_dir(&state.session_id);
+        let app = mk_app(state);
+        assert_eq!(app.session_dir(), expected);
+    });
+}

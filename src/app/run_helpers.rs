@@ -20,11 +20,23 @@ impl App {
     }
 
     /// Resolve the session directory from the loaded `[paths]` config.
-    /// When `paths.sessions_root` is a relative path (e.g. `.codexize/sessions`
-    /// set via `CODEXIZE_ROOT` in tests), it is resolved against `$HOME`;
-    /// the load-time `$HOME` expansion in [`PathsView`] handles this.
+    /// Mirrors the picker fallback in `main.rs`: only honor the
+    /// `paths.sessions_root` view when the operator set the value
+    /// explicitly. Otherwise stay on the legacy
+    /// `state::codexize_root().join("sessions")` so the App reads from the
+    /// same project-local `.codexize/sessions` tree the runner stages and
+    /// `state::session_dir(...)` write to. Without the fallback, the baked
+    /// `$HOME/.codexize/sessions` default makes `finish_stamp_path_for`
+    /// probe a path that the wrapper never writes — every run reports
+    /// "missing finish stamp" while the real stamp sits under the project
+    /// directory.
     pub(crate) fn session_dir(&self) -> std::path::PathBuf {
-        self.paths.sessions_root.join(&self.state.session_id)
+        let root = if self.config.paths.sessions_root.is_explicit() {
+            self.paths.sessions_root.clone()
+        } else {
+            session_state::codexize_root().join("sessions")
+        };
+        root.join(&self.state.session_id)
     }
 
     /// Build a per-call `PromptMeta` from this App's loaded `Config`.

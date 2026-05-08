@@ -48,7 +48,16 @@ impl App {
         let memory_view = config.memory_view();
         let ui_view = config.ui_view();
         if state.builder.task_titles.is_empty() {
-            let tasks_path = paths_view.sessions_root.join(&state.session_id)
+            // Same fallback as `App::session_dir`: only honor the
+            // configured `sessions_root` when explicit, otherwise read
+            // from the project-local `.codexize/sessions` the runner uses.
+            let resume_root = if config.paths.sessions_root.is_explicit() {
+                paths_view.sessions_root.clone()
+            } else {
+                session_state::codexize_root().join("sessions")
+            };
+            let tasks_path = resume_root
+                .join(&state.session_id)
                 .join("artifacts")
                 .join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {

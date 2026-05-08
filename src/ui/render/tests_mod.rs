@@ -51,6 +51,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         input_buffer: String::new(),
         input_cursor: 0,
         pending_view_path: None,
+        pending_post_view_phase: None,
         confirm_back: false,
         startup_origin: AppStartupOrigin::Default,
         run_launched: false,

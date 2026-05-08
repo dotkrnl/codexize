@@ -227,10 +227,27 @@ impl App {
             self.runner_supervisor.shutdown_all_runs();
             return Ok(true);
         }
+        self.maybe_apply_post_view_transition();
         self.maybe_yolo_auto_resolve();
         self.maybe_auto_launch();
         self.update_agent_progress();
         Ok(false)
+    }
+    /// Apply a phase transition that was deferred until the editor opened by
+    /// `pending_view_path` exited. Runs once per pending request; if the
+    /// transition is rejected (e.g. plan-schema validation against the edited
+    /// artifact) the error is surfaced through the boundary path so the
+    /// operator sees what blocked progress instead of a silently stuck modal.
+    fn maybe_apply_post_view_transition(&mut self) {
+        if self.pending_view_path.is_some() {
+            return;
+        }
+        let Some(phase) = self.pending_post_view_phase.take() else {
+            return;
+        };
+        if let Err(err) = self.transition_to_phase(phase) {
+            self.surface_boundary_error(err.to_string(), true);
+        }
     }
     /// Post-data-drain phase: watchdog evaluation and split-target sync after
     /// the runtime has applied any drained `DataEvent`s. Watchdog state is

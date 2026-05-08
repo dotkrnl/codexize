@@ -154,7 +154,11 @@ impl App {
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.clear_agent_error();
                 self.queue_view_of_current_artifact("plan.md");
-                let _ = self.transition_to_phase(Phase::ShardingRunning);
+                // Defer the ShardingRunning transition until *after* the
+                // editor closes. Otherwise plan-schema validation runs against
+                // the pre-edit copy, fails silently (the result was discarded
+                // by `let _ =`), and the modal stays up while vim still opens.
+                self.pending_post_view_phase = Some(Phase::ShardingRunning);
                 false
             }
             KeyCode::Char('n') => {
@@ -183,5 +187,150 @@ impl App {
             self.auto_approve_plan_review_pause("plan_approval");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::test_support::{key, mk_app, with_temp_root};
+    use crate::state::{self as session_state, Phase, SessionState};
+    use crossterm::event::KeyCode;
+
+    const VALID_PLAN: &str = r#"# Example Plan
+
+## Goal Description
+Ship the feature.
+
+## Acceptance Criteria
+- AC-1: cover the main path
+  - Positive Tests (expected to PASS):
+    - accepts a valid input
+  - Negative Tests (expected to FAIL):
+    - rejects an invalid input
+
+## Path Boundaries
+
+### Upper Bound (Maximum Scope)
+Ceiling.
+
+### Lower Bound (Minimum Scope)
+Floor.
+
+### Allowed Choices
+- Can use: existing helpers
+- Cannot use: new third-party crates
+
+## Dependencies and Sequence
+1. Milestone 1: implement it.
+"#;
+
+    const INVALID_PLAN: &str = r#"# Unstructured Plan
+
+## Not The Schema
+Missing every required section.
+"#;
+
+    fn write_plan(session_id: &str, body: &str) {
+        let path = session_state::session_dir(session_id)
+            .join("artifacts")
+            .join("plan.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    fn paused_app(session_label: &str, plan_body: &str) -> crate::app::App {
+        let mut state = SessionState::new(session_label.to_string());
+        state.current_phase = Phase::PlanReviewPaused;
+        write_plan(&state.session_id, plan_body);
+        mk_app(state)
+    }
+
+    #[test]
+    fn enter_in_paused_modal_defers_transition_until_after_editor() {
+        with_temp_root(|| {
+            let mut app = paused_app("plan-review-defer", INVALID_PLAN);
+            app.handle_plan_review_paused_modal_key(key(KeyCode::Enter));
+
+            // Phase must NOT advance synchronously: validation runs *after*
+            // the editor closes so the operator can fix the plan first.
+            assert_eq!(app.state.current_phase, Phase::PlanReviewPaused);
+            assert!(
+                app.pending_view_path.is_some(),
+                "editor must be queued for plan.md"
+            );
+            assert_eq!(
+                app.pending_post_view_phase,
+                Some(Phase::ShardingRunning),
+                "post-editor transition target must be recorded"
+            );
+            assert!(app.state.agent_error.is_none());
+        });
+    }
+
+    #[test]
+    fn post_editor_tick_advances_to_sharding_when_plan_validates() {
+        with_temp_root(|| {
+            let mut app = paused_app("plan-review-success", VALID_PLAN);
+            app.handle_plan_review_paused_modal_key(key(KeyCode::Enter));
+
+            // Simulate the runtime taking the queued path to launch the editor.
+            let _ = app.take_pending_view_path();
+
+            app.runtime_tick_before_data_drain()
+                .expect("tick must succeed");
+
+            assert_eq!(app.state.current_phase, Phase::ShardingRunning);
+            assert!(app.pending_post_view_phase.is_none());
+            assert!(app.state.agent_error.is_none());
+        });
+    }
+
+    #[test]
+    fn post_editor_tick_surfaces_error_when_plan_still_invalid() {
+        with_temp_root(|| {
+            let mut app = paused_app("plan-review-still-invalid", INVALID_PLAN);
+            app.handle_plan_review_paused_modal_key(key(KeyCode::Enter));
+
+            // Editor "ran" but the operator didn't fix the schema breakage.
+            let _ = app.take_pending_view_path();
+
+            app.runtime_tick_before_data_drain()
+                .expect("tick must succeed");
+
+            // Modal stays up so the operator can retry; the validation error
+            // surfaces through agent_error instead of being silently swallowed.
+            assert_eq!(app.state.current_phase, Phase::PlanReviewPaused);
+            assert!(app.pending_post_view_phase.is_none());
+            let err = app
+                .state
+                .agent_error
+                .as_deref()
+                .expect("validation error must surface");
+            assert!(
+                err.contains("plan schema validation failed"),
+                "unexpected error text: {err}"
+            );
+        });
+    }
+
+    #[test]
+    fn tick_before_editor_runs_does_not_apply_pending_transition() {
+        with_temp_root(|| {
+            let mut app = paused_app("plan-review-pre-editor", VALID_PLAN);
+            app.handle_plan_review_paused_modal_key(key(KeyCode::Enter));
+
+            // The runtime calls runtime_tick_before_data_drain *after* draining
+            // pending_view_path each iteration, but a stray tick before the
+            // editor opens must not race ahead and apply the transition.
+            app.runtime_tick_before_data_drain()
+                .expect("tick must succeed");
+
+            assert_eq!(app.state.current_phase, Phase::PlanReviewPaused);
+            assert_eq!(
+                app.pending_post_view_phase,
+                Some(Phase::ShardingRunning),
+                "transition stays deferred while editor is still queued"
+            );
+        });
     }
 }

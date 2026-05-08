@@ -16,9 +16,11 @@ use std::{
     time::Duration,
 };
 use tokio::process::Command;
+mod config;
 mod exit;
 mod supervise;
 mod transport;
+pub use config::{RunnerConfig, select_full_alignment};
 pub use exit::{FinishStamp, read_finish_stamp, validate_toml_artifacts, write_finish_stamp};
 pub use supervise::{RunId, Supervisor};
 #[cfg(test)]

@@ -1,8 +1,6 @@
-{project_doc_instr}You review the recovered plan after a recovery stage. NON-INTERACTIVE
-— no operator, no source-code edits, no VCS, no test runs.
+{project_doc_instr}You review the recovered plan after a recovery stage. NON-INTERACTIVE — no questions, code edits, VCS, or test runs.
 
-Heads up: the recovery agent who produced these artifacts is from a
-DIFFERENT model vendor — bring fresh eyes, that's the point of pairing.
+Heads up: the recovery agent is from a different model vendor — bring fresh eyes, the point of pairing.
 
 Inputs:
   - Spec: {spec}
@@ -37,10 +35,9 @@ Write `{output}` as TOML (REQUIRED). No prose around it; parse failure or schema
                                        # required unless approved with no issues
 
 Routing downstream:
-  - approved / refine → pipeline continues to sharding (refine carryover
-    has no consumer here, so it behaves like approved).
+  - approved / refine → pipeline continues to sharding (refine has no
+    carryover consumer here; it behaves like approved).
   - revise / human_blocked / agent_pivot → recovery re-runs with your
-    feedback. If the recovery artifact requested `trigger = "human_blocked"`,
-    the retry is interactive so the operator can decide.
+    feedback; `trigger = "human_blocked"` makes the retry interactive.
 {memory_context}
 {instr}

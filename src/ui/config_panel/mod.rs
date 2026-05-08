@@ -1406,8 +1406,7 @@ mod tests {
         let mut state = state_with_overrides();
         state.path = path.clone();
         crate::data::config::save_atomic_to(&path, &state.config).unwrap();
-        state.opened_mtime = mtime(&path);
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        state.opened_mtime = Some(SystemTime::UNIX_EPOCH);
         fs::write(&path, "[meta]\nversion = 1\n[ntfy]\nretry_attempts = 2\n").unwrap();
 
         state.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));

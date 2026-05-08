@@ -221,7 +221,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
         .join("artifacts/live_summary.final-validation-r1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
+        policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path, true),
         ..sample_request(VendorKind::Codex)
     };
 
@@ -306,7 +306,7 @@ fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
         .join(".codexize/sessions/session/artifacts/live_summary.dreaming-r2-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
+        policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path, true),
         ..sample_request(VendorKind::Codex)
     };
 
@@ -360,7 +360,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
         .join("artifacts/live_summary.simplifier-stage-r1-a1.txt");
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
-        policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
+        policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path, true),
         ..sample_request(VendorKind::Codex)
     };
 

@@ -95,6 +95,30 @@ impl Supervisor {
             AcpLaunchPolicy::default(),
         )
     }
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_interactive_with_policy(
+        &self,
+        run_id: RunId,
+        window_name: &str,
+        run: &AgentRun,
+        vendor: VendorKind,
+        run_key: &str,
+        artifacts_dir: &Path,
+        required_artifact: Option<&Path>,
+        policy: AcpLaunchPolicy,
+    ) -> Result<()> {
+        self.launch_managed(
+            run_id,
+            window_name,
+            run,
+            vendor,
+            run_key,
+            artifacts_dir,
+            required_artifact,
+            true,
+            policy,
+        )
+    }
     /// Launch an agent non-interactively inside the managed ACP runtime boundary.
     /// All agent child-process launches must route through the runner so that
     /// finish-stamp logic is guaranteed to run.

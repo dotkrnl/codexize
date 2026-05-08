@@ -167,6 +167,7 @@ fn absolutize_policy(p: &AcpLaunchPolicy) -> AcpResult<AcpLaunchPolicy> {
     Ok(AcpLaunchPolicy {
         allowed_write_paths: p.allowed_write_paths.iter().map(|p| absolutize(p)).collect::<AcpResult<Vec<_>>>()?,
         shell_policy: p.shell_policy.clone(), enforce_readonly_workspace: p.enforce_readonly_workspace,
+        memory_write_check: p.memory_write_check,
     })
 }
 #[rustfmt::skip]

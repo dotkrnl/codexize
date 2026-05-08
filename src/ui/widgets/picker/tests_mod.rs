@@ -965,26 +965,103 @@ fn config_panel_e_toggles_read_only_off() {
 }
 
 #[test]
+#[serial_test::serial]
 fn config_panel_save_in_picker_reloads_picker_config() {
-    // This is hard to test end-to-end without a real config file on disk,
-    // but we can verify it calls reload_config which we can check indirectly.
+    // Drive the full Ctrl-S → Saved → reload_config path with a real file:
+    // open the panel against a tempfile via CODEXIZE_CONFIG, mutate a
+    // path-affecting field, save, and verify the picker's sessions_root
+    // reflects the new value without re-instantiating the picker.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let other_root = dir.path().join("alt-sessions");
+    std::fs::write(
+        &path,
+        b"[meta]\nversion = 1\n[paths]\nsessions_root = \"/tmp/initial\"\n",
+    )
+    .unwrap();
+    let prev = std::env::var_os("CODEXIZE_CONFIG");
+    // SAFETY: serialized via #[serial]; restored unconditionally below.
+    unsafe {
+        std::env::set_var("CODEXIZE_CONFIG", &path);
+    }
+
     let mut picker = test_picker("", 0);
     picker.input_mode = false;
-    picker.execute_palette_command("config", "").unwrap();
+    picker
+        .execute_palette_command("config", "")
+        .expect("open config panel");
 
-    let panel = picker.config_panel.as_mut().unwrap();
+    let panel = picker.config_panel.as_mut().expect("panel open");
     panel.read_only = false;
-    // We can't easily trigger Saved outcome without a real file and matching mtime,
-    // but we can verify the handle_key logic for Saved.
+    // Stage a paths.sessions_root change so the saved file genuinely differs.
+    crate::data::config::mutate::set_value(
+        &mut panel.config,
+        "paths.sessions_root",
+        other_root.to_str().unwrap(),
+    )
+    .unwrap();
+    panel.dirty = true;
+
+    let outcome = picker
+        .handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .unwrap();
+    assert!(matches!(outcome, KeyAction::Continue));
+    assert!(
+        picker.config_panel.is_none(),
+        "Saved outcome must close the panel"
+    );
+    assert_eq!(
+        picker.sessions_root, other_root,
+        "reload_config must update sessions_root from the freshly-saved file"
+    );
+
+    unsafe {
+        match prev {
+            Some(v) => std::env::set_var("CODEXIZE_CONFIG", v),
+            None => std::env::remove_var("CODEXIZE_CONFIG"),
+        }
+    }
 }
 
 #[test]
+#[serial_test::serial]
 fn palette_config_handles_loader_error() {
+    // Force a parse error by pointing CODEXIZE_CONFIG at a malformed TOML
+    // file. The picker must keep config_panel = None and surface the
+    // failure on the status line so the operator sees what happened.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, b"not valid = = = toml\n[[broken\n").unwrap();
+    let prev = std::env::var_os("CODEXIZE_CONFIG");
+    // SAFETY: serialized via #[serial]; restored unconditionally below.
+    unsafe {
+        std::env::set_var("CODEXIZE_CONFIG", &path);
+    }
+
     let mut picker = test_picker("", 0);
     picker.input_mode = false;
+    picker
+        .execute_palette_command("config", "")
+        .expect("palette command must not bubble loader errors");
 
-    // Point to a non-existent path to trigger error (the loader should fail)
-    // Actually, config_path() is hardcoded.
-    // We can't easily override the path without more refactoring, but we can
-    // check if it sets a status message on error.
+    assert!(
+        picker.config_panel.is_none(),
+        "loader failure must not open the panel"
+    );
+    let status = picker
+        .status_line
+        .render()
+        .expect("status line message")
+        .to_string();
+    assert!(
+        status.to_lowercase().contains("config"),
+        "status line should mention config: {status}"
+    );
+
+    unsafe {
+        match prev {
+            Some(v) => std::env::set_var("CODEXIZE_CONFIG", v),
+            None => std::env::remove_var("CODEXIZE_CONFIG"),
+        }
+    }
 }

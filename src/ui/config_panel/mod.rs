@@ -360,8 +360,8 @@ pub(crate) enum PanelOutcome {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ConfigPanelState {
-    config: Config,
-    path: PathBuf,
+    pub(crate) config: Config,
+    pub(crate) path: PathBuf,
     opened_mtime: Option<SystemTime>,
     selected_section: usize,
     selected_field: usize,
@@ -418,6 +418,15 @@ impl ConfigPanelState {
             return outcome;
         }
         if self.editing.is_some() {
+            if self.read_only {
+                // Defensive: `Enter` is gated so editing should not be set in
+                // read-only mode through the normal flow. If a caller forces
+                // `editing = Some(...)`, refuse to mutate; only Esc unwinds.
+                if matches!(key.code, KeyCode::Esc) {
+                    self.editing = None;
+                }
+                return PanelOutcome::KeepOpen;
+            }
             self.handle_edit_key(key);
             return PanelOutcome::KeepOpen;
         }
@@ -1759,6 +1768,37 @@ mod tests {
         focus_field(&mut state, "ntfy.enabled");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         insta::assert_snapshot!(render_to_text(&state, 80, 18));
+    }
+
+    #[test]
+    fn read_only_blocks_dropdown_commit_even_if_editing_is_forced() {
+        // The natural flow gates `Enter` so editing cannot be opened while
+        // read_only is true; this defensive check verifies a forcibly-set
+        // Choice editing state still cannot mutate the underlying value.
+        let mut state = state_with_overrides();
+        state.read_only = true;
+        focus_field(&mut state, "ntfy.enabled");
+        let value_before = state.value_for(state.current_meta().unwrap());
+        let dirty_before = state.dirty;
+        state.editing = Some(Editing::Choice {
+            key: "ntfy.enabled",
+            options: vec!["true".to_string(), "false".to_string()],
+            selected: 1,
+        });
+
+        // Enter would normally commit "false" — must be ignored in read-only.
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
+        assert_eq!(state.dirty, dirty_before);
+
+        // Down arrow would normally move highlight; mutation keys must be inert.
+        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
+        assert_eq!(state.dirty, dirty_before);
+
+        // Esc unwinds the forced-edit state defensively.
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(state.editing.is_none());
     }
 
     #[test]

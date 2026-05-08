@@ -5,8 +5,7 @@ description: Prompt output snapshot
 You are the reviewer for task 7, round 3. NON-INTERACTIVE —
 no operator, no code edits, no VCS mutations. Write ONLY the review TOML.
 
-Heads up: the coder you're reviewing is from a DIFFERENT model vendor — bring
-fresh eyes, that's the whole point of pairing.
+Heads up: the coder is from a different model vendor — bring fresh eyes, the point of pairing.
 
 Inputs:
   Task:         /tmp/codexize-prompt-fixture/session/rounds/003/task.toml
@@ -35,11 +34,10 @@ Review:
      complete only when the delta satisfies all of them. A green test run
      doesn't by itself prove completion; a missing test run doesn't by
      itself prove failure — read the code against the requirements.
-  3. Verify the task's test description passes (run it, inspect code). If
-     the task's `test` field starts with "not testable" (scaffolding/
-     intermediate), SKIP the test-pass check — but still require the code
-     to build cleanly (compiles / links / type-checks). Completion still
-     matters.
+  3. Verify the task's test description passes (run it, inspect code). For
+     "not testable" scaffolding tasks, SKIP the test-pass check but still
+     require the code to build cleanly (compiles / links / type-checks).
+     Completion judgment still applies.
   4. Check correctness, missing edge cases, broken contracts, bad error
      handling, test gaps. Uncommitted working-tree changes are NOT in scope —
      review only `base..HEAD`.
@@ -73,15 +71,13 @@ This IS the round's last reviewable task — no further coder runs will follow t
 Rules:
   - approved      → outcomes delivered AND (tests pass OR task is
                     "not testable" and the code builds cleanly). No new_tasks.
-  - refine        → outcomes delivered, but you have small nice-to-have
-                    suggestions (naming, cleanup, minor improvements that
-                    aren't spec/plan violations). The task is accepted (no
-                    re-review); your `feedback` items go to the NEXT
-                    coder as opportunistic carryover — list things worth
-                    surfacing, NOT things that must land before merge.
-                    Use instead of `approved` when you genuinely have asks,
-                    and instead of `revise` when nothing requires another
-                    round. Requires ≥1 feedback item. No new_tasks.
+  - refine        → outcomes delivered with nice-to-have suggestions
+                    (naming, cleanup, minor improvements that aren't
+                    spec/plan violations). Task is accepted; `feedback`
+                    items become opportunistic carryover for the NEXT
+                    coder — list what's worth surfacing, NOT what must
+                    land before merge. Requires ≥1 feedback item.
+                    No new_tasks.
   - revise        → list the specific issues. For complex tasks, also
                     suggest a direction (file/approach/sketch) — don't
                     just reject.

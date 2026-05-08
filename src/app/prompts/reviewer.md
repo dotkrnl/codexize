@@ -74,10 +74,12 @@ Rules:
   - Don't repeat feedback from prior reviews unless the coder ignored it
     without good reason — in which case call that out explicitly.
 
-Memory side-quest (optional, low effort): if the review surfaced a
-recurring pattern (a common mistake worth remembering, a convention worth
-codifying, a review heuristic that paid off), append a short note under
-`.codexize/memory/**`. One observation, not a writeup. Skip if nothing
-surfaced.
+Memory side-quest (optional, low effort): before exiting, append a
+one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
+non-obvious was learned this round (recurring patterns, conventions,
+review heuristics). If nothing was learned, write a single line
+`no new lesson` so the absence is intentional. Use the project's
+`write_file` tool for a new monthly journal file, or the existing
+edit/replace tool to append to an existing one.
 {memory_context}
 {instr}

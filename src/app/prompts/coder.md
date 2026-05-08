@@ -77,9 +77,12 @@ If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator
 independently verifies the working tree is clean — a dirty tree fails the run.
 
-Memory side-quest (optional, low effort): if you hit a vendor quirk, an
-architectural constraint, or a non-obvious pitfall while implementing,
-append a short note under `.codexize/memory/**`. Keep it bounded — a single
-observation, not a writeup. Skip if nothing surfaced.
+Memory side-quest (optional, low effort): before exiting, append a
+one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
+non-obvious was learned this round (vendor quirks, architectural
+constraints, pitfalls). If nothing was learned, write a single line
+`no new lesson` so the absence is intentional. Use the project's
+`write_file` tool for a new monthly journal file, or the existing
+edit/replace tool to append to an existing one.
 {memory_context}
 {instr}

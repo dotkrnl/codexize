@@ -17,6 +17,7 @@ mod notifications;
 mod observation;
 pub(crate) use crate::ui::config_panel;
 pub(crate) use crate::ui::palette;
+mod prior_attempts;
 mod prompt_builders;
 mod prompt_ctx;
 mod prompt_support;

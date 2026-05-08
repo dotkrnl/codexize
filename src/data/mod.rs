@@ -8,6 +8,7 @@ pub(crate) mod async_bridge;
 pub mod atomic;
 pub mod cache;
 pub mod cache_lock;
+pub mod config;
 pub mod dashboard_io;
 pub(crate) mod dashboard_model;
 pub mod events;

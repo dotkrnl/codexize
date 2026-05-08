@@ -1,5 +1,4 @@
 use super::*;
-use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -443,6 +442,7 @@ struct RecordedRequest {
     method: String,
     path: String,
     headers: Vec<(String, String)>,
+    #[allow(dead_code)]
     body: String,
 }
 

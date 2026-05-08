@@ -289,6 +289,8 @@ pub struct App {
     /// (ntfy, ACP, runner, paths, diagnostics, memory, UI) is derived
     /// from this single `Arc<Config>` — load-on-launch, no global static.
     pub(crate) config: std::sync::Arc<crate::data::config::Config>,
+    /// Pre-extracted read-only view of `[memory]`.
+    pub(crate) memory_view: crate::data::config::view::MemoryView,
     /// Pre-extracted read-only view of `[paths]` with `$HOME` already
     /// expanded at load time. All path resolution inside `App` and its
     /// stages flows through this struct so operators can independently

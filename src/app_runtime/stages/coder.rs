@@ -83,6 +83,7 @@ impl App {
             &live_summary_path,
             resume,
             &refine_carryover,
+            self.memory_view.max_topics_per_read,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.surface_boundary_error(format!("error writing prompt: {e}"), true);

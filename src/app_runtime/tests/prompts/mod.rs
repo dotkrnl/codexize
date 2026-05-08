@@ -104,6 +104,7 @@ fn prompt_insta_snapshots_match_fixtures() {
             &spec.display().to_string(),
             &spec_review_out.display().to_string(),
             &live.display().to_string(),
+            6,
         );
         assert_memory_block("spec_review", &spec_review);
         assert_prompt_insta_snapshot("spec_review", &spec_review);
@@ -115,6 +116,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &plan_review_r1_out.display().to_string(),
                 1,
                 &live.display().to_string(),
+                6,
             ),
         );
         assert_prompt_insta_snapshot(
@@ -125,6 +127,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &plan_review_r3_out.display().to_string(),
                 3,
                 &live.display().to_string(),
+                6,
             ),
         );
 
@@ -137,6 +140,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &summary.display().to_string(),
                 &live.display().to_string(),
                 false,
+                6,
             ),
         );
         assert_prompt_insta_snapshot(
@@ -147,6 +151,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &summary.display().to_string(),
                 &live.display().to_string(),
                 true,
+                6,
             ),
         );
 
@@ -156,15 +161,15 @@ fn prompt_insta_snapshots_match_fixtures() {
         ];
         assert_prompt_insta_snapshot(
             "planning_interactive",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, false),
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, false, 6),
         );
         assert_prompt_insta_snapshot(
             "planning_yolo",
-            &planning_prompt(&spec, &spec_reviews, &plan, &live, true),
+            &planning_prompt(&spec, &spec_reviews, &plan, &live, true, 6),
         );
         assert_prompt_insta_snapshot(
             "sharding",
-            &sharding_prompt(&spec, &plan, &tasks_path, &live),
+            &sharding_prompt(&spec, &plan, &tasks_path, &live, 6),
         );
         assert_prompt_insta_snapshot(
             "final_validation",
@@ -174,12 +179,14 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &final_verdict_r3,
                 &live,
                 None,
+                6,
             ),
         );
         let dreaming = dreaming_prompt(
             &session_dir,
             &session_dir.join("memory/dreams/dream-0001.toml"),
             &live,
+            6,
         );
         assert_capture_lessons_block("dreaming", &dreaming);
         assert_prompt_insta_snapshot("dreaming", &dreaming);
@@ -196,6 +203,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &live,
                 &recovery,
                 true,
+                6,
             ),
         );
         assert_prompt_insta_snapshot(
@@ -211,6 +219,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &live,
                 &recovery,
                 false,
+                6,
             ),
         );
         assert_prompt_insta_snapshot(
@@ -222,13 +231,14 @@ fn prompt_insta_snapshots_match_fixtures() {
                 &recovery,
                 &live,
                 &plan_review_r1_out,
+                6,
             ),
         );
         assert_prompt_insta_snapshot(
             "recovery_sharding",
-            &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5),
+            &recovery_sharding_prompt(&spec, &plan, &live, &tasks_path, &[1, 2], 5, 6),
         );
-        let coder_r1 = coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[]);
+        let coder_r1 = coder_prompt(&session_dir, 7, 1, &task_file_r1, &live, false, &[], 6);
         assert_capture_lessons_block("coder_round1", &coder_r1);
         assert_prompt_insta_snapshot("coder_round1", &coder_r1);
         let prev_review_path = session_dir.join("rounds/002/review.toml");
@@ -247,6 +257,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                     "carry-1: prefer streaming reads".to_string(),
                     "carry-2: tighten error handling".to_string(),
                 ],
+                6,
             ),
         );
         let reviewer_r1 = reviewer_prompt(ReviewerPromptInputs {
@@ -259,6 +270,7 @@ fn prompt_insta_snapshots_match_fixtures() {
             review_file: &review_r1,
             live_summary_path: &live,
             is_terminal_review: false,
+            max_topics_per_read: 6,
         });
         assert_capture_lessons_block("reviewer_round1", &reviewer_r1);
         assert_prompt_insta_snapshot("reviewer_round1", &reviewer_r1);
@@ -275,11 +287,12 @@ fn prompt_insta_snapshots_match_fixtures() {
                 review_file: &review_r3,
                 live_summary_path: &live,
                 is_terminal_review: true,
+                max_topics_per_read: 6,
             }),
         );
         assert_prompt_insta_snapshot(
             "simplifier",
-            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live, &[]),
+            &simplifier_prompt(&session_dir, &review_scope_r1, &simplification, &live, &[], 6),
         );
         assert_prompt_insta_snapshot(
             "simplifier_with_refine",
@@ -292,6 +305,7 @@ fn prompt_insta_snapshots_match_fixtures() {
                     "rename internal `foo` helper to `parse_foo`".to_string(),
                     "tighten error message in load path".to_string(),
                 ],
+                6,
             ),
         );
     });

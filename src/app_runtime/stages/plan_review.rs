@@ -69,6 +69,7 @@ impl App {
             &review_path.display().to_string(),
             round,
             &live_summary_path.display().to_string(),
+            self.memory_view.max_topics_per_read,
         );
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);

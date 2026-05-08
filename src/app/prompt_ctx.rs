@@ -6,14 +6,20 @@ use std::{
 use crate::logic::memory::{memory_root_from_session_path, normalize_absolute};
 pub(super) struct PromptCtx {
     values: HashMap<&'static str, String>,
+    max_topics_per_read: u32,
 }
 impl PromptCtx {
     pub(super) fn new() -> Self {
         let mut ctx = Self {
             values: HashMap::new(),
+            max_topics_per_read: 6,
         };
         ctx.set("project_doc_instr", project_doc_instr());
         ctx
+    }
+    pub(super) fn set_max_topics_per_read(&mut self, v: u32) -> &mut Self {
+        self.max_topics_per_read = v;
+        self
     }
     pub(super) fn set(&mut self, key: &'static str, value: impl Into<String>) -> &mut Self {
         self.values.insert(key, value.into());
@@ -60,6 +66,7 @@ impl PromptCtx {
                     "memory_manifest",
                     self.path(memory_root.join("manifest.toml")),
                 ),
+                ("max_topics_per_read", self.max_topics_per_read.to_string()),
             ],
         );
         self.set("memory_context", rendered)

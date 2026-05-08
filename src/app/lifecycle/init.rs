@@ -45,6 +45,7 @@ impl App {
         );
         let messages = SessionState::load_messages(&state.session_id).unwrap_or_default();
         let paths_view = config.paths_view();
+        let memory_view = config.memory_view();
         if state.builder.task_titles.is_empty() {
             let tasks_path = paths_view.sessions_root.join(&state.session_id)
                 .join("artifacts")
@@ -121,6 +122,7 @@ impl App {
             interactive_wait_marker: None,
             config,
             paths: paths_view,
+            memory_view,
             #[cfg(test)]
             test_launch_harness: None,
             messages,

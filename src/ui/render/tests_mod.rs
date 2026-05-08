@@ -18,6 +18,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
     state.agent_runs = runs;
     let config = std::sync::Arc::new(crate::data::config::Config::baked_defaults());
     let paths = config.paths_view();
+    let memory_view = config.memory_view();
     let selected_key = node_key_at_path(&nodes, &[0]);
     let visible_rows = flatten_visible_rows(&nodes, |row| row.is_expandable());
     let collapsed_overrides = visible_rows
@@ -80,6 +81,7 @@ fn test_app(nodes: Vec<Node>, runs: Vec<RunRecord>, messages: Vec<Message>) -> A
         interactive_wait_marker: None,
         config,
         paths,
+        memory_view,
         watchdog: super::super::watchdog::WatchdogRegistry::new(),
         test_launch_harness: None,
         messages,

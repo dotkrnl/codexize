@@ -61,7 +61,7 @@ impl App {
 
         let attempt = self.attempt_for("dreaming", None, round);
         let live_summary_path = self.live_summary_path_for_run("dreaming", None, round, attempt);
-        let prompt = dreaming_prompt(&session_dir, &dream_report_path, &live_summary_path);
+        let prompt = dreaming_prompt(&session_dir, &dream_report_path, &live_summary_path, self.memory_view.max_topics_per_read);
         let prompt_path = session_dir
             .join("prompts")
             .join(format!("dreaming-r{round}.md"));

@@ -69,6 +69,7 @@ impl App {
             &summary_path.display().to_string(),
             &live_summary_path.display().to_string(),
             modes.yolo,
+            self.memory_view.max_topics_per_read,
         );
         if let Err(e) = std::fs::write(&prompt_path, &prompt) {
             self.record_agent_error(format!("error writing prompt: {e}"));

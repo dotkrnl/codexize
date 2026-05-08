@@ -5,8 +5,7 @@ This is a FULL-ALIGNMENT review round (cadence-triggered). Your job is wider
 than a regular round: re-anchor on the entire plan and audit cumulative
 coverage so per-round drift gets caught here rather than at FinalValidation.
 
-Heads up: the coder you're reviewing is from a DIFFERENT model vendor — bring
-fresh eyes, that's the whole point of pairing.
+Heads up: the coder is from a different model vendor — bring fresh eyes, the point of pairing.
 
 Inputs:
   Task:         {task}
@@ -28,48 +27,35 @@ Review:
      complete only when the delta satisfies all of them. A green test run
      doesn't by itself prove completion; a missing test run doesn't by
      itself prove failure — read the code against the requirements.
-  3. Verify the task's test description passes (run it, inspect code). If
-     the task's `test` field starts with "not testable" (scaffolding/
-     intermediate), SKIP the test-pass check — but still require the code
-     to build cleanly (compiles / links / type-checks). Completion still
-     matters.
-  4. FULL-ALIGNMENT PASS — re-read the **entire plan** at {plan} (not just
-     this round's task). Then read every prior round summary under the
-     session's `artifacts/` directory (and the per-round `coder_summary.toml`
-     / `review.toml` files under `rounds/NNN/`) to judge **cumulative**
-     coverage across rounds 1..{round}. The goal is to catch drift the
-     per-round reviews could not see.
+  3. Verify the task's test description passes (run it, inspect code). For
+     "not testable" scaffolding tasks, SKIP the test-pass check but still
+     require the code to build cleanly (compiles / links / type-checks).
+     Completion judgment still applies.
+  4. FULL-ALIGNMENT PASS — re-read the entire plan at {plan} (not just this
+     round's task), then walk every prior `coder_summary.toml` / `review.toml`
+     under `rounds/NNN/` to judge cumulative coverage across rounds 1..{round}.
+     Catch drift the per-round reviews missed.
 
-       a. Walk every `AC-N` block in `## Acceptance Criteria`. For each, label
-          it `covered` / `partial` / `missed` based on the accumulated work so
-          far. A `covered` AC has both its Positive and Negative test cases
-          either landed or visibly addressed by an existing test that maps
-          to that AC; `partial` means some cases shipped but not all; `missed`
-          means no round has produced work that maps to the AC yet.
-       b. Audit `## Path Boundaries`. For each finding write a one-liner:
-            - Over Upper Bound: implementation has expanded scope past the
-              ceiling (over-engineering / scope creep beyond Maximum Scope).
-            - Under Lower Bound: implementation has not yet reached the
-              minimum-viable floor (under-delivery).
-            - Allowed Choices: any use of items listed in `Cannot use:`, or
-              avoidance of items required by `Can use:`.
-          Boundaries are advisory: surface drift, do not block on a soft
-          over/under-shoot — that is what the verdict (`refine` vs `revise`)
-          is for.
+       a. Label each `AC-N` block in `## Acceptance Criteria` as
+          `covered` / `partial` / `missed` based on accumulated work.
+          `covered` = both Positive and Negative cases landed or addressed by
+          an existing test mapping to the AC; `partial` = some cases shipped;
+          `missed` = no round has produced mapped work yet.
+       b. Audit `## Path Boundaries`. One line per finding:
+            - Over Upper Bound: scope past the ceiling (over-engineering).
+            - Under Lower Bound: minimum-viable floor not yet reached.
+            - Allowed Choices: use of `Cannot use:` items or absence of
+              required `Can use:` items.
+          Boundaries are advisory: surface drift, do not block on soft
+          over/under-shoots — the verdict (`refine` vs `revise`) handles that.
        c. Enumerate forgotten items in `## Dependencies and Sequence`:
-          milestones / phases that no round so far has touched. Call out each
-          by its plan label so the next round can pick them up.
+          milestones / phases no round has touched. Cite each by plan label.
 {review_scope_text}{terminal_review_block}
 
-# IMPORTANT: emit ONLY the TOML below to {review} — no prose around it.
-# Parse failure = run failure. Use double-quoted strings; triple-quoted for
-# multi-line; arrays of inline tables for any new_task refs.
-#
-# Outer artifact shape MUST match the regular reviewer (status / summary /
-# feedback / new_tasks). Add EXACTLY one extra section: `## AC Coverage Audit`
-# inside the `summary` triple-quoted string, formatted as a markdown sub-block
-# the orchestrator can show to the operator. Do not add any other new keys
-# — the review-result reader only knows the fields below.
+Before exiting, write `{review}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
+
+Outer shape matches the regular reviewer (status / summary / feedback / new_tasks). Embed the
+`## AC Coverage Audit` markdown sub-block inside the `summary` triple-quoted string.
 
     status  = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary = """One-paragraph verdict, then the AC Coverage Audit block:
@@ -103,15 +89,13 @@ Rules:
                     `missed` AC and no Path-Boundary drift severe enough to
                     require rework. The AC Coverage Audit block is still
                     required even on approved. No new_tasks.
-  - refine        → outcomes delivered, but you have small nice-to-have
-                    suggestions (naming, cleanup, minor improvements that
-                    aren't spec/plan violations). The task is accepted (no
-                    re-review); your `feedback` items go to the NEXT
-                    coder as opportunistic carryover — list things worth
-                    surfacing, NOT things that must land before merge.
-                    Use instead of `approved` when you genuinely have asks,
-                    and instead of `revise` when nothing requires another
-                    round. Requires ≥1 feedback item. No new_tasks.
+  - refine        → outcomes delivered with nice-to-have suggestions
+                    (naming, cleanup, minor improvements that aren't
+                    spec/plan violations). Task is accepted; `feedback`
+                    items become opportunistic carryover for the NEXT
+                    coder — list what's worth surfacing, NOT what must
+                    land before merge. Requires ≥1 feedback item.
+                    No new_tasks.
   - revise        → list the specific issues. For complex tasks, also
                     suggest a direction (file/approach/sketch) — don't
                     just reject. Use this when the audit surfaces a

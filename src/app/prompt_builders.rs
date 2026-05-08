@@ -329,7 +329,7 @@ fn build_reviewer_ctx(inputs: &ReviewerPromptInputs<'_>) -> PromptCtx {
         String::new()
     };
     let coder_summary_section = inputs.coder_summary_file.map_or(String::new(), |path| {
-        formatdoc!("  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n    Rebuttal entries use the prefix \"[Round N, Item M]\".\n", ctx.path(path), inputs.round)
+        formatdoc!("  Coder summary: {}\n  Coder rebuttal (round {}):\n    Read it before your verdict.\n    If the coder rebuts prior feedback convincingly, do not repeat that item as blocking feedback.\n", ctx.path(path), inputs.round)
     });
     let terminal_review_block = if inputs.is_terminal_review {
         "\nThis IS the round's last reviewable task — no further coder runs will follow this approval. `refine` is therefore not available: its carryover would either be silently dropped (YOLO skips the simplifier and transitions straight to Done) or only opportunistically applied by the simplifier. You MUST use `approved` (if the delta is acceptable as-is) or `revise` (if the items must land before merge — that re-runs THIS task in the next round). The orchestrator will reject `status = \"refine\"` on this run.\n".to_string()

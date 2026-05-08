@@ -67,11 +67,11 @@ Hard rules:
     rather than bypassing the ignore.
 
 Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
-    status       = "done" | "partial"      # "partial" makes the run retry
-    summary      = "One short paragraph of what you completed."
-    rebuttal     = ["[Round N, Item M] Response to prior reviewer feedback."]
-                                            # only when prior feedback was wrong or already
-                                            # addressed; prefix each item with [Round N, Item M]
+    status   = "done" | "partial"   # "partial" makes the run retry
+    summary  = "One short paragraph of what you completed."
+    rebuttal = ["Response to prior reviewer feedback."]
+                                    # only when prior feedback was wrong or
+                                    # already addressed; one entry per item
 
 If the task was already complete and you committed nothing, status = "done"
 with the reason in summary — that's not a failure. The orchestrator

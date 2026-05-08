@@ -35,6 +35,12 @@ struct ManagedAcpRunResult {
     enforce_readonly: bool,
     journal_mtime_before: Option<std::time::SystemTime>,
 }
+fn get_journal_mtime(cwd: &std::path::Path) -> Option<std::time::SystemTime> {
+    fs::metadata(journal_path(cwd))
+        .and_then(|m| m.modified())
+        .ok()
+}
+
 fn run_managed_acp_launch(
     launch: ManagedAcpLaunch,
     cancel: &CancelSignal,
@@ -44,9 +50,7 @@ fn run_managed_acp_launch(
     let head_before = git_rev_parse_head().unwrap_or_default();
     let enforce_readonly = launch.resolved.session.policy.enforce_readonly_workspace;
     let journal_mtime_before = if launch.resolved.session.policy.memory_write_check {
-        fs::metadata(journal_path(&launch.resolved.session.cwd))
-            .and_then(|m| m.modified())
-            .ok()
+        get_journal_mtime(&launch.resolved.session.cwd)
     } else {
         None
     };
@@ -461,9 +465,7 @@ pub(super) async fn finalize_managed_acp_launch(
             )
             .await;
             if launch.resolved.session.policy.memory_write_check && outcome.exit_code == 0 {
-                let journal_mtime_after = fs::metadata(journal_path(&launch.resolved.session.cwd))
-                    .and_then(|m| m.modified())
-                    .ok();
+                let journal_mtime_after = get_journal_mtime(&launch.resolved.session.cwd);
                 if journal_mtime_after == result.journal_mtime_before {
                     crate::runner::transport::persist_system_warning(
                         &launch,

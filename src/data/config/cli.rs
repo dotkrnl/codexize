@@ -164,13 +164,23 @@ pub fn run_reset(
 /// `codexize config validate [<path>]` — parse + validate the file at
 /// `path` (or [`effective_path`] when `None`). Prints `ok` on success;
 /// returns the error verbatim on failure so the caller surfaces it.
+/// When the default config path is used and doesn't exist, prints a note
+/// to stderr so the operator has a signal that baked defaults were validated
+/// rather than their file.
 pub fn run_validate(path: Option<&Path>, out: &mut dyn Write) -> Result<()> {
     let resolved: PathBuf = match path {
         Some(p) => p.to_path_buf(),
         None => effective_path(),
     };
+    let file_existed = resolved.exists();
     match load_from_path(&resolved) {
         Ok(_) => {
+            if !file_existed {
+                eprintln!(
+                    "note: no file at {}; baked defaults are valid",
+                    resolved.display()
+                );
+            }
             writeln!(out, "ok")?;
             Ok(())
         }
@@ -502,5 +512,46 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("CODEXIZE_ACP_"));
         assert!(!p.exists(), "validation failure must not write the file");
+    }
+
+    #[test]
+    #[serial]
+    fn ntfy_reset_preserves_created_at_on_second_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        let _g = EnvGuard::install(&p);
+
+        let cfg1 = ntfy_reset_topic().expect("first mint");
+        let original_created_at = cfg1.ntfy.created_at.value().clone();
+        let topic1 = cfg1.ntfy.topic.value().clone();
+        assert!(original_created_at.is_some(), "created_at must be set on first mint");
+        assert!(!topic1.is_empty());
+
+        run_unset("ntfy.topic", &mut out_string()).unwrap();
+        let cfg2 = ntfy_reset_topic().expect("second mint after unset");
+        assert_ne!(cfg2.ntfy.topic.value(), &topic1, "topic should have changed");
+        // created_at round-trips through RFC3339 (seconds-only), so compare
+        // at second precision rather than expecting nanosecond equality.
+        assert_eq!(
+            cfg2.ntfy.created_at.value().map(|t| t.timestamp()),
+            original_created_at.map(|t| t.timestamp()),
+            "created_at must survive a re-mint even after unset"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn validate_missing_default_path_notes_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("config.toml");
+        // The file doesn't exist at the default path.
+        assert!(!p.exists());
+        let _g = EnvGuard::install(&p);
+        let mut buf = out_string();
+        // Validates baked defaults (ok) but should note absence on stderr.
+        run_validate(None, &mut buf).unwrap();
+        assert_eq!(into_string(buf).trim(), "ok");
+        // Stderr note is printed via eprintln; we don't capture it here,
+        // but the test exercises the ENOENT branch and confirms it succeeds.
     }
 }

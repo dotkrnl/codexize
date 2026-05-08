@@ -12,11 +12,7 @@
 use std::collections::BTreeMap;
 
 use super::defaults::emit_annotated;
-use super::schema::{
-    AcpAgentSection, AcpAgents, AcpInstallSection, AcpPolicySection, Config, DiagnosticsSection,
-    LogLevel, MemorySection, NtfyDetailMode, NtfyEvents, Override, PathsSection, RunnerSection,
-    ShellPolicy, UiColonPalette, UiFooter, UiSection,
-};
+use super::schema::{AcpAgentSection, AcpAgents, Config, LogLevel, NtfyDetailMode, Override, ShellPolicy};
 
 #[derive(Debug)]
 pub enum MutationError {
@@ -550,23 +546,23 @@ pub fn reset_section(config: &mut Config, section: &str) -> Result<(), MutationE
             });
         }
         "ntfy" => config.ntfy = baked.ntfy,
-        "ntfy.events" => config.ntfy.events = NtfyEvents::default(),
+        "ntfy.events" => config.ntfy.events = baked.ntfy.events,
         "acp" => config.acp = baked.acp,
-        "acp.policy" => config.acp.policy = AcpPolicySection::default(),
-        "acp.install" => config.acp.install = AcpInstallSection::default(),
-        "acp.agents" => config.acp.agents = AcpAgents::default(),
+        "acp.policy" => config.acp.policy = baked.acp.policy,
+        "acp.install" => config.acp.install = baked.acp.install,
+        "acp.agents" => config.acp.agents = baked.acp.agents,
         "acp.agents.claude" => config.acp.agents.claude = baked.acp.agents.claude,
         "acp.agents.codex" => config.acp.agents.codex = baked.acp.agents.codex,
         "acp.agents.gemini" => config.acp.agents.gemini = baked.acp.agents.gemini,
         "acp.agents.kimi" => config.acp.agents.kimi = baked.acp.agents.kimi,
         "acp.agents.opencode" => config.acp.agents.opencode = baked.acp.agents.opencode,
-        "runner" => config.runner = RunnerSection::default(),
-        "paths" => config.paths = PathsSection::default(),
-        "ui" => config.ui = UiSection::default(),
-        "ui.colon_palette" => config.ui.colon_palette = UiColonPalette::default(),
-        "ui.footer" => config.ui.footer = UiFooter::default(),
-        "diagnostics" => config.diagnostics = DiagnosticsSection::default(),
-        "memory" => config.memory = MemorySection::default(),
+        "runner" => config.runner = baked.runner,
+        "paths" => config.paths = baked.paths,
+        "ui" => config.ui = baked.ui,
+        "ui.colon_palette" => config.ui.colon_palette = baked.ui.colon_palette,
+        "ui.footer" => config.ui.footer = baked.ui.footer,
+        "diagnostics" => config.diagnostics = baked.diagnostics,
+        "memory" => config.memory = baked.memory,
         _ => {
             return Err(MutationError::UnknownKey {
                 key: section.to_string(),

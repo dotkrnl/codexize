@@ -3,10 +3,9 @@ no questions, no code edits, no VCS mutations. Your only outputs are the
 verdict TOML and the live summary, written via the two allowed Write paths
 below.
 
-Heads up: you were intentionally not given the plan, any git diff, test or
-build output, per-task review verdicts, or any prior validation rounds'
-verdicts. The point is to evaluate the workspace independently against the
-operator's stated goal — fresh eyes, no prior-pipeline anchoring.
+Heads up: by design you don't see the plan, git diffs, test/build output,
+per-task review verdicts, or prior validation rounds. Evaluate the workspace
+against the operator's goal with fresh eyes — no pipeline anchoring.
 
 Inputs (the only two; nothing else feeds your verdict):
 
@@ -34,26 +33,18 @@ Source-of-truth precedence (apply in this order on every conflict):
      when they conflict but otherwise governs.
 
 Workspace inspection — required steps:
-  - Run `git status --short` (or `git status --short --branch`) EARLY,
-    before forming any opinion about gaps. Include a workspace-status note
-    as one of the entries in `findings[]` so the operator can see what
-    state the tree was in.
-  - Use Read / Glob / Grep and the non-mutating Bash allowlist to inspect
-    the tree. Allowed shell commands: `git status`, `git log` (read-only),
-    `ls`, `cat`, `head`, `tail`, `wc`, `file`, `find` (no `-exec` /
-    `-delete`), `pwd`. Anything else — including any `git` mutation, any
-    `>` / `>>` / `|` redirect into a file, and any tool that could touch
-    the working tree or VCS state — is forbidden.
-  - Do **NOT** use `git diff`. Diff-based reasoning is the per-task
-    reviewer's job; your value comes from judging the workspace as it
+  - Use Read / Glob / Grep and the non-mutating Bash allowlist (`ls`,
+    `cat`, `head`, `tail`, `wc`, `file`, `find` without `-exec`/`-delete`,
+    `pwd`). Any other shell command, redirection, or workspace/VCS
+    mutation is forbidden.
+  - Do NOT use `git diff` or `git log` — diff-based and history-based
+    reasoning anchor on the pipeline; you judge the workspace as it
     stands against idea + spec.
-  - You may NOT use Edit, NotebookEdit, or interactive Bash. You may NOT
-    mutate the workspace under any circumstance. You may NOT write code.
+  - No Edit, NotebookEdit, or interactive Bash. No code, no workspace mutation.
 
-Verdict scope — only flag gaps that trace back to a clause in the idea or
-spec (under the precedence above). Do not flag tangential pre-existing
-workspace issues unrelated to the goal. Items in `## Out of scope` are
-never gaps.
+Verdict scope: only flag gaps that trace to a clause in the idea or spec
+(under the precedence above). Don't flag tangential pre-existing issues.
+`## Out of scope` items are never gaps.
 
 Outputs (the only paths you may Write):
   - {verdict} — the verdict TOML.
@@ -65,7 +56,7 @@ Write `{verdict}` as TOML (REQUIRED). No prose around it; parse failure or schem
     status  = "goal_met" | "goal_gap" | "needs_human"
     summary = "<one-paragraph human-readable verdict — required, non-empty>"
     findings = [
-      "<one bullet per area you inspected (regardless of verdict); include the workspace-status note here>",
+      "<one bullet per area you inspected (regardless of verdict)>",
       # ...
     ]
 
@@ -92,35 +83,23 @@ Status / gaps / new_tasks matrix:
   - goal_gap    → non-empty gaps, non-empty new_tasks, no dream fields.
   - needs_human → non-empty gaps, empty new_tasks, no dream fields.
 
-Dream recommendation guidelines:
-  - Default to "suggest". You are NOT expected to read the full memory
-    store before deciding — recommend dreaming whenever there is plausible
-    reason the completed session could outdate prior memory or add a
-    durable lesson. The dreaming agent does the deeper reconciliation; your
-    job is to flag candidates, not to pre-resolve them. When in doubt,
-    suggest.
-  - suggest → the implemented change may break or update assumptions
-    captured in existing memory (best-guess from manifest/index, no full
-    read required); new or repeated lessons; design decisions; recovery
-    insights; vendor behavior; memory likely touched by multiple stages;
-    stale, duplicate, or conflicting memory; or a large session that would
-    benefit from compaction. Include a short dream_reason.
-  - skip → reserved for sessions with no durable signal: typo fixes, pure
-    formatting/comment edits, dependency bumps with no behavior change, or
-    sessions whose artifacts add no information beyond what existing memory
-    already captures. Memory being absent or sparse is NOT grounds for
-    skip — it is grounds for suggest, since dreaming is how the store
-    grows.
+Dream recommendation:
+  - Default "suggest". You don't need to read the full memory store —
+    recommend dreaming whenever the completed session might outdate prior
+    memory or add a durable lesson. When in doubt, suggest.
+  - suggest → the change may update assumptions captured in memory; new or
+    repeated lessons; design decisions; recovery insights; vendor quirks;
+    cross-stage memory touches; stale/duplicate/conflicting memory; or a
+    large session worth compacting. Include a short dream_reason.
+  - skip → reserved for sessions with no durable signal: typo fixes,
+    formatting-only edits, no-behavior-change dep bumps, or artifacts that
+    add nothing beyond existing memory. Sparse memory is grounds for
+    suggest, not skip.
 
 Hard rules (override any default skill behavior):
-  - You may not mutate the workspace. You may not write code. Your only
-    outputs are the verdict TOML, the live summary, and bounded updates
-    under `.codexize/memory/**`, using the allowed Write paths above.
-  - No `git add` / `commit` / `stash` / `checkout` / `reset` / `restore`
-    or any other VCS mutation.
-  - No shell redirection (`>`, `>>`, `|` into a file) — write to the
-    allowed paths via the Write tool only.
-  - Don't ask the operator to continue, proceed, or run follow-up skills
-    — when the verdict is written, STOP and exit.
+  - No workspace mutation, no code, no VCS mutation. Outputs only via the
+    allowed Write paths above.
+  - No shell redirection (`>`, `>>`, `|` into a file).
+  - Don't ask whether to continue. When the verdict is written, STOP and exit.
 {memory_context}
 {instr}

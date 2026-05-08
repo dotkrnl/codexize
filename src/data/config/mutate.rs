@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 
 use super::defaults::emit_annotated;
+use super::fmt::format_string_array as format_array;
 use super::schema::{AcpAgentSection, AcpAgents, Config, LogLevel, NtfyDetailMode, Override, ShellPolicy};
 
 #[derive(Debug)]
@@ -668,42 +669,6 @@ fn parse_string_list(raw: &str) -> Vec<String> {
     }
     out.push(cur.trim().to_string());
     out.into_iter().filter(|s| !s.is_empty()).collect()
-}
-
-fn format_array(items: &[String]) -> String {
-    if items.is_empty() {
-        return "[]".to_string();
-    }
-    let mut s = String::from("[");
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            s.push_str(", ");
-        }
-        s.push_str(&toml_quote(item));
-    }
-    s.push(']');
-    s
-}
-
-fn toml_quote(value: &str) -> String {
-    let mut s = String::with_capacity(value.len() + 2);
-    s.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => s.push_str("\\\""),
-            '\\' => s.push_str("\\\\"),
-            '\n' => s.push_str("\\n"),
-            '\r' => s.push_str("\\r"),
-            '\t' => s.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                use std::fmt::Write as _;
-                let _ = write!(s, "\\u{:04X}", c as u32);
-            }
-            c => s.push(c),
-        }
-    }
-    s.push('"');
-    s
 }
 
 /// Pull the requested section out of the canonical annotated dump. Used

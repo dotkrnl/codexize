@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod defaults;
+pub mod fmt;
 pub mod loader;
 pub mod mutate;
 pub mod paths;

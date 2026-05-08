@@ -8,6 +8,7 @@
 
 use std::fmt::Write as _;
 
+use super::fmt::{format_inline_env, format_string_array, toml_quote as quote};
 use super::schema::{AcpAgentSection, Config};
 
 /// Render the canonical fully-populated annotated TOML for `config`.
@@ -189,60 +190,6 @@ fn emit_agent(out: &mut String, vendor: &str, agent: &AcpAgentSection) {
     writeln!(out, "program = {}", quote(agent.program.value())).ok();
     writeln!(out, "args = {}", format_string_array(agent.args.value())).ok();
     writeln!(out, "env = {}", format_inline_env(agent.env.value())).ok();
-}
-
-fn quote(value: &str) -> String {
-    let mut s = String::with_capacity(value.len() + 2);
-    s.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => s.push_str("\\\""),
-            '\\' => s.push_str("\\\\"),
-            '\n' => s.push_str("\\n"),
-            '\r' => s.push_str("\\r"),
-            '\t' => s.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                write!(s, "\\u{:04X}", c as u32).ok();
-            }
-            c => s.push(c),
-        }
-    }
-    s.push('"');
-    s
-}
-
-fn format_string_array(items: &[String]) -> String {
-    if items.is_empty() {
-        return "[]".to_string();
-    }
-    let mut s = String::from("[");
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            s.push_str(", ");
-        }
-        s.push_str(&quote(item));
-    }
-    s.push(']');
-    s
-}
-
-fn format_inline_env(env: &std::collections::BTreeMap<String, String>) -> String {
-    if env.is_empty() {
-        return "{}".to_string();
-    }
-    let mut s = String::from("{ ");
-    for (i, (k, v)) in env.iter().enumerate() {
-        if i > 0 {
-            s.push_str(", ");
-        }
-        // Keys per validation never contain `=` or NUL, but quote
-        // defensively so any future widening of allowed chars stays valid.
-        s.push_str(&quote(k));
-        s.push_str(" = ");
-        s.push_str(&quote(v));
-    }
-    s.push_str(" }");
-    s
 }
 
 #[cfg(test)]

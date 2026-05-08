@@ -227,18 +227,36 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         tui::stop(&mut terminal)?;
         return Ok(());
     }
+    let paths_view = config.paths_view();
+    // Honor an explicit `paths.sessions_root` operator override; otherwise
+    // keep the legacy `state::codexize_root()`-derived path so existing
+    // installs and tests that rely on `CODEXIZE_ROOT` keep working.
+    let sessions_root = if config.paths.sessions_root.is_explicit() {
+        paths_view.sessions_root.clone()
+    } else {
+        picker::default_sessions_root()
+    };
+    let memory_root_override: Option<std::path::PathBuf> = config
+        .paths
+        .memory_root
+        .is_explicit()
+        .then(|| paths_view.memory_root.clone());
     let (session_id, startup_origin, resume_warnings) = match plan {
         LaunchPlan::DirectCreate { idea, modes } => {
             // Direct creation always produces a fresh session, so the
             // resume-ignored warnings do not apply here.
             (
-                picker::create_session(&idea, modes)?,
+                picker::create_session(&idea, modes, memory_root_override.as_deref())?,
                 app::AppStartupOrigin::Default,
                 Vec::new(),
             )
         }
         LaunchPlan::Picker { create_modes } => {
-            let mut picker = picker::SessionPicker::new_with_create_modes(create_modes)?;
+            let mut picker = picker::SessionPicker::new_with_paths(
+                create_modes,
+                sessions_root.clone(),
+                memory_root_override.clone(),
+            )?;
             let selection = match picker.run(terminal_guard.terminal_mut())? {
                 Some(selection) => selection,
                 None => {

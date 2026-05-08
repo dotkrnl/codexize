@@ -15,6 +15,8 @@ fn test_picker(input_buffer: &str, input_cursor: usize) -> SessionPicker {
         create_modes: crate::state::Modes::default(),
         palette: PaletteState::default(),
         status_line: StatusLine::new(),
+        sessions_root: default_sessions_root(),
+        memory_root_override: None,
     }
 }
 
@@ -106,7 +108,7 @@ fn with_temp_codexize_root<T>(f: impl FnOnce() -> T) -> T {
 fn scan_sessions_returns_empty_when_root_is_brand_new() {
     with_temp_codexize_root(|| {
         // First call creates the sessions dir on demand and returns no entries.
-        let entries = scan_sessions().unwrap();
+        let entries = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
         assert!(entries.is_empty());
         assert!(crate::state::codexize_root().join("sessions").exists());
     });
@@ -115,11 +117,11 @@ fn scan_sessions_returns_empty_when_root_is_brand_new() {
 #[test]
 fn scan_sessions_skips_directories_without_session_toml() {
     with_temp_codexize_root(|| {
-        let _ = scan_sessions().unwrap();
+        let _ = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
         let stray = crate::state::codexize_root().join("sessions").join("stray");
         std /* test fixture IO */ ::fs::create_dir_all(&stray).unwrap();
         // No session.toml inside; the entry must be ignored.
-        let entries = scan_sessions().unwrap();
+        let entries = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
         assert!(
             entries.is_empty(),
             "stray dir without session.toml must be skipped"
@@ -142,7 +144,7 @@ fn scan_sessions_returns_entries_sorted_by_recency() {
         newer.title = Some("beta title".to_string());
         newer.save().unwrap();
 
-        let entries = scan_sessions().unwrap();
+        let entries = scan_sessions(&crate::state::codexize_root().join("sessions")).unwrap();
         assert_eq!(entries.len(), 2, "both sessions must be discovered");
         assert_eq!(entries[0].session_id, "beta", "newest first");
         assert_eq!(entries[1].session_id, "alpha");
@@ -424,6 +426,7 @@ fn create_session_helper_persists_brainstorm_running_with_modes() {
                 yolo: true,
                 cheap: true,
             },
+            None,
         )
         .expect("create_session succeeds");
 
@@ -444,6 +447,7 @@ fn create_session_helper_logs_session_created_and_mode_events() {
                 yolo: true,
                 cheap: false,
             },
+            None,
         )
         .expect("create_session succeeds");
 
@@ -525,6 +529,8 @@ fn picker_with_entries(entries: Vec<SessionEntry>, selected: usize) -> SessionPi
         create_modes: crate::state::Modes::default(),
         palette: PaletteState::default(),
         status_line: StatusLine::new(),
+        sessions_root: default_sessions_root(),
+        memory_root_override: None,
     }
 }
 

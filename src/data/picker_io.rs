@@ -4,14 +4,14 @@ use crate::{
 };
 use anyhow::Result;
 use std::fs;
-pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
-    let sessions_dir = state::codexize_root().join("sessions");
+use std::path::Path;
+pub fn scan_sessions(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {
     if !sessions_dir.exists() {
-        fs::create_dir_all(&sessions_dir)?;
+        fs::create_dir_all(sessions_dir)?;
         return Ok(Vec::new());
     }
     let mut entries = Vec::new();
-    for entry in fs::read_dir(&sessions_dir)? {
+    for entry in fs::read_dir(sessions_dir)? {
         let entry = entry?;
         let path = entry.path();
         if !path.is_dir() {

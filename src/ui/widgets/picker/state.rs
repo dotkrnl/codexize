@@ -17,6 +17,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph},
 };
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 #[path = "view.rs"]
 mod view;
@@ -51,6 +52,17 @@ pub struct SessionPicker {
     create_modes: Modes,
     palette: PaletteState,
     status_line: StatusLine,
+    /// Directory containing per-session subdirectories. Resolved from
+    /// the loaded `Config` (`paths.sessions_root` when explicitly set;
+    /// otherwise the legacy `state::codexize_root().join("sessions")`)
+    /// so a CLI override flows through to `scan_sessions` and to any
+    /// session created inline by the picker.
+    sessions_root: PathBuf,
+    /// `Some` when the operator explicitly set `paths.memory_root`. The
+    /// inline `create_session` flow consults this when bootstrapping
+    /// memory for a freshly-created session so the override wins over
+    /// the session-derived default.
+    memory_root_override: Option<PathBuf>,
 }
 enum KeyAction {
     Continue,
@@ -62,7 +74,14 @@ impl SessionPicker {
         Self::new_with_create_modes(Modes::default())
     }
     pub fn new_with_create_modes(create_modes: Modes) -> Result<Self> {
-        let entries = scan_sessions()?;
+        Self::new_with_paths(create_modes, default_sessions_root(), None)
+    }
+    pub fn new_with_paths(
+        create_modes: Modes,
+        sessions_root: PathBuf,
+        memory_root_override: Option<PathBuf>,
+    ) -> Result<Self> {
+        let entries = scan_sessions(&sessions_root)?;
         Ok(Self {
             entries,
             selected: 0,
@@ -77,10 +96,12 @@ impl SessionPicker {
             create_modes,
             palette: PaletteState::default(),
             status_line: StatusLine::new(),
+            sessions_root,
+            memory_root_override,
         })
     }
     fn refresh(&mut self) -> Result<()> {
-        self.entries = scan_sessions()?;
+        self.entries = scan_sessions(&self.sessions_root)?;
         let visible_count = self.visible_entries().len();
         if self.selected >= visible_count && visible_count > 0 {
             self.selected = visible_count - 1;
@@ -343,7 +364,11 @@ impl SessionPicker {
         }
     }
     fn create_session_now(&mut self, idea: &str) -> Result<KeyAction> {
-        let session_id = create_session(idea, self.create_modes)?;
+        let session_id = create_session(
+            idea,
+            self.create_modes,
+            self.memory_root_override.as_deref(),
+        )?;
         Ok(KeyAction::SelectSession(PickerSelection {
             session_id,
             created: true,
@@ -395,8 +420,16 @@ impl SessionPicker {
         Ok(KeyAction::Continue)
     }
 }
-pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
-    crate::data::picker_io::scan_sessions()
+pub fn scan_sessions(sessions_root: &Path) -> Result<Vec<SessionEntry>> {
+    crate::data::picker_io::scan_sessions(sessions_root)
+}
+
+/// Default sessions directory used by callers who haven't loaded the
+/// unified config yet (tests, CLI shims). Production code constructs
+/// the picker with [`SessionPicker::new_with_paths`] and threads
+/// `paths.sessions_root` from the loaded `Config`.
+pub fn default_sessions_root() -> PathBuf {
+    session_state::codexize_root().join("sessions")
 }
 /// Create a new session on disk and emit the standard creation events.
 ///
@@ -404,14 +437,21 @@ pub fn scan_sessions() -> Result<Vec<SessionEntry>> {
 /// rejecting empty input. Both the interactive picker and the direct-CLI
 /// `--yolo -m` route share this helper so creation semantics (id, phase,
 /// mode logging) cannot drift.
-pub fn create_session(idea: &str, modes: Modes) -> Result<String> {
+pub fn create_session(
+    idea: &str,
+    modes: Modes,
+    memory_root_override: Option<&Path>,
+) -> Result<String> {
     let session_id = generate_session_id();
     let mut state = SessionState::new(session_id.clone());
     session_state::transitions::prepare_new_session_for_brainstorm(&mut state, idea, modes);
     state.save()?;
-    let memory_root = crate::logic::memory::memory_root_from_session_path(
-        &session_state::session_dir(&session_id),
-    );
+    let memory_root = match memory_root_override {
+        Some(root) => root.to_path_buf(),
+        None => crate::logic::memory::memory_root_from_session_path(
+            &session_state::session_dir(&session_id),
+        ),
+    };
     // Best-effort: a transient FS error here must not block session creation.
     if let Err(err) = crate::data::memory::ensure_memory_bootstrap(&memory_root) {
         let _ = state.log_event(format!("memory_bootstrap_failed: {err:#}"));

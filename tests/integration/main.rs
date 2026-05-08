@@ -9,6 +9,7 @@
 //! `mod`'d in below.
 
 mod app_runtime_harness;
+mod config;
 mod layer_boundaries;
 mod smoke_baseline;
 mod support;

@@ -44,9 +44,7 @@ Difficulty:
     leave it false — the system routes extra compute to tough tasks, so
     over-marking wastes budget.
 
-Output: write {output} as TOML in this shape. No prose around it.
-Validated programmatically; missing/empty fields or ids ≤ {id_floor}
-cause rejection.
+Write `{output}` as TOML (REQUIRED). No prose around it; parse failure, schema violation, or any task id ≤ {id_floor} = run failure.
 
     [[tasks]]
     id = N                                      # N > {id_floor}

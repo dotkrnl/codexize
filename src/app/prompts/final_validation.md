@@ -60,8 +60,7 @@ Outputs (the only paths you may Write):
   - {live_summary} — the live progress summary (rules below).
   - `.codexize/memory/**` — bounded advisory memory updates only.{simplification_block}
 
-Verdict TOML schema (validated programmatically; parse failure or schema
-violation = run failure):
+Write `{verdict}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     status  = "goal_met" | "goal_gap" | "needs_human"
     summary = "<one-paragraph human-readable verdict — required, non-empty>"

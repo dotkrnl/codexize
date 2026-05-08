@@ -52,7 +52,7 @@ Review:
           milestones / phases no round has touched. Cite each by plan label.
 {review_scope_text}{terminal_review_block}
 
-Before exiting, write `{review}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
+Write `{review}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
 Outer shape matches the regular reviewer (status / summary / feedback / new_tasks). Embed the
 `## AC Coverage Audit` markdown sub-block inside the `summary` triple-quoted string.

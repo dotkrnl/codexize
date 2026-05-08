@@ -29,9 +29,7 @@ Review:
      Completion judgment still applies.
 {review_scope_text}{terminal_review_block}
 
-# IMPORTANT: emit ONLY the TOML below to {review} — no prose around it.
-# Parse failure = run failure. Use double-quoted strings; triple-quoted for
-# multi-line; arrays of inline tables for any new_task refs.
+Write `{review}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     status  = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary = "One-paragraph summary of what was done and your verdict."

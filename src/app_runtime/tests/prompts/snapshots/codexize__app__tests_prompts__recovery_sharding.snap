@@ -48,9 +48,7 @@ Difficulty:
     leave it false — the system routes extra compute to tough tasks, so
     over-marking wastes budget.
 
-Output: write /tmp/codexize-prompt-fixture/session/artifacts/tasks.toml as TOML in this shape. No prose around it.
-Validated programmatically; missing/empty fields or ids ≤ 5
-cause rejection.
+Write `/tmp/codexize-prompt-fixture/session/artifacts/tasks.toml` as TOML (REQUIRED). No prose around it; parse failure, schema violation, or any task id ≤ 5 = run failure.
 
     [[tasks]]
     id = N                                      # N > 5

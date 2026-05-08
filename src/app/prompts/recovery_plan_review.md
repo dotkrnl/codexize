@@ -29,8 +29,7 @@ If the recovered plan is missing any required schema heading and the issue
 is not a trivial mechanical fix, do not approve it; route it back for another
 recovery pass.
 
-# IMPORTANT: emit ONLY the TOML below to {output} — no prose around it.
-# Parse failure = run failure.
+Write `{output}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     status   = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary  = "One-line verdict."

@@ -36,9 +36,7 @@ Review:
      review only `base..HEAD`.
 
 
-# IMPORTANT: emit ONLY the TOML below to /tmp/codexize-prompt-fixture/session/rounds/001/review.toml — no prose around it.
-# Parse failure = run failure. Use double-quoted strings; triple-quoted for
-# multi-line; arrays of inline tables for any new_task refs.
+Write `/tmp/codexize-prompt-fixture/session/rounds/001/review.toml` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     status  = "approved" | "refine" | "revise" | "human_blocked" | "agent_pivot"
     summary = "One-paragraph summary of what was done and your verdict."

@@ -39,8 +39,7 @@ Write only `.codexize/memory/**`, including the validated `dream-####.toml`
 report. Preserve outdated information by marking entries superseded rather
 than deleting by default.
 
-Dream report TOML schema for /tmp/codexize-prompt-fixture/session/memory/dreams/dream-0001.toml (validated programmatically;
-parse failure or schema violation = run failure):
+Write `/tmp/codexize-prompt-fixture/session/memory/dreams/dream-0001.toml` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     schema_version = 1
     status         = "completed"

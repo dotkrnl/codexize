@@ -73,8 +73,7 @@ Workspace hygiene (same as the coder follows):
     vocabulary ("task N", "round N", "plan", "shard", "phase", "simplifier")
     or references to this prompt.
 
-Before exiting, write `{simplification_path}` in this exact TOML shape
-(REQUIRED; parse failure or schema violation = run failure):
+Write `{simplification_path}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     status  = "simplified" | "no_changes" | "skipped"
     summary = "<one-paragraph human-readable summary of what you did>"

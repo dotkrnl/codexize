@@ -56,7 +56,7 @@ Hard rules:
   - Never `git add -f`. `.gitignore`d paths stay out of the commit; if every
     relevant change is ignored, skip the commit entirely.
 
-Before exiting, write `{coder_summary}` in this exact TOML shape (REQUIRED):
+Write `{coder_summary}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
     status   = "done" | "partial"   # "partial" makes the run retry
     summary  = "One short paragraph of what you completed."
     rebuttal = ["Response to prior reviewer feedback."]

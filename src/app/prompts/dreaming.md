@@ -35,8 +35,7 @@ Write only `.codexize/memory/**`, including the validated `dream-####.toml`
 report. Preserve outdated information by marking entries superseded rather
 than deleting by default.
 
-Dream report TOML schema for {dream_report} (validated programmatically;
-parse failure or schema violation = run failure):
+Write `{dream_report}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     schema_version = 1
     status         = "completed"

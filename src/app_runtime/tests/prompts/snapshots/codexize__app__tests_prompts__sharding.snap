@@ -55,8 +55,7 @@ Difficulty:
   - Default `tough = false`. When in doubt, leave it false — extra compute
     is routed to tough tasks, so over-marking wastes budget.
 
-Output: write /tmp/codexize-prompt-fixture/session/artifacts/tasks.toml as TOML. No prose around it. Validated programmatically;
-missing/empty fields cause rejection.
+Write `/tmp/codexize-prompt-fixture/session/artifacts/tasks.toml` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 
     [[tasks]]
     id = 1

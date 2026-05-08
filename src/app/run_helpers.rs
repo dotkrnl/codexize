@@ -16,7 +16,7 @@ pub(crate) enum OperatorTerminationMarker {
 mod tests;
 impl App {
     pub(crate) fn default_acp_policy(&self) -> crate::acp::AcpLaunchPolicy {
-        crate::acp::AcpLaunchPolicy::default()
+        crate::acp::AcpLaunchPolicy::from_policy_defaults(&self.config.acp_policy_view())
     }
     pub(crate) fn attempt_for(&self, stage: &str, task_id: Option<u32>, round: u32) -> u32 {
         self.state

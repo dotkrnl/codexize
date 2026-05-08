@@ -84,6 +84,24 @@ pub struct AcpLaunchPolicy {
 }
 #[rustfmt::skip]
 impl AcpLaunchPolicy {
+    /// Build a per-call policy from the loaded `[acp.policy]` config defaults.
+    /// Per-stage factories (`final_validation`, `dreaming`, `simplifier`)
+    /// construct their own stricter policy and are intentionally NOT routed
+    /// through this path — they always win per-call.
+    pub fn from_policy_defaults(view: &crate::data::config::view::AcpPolicyDefaultsView) -> Self {
+        let shell_policy = match view.shell_policy {
+            crate::data::config::schema::ShellPolicy::FullAccess =>
+                AcpShellCommandPolicy::FullAccess,
+            crate::data::config::schema::ShellPolicy::Allowlist =>
+                AcpShellCommandPolicy::Allowlist(view.shell_allowlist.clone()),
+        };
+        Self {
+            allowed_write_paths: view.allowed_write_paths.iter().map(PathBuf::from).collect(),
+            shell_policy,
+            enforce_readonly_workspace: view.enforce_readonly_workspace,
+        }
+    }
+
     fn readonly_memory_shell_allowlist() -> Vec<String> {
         ["git status", "git log", "ls", "cat", "head", "tail", "wc", "file", "find", "pwd"]
             .map(String::from)

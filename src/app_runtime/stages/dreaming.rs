@@ -106,7 +106,11 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&dream_report_path),
-                crate::acp::AcpLaunchPolicy::dreaming(&dream_report_path, &live_summary_path),
+                crate::acp::AcpLaunchPolicy::dreaming(
+                    &dream_report_path,
+                    &live_summary_path,
+                    self.runner_config.memory_write_check,
+                ),
             )
         };
         match launch_result {

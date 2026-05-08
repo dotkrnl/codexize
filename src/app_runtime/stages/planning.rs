@@ -92,7 +92,7 @@ impl App {
         {
             result
         } else if interactive {
-            self.runner_supervisor.launch_interactive(
+            self.runner_supervisor.launch_interactive_with_policy(
                 run_id,
                 &window_name,
                 &run,
@@ -100,9 +100,13 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
+                crate::acp::AcpLaunchPolicy {
+                    memory_write_check: self.runner_config.memory_write_check,
+                    ..Default::default()
+                },
             )
         } else {
-            self.runner_supervisor.launch_noninteractive(
+            self.runner_supervisor.launch_noninteractive_with_policy(
                 run_id,
                 &window_name,
                 &run,
@@ -110,6 +114,10 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&plan_path),
+                crate::acp::AcpLaunchPolicy {
+                    memory_write_check: self.runner_config.memory_write_check,
+                    ..Default::default()
+                },
             )
         };
         match launch_result {

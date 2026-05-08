@@ -146,7 +146,11 @@ impl App {
                 &run_key,
                 &artifacts_dir,
                 Some(&simplification_path),
-                crate::acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
+                crate::acp::AcpLaunchPolicy::simplifier(
+                    &simplification_path,
+                    &live_summary_path,
+                    self.runner_config.memory_write_check,
+                ),
             )
         };
         match launch_result {

@@ -121,7 +121,7 @@ pub fn get_value(config: &Config, key: &str) -> Result<String, MutationError> {
                 .cloned()
                 .ok_or_else(|| MutationError::UnknownKey {
                     key: key.to_string(),
-                    suggestion: nearest_env_key(env_key, env),
+                    suggestion: super::util::nearest(env_key, &env.keys().map(|s| s.as_str()).collect::<Vec<_>>(), 4),
                 })?
         }
 
@@ -152,7 +152,7 @@ pub fn get_value(config: &Config, key: &str) -> Result<String, MutationError> {
         _ => {
             return Err(MutationError::UnknownKey {
                 key: key.to_string(),
-                suggestion: nearest_key(key, &all_scalar_keys()),
+                suggestion: super::util::nearest(key, &all_scalar_keys(), 4),
             });
         }
     };
@@ -331,7 +331,7 @@ pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), 
         _ => {
             return Err(MutationError::UnknownKey {
                 key: key.to_string(),
-                suggestion: nearest_key(key, &all_settable_keys()),
+                suggestion: super::util::nearest(key, &all_settable_keys(), 4),
             });
         }
     }
@@ -527,7 +527,7 @@ pub fn unset_value(config: &mut Config, key: &str) -> Result<(), MutationError> 
         _ => {
             return Err(MutationError::UnknownKey {
                 key: key.to_string(),
-                suggestion: nearest_key(key, &all_settable_keys()),
+                suggestion: super::util::nearest(key, &all_settable_keys(), 4),
             });
         }
     }
@@ -567,7 +567,7 @@ pub fn reset_section(config: &mut Config, section: &str) -> Result<(), MutationE
         _ => {
             return Err(MutationError::UnknownKey {
                 key: section.to_string(),
-                suggestion: nearest_key(section, all_section_names()),
+                suggestion: super::util::nearest(section, all_section_names(), 4),
             });
         }
     }
@@ -588,7 +588,7 @@ fn agent_for<'a>(
         "opencode" => Ok(&agents.opencode),
         _ => Err(MutationError::UnknownKey {
             key: format!("acp.agents.{vendor}"),
-            suggestion: nearest_key(vendor, &["claude", "codex", "gemini", "kimi", "opencode"]),
+            suggestion: super::util::nearest(vendor, &["claude", "codex", "gemini", "kimi", "opencode"], 4),
         }),
     }
 }
@@ -605,7 +605,7 @@ fn agent_for_mut<'a>(
         "opencode" => Ok(&mut agents.opencode),
         _ => Err(MutationError::UnknownKey {
             key: format!("acp.agents.{vendor}"),
-            suggestion: nearest_key(vendor, &["claude", "codex", "gemini", "kimi", "opencode"]),
+            suggestion: super::util::nearest(vendor, &["claude", "codex", "gemini", "kimi", "opencode"], 4),
         }),
     }
 }
@@ -788,37 +788,6 @@ fn all_settable_keys() -> Vec<&'static str> {
     ]
 }
 
-fn nearest_key(target: &str, candidates: &[&str]) -> Option<String> {
-    let mut best: Option<(usize, &str)> = None;
-    for c in candidates {
-        let d = levenshtein(target, c);
-        if d <= 4 && best.map(|(b, _)| d < b).unwrap_or(true) {
-            best = Some((d, c));
-        }
-    }
-    best.map(|(_, s)| s.to_string())
-}
-
-fn nearest_env_key(target: &str, env: &BTreeMap<String, String>) -> Option<String> {
-    let keys: Vec<&str> = env.keys().map(|s| s.as_str()).collect();
-    nearest_key(target, &keys)
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut curr = vec![0usize; b.len() + 1];
-    for i in 1..=a.len() {
-        curr[0] = i;
-        for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[b.len()]
-}
 
 #[cfg(test)]
 mod tests {

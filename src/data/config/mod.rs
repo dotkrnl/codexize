@@ -11,6 +11,7 @@ pub mod loader;
 pub mod mutate;
 pub mod paths;
 pub mod schema;
+pub mod util;
 pub mod view;
 
 pub use loader::{LoadError, load_or_default, save_atomic, save_atomic_to};

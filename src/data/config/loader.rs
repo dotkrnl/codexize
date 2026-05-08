@@ -158,7 +158,7 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
                     path: unknown.to_string(),
                     line,
                     column,
-                    suggestion: nearest(unknown, known_top),
+                    suggestion: super::util::nearest(unknown, known_top, 3),
                 });
             }
         }
@@ -518,7 +518,7 @@ fn unknown(parent: &str, key: &str, item: &Item, known: &[&str]) -> Result<(), L
         path: dotted(parent, key),
         line,
         column,
-        suggestion: nearest(key, known),
+        suggestion: super::util::nearest(key, known, 3),
     })
 }
 
@@ -656,36 +656,6 @@ fn parse_timestamp(item: &Item, path: &str) -> Result<Option<DateTime<Utc>>, Loa
                 "{path} = {raw:?} is not a valid RFC-3339 datetime: {e}"
             ))
         })
-}
-
-/// Compute the closest match in `candidates` to `target` using a bounded
-/// Levenshtein distance; returns `None` when nothing is within edit
-/// distance ≤ 3 (so wildly off keys don't get nonsense suggestions).
-fn nearest(target: &str, candidates: &[&str]) -> Option<String> {
-    let mut best: Option<(usize, &str)> = None;
-    for c in candidates {
-        let d = levenshtein(target, c);
-        if d <= 3 && best.map(|(b, _)| d < b).unwrap_or(true) {
-            best = Some((d, c));
-        }
-    }
-    best.map(|(_, s)| s.to_string())
-}
-
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut curr = vec![0usize; b.len() + 1];
-    for i in 1..=a.len() {
-        curr[0] = i;
-        for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[b.len()]
 }
 
 // --- save -----------------------------------------------------------------

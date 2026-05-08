@@ -35,6 +35,30 @@ Write only `.codexize/memory/**`, including the validated `dream-####.toml`
 report. Preserve outdated information by marking entries superseded rather
 than deleting by default.
 
+Dream report TOML schema for {dream_report} (validated programmatically;
+parse failure or schema violation = run failure):
+
+    schema_version = 1
+    status         = "completed"
+    summary        = "<one-paragraph human-readable summary of this dream — required, non-empty>"
+    started_at     = "<RFC-3339 quoted string, e.g. \"2026-05-07T22:00:00Z\">"
+    ended_at       = "<RFC-3339 quoted string, must be >= started_at>"
+    inputs         = ["index.md", "manifest.toml", "..."]   # required, non-empty
+                    # every memory file you actually read this round, as paths
+                    # relative to .codexize/memory (no `..`, no absolute paths);
+                    # at minimum index.md and manifest.toml since those are
+                    # mandatory reads.
+
+    # At least one [[changes]] block is required. Record every consolidation
+    # action you took — promotions, merges, supersessions, archivals, index
+    # edits, tier changes. If you genuinely changed nothing else, record the
+    # `last_dreamed_at`/`last_seen_at` bump on the entries you reviewed as
+    # a `tier_changed` or `index_updated` entry that names what was touched.
+    [[changes]]
+    kind   = "promoted" | "merged" | "superseded" | "archived" | "index_updated" | "tier_changed"
+    target = "<entry id, file path, or anchor like index.md#section — non-empty>"
+    reason = "<one-line justification — non-empty>"
+
 Capture lessons (optional, low effort): before exiting, append a
 one-paragraph entry under `.codexize/memory/journal/<YYYY-MM>.md` if anything
 non-obvious was learned this round. If nothing was learned, write a single

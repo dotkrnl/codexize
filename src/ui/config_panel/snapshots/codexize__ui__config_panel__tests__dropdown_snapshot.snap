@@ -1,0 +1,23 @@
+---
+source: src/ui/config_panel/mod.rs
+assertion_line: 1717
+expression: "render_to_text(&state, 80, 18)"
+---
+"codexize · config · /tmp/example/config.toml                                    "
+"▸meta  ▾ntfy*  ▸ntfy.events  ▸acp.policy  ▸acp.install  ▸acp.agents.claude      "
+"▸runner  ▸paths*  ▸ui  ▸ui.colon_palette  ▸ui.footer  ▸diagnostics  ▸memory     "
+"────────────────────────────────────────────────────────────────────────────────"
+"> enabled              │ true                                              (def)"
+"  server               │ ┌────────┐fy.sh                                   (def)"
+"  topic                │ │> true  │abcdef                               override"
+"  detail_mode          │ │  false │                                     override"
+"  retry_attempts       │ └────────┘                                        (def)"
+"  retry_delay_ms       │ 250                                               (def)"
+"  http_timeout_secs    │ 10                                                (def)"
+"  body_max_bytes       │ 4096                                              (def)"
+"  excerpt_max_chars    │ 600                                               (def)"
+"  created_at           │                                                   (def)"
+"  updated_at           │                                                   (def)"
+"────────────────────────────────────────────────────────────────────────────────"
+"Enables notification delivery when a topic is configured.                       "
+"↑↓ select · Enter commit · Esc cancel  |  choose ntfy.enabled                   "

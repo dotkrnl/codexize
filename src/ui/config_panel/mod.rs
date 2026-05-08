@@ -14,7 +14,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     text::Line,
-    widgets::{Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use std::{
     fs,
@@ -26,6 +26,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 const MIN_WIDTH: u16 = 50;
 const TAB_SEPARATOR: &str = "  ";
 const TAG_WIDTH: usize = 9;
+const BOOL_OPTIONS: &[&str] = &["true", "false"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldKind {
@@ -335,6 +336,11 @@ const SECTIONS: &[&str] = &[
 enum Editing {
     Integer,
     String,
+    Choice {
+        key: &'static str,
+        options: Vec<String>,
+        selected: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -424,52 +430,21 @@ impl ConfigPanelState {
                 self.move_field(1);
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Left => {
-                if self
-                    .current_kind()
-                    .is_some_and(|k| matches!(k, FieldKind::Enum(_)))
-                {
-                    self.cycle_enum(-1);
-                } else {
-                    self.move_section(-1);
-                }
+            // Horizontal arrows are no-ops in navigation mode: mutation is
+            // gated behind Enter, and section switching is bound to Tab/[/].
+            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Right => {
-                if self
-                    .current_kind()
-                    .is_some_and(|k| matches!(k, FieldKind::Enum(_)))
-                {
-                    self.cycle_enum(1);
-                } else {
-                    self.move_section(1);
-                }
-                PanelOutcome::KeepOpen
-            }
-            KeyCode::Char(' ') | KeyCode::Enter => {
+            KeyCode::Enter => {
                 self.activate_field();
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('j') => {
-                if self
-                    .current_kind()
-                    .is_some_and(|k| matches!(k, FieldKind::Enum(_)))
-                {
-                    self.cycle_enum(1);
-                } else {
-                    self.move_field(1);
-                }
+                self.move_field(1);
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('k') => {
-                if self
-                    .current_kind()
-                    .is_some_and(|k| matches!(k, FieldKind::Enum(_)))
-                {
-                    self.cycle_enum(-1);
-                } else {
-                    self.move_field(-1);
-                }
+                self.move_field(-1);
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('d') => {
@@ -615,12 +590,16 @@ impl ConfigPanelState {
     }
 
     fn handle_edit_key(&mut self, key: KeyEvent) {
+        if matches!(self.editing, Some(Editing::Choice { .. })) {
+            self.handle_choice_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.editing = None;
                 self.status = "edit cancelled".to_string();
             }
-            KeyCode::Tab => {
+            KeyCode::Enter | KeyCode::Tab => {
                 self.accept_edit();
             }
             KeyCode::Backspace => {
@@ -640,32 +619,105 @@ impl ConfigPanelState {
                 }
             }
             KeyCode::Up if matches!(self.editing, Some(Editing::Integer)) => {
-                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) { 10 } else { 1 };
+                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    10
+                } else {
+                    1
+                };
                 self.nudge_integer(delta);
             }
             KeyCode::Down if matches!(self.editing, Some(Editing::Integer)) => {
-                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) { -10 } else { -1 };
+                let delta = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    -10
+                } else {
+                    -1
+                };
                 self.nudge_integer(delta);
             }
             _ => {}
         }
     }
 
+    fn handle_choice_key(&mut self, key: KeyEvent) {
+        let Some(Editing::Choice {
+            key: field_key,
+            options,
+            selected,
+        }) = self.editing.clone()
+        else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.editing = None;
+                self.status = "edit cancelled".to_string();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let next = wrap_index(selected, options.len(), -1);
+                self.set_choice_selected(next);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let next = wrap_index(selected, options.len(), 1);
+                self.set_choice_selected(next);
+            }
+            KeyCode::Enter => {
+                let value = options.get(selected).cloned().unwrap_or_default();
+                match self.set_value(field_key, &value) {
+                    Ok(()) => {
+                        self.status = format!("set {field_key} to {value}");
+                        self.editing = None;
+                    }
+                    Err(err) => {
+                        self.status = err.to_string();
+                        self.editing = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn set_choice_selected(&mut self, next: usize) {
+        if let Some(Editing::Choice { selected, .. }) = self.editing.as_mut() {
+            *selected = next;
+        }
+    }
+
     fn activate_field(&mut self) {
-        let Some(meta) = self.current_meta() else {
+        let Some(meta) = self.current_meta().copied() else {
             return;
         };
         match meta.kind {
-            FieldKind::Bool => self.toggle_bool(),
-            FieldKind::Enum(_) => self.cycle_enum(1),
+            FieldKind::Bool => {
+                let options: Vec<String> = BOOL_OPTIONS.iter().map(|s| (*s).to_string()).collect();
+                let current = self.value_for(&meta);
+                let selected = options.iter().position(|v| v == &current).unwrap_or(0);
+                self.editing = Some(Editing::Choice {
+                    key: meta.key,
+                    options,
+                    selected,
+                });
+                self.status = format!("choose {}", meta.key);
+            }
+            FieldKind::Enum(variants) => {
+                let options: Vec<String> = variants.iter().map(|v| (*v).to_string()).collect();
+                let current = self.value_for(&meta);
+                let selected = options.iter().position(|v| v == &current).unwrap_or(0);
+                self.editing = Some(Editing::Choice {
+                    key: meta.key,
+                    options,
+                    selected,
+                });
+                self.status = format!("choose {}", meta.key);
+            }
             FieldKind::Integer { .. } => {
-                let value = self.value_for(meta);
+                let value = self.value_for(&meta);
                 self.edit_buffer = value;
                 self.editing = Some(Editing::Integer);
                 self.status = format!("editing {}", meta.key);
             }
             FieldKind::String => {
-                let value = self.value_for(meta);
+                let value = self.value_for(&meta);
                 self.edit_buffer = value;
                 self.editing = Some(Editing::String);
                 self.status = format!("editing {}", meta.key);
@@ -696,34 +748,6 @@ impl ConfigPanelState {
             Err(err) => {
                 self.status = err.to_string();
             }
-        }
-    }
-
-    fn toggle_bool(&mut self) {
-        let Some(meta) = self.current_meta().copied() else {
-            return;
-        };
-        let next = match self.value_for(&meta).as_str() {
-            "true" => "false",
-            _ => "true",
-        };
-        if self.set_value(meta.key, next).is_ok() {
-            self.status = format!("set {} to {next}", meta.key);
-        }
-    }
-
-    fn cycle_enum(&mut self, delta: isize) {
-        let Some(meta) = self.current_meta().copied() else {
-            return;
-        };
-        let FieldKind::Enum(variants) = meta.kind else {
-            return;
-        };
-        let current = self.value_for(&meta);
-        let index = variants.iter().position(|v| *v == current).unwrap_or(0);
-        let next = wrap_index(index, variants.len(), delta);
-        if self.set_value(meta.key, variants[next]).is_ok() {
-            self.status = format!("set {} to {}", meta.key, variants[next]);
         }
     }
 
@@ -805,10 +829,6 @@ impl ConfigPanelState {
 
     fn current_meta(&self) -> Option<&'static FieldMeta> {
         FIELDS.get(self.selected_field)
-    }
-
-    fn current_kind(&self) -> Option<FieldKind> {
-        self.current_meta().map(|meta| meta.kind)
     }
 
     fn move_section(&mut self, delta: isize) {
@@ -981,13 +1001,11 @@ impl ConfigPanelState {
     fn edit_error_for(&self, meta: FieldMeta, value: &str) -> Option<String> {
         self.editing.as_ref()?;
         match meta.kind {
-            FieldKind::Integer { min } => {
-                match value.parse::<u64>() {
-                    Ok(parsed) if parsed < min => Some(format!("{} must be >= {min}", meta.key)),
-                    Ok(_) => None,
-                    Err(_) => Some(format!("{} must be an integer", meta.key)),
-                }
-            }
+            FieldKind::Integer { min } => match value.parse::<u64>() {
+                Ok(parsed) if parsed < min => Some(format!("{} must be >= {min}", meta.key)),
+                Ok(_) => None,
+                Err(_) => Some(format!("{} must be an integer", meta.key)),
+            },
             FieldKind::String if meta.key == "ntfy.server" => {
                 if value.starts_with("http://") || value.starts_with("https://") {
                     None
@@ -1029,7 +1047,89 @@ impl Widget for ConfigPanelWidget<'_> {
             lines.push(Line::from(""));
         }
         Paragraph::new(lines).render(area, buf);
+        render_dropdown(self.state, area, buf);
     }
+}
+
+fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
+    let Some(Editing::Choice {
+        options, selected, ..
+    }) = state.editing.as_ref()
+    else {
+        return;
+    };
+    if options.is_empty() {
+        return;
+    }
+    let w = area.width as usize;
+    let tab_lines = tab_bar_lines(state, w).len() as u16;
+    // Body region: header(1) + tab_lines + separator(1) starts the rows;
+    // bottom 3 rows are reserved for separator + help + footer.
+    let body_y_start = area.y.saturating_add(2 + tab_lines);
+    let body_y_end = area.y.saturating_add(area.height).saturating_sub(3);
+    if body_y_end <= body_y_start {
+        return;
+    }
+
+    let visible = visible_fields(state);
+    let pos = visible
+        .iter()
+        .position(|i| *i == state.selected_field)
+        .unwrap_or(0);
+    let row_y = body_y_start.saturating_add(pos as u16);
+    if row_y >= body_y_end {
+        return;
+    }
+
+    let max_opt_w = options.iter().map(|o| o.width()).max().unwrap_or(1);
+    let popup_w = ((max_opt_w + 4) as u16).max(10).min(area.width);
+    let popup_h_wanted = options.len() as u16 + 2; // top/bottom border
+    let avail_h = body_y_end.saturating_sub(body_y_start);
+    let popup_h = popup_h_wanted.min(avail_h);
+    if popup_h < 3 {
+        return;
+    }
+
+    let name_w = w.min(22) as u16;
+    let mut popup_x = area.x.saturating_add(name_w + 3);
+    let area_right = area.x.saturating_add(area.width);
+    if popup_x + popup_w > area_right {
+        popup_x = area_right.saturating_sub(popup_w);
+    }
+    if popup_x < area.x {
+        popup_x = area.x;
+    }
+
+    // Anchor below the focused row; if there is not enough room, place it
+    // above. Falling back to the bottom of the body keeps the popup
+    // fully visible when nothing else fits.
+    let mut popup_y = row_y.saturating_add(1);
+    if popup_y + popup_h > body_y_end {
+        let above_room = row_y.saturating_sub(body_y_start);
+        if above_room >= popup_h {
+            popup_y = row_y.saturating_sub(popup_h);
+        } else {
+            popup_y = body_y_end.saturating_sub(popup_h);
+        }
+    }
+
+    let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+    Clear.render(popup_rect, buf);
+
+    let inner_w = popup_rect.width.saturating_sub(2) as usize;
+    let lines: Vec<Line<'static>> = options
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let marker = if i == *selected { '>' } else { ' ' };
+            let text = fit_cell(&format!("{marker} {opt}"), inner_w);
+            Line::from(text)
+        })
+        .collect();
+
+    Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL))
+        .render(popup_rect, buf);
 }
 
 fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
@@ -1100,7 +1200,8 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> String {
     let focused = idx == state.selected_field;
     let name_w = width.min(22);
     let tag = state.source_for(meta);
-    let mut value = if focused && state.editing.is_some() {
+    let mut value = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
+    {
         state.edit_buffer.clone()
     } else {
         render_value(state, meta, focused)
@@ -1159,7 +1260,17 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
 }
 
 fn footer_line(state: &ConfigPanelState, width: usize) -> String {
-    let hotkeys = ["Tab section", "Enter edit", "d default", "Esc close", "Ctrl-S save"];
+    let hotkeys: &[&str] = match &state.editing {
+        Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
+        Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
+        None => &[
+            "Tab section",
+            "Enter edit",
+            "d default",
+            "Esc close",
+            "Ctrl-S save",
+        ],
+    };
     let mut first = String::new();
     for item in hotkeys {
         let next = if first.is_empty() {
@@ -1283,10 +1394,7 @@ fn format_list(values: &[String]) -> String {
 }
 
 fn format_map(map: &std::collections::BTreeMap<String, String>) -> String {
-    let parts: Vec<String> = map
-        .iter()
-        .map(|(k, v)| format!("{k} = \"{v}\""))
-        .collect();
+    let parts: Vec<String> = map.iter().map(|(k, v)| format!("{k} = \"{v}\"")).collect();
     format!("{{ {} }}", parts.join(", "))
 }
 
@@ -1451,26 +1559,155 @@ mod tests {
         assert!(text.contains(terminal_too_narrow_message()));
     }
 
+    fn focus_field(state: &mut ConfigPanelState, key: &str) {
+        let field_idx = FIELDS.iter().position(|f| f.key == key).unwrap();
+        state.selected_section = SECTIONS
+            .iter()
+            .position(|s| *s == FIELDS[field_idx].section)
+            .unwrap();
+        state.selected_field = field_idx;
+    }
+
     #[test]
-    fn editing_bool_enum_reset_and_invalid_integer_updates_status() {
+    fn arrow_keys_in_nav_mode_are_no_ops_for_field_and_section() {
         let mut state = state_with_overrides();
-        state.selected_field = FIELDS.iter().position(|f| f.key == "ntfy.enabled").unwrap();
+        focus_field(&mut state, "ntfy.enabled");
+        let section_before = state.selected_section;
+        let value_before = state.value_for(state.current_meta().unwrap());
+        for code in [
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
+            state.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+            assert_eq!(
+                state.selected_section, section_before,
+                "{code:?} moved section"
+            );
+            assert_eq!(
+                state.value_for(state.current_meta().unwrap()),
+                value_before,
+                "{code:?} mutated value"
+            );
+            assert!(state.editing.is_none(), "{code:?} entered edit mode");
+        }
+    }
+
+    #[test]
+    fn arrow_keys_in_nav_mode_dont_cycle_enum() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.detail_mode");
+        // The override fixture sets detail_mode = "minimal"; cycling under
+        // the old keymap would flip to "detailed" — these arrows must now
+        // leave the value alone.
+        let value_before = state.value_for(state.current_meta().unwrap());
+        for code in [
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('l'),
+        ] {
+            state.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+            assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
+        }
+    }
+
+    #[test]
+    fn enter_on_bool_opens_dropdown_with_current_value_selected() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.enabled");
+        // Default is true; expect "true" preselected in the dropdown.
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let Some(Editing::Choice {
+            key,
+            options,
+            selected,
+        }) = state.editing.as_ref()
+        else {
+            panic!("expected Choice editing state, got {:?}", state.editing);
+        };
+        assert_eq!(*key, "ntfy.enabled");
+        assert_eq!(options, &vec!["true".to_string(), "false".to_string()]);
+        assert_eq!(options[*selected], "true");
+        assert_eq!(state.value_for(state.current_meta().unwrap()), "true");
+    }
+
+    #[test]
+    fn enter_on_dropdown_commits_and_returns_to_nav() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.enabled");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // Move highlight to "false" then commit.
+        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.editing.is_none());
         assert_eq!(state.value_for(state.current_meta().unwrap()), "false");
+        assert!(state.dirty);
+    }
 
-        state.selected_field = FIELDS
-            .iter()
-            .position(|f| f.key == "ntfy.detail_mode")
-            .unwrap();
-        state.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
-        assert_eq!(state.value_for(state.current_meta().unwrap()), "detailed");
-        state.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-        assert_eq!(state.source_for(state.current_meta().unwrap()), "(def)");
+    #[test]
+    fn esc_in_dropdown_returns_to_nav_without_mutation() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.enabled");
+        let value_before = state.value_for(state.current_meta().unwrap());
+        let dirty_before = state.dirty;
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // Move the highlight then cancel — must not commit.
+        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(state.editing.is_none());
+        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
+        assert_eq!(state.dirty, dirty_before);
+    }
 
-        state.selected_field = FIELDS
-            .iter()
-            .position(|f| f.key == "ntfy.retry_attempts")
-            .unwrap();
+    #[test]
+    fn enter_on_enum_opens_dropdown_with_variants() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.detail_mode");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let Some(Editing::Choice { options, .. }) = state.editing.as_ref() else {
+            panic!("expected Choice editing state");
+        };
+        assert!(options.iter().any(|o| o == "detailed"));
+        assert!(options.iter().any(|o| o == "minimal"));
+    }
+
+    #[test]
+    fn enter_on_integer_enters_inline_edit() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
+        let value = state.value_for(state.current_meta().unwrap());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::Integer)));
+        assert_eq!(state.edit_buffer, value);
+    }
+
+    #[test]
+    fn enter_on_string_enters_inline_edit() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.server");
+        let value = state.value_for(state.current_meta().unwrap());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(state.editing, Some(Editing::String)));
+        assert_eq!(state.edit_buffer, value);
+    }
+
+    #[test]
+    fn inline_edit_enter_commits_buffer() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.edit_buffer = "7".to_string();
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.editing.is_none());
+        assert_eq!(state.value_for(state.current_meta().unwrap()), "7");
+    }
+
+    #[test]
+    fn inline_edit_invalid_integer_blocks_save() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         state.edit_buffer = "0".to_string();
         assert!(
@@ -1479,6 +1716,23 @@ mod tests {
                 .unwrap()
                 .contains("cannot save")
         );
+    }
+
+    #[test]
+    fn d_resets_overridden_enum_to_default() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.detail_mode");
+        assert_eq!(state.source_for(state.current_meta().unwrap()), "override");
+        state.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert_eq!(state.source_for(state.current_meta().unwrap()), "(def)");
+    }
+
+    #[test]
+    fn dropdown_snapshot() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.enabled");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        insta::assert_snapshot!(render_to_text(&state, 80, 18));
     }
 
     #[test]

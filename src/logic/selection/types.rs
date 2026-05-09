@@ -109,6 +109,47 @@ pub struct Candidate {
     pub quota_percent: Option<u8>,
     pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,
+    /// Per-tuple provider properties resolved from the baked defaults
+    /// table (or user `[[providers]]` overrides). Selection consumes
+    /// these instead of inferring eligibility from the model name.
+    pub enabled: bool,
+    pub free: bool,
+    pub official: bool,
+    pub quota_disabled: bool,
+    pub cheap_eligible: bool,
+    pub tough_eligible: bool,
+    pub effort_eligible: bool,
+    pub effort_mapping: crate::data::config::schema::EffortMapping,
+    /// `true` when the most recent quota fetch for this candidate's
+    /// subscription failed. Selection uses this to apply the spec's
+    /// 50% capacity assumption.
+    pub quota_failed: bool,
+}
+
+impl Candidate {
+    /// Per-spec effective quota:
+    /// - `quota_disabled` ⇒ Some(100) (forced 100%)
+    /// - `free` ⇒ Some(100)
+    /// - quota fetched ⇒ Some(value)
+    /// - subscription's quota fetch failed ⇒ Some(50)
+    /// - none of the above ⇒ None (unknown)
+    pub fn effective_quota(&self) -> Option<u8> {
+        if self.quota_disabled || self.free {
+            return Some(100);
+        }
+        if let Some(value) = self.quota_percent {
+            return Some(value);
+        }
+        if self.quota_failed {
+            return Some(50);
+        }
+        None
+    }
+
+    /// Tiebreak helper: unknown/None becomes 0 per spec §selection.
+    pub fn effective_quota_for_tiebreak(&self) -> u8 {
+        self.effective_quota().unwrap_or(0)
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeModelEntry {

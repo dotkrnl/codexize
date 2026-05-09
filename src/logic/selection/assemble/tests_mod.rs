@@ -9,6 +9,11 @@ fn candidate(
     quota_percent: Option<u8>,
     display_order: usize,
 ) -> Candidate {
+    // Tests in this module exercise the priority ladder via the
+    // `enabled / free / official / quota_disabled` axis. By default
+    // every fixture candidate is treated as a non-free, non-official,
+    // non-quota_disabled provider — i.e. pool `N` — so callers can
+    // flip individual flags to land in the pool they're testing.
     Candidate {
         subscription,
         cli,
@@ -16,6 +21,21 @@ fn candidate(
         quota_percent,
         quota_resets_at: None,
         display_order,
+        enabled: true,
+        free: subscription == SubscriptionKind::Free,
+        // Mirror the production fallback in `build_candidate`: anything
+        // routed through OpencodeGo is non-official; Free candidates are
+        // never official either.
+        official: !matches!(
+            subscription,
+            SubscriptionKind::OpencodeGo | SubscriptionKind::Free
+        ),
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: false,
+        effort_eligible: false,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
     }
 }
 
@@ -69,12 +89,15 @@ fn arbitration_prefers_free_over_direct_tie_at_full_quota() {
 
 #[test]
 fn arbitration_keeps_direct_at_floor_over_higher_opencode_go() {
+    // Spec §"Selection algorithm" raised the official floor to 21 — at
+    // or above that, the official pool wins outright even when a
+    // non-official provider (here OpencodeGo) reports more headroom.
     let candidates = vec![
         candidate(
             SubscriptionKind::Claude,
             CliKind::Claude,
             "claude-opus",
-            Some(20),
+            Some(21),
             0,
         ),
         candidate(
@@ -93,12 +116,14 @@ fn arbitration_keeps_direct_at_floor_over_higher_opencode_go() {
 
 #[test]
 fn arbitration_allows_opencode_go_when_direct_below_floor() {
+    // Below the 21% official floor the spec merges official ∪
+    // non-official and picks by raw effective quota.
     let candidates = vec![
         candidate(
             SubscriptionKind::Claude,
             CliKind::Claude,
             "claude-opus",
-            Some(19),
+            Some(20),
             0,
         ),
         candidate(
@@ -713,14 +738,15 @@ fn quota_heuristic_fallback_when_no_exact_match() {
 
 #[test]
 fn dedup_keeps_direct_when_quota_meets_floor() {
-    // Direct quota at or above the 20% floor wins unconditionally — even
-    // when opencode reports more remaining headroom.
+    // Direct quota at or above the 21% official floor (spec §
+    // "Selection algorithm") wins unconditionally — even when opencode
+    // reports more remaining headroom.
     for (direct_quota, opencode_quota) in [
-        (Some(20), Some(99)),
+        (Some(21), Some(99)),
         (Some(50), Some(50)),
         (Some(80), Some(99)),
         (Some(80), None),
-        (Some(20), None),
+        (Some(21), None),
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
         assert_eq!(survivor.vendor, SubscriptionKind::Claude);
@@ -1182,6 +1208,106 @@ fn unmatched_mapped_into_produces_soft_warning() {
     );
     assert_eq!(models.len(), 1, "unmatched entry must not create a row");
     assert_eq!(models[0].candidates.len(), 1, "only the direct candidate");
+}
+
+#[test]
+fn ladder_quota_disabled_pool_picked_when_no_free_or_official() {
+    // Spec §"Selection algorithm" step 2: when neither F nor O has
+    // entries, the no-quota pool (`quota_disabled = true`) wins over
+    // the bare non-official pool. Build the candidate list directly
+    // — the dashboard pipeline only ever produces `quota_disabled =
+    // false` candidates today.
+    let mut q_candidate = candidate(
+        SubscriptionKind::OpencodeGo,
+        CliKind::Opencode,
+        "no-quota",
+        Some(5),
+        0,
+    );
+    q_candidate.quota_disabled = true;
+    let n_candidate = candidate(
+        SubscriptionKind::OpencodeGo,
+        CliKind::Opencode,
+        "non-official",
+        Some(99),
+        1,
+    );
+    let candidates = vec![q_candidate, n_candidate];
+    let selected = select_candidate_index(&candidates).unwrap();
+    assert_eq!(
+        selected, 0,
+        "quota_disabled (forced 100%) outranks non-official q=99 in the ladder"
+    );
+}
+
+#[test]
+fn ladder_skips_disabled_providers() {
+    let mut disabled_free = candidate(
+        SubscriptionKind::Free,
+        CliKind::Opencode,
+        "disabled-free",
+        Some(100),
+        0,
+    );
+    disabled_free.enabled = false;
+    let active_official = candidate(
+        SubscriptionKind::Codex,
+        CliKind::Codex,
+        "gpt-5",
+        Some(80),
+        1,
+    );
+    let candidates = vec![disabled_free, active_official];
+    let selected = select_candidate_index(&candidates).unwrap();
+    assert_eq!(
+        selected, 1,
+        "disabled free should be skipped so official wins"
+    );
+}
+
+#[test]
+fn ladder_returns_none_when_every_candidate_is_disabled() {
+    let mut a = candidate(
+        SubscriptionKind::Codex,
+        CliKind::Codex,
+        "gpt-5",
+        Some(80),
+        0,
+    );
+    a.enabled = false;
+    let mut b = candidate(
+        SubscriptionKind::Free,
+        CliKind::Opencode,
+        "free",
+        Some(100),
+        1,
+    );
+    b.enabled = false;
+    assert_eq!(select_candidate_index(&[a, b]), None);
+}
+
+#[test]
+fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
+    // Per spec, a subscription that failed its quota fetch has *all*
+    // its providers reported as 50% effective when no per-model
+    // quota came back. Wire this through assemble_universe and read
+    // the candidate's `effective_quota()`.
+    let dashboard = vec![make_ipbr_entry("gpt-5", "codex", "gpt-5")];
+    let mut quotas = QuotaPayload::default();
+    quotas
+        .failed_subscriptions
+        .insert(SubscriptionKind::Codex);
+    let available = BTreeSet::from([SubscriptionKind::Codex]);
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
+    assert_eq!(models.len(), 1);
+    let candidate = &models[0].candidates[0];
+    assert!(candidate.quota_failed);
+    assert_eq!(candidate.quota_percent, None);
+    assert_eq!(candidate.effective_quota(), Some(50));
+    // Row-level quota mirrors the selected candidate's effective
+    // quota, so downstream UI shows 50% rather than "unknown".
+    assert_eq!(models[0].quota_percent, Some(50));
 }
 
 #[test]

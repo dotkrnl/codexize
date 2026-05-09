@@ -261,10 +261,18 @@ impl App {
             }
             Phase::SpecReviewRunning | Phase::SpecReviewPaused => {
                 self.cancel_run_label("[Spec Review]");
-                let _ = fs::remove_file(artifacts.join("spec-review-1.md"));
-                let _ = fs::remove_file(prompts.join("spec-review-1.md"));
-                // TODO(schema-v2): clean up all review artifacts by RunRecord instead of the
-                // removed spec_reviewers/phase_models state.
+                let rounds: Vec<u32> = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .filter(|r| r.stage == "spec-review")
+                    .map(|r| r.round)
+                    .collect();
+                for round in rounds {
+                    let _ = fs::remove_file(artifacts.join(format!("spec-review-{round}.md")));
+                    let _ = fs::remove_file(prompts.join(format!("spec-review-{round}.md")));
+                }
+                self.clear_agent_error();
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
             Phase::PlanningRunning => {
@@ -274,8 +282,17 @@ impl App {
             }
             Phase::PlanReviewRunning => {
                 self.cancel_run_label("[Plan Review 1]");
-                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
-                let _ = fs::remove_file(prompts.join("plan-review-1.md"));
+                let rounds: Vec<u32> = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .filter(|r| r.stage == "plan-review")
+                    .map(|r| r.round)
+                    .collect();
+                for round in rounds {
+                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{round}.md")));
+                    let _ = fs::remove_file(prompts.join(format!("plan-review-{round}.md")));
+                }
                 let plan_backup = artifacts.join("plan.pre-review-1.md");
                 let spec_backup = artifacts.join("spec.pre-review-1.md");
                 restore_artifacts(&[
@@ -283,7 +300,6 @@ impl App {
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
                 self.clear_agent_error();
-                // TODO(schema-v2): restore the paused/running distinction from RunRecord state.
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::PlanReviewPaused => {
@@ -293,19 +309,25 @@ impl App {
                     (plan_backup.as_path(), artifacts.join("plan.md").as_path()),
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
-                let _ = fs::remove_file(artifacts.join("plan-review-1.md"));
-                let _ = fs::remove_file(prompts.join("plan-review-1.md"));
+                let rounds: Vec<u32> = self
+                    .state
+                    .agent_runs
+                    .iter()
+                    .filter(|r| r.stage == "plan-review")
+                    .map(|r| r.round)
+                    .collect();
+                for round in rounds {
+                    let _ = fs::remove_file(artifacts.join(format!("plan-review-{round}.md")));
+                    let _ = fs::remove_file(prompts.join(format!("plan-review-{round}.md")));
+                }
                 let _ = fs::remove_file(artifacts.join("plan.pre-review-1.md"));
                 let _ = fs::remove_file(artifacts.join("spec.pre-review-1.md"));
-                // TODO(schema-v2): clean up all plan review artifacts by RunRecord history.
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::ShardingRunning => {
                 self.cancel_run_label("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
-                // TODO(schema-v2): remove sharding launch metadata from RunRecord instead of the
-                // removed phase_models state.
                 let _ = self.transition_to_phase(Phase::PlanReviewRunning);
             }
             Phase::ImplementationRound(r) => {

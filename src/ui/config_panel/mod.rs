@@ -982,10 +982,11 @@ impl ConfigPanelState {
                 );
                 let mut available: Vec<(String, String)> = Vec::new();
                 for entry in &merged {
-                    let vendor_label = crate::logic::selection::vendor::subscription_kind_to_str(
-                        entry.subscription,
-                    )
-                    .to_string();
+                    let vendor_label =
+                        crate::logic::selection::subscription::subscription_kind_to_str(
+                            entry.subscription,
+                        )
+                        .to_string();
                     let pair = (vendor_label, entry.model.clone());
                     if !available.contains(&pair) {
                         available.push(pair);

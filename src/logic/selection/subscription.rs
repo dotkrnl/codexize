@@ -37,5 +37,5 @@ pub fn subscription_kind_to_str(v: SubscriptionKind) -> &'static str {
     }
 }
 #[cfg(test)]
-#[path = "vendor_tests.rs"]
+#[path = "subscription_tests.rs"]
 mod tests;

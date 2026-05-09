@@ -162,7 +162,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
 
     assert_eq!(models.len(), 2);
     assert_eq!(errors.len(), 1, "partial reset gaps should trigger refresh");
-    assert_eq!(errors[0].vendor, SubscriptionKind::Claude);
+    assert_eq!(errors[0].subscription, SubscriptionKind::Claude);
 }
 
 #[test]

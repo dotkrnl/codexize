@@ -1,7 +1,7 @@
 use super::config::SelectionPhase;
 use super::ranking::candidate_pool_weights;
+use super::subscription::{is_cheap_eligible, is_tough_eligible};
 use super::types::{CachedModel, SubscriptionKind};
-use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
 use std::cmp::Ordering;
 use std::ops::Deref;

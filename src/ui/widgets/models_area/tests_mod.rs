@@ -675,7 +675,7 @@ fn compact_quota_failed_fetch_renders_red_dashes() {
         0,
     )];
     let errors = vec![QuotaError {
-        vendor: SubscriptionKind::Kimi,
+        subscription: SubscriptionKind::Kimi,
         message: "boom".to_string(),
     }];
 
@@ -711,7 +711,7 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
         0,
     )];
     let errors = vec![QuotaError {
-        vendor: SubscriptionKind::Kimi,
+        subscription: SubscriptionKind::Kimi,
         message: "boom".to_string(),
     }];
 

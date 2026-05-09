@@ -99,7 +99,7 @@ async fn assemble_with_refresh(
             }
             Err(e) => {
                 quota_errors.push(QuotaError {
-                    vendor: SubscriptionKind::Claude,
+                    subscription: SubscriptionKind::Claude,
                     message: format!("dashboard fetch failed: {e}"),
                 });
                 cached_dashboard
@@ -132,7 +132,7 @@ async fn assemble_with_refresh(
         // failed_subscriptions) can be applied even when a vendor's
         // refresh exploded with no per-model entries to insert.
         let failed_vendors: BTreeSet<SubscriptionKind> =
-            fresh_errors.iter().map(|err| err.vendor).collect();
+            fresh_errors.iter().map(|err| err.subscription).collect();
         quota_errors.extend(fresh_errors);
         quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas, &failed_vendors);
         reset_payload = pure::merge_reset_payload(&cached_resets, fresh_resets);

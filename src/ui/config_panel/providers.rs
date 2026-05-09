@@ -92,7 +92,7 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
 
     for entry in providers {
         let vendor_label =
-            crate::logic::selection::vendor::subscription_kind_to_str(entry.subscription)
+            crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
                 .to_string();
         let group = (vendor_label, entry.model.clone());
         if current_group.as_ref() != Some(&group) {

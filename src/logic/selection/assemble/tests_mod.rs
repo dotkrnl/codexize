@@ -1062,7 +1062,7 @@ fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
         dashboard_warnings_to_quota_errors(vec!["ipbr normalized key 'x' collided".into()]);
 
     assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].vendor, SubscriptionKind::Claude);
+    assert_eq!(errors[0].subscription, SubscriptionKind::Claude);
     assert_eq!(
         errors[0].message,
         "dashboard warning: ipbr normalized key 'x' collided"

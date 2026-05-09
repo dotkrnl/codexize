@@ -48,7 +48,7 @@ impl CliKind {
 }
 #[derive(Debug, Clone)]
 pub struct QuotaError {
-    pub vendor: SubscriptionKind,
+    pub subscription: SubscriptionKind,
     pub message: String,
 }
 use std::collections::BTreeMap;

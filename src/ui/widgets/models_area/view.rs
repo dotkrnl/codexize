@@ -205,7 +205,7 @@ fn render_full_table(
         let short_name = model_names::display_short(&model.name);
         let vendor_failed = quota_errors
             .iter()
-            .any(|err| err.vendor == model.subscription);
+            .any(|err| err.subscription == model.subscription);
         let vendor_span = Span::styled(
             format!("{label:<vendor_width$}"),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -455,7 +455,7 @@ fn render_compact_quota(
     let expanded_width: usize = vendors_to_render
         .iter()
         .map(|(vendor, model)| {
-            let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
+            let vendor_failed = quota_errors.iter().any(|err| err.subscription == *vendor);
             let label = display_vendor_tag(model);
             let quota_str_len = if vendor_failed {
                 2
@@ -470,7 +470,7 @@ fn render_compact_quota(
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut first = true;
     for (vendor, model) in vendors_to_render {
-        let vendor_failed = quota_errors.iter().any(|err| err.vendor == vendor);
+        let vendor_failed = quota_errors.iter().any(|err| err.subscription == vendor);
         if !first {
             spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
         }

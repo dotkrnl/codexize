@@ -9,8 +9,8 @@
 //! exposed because that orchestrator needs them between IO calls.
 use super::baked;
 use super::ranking::stamp_selection_provenance;
+use super::subscription;
 use super::types::{CachedModel, Candidate, CliKind, QuotaError, SubscriptionKind};
-use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::dashboard::DashboardModel;
 use crate::data::config::schema::ProviderEntry;
@@ -485,9 +485,9 @@ pub fn merge_quota_payload(
                 .insert(subscription_str.clone(), models.clone());
         }
     }
-    for (subscription, models) in fresh {
+    for (kind, models) in fresh {
         merged.values.insert(
-            vendor::subscription_kind_to_str(subscription).to_string(),
+            subscription::subscription_kind_to_str(kind).to_string(),
             models,
         );
     }
@@ -524,9 +524,9 @@ pub fn merge_reset_payload(
             merged.insert(subscription_str.clone(), models.clone());
         }
     }
-    for (subscription, models) in fresh {
+    for (kind, models) in fresh {
         merged.insert(
-            vendor::subscription_kind_to_str(subscription).to_string(),
+            subscription::subscription_kind_to_str(kind).to_string(),
             models,
         );
     }
@@ -567,7 +567,7 @@ pub fn dashboard_warnings_to_quota_errors(warnings: Vec<String>) -> Vec<QuotaErr
             // Dashboard refresh diagnostics are currently displayed
             // through the shared QuotaError list; Claude is the existing
             // sentinel for dashboard-sourced notices.
-            vendor: SubscriptionKind::Claude,
+            subscription: SubscriptionKind::Claude,
             message: format!("dashboard warning: {message}"),
         })
         .collect()

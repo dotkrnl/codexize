@@ -92,7 +92,7 @@ pub async fn load_quota_maps_for_async(
     for (vendor, task) in tasks {
         let Ok(result) = task.await else {
             errors.push(QuotaError {
-                vendor,
+                subscription: vendor,
                 message: "quota worker task failed".to_string(),
             });
             continue;
@@ -102,7 +102,10 @@ pub async fn load_quota_maps_for_async(
                 maps.insert(vendor, map);
                 reset_maps.insert(vendor, reset_map);
             }
-            Err(e) => errors.push(QuotaError { vendor, message: e }),
+            Err(e) => errors.push(QuotaError {
+                subscription: vendor,
+                message: e,
+            }),
         }
     }
     (maps, reset_maps, errors)

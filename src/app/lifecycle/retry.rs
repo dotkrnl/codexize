@@ -263,7 +263,7 @@ impl App {
                 self.cancel_run_label("[Spec Review]");
                 let _ = fs::remove_file(artifacts.join("spec-review-1.md"));
                 let _ = fs::remove_file(prompts.join("spec-review-1.md"));
-                // TODO(Task 2): clean up all review artifacts by RunRecord instead of the
+                // TODO(schema-v2): clean up all review artifacts by RunRecord instead of the
                 // removed spec_reviewers/phase_models state.
                 let _ = self.transition_to_phase(Phase::BrainstormRunning);
             }
@@ -283,7 +283,7 @@ impl App {
                     (spec_backup.as_path(), artifacts.join("spec.md").as_path()),
                 ]);
                 self.clear_agent_error();
-                // TODO(Task 2): restore the paused/running distinction from RunRecord state.
+                // TODO(schema-v2): restore the paused/running distinction from RunRecord state.
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::PlanReviewPaused => {
@@ -297,14 +297,14 @@ impl App {
                 let _ = fs::remove_file(prompts.join("plan-review-1.md"));
                 let _ = fs::remove_file(artifacts.join("plan.pre-review-1.md"));
                 let _ = fs::remove_file(artifacts.join("spec.pre-review-1.md"));
-                // TODO(Task 2): clean up all plan review artifacts by RunRecord history.
+                // TODO(schema-v2): clean up all plan review artifacts by RunRecord history.
                 let _ = self.transition_to_phase(Phase::PlanningRunning);
             }
             Phase::ShardingRunning => {
                 self.cancel_run_label("[Sharding]");
                 let _ = fs::remove_file(artifacts.join("tasks.toml"));
                 let _ = fs::remove_file(prompts.join("sharding.md"));
-                // TODO(Task 2): remove sharding launch metadata from RunRecord instead of the
+                // TODO(schema-v2): remove sharding launch metadata from RunRecord instead of the
                 // removed phase_models state.
                 let _ = self.transition_to_phase(Phase::PlanReviewRunning);
             }

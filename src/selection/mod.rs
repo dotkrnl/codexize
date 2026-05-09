@@ -10,7 +10,7 @@ pub use crate::logic::selection::{
     CachedModel, Candidate, CliKind, IpbrPhaseScores, ModelRow, QuotaError, ScoreSource,
     SubscriptionKind,
 };
-pub use crate::logic::selection::{config, display, ranking, types, vendor};
+pub use crate::logic::selection::{config, display, ranking, subscription, types};
 pub use config::*;
 #[allow(clippy::module_inception)]
 pub mod selection {

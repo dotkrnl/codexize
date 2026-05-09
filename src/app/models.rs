@@ -62,7 +62,10 @@ pub(crate) fn subscription_color(subscription: SubscriptionKind) -> Color {
     }
 }
 fn quota_error_summary(errors: &[QuotaError]) -> String {
-    let names: Vec<&str> = errors.iter().map(|e| subscription_tag(e.vendor)).collect();
+    let names: Vec<&str> = errors
+        .iter()
+        .map(|e| subscription_tag(e.subscription))
+        .collect();
     match names.as_slice() {
         [] => "model refresh failed".to_string(),
         [single] => format!("model refresh: {single} quota unavailable"),

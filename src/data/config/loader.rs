@@ -1191,7 +1191,7 @@ pub fn render_sparse(config: &Config) -> String {
             let _ = writeln!(
                 out,
                 "subscription = {}",
-                toml_quote(crate::selection::vendor::subscription_kind_to_str(
+                toml_quote(crate::selection::subscription::subscription_kind_to_str(
                     entry.subscription
                 ))
             );

@@ -13,7 +13,7 @@ use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, Candidate, CliKind, FreeModelEntry, QuotaError, SubscriptionKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
-use crate::data::config::schema::EffortMapping;
+use crate::data::config::schema::{EffortMapping, ProviderEntry};
 use crate::dashboard::DashboardModel;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -31,15 +31,32 @@ const OFFICIAL_QUOTA_FLOOR: u8 = 21;
 /// reads, refresh fetches, and writes that produced these inputs. This
 /// function only merges, groups, and ranks those snapshots.
 ///
-/// Returns `(models, free_model_warnings)` where `free_model_warnings`
-/// lists `mapped_into` values from `free_models` entries that did not
-/// match any ipbr canonical row name.
+/// `providers` carries the operator's `[[providers]]` list (already
+/// merged in-memory with the legacy `[[free_models]]` block at config
+/// load time). Assembly resolves it against the baked defaults via
+/// [`baked::merge_with_overrides`] and uses the result to:
+///   - override per-tuple flags (`enabled`, `free`, `official`,
+///     `quota_disabled`, eligibility, mapping) on each dashboard-row
+///     candidate that matches a provider entry by `(vendor, model, cli,
+///     launch_name)`;
+///   - append user-added candidates whose `(vendor, model)` matches a
+///     dashboard row but whose `(cli, launch_name)` differs from the
+///     row's natural candidate.
+///
+/// `free_models` is retained as a legacy convenience for fixture tests
+/// that don't go through the loader's migration path; production callers
+/// pass an empty slice and feed everything through `providers`.
+///
+/// Returns `(models, warnings)` where `warnings` lists `mapped_into`
+/// values from `free_models` entries that did not match any ipbr
+/// canonical row name.
 pub fn assemble_universe(
     dashboard_entries: Vec<DashboardEntry>,
     quota_payload: QuotaPayload,
     reset_payload: ResetPayload,
     available_subscriptions: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<String>) {
     let failed_subscriptions = quota_payload.failed_subscriptions.clone();
     let parsed_quotas: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = quota_payload
@@ -61,13 +78,23 @@ pub fn assemble_universe(
         .filter(|(subscription, _)| available_subscriptions.contains(subscription))
         .collect();
 
+    // Resolve baked + user `[[providers]]` and index by the dashboard's
+    // (subscription, model) key so per-row lookups are linear in the
+    // size of the resolved list once. `provider_index_for` returns
+    // entries in baked-then-additions order, preserving display_order
+    // intent for additions that are appended below.
+    let resolved_providers = baked::merge_with_overrides(providers);
+    let providers_by_row = group_providers_by_row(&resolved_providers);
+
     let mut rows: BTreeMap<String, CachedModel> = BTreeMap::new();
+    let mut consumed_providers: BTreeSet<(SubscriptionKind, String, CliKind, String)> =
+        BTreeSet::new();
     for entry in dashboard_entries {
         let Some(row_name) = row_name_for_entry(&entry) else {
             continue;
         };
-        let subscription = parse_dashboard_subscription(&entry);
-        let candidate = subscription.and_then(|subscription| {
+        let dashboard_subscription = parse_dashboard_subscription(&entry);
+        let candidate = dashboard_subscription.and_then(|subscription| {
             build_candidate(
                 subscription,
                 &entry,
@@ -76,13 +103,38 @@ pub fn assemble_universe(
                 &parsed_resets,
                 &failed_subscriptions,
                 available_subscriptions,
+                &providers_by_row,
             )
         });
         let row = rows
             .entry(row_name.clone())
             .or_insert_with(|| row_from_entry(row_name.clone(), &entry));
         if let Some(candidate) = candidate {
+            consumed_providers.insert((
+                candidate.subscription,
+                entry.name.clone(),
+                candidate.cli,
+                candidate.launch_name.clone(),
+            ));
             row.candidates.push(candidate);
+        }
+        // Append user-added providers whose `(vendor, model)` keys this
+        // dashboard row but whose `(cli, launch_name)` differs from the
+        // natural dashboard candidate. These never reach `build_candidate`
+        // — they originate from `[[providers]]`, not from a dashboard
+        // entry — so we materialise them here off the resolved list.
+        if let Some(dashboard_subscription) = dashboard_subscription {
+            append_provider_additions(
+                row,
+                dashboard_subscription,
+                &entry.name,
+                &providers_by_row,
+                &parsed_quotas,
+                &parsed_resets,
+                &failed_subscriptions,
+                available_subscriptions,
+                &mut consumed_providers,
+            );
         }
     }
 
@@ -197,6 +249,31 @@ fn parse_dashboard_subscription(entry: &DashboardEntry) -> Option<SubscriptionKi
     }
 }
 
+/// Index of resolved providers (baked ⊕ user) keyed by the dashboard's
+/// `(SubscriptionKind, model)` row. Each key maps to the providers that
+/// belong on that row, in the order produced by
+/// [`baked::merge_with_overrides`] (baked first, additions last).
+type ProvidersByRow<'a> = BTreeMap<(SubscriptionKind, String), Vec<&'a ProviderEntry>>;
+
+fn group_providers_by_row(providers: &[ProviderEntry]) -> ProvidersByRow<'_> {
+    let mut by_row: ProvidersByRow<'_> = BTreeMap::new();
+    for entry in providers {
+        let Some(subscription) = parse_subscription_str(&entry.vendor) else {
+            // Unrecognised vendor strings are dropped here — the loader
+            // has already accepted them, but we have no SubscriptionKind
+            // bucket to file them under. Validation surfaces this
+            // gracefully through unmatched-row diagnostics elsewhere.
+            continue;
+        };
+        by_row
+            .entry((subscription, entry.model.clone()))
+            .or_default()
+            .push(entry);
+    }
+    by_row
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_candidate(
     subscription: SubscriptionKind,
     dashboard_entry: &DashboardEntry,
@@ -208,6 +285,7 @@ fn build_candidate(
     >,
     failed_subscriptions: &BTreeSet<SubscriptionKind>,
     available_subscriptions: &BTreeSet<SubscriptionKind>,
+    providers_by_row: &ProvidersByRow<'_>,
 ) -> Option<Candidate> {
     if !available_subscriptions.contains(&subscription) {
         return None;
@@ -227,39 +305,21 @@ fn build_candidate(
     } else {
         dashboard_name
     };
-    let quota_percent = parsed_quotas
-        .get(&subscription)
-        .and_then(|by_model| by_model.get(launch_name))
-        .copied()
-        .flatten()
-        .or_else(|| quota::find_quota_by_heuristic(launch_name, subscription, parsed_quotas))
-        .or_else(|| {
-            (launch_name != dashboard_name)
-                .then(|| {
-                    quota::find_quota_by_heuristic(dashboard_name, subscription, parsed_quotas)
-                })
-                .flatten()
+    // Per-tuple flags come from the resolved provider list when the
+    // dashboard's natural candidate identity matches a provider entry.
+    // Falling back to `baked::baked_for` would skip user overrides, so
+    // we look the entry up here and only reach the bare-bones fallback
+    // when no provider entry exists for this exact tuple.
+    let provider_match = providers_by_row
+        .get(&(subscription, dashboard_name.to_string()))
+        .and_then(|entries| {
+            entries
+                .iter()
+                .copied()
+                .find(|entry| entry.cli == cli && entry.launch_name == launch_name)
         });
-    let quota_resets_at = parsed_resets
-        .get(&subscription)
-        .and_then(|by_model| by_model.get(launch_name))
-        .copied()
-        .flatten()
-        .or_else(|| quota::find_reset_by_heuristic(launch_name, subscription, parsed_resets));
-    // Resolve per-tuple provider properties from the baked defaults
-    // table, keyed by `(dashboard.vendor, dashboard.name, cli,
-    // launch_name)`. Tuples with no baked entry (anonymous additions
-    // from the dashboard side) decay to neutral defaults — explicit
-    // operator [[providers]] toggles cannot reach this code path until
-    // the data layer threads the resolved providers list through
-    // assembly (out of scope for this pass).
-    let baked_props = baked::baked_for(
-        &dashboard_entry.vendor,
-        dashboard_name,
-        cli,
-        launch_name,
-    );
     let (
+        enabled,
         free,
         official,
         quota_disabled,
@@ -267,25 +327,28 @@ fn build_candidate(
         tough_eligible,
         effort_eligible,
         effort_mapping,
-    ) = match baked_props {
-        Some(props) => (
-            props.free,
-            props.official,
-            props.quota_disabled,
-            props.cheap_eligible,
-            props.tough_eligible,
-            props.effort_eligible,
-            props.effort_mapping,
+    ) = match provider_match {
+        Some(entry) => (
+            entry.enabled,
+            entry.free,
+            entry.official,
+            entry.quota_disabled,
+            entry.cheap_eligible,
+            entry.tough_eligible,
+            entry.effort_eligible,
+            entry.effort_mapping.clone(),
         ),
         None => (
+            true,
             false,
-            // Fallback when no baked tuple matches: anything routed
+            // Fallback when no provider entry matches: anything routed
             // through OpencodeGo is by definition not the canonical
             // owner of the model, so it is non-official. Direct CLIs
             // (Claude, Codex, Gemini, Kimi) speaking to their own
             // subscription remain official by default — the legacy
             // "direct vs routed" pipeline depends on this distinction
-            // even when the (vendor, model) tuple has no baked entry.
+            // even when the (vendor, model) tuple has no provider
+            // entry on file.
             subscription != SubscriptionKind::OpencodeGo,
             false,
             false,
@@ -294,15 +357,82 @@ fn build_candidate(
             EffortMapping::default(),
         ),
     };
+    Some(make_candidate(
+        subscription,
+        cli,
+        launch_name,
+        display_order,
+        enabled,
+        free,
+        official,
+        quota_disabled,
+        cheap_eligible,
+        tough_eligible,
+        effort_eligible,
+        effort_mapping,
+        parsed_quotas,
+        parsed_resets,
+        failed_subscriptions,
+        Some(dashboard_name),
+    ))
+}
+
+/// Materialise a `Candidate` with quota/reset lookups applied for a
+/// fully-resolved per-tuple flag bundle. The `dashboard_name` argument
+/// lets the dashboard-driven path opt into a secondary heuristic
+/// fallback (when `launch_name` was rewritten — e.g. Kimi → kimi-latest
+/// — but the dashboard name still has a quota entry); user-addition
+/// candidates pass `None` because their launch_name is authoritative.
+#[allow(clippy::too_many_arguments)]
+fn make_candidate(
+    subscription: SubscriptionKind,
+    cli: CliKind,
+    launch_name: &str,
+    display_order: usize,
+    enabled: bool,
+    free: bool,
+    official: bool,
+    quota_disabled: bool,
+    cheap_eligible: bool,
+    tough_eligible: bool,
+    effort_eligible: bool,
+    effort_mapping: EffortMapping,
+    parsed_quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
+    parsed_resets: &BTreeMap<
+        SubscriptionKind,
+        BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
+    >,
+    failed_subscriptions: &BTreeSet<SubscriptionKind>,
+    dashboard_name: Option<&str>,
+) -> Candidate {
+    let quota_percent = parsed_quotas
+        .get(&subscription)
+        .and_then(|by_model| by_model.get(launch_name))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_quota_by_heuristic(launch_name, subscription, parsed_quotas))
+        .or_else(|| {
+            dashboard_name
+                .filter(|name| *name != launch_name)
+                .and_then(|name| {
+                    quota::find_quota_by_heuristic(name, subscription, parsed_quotas)
+                })
+        });
+    let quota_resets_at = parsed_resets
+        .get(&subscription)
+        .and_then(|by_model| by_model.get(launch_name))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_reset_by_heuristic(launch_name, subscription, parsed_resets));
     let quota_failed = failed_subscriptions.contains(&subscription);
-    Some(Candidate {
+    Candidate {
         subscription,
         cli,
         launch_name: launch_name.to_string(),
         quota_percent,
         quota_resets_at,
         display_order,
-        enabled: true,
+        enabled,
         free,
         official,
         quota_disabled,
@@ -311,7 +441,74 @@ fn build_candidate(
         effort_eligible,
         effort_mapping,
         quota_failed,
-    })
+    }
+}
+
+/// Append candidates for any provider entries that key this dashboard
+/// row but whose `(cli, launch_name)` doesn't match the row's natural
+/// dashboard candidate. Provider entries flagged `free = true` route
+/// through `SubscriptionKind::Free` so quota lookups hit the legacy
+/// free-pool path; the rest follow `cli.to_subscription()`.
+#[allow(clippy::too_many_arguments)]
+fn append_provider_additions(
+    row: &mut CachedModel,
+    dashboard_subscription: SubscriptionKind,
+    dashboard_model: &str,
+    providers_by_row: &ProvidersByRow<'_>,
+    parsed_quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
+    parsed_resets: &BTreeMap<
+        SubscriptionKind,
+        BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
+    >,
+    failed_subscriptions: &BTreeSet<SubscriptionKind>,
+    available_subscriptions: &BTreeSet<SubscriptionKind>,
+    consumed: &mut BTreeSet<(SubscriptionKind, String, CliKind, String)>,
+) {
+    let Some(entries) = providers_by_row.get(&(dashboard_subscription, dashboard_model.to_string()))
+    else {
+        return;
+    };
+    for entry in entries {
+        let candidate_subscription = if entry.free {
+            SubscriptionKind::Free
+        } else {
+            entry.cli.to_subscription()
+        };
+        let key = (
+            candidate_subscription,
+            dashboard_model.to_string(),
+            entry.cli,
+            entry.launch_name.clone(),
+        );
+        if !consumed.insert(key) {
+            continue;
+        }
+        // Free providers bypass the available-subscriptions filter:
+        // legacy `[[free_models]]` semantics treated them as always-on.
+        // Other additions still respect available_subscriptions so a
+        // user can't reach a vendor whose ACP agent isn't installed.
+        if !entry.free && !available_subscriptions.contains(&candidate_subscription) {
+            continue;
+        }
+        row.candidates.push(make_candidate(
+            candidate_subscription,
+            entry.cli,
+            &entry.launch_name,
+            entry.display_order as usize,
+            entry.enabled,
+            entry.free,
+            entry.official,
+            entry.quota_disabled,
+            entry.cheap_eligible,
+            entry.tough_eligible,
+            entry.effort_eligible,
+            entry.effort_mapping.clone(),
+            parsed_quotas,
+            parsed_resets,
+            failed_subscriptions,
+            None,
+        ));
+    }
 }
 
 fn refresh_selected_candidate(row: &mut CachedModel) {

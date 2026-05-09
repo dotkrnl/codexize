@@ -203,7 +203,7 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
@@ -234,7 +234,7 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
     let available = BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[], &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "kimi-k2.6");
@@ -400,7 +400,7 @@ fn assemble_from_cache_with_available(
         .quota_resets
         .map(|section| section.data)
         .unwrap_or_default();
-    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, available, &[]);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, available, &[], &[]);
     models
 }
 
@@ -716,7 +716,8 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let resets = empty_resets_for_quotas(&quotas);
 
-    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, &all_vendors(), &[]);
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, resets, &all_vendors(), &[], &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
@@ -806,6 +807,7 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
         BTreeMap::new(),
         &opencode_available(),
         &[],
+        &[],
     );
     assert_eq!(models.len(), 1);
     models.into_iter().next().unwrap()
@@ -820,6 +822,7 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
         QuotaPayload::default(),
         BTreeMap::new(),
         &opencode_available(),
+        &[],
         &[],
     );
 
@@ -1054,6 +1057,7 @@ fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
         BTreeMap::new(),
         &kimi_opencode_available(),
         &[],
+        &[],
     );
 
     assert_eq!(models.len(), 1);
@@ -1081,6 +1085,7 @@ fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher
         BTreeMap::new(),
         &kimi_opencode_available(),
         &[],
+        &[],
     );
 
     assert_eq!(models.len(), 1);
@@ -1104,6 +1109,7 @@ fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
+        &[],
         &[],
     );
 
@@ -1129,6 +1135,7 @@ fn synth_kimi_latest_skipped_when_no_kimi_semver() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
+        &[],
         &[],
     );
 
@@ -1156,6 +1163,7 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
+        &[],
         &[],
     );
 
@@ -1186,7 +1194,7 @@ fn synth_kimi_latest_skipped_when_kimi_unavailable() {
     let available = BTreeSet::from([SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
+        assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[], &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
@@ -1207,7 +1215,7 @@ fn free_candidate_wins_arbitration_over_direct_below_quota() {
     let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
 
     let (models, warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
 
     assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
     assert_eq!(models.len(), 1);
@@ -1245,7 +1253,7 @@ fn unmatched_mapped_into_produces_soft_warning() {
     let available = BTreeSet::from([SubscriptionKind::Claude]);
 
     let (models, warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
 
     assert_eq!(warnings.len(), 1);
     assert!(
@@ -1334,6 +1342,115 @@ fn ladder_returns_none_when_every_candidate_is_disabled() {
 }
 
 #[test]
+fn provider_override_disables_baked_candidate_in_universe() {
+    // Operator marks the baked claude/claude-opus-4-7 tuple as
+    // disabled via `[[providers]]`; assemble must propagate the flag
+    // so `select_candidate_index` skips it. The dashboard row stays
+    // present (no auto-deletion), but it has zero selectable
+    // candidates — exactly the spec's AC-1 contract for disabled
+    // baked tuples.
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
+    let dashboard = vec![make_ipbr_entry(
+        "claude-opus-4-7",
+        "claude",
+        "claude-opus-4-7",
+    )];
+    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
+    let providers = vec![ProviderEntry {
+        vendor: "claude".to_string(),
+        model: "claude-opus-4-7".to_string(),
+        cli: CliKind::Claude,
+        launch_name: "claude-opus-4-7".to_string(),
+        enabled: false,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: EffortMapping::default(),
+        display_order: 0,
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Claude]);
+
+    let (models, _warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &[],
+        &providers,
+    );
+
+    assert_eq!(models.len(), 1, "row must remain even when disabled");
+    let row = &models[0];
+    assert_eq!(row.candidates.len(), 1);
+    assert!(
+        !row.candidates[0].enabled,
+        "user override must flip the baked candidate's enabled flag"
+    );
+    assert!(
+        row.selected_candidate().is_none(),
+        "ladder must skip disabled candidates"
+    );
+}
+
+#[test]
+fn provider_addition_appends_routed_candidate_to_dashboard_row() {
+    // The user adds an opencode-routed alternative for an existing
+    // claude-opus-4-7 dashboard row. The natural Claude candidate is
+    // still produced (with its baked flags) AND the OpencodeGo
+    // candidate appears as an addition with the user-supplied flags.
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
+    let dashboard = vec![make_ipbr_entry(
+        "claude-opus-4-7",
+        "claude",
+        "claude-opus-4-7",
+    )];
+    let quotas = make_quota_payload(&[
+        ("claude", "claude-opus-4-7", Some(50)),
+        ("opencode-go", "claude-opus-4-7", Some(95)),
+    ]);
+    let providers = vec![ProviderEntry {
+        vendor: "claude".to_string(),
+        model: "claude-opus-4-7".to_string(),
+        cli: CliKind::Opencode,
+        launch_name: "claude-opus-4-7".to_string(),
+        enabled: true,
+        free: false,
+        official: false,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: EffortMapping::default(),
+        display_order: 1,
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
+
+    let (models, _warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &[],
+        &providers,
+    );
+
+    assert_eq!(models.len(), 1);
+    let row = &models[0];
+    assert_eq!(row.candidates.len(), 2);
+    let opencode = row
+        .candidates
+        .iter()
+        .find(|c| c.subscription == SubscriptionKind::OpencodeGo)
+        .expect("user-added opencode candidate must appear in the row");
+    assert_eq!(opencode.cli, CliKind::Opencode);
+    assert!(opencode.tough_eligible);
+    assert!(!opencode.official, "user addition stayed non-official");
+}
+
+#[test]
 fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     // Per spec, a subscription that failed its quota fetch has *all*
     // its providers reported as 50% effective when no per-model
@@ -1346,7 +1463,7 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
         .insert(SubscriptionKind::Codex);
     let available = BTreeSet::from([SubscriptionKind::Codex]);
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[], &[]);
     assert_eq!(models.len(), 1);
     let candidate = &models[0].candidates[0];
     assert!(candidate.quota_failed);
@@ -1371,7 +1488,7 @@ fn free_candidate_launch_name_is_verbatim_in_acp_request() {
     let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
 
     assert_eq!(models.len(), 1);
     let selected = models[0].selected_candidate().unwrap();

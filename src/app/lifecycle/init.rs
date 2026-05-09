@@ -66,6 +66,7 @@ impl App {
         }
         let nodes = build_tree(&state);
         let free_models = config.free_models.value().clone();
+        let providers = config.providers.value().clone();
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
@@ -79,6 +80,7 @@ impl App {
                     paths_view.cache_root.clone(),
                     acp_config.available_vendors(),
                     free_models.clone(),
+                    providers.clone(),
                 ),
                 started_at: Instant::now(),
             },
@@ -172,6 +174,7 @@ impl App {
             &loaded,
             &acp_config.available_vendors(),
             &free_models,
+            &providers,
         );
         if !cached.is_empty() {
             let cache_has_expired_section = startup_cache_has_expired_section(&loaded);

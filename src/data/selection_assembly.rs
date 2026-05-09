@@ -5,6 +5,7 @@
 //! these directly (see `scripts/check-layers.sh`).
 use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
+use crate::data::config::schema::ProviderEntry;
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
 use crate::logic::selection::types::{CachedModel, FreeModelEntry, QuotaError, SubscriptionKind};
@@ -15,31 +16,35 @@ pub async fn assemble_models_async(
     cache_dir: &Path,
     available_vendors: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load(cache_dir);
-    assemble_with_refresh(cache_dir, loaded, available_vendors, free_models).await
+    assemble_with_refresh(cache_dir, loaded, available_vendors, free_models, providers).await
 }
 
 pub fn assemble_from_cached_only(
     cache_dir: &Path,
     available_vendors: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
     let loaded = cache::load(cache_dir);
-    assemble_from_loaded_with_available(&loaded, available_vendors, free_models)
+    assemble_from_loaded_with_available(&loaded, available_vendors, free_models, providers)
 }
 
 pub fn assemble_from_loaded(
     loaded: &LoadedCache,
     available_vendors: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
-    assemble_from_loaded_with_available(loaded, available_vendors, free_models)
+    assemble_from_loaded_with_available(loaded, available_vendors, free_models, providers)
 }
 fn assemble_from_loaded_with_available(
     loaded: &LoadedCache,
     available_vendors: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
     if loaded.dashboard.is_none() {
         return Vec::new();
@@ -59,8 +64,14 @@ fn assemble_from_loaded_with_available(
         .as_ref()
         .map(|section| section.data.clone())
         .unwrap_or_default();
-    let (models, _free_model_warnings) =
-        pure::assemble_universe(dashboard, quotas, resets, available_vendors, free_models);
+    let (models, _free_model_warnings) = pure::assemble_universe(
+        dashboard,
+        quotas,
+        resets,
+        available_vendors,
+        free_models,
+        providers,
+    );
     models
 }
 async fn assemble_with_refresh(
@@ -68,6 +79,7 @@ async fn assemble_with_refresh(
     loaded: LoadedCache,
     available_vendors: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
+    providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let (cached_dashboard, dashboard_expired) = match loaded.dashboard {
         Some(section) => (section.data, section.expired),
@@ -140,6 +152,7 @@ async fn assemble_with_refresh(
         reset_payload,
         available_vendors,
         free_models,
+        providers,
     );
     quota_errors.extend(free_model_warnings.into_iter().map(|msg| QuotaError {
         vendor: SubscriptionKind::Free,

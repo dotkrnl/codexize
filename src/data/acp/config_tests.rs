@@ -50,6 +50,7 @@ fn free_model_entry_resolves_to_verbatim_launch_name_through_acp_path() {
         BTreeMap::new(),
         &available,
         &free_models,
+        &[],
     );
     assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
     let row = models

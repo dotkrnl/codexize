@@ -1,6 +1,7 @@
 use super::{App, state::ModelRefreshState, status_line::Severity};
 use crate::{
     cache,
+    data::config::schema::ProviderEntry,
     selection::{CachedModel, QuotaError, SubscriptionKind},
 };
 use ratatui::style::Color;
@@ -14,6 +15,7 @@ pub(crate) fn spawn_refresh(
     cache_dir: PathBuf,
     available_vendors: BTreeSet<SubscriptionKind>,
     free_models: Vec<crate::selection::FreeModelEntry>,
+    providers: Vec<ProviderEntry>,
 ) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -23,6 +25,7 @@ pub(crate) fn spawn_refresh(
                     &cache_dir,
                     &available_vendors,
                     &free_models,
+                    &providers,
                 )
                 .await,
             );
@@ -34,6 +37,7 @@ pub(crate) fn spawn_refresh(
                 &cache_dir_owned,
                 &available_vendors,
                 &free_models,
+                &providers,
             )
             .await
         }));
@@ -139,6 +143,7 @@ impl App {
                             self.paths.cache_root.clone(),
                             self.available_vendors(),
                             self.config.free_models.value().clone(),
+                            self.config.providers.value().clone(),
                         ),
                         started_at: Instant::now(),
                     };
@@ -152,6 +157,7 @@ impl App {
                 self.paths.cache_root.clone(),
                 self.available_vendors(),
                 self.config.free_models.value().clone(),
+                self.config.providers.value().clone(),
             ),
             started_at: Instant::now(),
         };

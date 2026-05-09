@@ -20,6 +20,8 @@ fn running_run(id: u64) -> RunRecord {
         status: RunStatus::Running,
         error: None,
         effort: EffortLevel::Tough,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

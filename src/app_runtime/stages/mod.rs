@@ -28,6 +28,7 @@ use crate::app::models::vendor_tag;
 use crate::{
     adapters::EffortLevel,
     app::App,
+    data::config::schema::EffortMapping,
     selection::{
         CachedModel, CliKind, SubscriptionKind,
         config::SelectionPhase,
@@ -39,28 +40,39 @@ use crate::{
 };
 
 /// Tuple returned by every model-pick helper so the launch boundary always
-/// sees the selected `Candidate`'s CLI and launch_name (not just the row's
-/// canonical identity). Free candidates require this so a row named
-/// `deepseek-v4-flash` can launch via opencode with `dsk-4-flash`.
+/// sees the selected `Candidate`'s CLI, launch_name, and effort metadata.
+/// `effort_mapping` and `effort_eligible` are sourced from the candidate so
+/// the launch site can drive [`crate::adapters::launch_effort_suffix`]
+/// without consulting any vendor-keyed table.
 pub(crate) type StagePick = (
     String,           // model row name
     SubscriptionKind, // row subscription (compat mirror of selected candidate)
     String,           // vendor tag string
     CliKind,          // CLI to spawn
     String,           // verbatim launch_name passed to the CLI
+    EffortMapping,    // per-tuple effort token table (cheap/normal/tough)
+    bool,             // candidate's effort_eligible flag
 );
 
-/// Pull `(cli, launch_name)` from the row's selected candidate when arbitration
-/// has chosen one; otherwise fall back to the direct-vendor CLI and the row's
-/// canonical name. The fallback only fires for rows with no candidates (e.g.
-/// override_model paths constructed before assembly seeded candidates), which
-/// preserves pre-task-2 behavior.
-pub(crate) fn pick_cli_and_launch_name(row: &CachedModel) -> (CliKind, String) {
+/// Pull launch-time fields from the row's selected candidate when
+/// arbitration has chosen one; otherwise fall back to the direct-vendor
+/// CLI, the row's canonical name, and a default effort mapping with
+/// `effort_eligible = false`. The fallback only fires for rows with no
+/// candidates (e.g. override_model paths constructed before assembly
+/// seeded candidates), which preserves pre-task-2 behavior.
+pub(crate) fn pick_cli_and_launch_name(
+    row: &CachedModel,
+) -> (CliKind, String, EffortMapping, bool) {
     if let Some(candidate) = row.selected_candidate() {
-        return (candidate.cli, candidate.launch_name.clone());
+        return (
+            candidate.cli,
+            candidate.launch_name.clone(),
+            candidate.effort_mapping.clone(),
+            candidate.effort_eligible,
+        );
     }
     let cli = row.subscription.direct_cli().unwrap_or(CliKind::Opencode);
-    (cli, row.name.clone())
+    (cli, row.name.clone(), EffortMapping::default(), false)
 }
 impl App {
     pub(crate) fn try_test_launch(
@@ -120,23 +132,29 @@ impl App {
         cheap: bool,
     ) -> Option<StagePick> {
         if let Some(model) = override_model {
-            let (cli, launch_name) = pick_cli_and_launch_name(model);
+            let (cli, launch_name, effort_mapping, effort_eligible) =
+                pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
                 model.subscription,
                 vendor_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
+                effort_mapping,
+                effort_eligible,
             ));
         }
         let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
-        let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
+        let (cli, launch_name, effort_mapping, effort_eligible) =
+            pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
             outcome.model.subscription,
             vendor_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
+            effort_mapping,
+            effort_eligible,
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -150,24 +168,30 @@ impl App {
         cheap: bool,
     ) -> Option<StagePick> {
         if let Some(model) = override_model {
-            let (cli, launch_name) = pick_cli_and_launch_name(model);
+            let (cli, launch_name, effort_mapping, effort_eligible) =
+                pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
                 model.subscription,
                 vendor_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
+                effort_mapping,
+                effort_eligible,
             ));
         }
         let outcome =
             select_for_review_with_effort(&self.models, used_vendors, used_models, effort, cheap)?;
-        let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
+        let (cli, launch_name, effort_mapping, effort_eligible) =
+            pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
             outcome.model.subscription,
             vendor_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
+            effort_mapping,
+            effort_eligible,
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -185,6 +209,8 @@ impl App {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
+        effort_mapping: EffortMapping,
+        effort_eligible: bool,
         mut modes: LaunchModes,
         prompt_path: std::path::PathBuf,
     ) {
@@ -210,6 +236,8 @@ impl App {
             vendor,
             window_name,
             effort,
+            effort_mapping,
+            effort_eligible,
             modes,
         );
         let Some(run) = self
@@ -241,7 +269,11 @@ impl App {
             );
         }
         self.prime_yolo_exit_tracking(&run);
-        let effort_suffix = crate::adapters::effort_suffix_from_str(&run.vendor, run.effort);
+        let effort_suffix = crate::adapters::launch_effort_suffix(
+            run.effort,
+            run.effort_eligible,
+            &run.effort_mapping,
+        );
         let started = Message {
             ts: chrono::Utc::now(),
             run_id,
@@ -299,13 +331,15 @@ impl App {
     fn session_selected_model_for_validator(&mut self) -> Option<StagePick> {
         let name = self.state.selected_model.as_ref()?.clone();
         let model = self.models.iter().find(|m| m.name == name)?;
-        let (cli, launch_name) = pick_cli_and_launch_name(model);
+        let (cli, launch_name, effort_mapping, effort_eligible) = pick_cli_and_launch_name(model);
         Some((
             model.name.clone(),
             model.subscription,
             vendor_tag(model.subscription).to_string(),
             cli,
             launch_name,
+            effort_mapping,
+            effort_eligible,
         ))
     }
     /// Look up the most-recent run on a stage for the given round and
@@ -330,19 +364,24 @@ impl App {
         // resuming we look the row up in the current universe and reuse its
         // selected candidate (preserves Free-tier launch_name on resume); if
         // the row no longer exists, fall back to direct-CLI defaults.
-        let (cli, launch_name) = match self.models.iter().find(|m| m.name == last.model) {
-            Some(row) => pick_cli_and_launch_name(row),
-            None => (
-                vendor_kind.direct_cli().unwrap_or(CliKind::Opencode),
-                last.model.clone(),
-            ),
-        };
+        let (cli, launch_name, effort_mapping, effort_eligible) =
+            match self.models.iter().find(|m| m.name == last.model) {
+                Some(row) => pick_cli_and_launch_name(row),
+                None => (
+                    vendor_kind.direct_cli().unwrap_or(CliKind::Opencode),
+                    last.model.clone(),
+                    EffortMapping::default(),
+                    false,
+                ),
+            };
         Some((
             last.model.clone(),
             vendor_kind,
             vendor_tag(vendor_kind).to_string(),
             cli,
             launch_name,
+            effort_mapping,
+            effort_eligible,
         ))
     }
 }

@@ -83,6 +83,8 @@ fn agent_run_summary_is_constructible_from_public_surface() {
         status: RunStatus::Running,
         error: None,
         effort: EffortLevel::Normal,
+        effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

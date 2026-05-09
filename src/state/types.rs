@@ -6,6 +6,7 @@
 //! dependencies; the additional `impl` block in `data/persistence` extends it
 //! with load/save/log helpers.
 use crate::adapters::EffortLevel;
+use crate::data::config::schema::EffortMapping;
 use crate::logic::pipeline::phase::Phase;
 use crate::logic::selection::SelectionPhase;
 use crate::state::BuilderState;
@@ -127,6 +128,20 @@ pub struct RunRecord {
     pub error: Option<String>,
     #[serde(default)]
     pub effort: EffortLevel,
+    /// Per-tuple effort token table mirrored from the selected `Candidate`
+    /// at launch time so resumed runs and tree rendering can derive the
+    /// suffix without consulting any vendor-keyed table. Defaulted on
+    /// loads of pre-task-9 session.toml files (cheap/medium/high), which
+    /// matches the legacy "no suffix" path when paired with a default
+    /// `effort_eligible == false`.
+    #[serde(default)]
+    pub effort_mapping: EffortMapping,
+    /// Whether the run's selected candidate was effort-capable.
+    /// Defaults to `false` when absent so resumed-from-disk runs render
+    /// without an effort suffix — matching pre-refactor behavior for any
+    /// row that was already non-effort.
+    #[serde(default)]
+    pub effort_eligible: bool,
     #[serde(default)]
     pub modes: LaunchModes,
     #[serde(default)]

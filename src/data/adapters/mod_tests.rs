@@ -12,74 +12,61 @@ fn short_model_uses_gemini_preview_display_label() {
 }
 
 #[test]
-fn effort_suffix_normal_is_empty_for_all_vendors() {
-    for vendor in [
-        SubscriptionKind::Codex,
-        SubscriptionKind::Claude,
-        SubscriptionKind::Gemini,
-        SubscriptionKind::Kimi,
-        SubscriptionKind::OpencodeGo,
-    ] {
-        assert_eq!(
-            effort_suffix(vendor, EffortLevel::Normal),
-            "",
-            "{vendor:?} Normal should produce empty suffix"
-        );
-    }
+fn launch_effort_suffix_normal_is_empty() {
+    let mapping = EffortMapping::new("low", "medium", "xhigh");
+    assert_eq!(
+        launch_effort_suffix(EffortLevel::Normal, true, &mapping),
+        ""
+    );
 }
 
 #[test]
-fn effort_suffix_tough_maps_provider_suffix() {
+fn launch_effort_suffix_ineligible_is_empty() {
+    let mapping = EffortMapping::new("low", "medium", "xhigh");
+    // Even with Tough effort, an effort-incapable candidate gets no suffix.
     assert_eq!(
-        effort_suffix(SubscriptionKind::Codex, EffortLevel::Tough),
+        launch_effort_suffix(EffortLevel::Tough, false, &mapping),
+        ""
+    );
+    assert_eq!(launch_effort_suffix(EffortLevel::Low, false, &mapping), "");
+}
+
+#[test]
+fn launch_effort_suffix_reads_per_tuple_token() {
+    let codex_mapping = EffortMapping::new("low", "medium", "xhigh");
+    let claude_mapping = EffortMapping::new("low", "medium", "max");
+    assert_eq!(
+        launch_effort_suffix(EffortLevel::Tough, true, &codex_mapping),
         ":xhigh"
     );
     assert_eq!(
-        effort_suffix(SubscriptionKind::Claude, EffortLevel::Tough),
+        launch_effort_suffix(EffortLevel::Tough, true, &claude_mapping),
         ":max"
     );
     assert_eq!(
-        effort_suffix(SubscriptionKind::Gemini, EffortLevel::Tough),
-        ""
-    );
-    assert_eq!(
-        effort_suffix(SubscriptionKind::Kimi, EffortLevel::Tough),
-        ""
-    );
-    assert_eq!(
-        effort_suffix(SubscriptionKind::OpencodeGo, EffortLevel::Tough),
-        ""
+        launch_effort_suffix(EffortLevel::Low, true, &codex_mapping),
+        ":low"
     );
 }
 
 #[test]
-fn effort_suffix_low_maps_provider_suffix() {
-    assert_eq!(
-        effort_suffix(SubscriptionKind::Codex, EffortLevel::Low),
-        ":low"
-    );
-    assert_eq!(
-        effort_suffix(SubscriptionKind::Claude, EffortLevel::Low),
-        ":low"
-    );
-    assert_eq!(
-        effort_suffix(SubscriptionKind::Gemini, EffortLevel::Low),
-        ""
-    );
-    assert_eq!(effort_suffix(SubscriptionKind::Kimi, EffortLevel::Low), "");
-    assert_eq!(
-        effort_suffix(SubscriptionKind::OpencodeGo, EffortLevel::Low),
-        ""
-    );
+fn launch_effort_suffix_empty_token_is_empty() {
+    // Per the design: an empty token yields no suffix even when the
+    // candidate is effort-eligible — so a row with an explicitly blank
+    // `tough` field never decorates the model name.
+    let mapping = EffortMapping::new("", "", "");
+    assert_eq!(launch_effort_suffix(EffortLevel::Tough, true, &mapping), "");
 }
 
 #[test]
 fn run_label_with_model_appends_effort_suffix() {
+    let mapping = EffortMapping::new("low", "medium", "xhigh");
     let name = run_label_with_model(
         "[Round 1 Coder]",
         "gpt-5.5",
-        SubscriptionKind::Codex,
         EffortLevel::Tough,
+        true,
+        &mapping,
     );
     assert_eq!(name, "[Round 1 Coder] gpt-5.5:xhigh");
 }

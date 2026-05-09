@@ -244,6 +244,8 @@ pub fn start_agent_run(
     vendor: String,
     window_name: String,
     effort: EffortLevel,
+    effort_mapping: crate::data::config::schema::EffortMapping,
+    effort_eligible: bool,
     modes: LaunchModes,
 ) -> u64 {
     let run_id = state.next_agent_run_id();
@@ -258,6 +260,8 @@ pub fn start_agent_run(
         vendor,
         window_name,
         effort,
+        effort_mapping,
+        effort_eligible,
         modes,
     )
 }
@@ -273,6 +277,8 @@ pub fn start_agent_run_with_id(
     vendor: String,
     window_name: String,
     effort: EffortLevel,
+    effort_mapping: crate::data::config::schema::EffortMapping,
+    effort_eligible: bool,
     modes: LaunchModes,
 ) -> u64 {
     let path = compute_section_path(state, &stage, task_id, round, attempt);
@@ -286,6 +292,8 @@ pub fn start_agent_run_with_id(
         vendor,
         window_name,
         effort,
+        effort_mapping,
+        effort_eligible,
         modes,
         Some(path),
     )

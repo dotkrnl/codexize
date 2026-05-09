@@ -36,7 +36,8 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
+        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
+            chosen;
         let session_id = &self.state.session_id;
         let prompt_path = session_state::session_dir(session_id)
             .join("prompts")
@@ -89,6 +90,8 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         let guard_mode = if modes.yolo {
@@ -97,7 +100,13 @@ impl App {
             guard::GuardMode::AskOperator
         };
         let dirty = self.capture_run_guard("brainstorm", None, 1, attempt, guard_mode);
-        let window_name = run_label_with_model("[Brainstorm]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            "[Brainstorm]",
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("brainstorm", None, 1, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
@@ -143,6 +152,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

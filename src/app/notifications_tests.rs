@@ -52,6 +52,8 @@ fn running_run(id: u64, stage: &str, interactive: bool) -> RunRecord {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes {
             interactive,
             ..LaunchModes::default()

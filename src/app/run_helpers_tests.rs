@@ -16,6 +16,8 @@ fn run(stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> RunRecord
         status: RunStatus::Done,
         error: None,
         effort: EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

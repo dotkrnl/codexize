@@ -27,6 +27,8 @@ fn run_record(interactive: bool) -> RunRecord {
         status: RunStatus::Running,
         error: None,
         effort: Default::default(),
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes {
             interactive,
             ..Default::default()

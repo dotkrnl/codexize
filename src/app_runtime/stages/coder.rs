@@ -56,7 +56,8 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
+        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
+            chosen;
         let prompt_path = session_dir.join("prompts").join(format!("coder-r{r}.md"));
         if let Some(parent) = prompt_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -95,10 +96,17 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
-        let window_name =
-            run_label_with_model(&format!("[Round {r} Coder]"), &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            &format!("[Round {r} Coder]"),
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         self.capture_run_guard(
             "coder",
@@ -134,6 +142,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

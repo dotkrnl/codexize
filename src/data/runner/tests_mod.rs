@@ -285,6 +285,8 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         hostname: None,
         mount_device_id: None,
         section_path: None,
@@ -382,6 +384,8 @@ fn seed_stream_session(session_id: &str, window_name: &str) {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         hostname: None,
         mount_device_id: None,
         section_path: None,
@@ -989,6 +993,8 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         hostname: None,
         mount_device_id: None,
         section_path: None,
@@ -1283,6 +1289,8 @@ fn launch_test_run(dir: &Path) -> AgentRun {
         launch_name: "model-x".to_string(),
         prompt_path,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
     }
 }
@@ -1687,6 +1695,8 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
         "codex".to_string(),
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         crate::state::LaunchModes::default(),
         None,
     );
@@ -1746,6 +1756,8 @@ fn acp_launch_persists_thought_chunks_as_agent_thought() {
         "codex".to_string(),
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         crate::state::LaunchModes::default(),
         None,
     );
@@ -1802,6 +1814,8 @@ fn acp_launch_concatenates_thought_chunks_per_turn() {
         "codex".to_string(),
         "[Coder]".to_string(),
         crate::adapters::EffortLevel::Normal,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         crate::state::LaunchModes::default(),
         None,
     );

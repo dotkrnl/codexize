@@ -1,3 +1,4 @@
+use crate::data::config::schema::EffortMapping;
 use crate::selection::SubscriptionKind;
 use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,16 @@ pub struct AgentRun {
     pub launch_name: String,
     pub prompt_path: PathBuf,
     pub effort: EffortLevel,
+    /// Per-tuple effort token table (`cheap` / `normal` / `tough`) resolved
+    /// from the selected `Candidate` at launch time. Drives
+    /// [`launch_effort_suffix`] without consulting any vendor-keyed table.
+    pub effort_mapping: EffortMapping,
+    /// Whether the selected `Candidate` is effort-capable. When `false`,
+    /// [`launch_effort_suffix`] returns an empty string regardless of
+    /// `effort` — matching the pre-refactor "non-effort vendors get no
+    /// suffix" behavior, but driven by per-tuple data instead of vendor
+    /// pattern-matching.
+    pub effort_eligible: bool,
     pub modes: LaunchModes,
 }
 pub fn all_vendors() -> [SubscriptionKind; 5] {
@@ -34,51 +45,41 @@ pub fn all_vendors() -> [SubscriptionKind; 5] {
 pub fn short_model(model: &str) -> String {
     crate::model_names::run_label_name(model)
 }
-pub fn effort_suffix(vendor: SubscriptionKind, effort: EffortLevel) -> &'static str {
-    match effort {
-        EffortLevel::Normal => "",
-        EffortLevel::Low => match vendor {
-            SubscriptionKind::Codex | SubscriptionKind::Claude => ":low",
-            SubscriptionKind::Gemini
-            | SubscriptionKind::Kimi
-            | SubscriptionKind::OpencodeGo
-            | SubscriptionKind::Direct => "",
-        },
-        EffortLevel::Tough => match vendor {
-            SubscriptionKind::Codex => ":xhigh",
-            SubscriptionKind::Claude => ":max",
-            SubscriptionKind::Gemini
-            | SubscriptionKind::Kimi
-            | SubscriptionKind::OpencodeGo
-            | SubscriptionKind::Direct => "",
-        },
-    }
-}
-pub fn effort_suffix_for_model(
-    vendor: SubscriptionKind,
-    _model: &str,
+/// Compute the launch-time effort suffix (e.g. `:xhigh`, `:max`) from the
+/// selected candidate's per-tuple `effort_mapping` + `effort_eligible`
+/// fields. Returns an empty string when the candidate is not effort-capable
+/// or `effort` is `Normal`. Replaces the legacy vendor-keyed helpers
+/// retired in the baked-providers refactor — see
+/// `baked-providers-refactor-design.md` §"Effort suffix at the launch
+/// site" for the design rationale.
+pub fn launch_effort_suffix(
     effort: EffortLevel,
-) -> &'static str {
-    // OpencodeGo routing originally inferred an "underlying" vendor from
-    // the model name to pick a suffix; with the heuristic gone, fall back
-    // to the routing vendor directly. Per-tuple effort flags will land in
-    // a later task.
-    effort_suffix(vendor, effort)
-}
-pub fn effort_suffix_from_str(vendor_str: &str, effort: EffortLevel) -> &'static str {
-    match crate::logic::selection::assemble::parse_subscription_str(vendor_str) {
-        Some(vendor) => effort_suffix(vendor, effort),
-        None => "",
+    effort_eligible: bool,
+    effort_mapping: &EffortMapping,
+) -> String {
+    if !effort_eligible || effort == EffortLevel::Normal {
+        return String::new();
+    }
+    let token = match effort {
+        EffortLevel::Low => &effort_mapping.cheap,
+        EffortLevel::Tough => &effort_mapping.tough,
+        EffortLevel::Normal => unreachable!(),
+    };
+    if token.is_empty() {
+        String::new()
+    } else {
+        format!(":{token}")
     }
 }
 pub fn run_label_with_model(
     base: &str,
     model: &str,
-    vendor: SubscriptionKind,
     effort: EffortLevel,
+    effort_eligible: bool,
+    effort_mapping: &EffortMapping,
 ) -> String {
     let short = short_model(model);
-    let suffix = effort_suffix_for_model(vendor, model, effort);
+    let suffix = launch_effort_suffix(effort, effort_eligible, effort_mapping);
     if suffix.is_empty() {
         format!("{base} {short}")
     } else {

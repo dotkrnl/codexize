@@ -64,13 +64,16 @@ impl App {
         let chosen = override_model
             .as_ref()
             .map(|model| {
-                let (cli, launch_name) = super::pick_cli_and_launch_name(model);
+                let (cli, launch_name, effort_mapping, effort_eligible) =
+                    super::pick_cli_and_launch_name(model);
                 (
                     model.name.clone(),
                     model.subscription,
                     vendor_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
+                    effort_mapping,
+                    effort_eligible,
                 )
             })
             .or_else(|| self.round_stage_model("simplifier", round))
@@ -78,7 +81,9 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Build, effort, modes.cheap)
             });
-        let Some((model, vendor_kind, vendor, cli, launch_name)) = chosen else {
+        let Some((model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible)) =
+            chosen
+        else {
             self.record_agent_error("no model available for simplifier".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -123,6 +128,8 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         // Code-producing stages share the coder/reviewer guard mode.
@@ -133,7 +140,13 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = run_label_with_model("[Simplifier]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            "[Simplifier]",
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("simplifier", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
@@ -163,6 +176,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

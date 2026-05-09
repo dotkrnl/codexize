@@ -60,7 +60,8 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
+        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
+            chosen;
         let attempt = self.attempt_for("plan-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("plan-review", None, round, attempt);
         let prompt = plan_review_prompt(
@@ -84,13 +85,16 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         let window_name = run_label_with_model(
             &format!("[Plan Review {round}]"),
             &model,
-            vendor_kind,
             effort,
+            effort_eligible,
+            &effort_mapping,
         );
         let run_id = self.state.next_agent_run_id();
         let dirty = self.capture_run_guard(
@@ -128,6 +132,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

@@ -27,6 +27,8 @@ fn retry_target_for_run_prefers_task_and_falls_back_to_stage() {
         status: RunStatus::Running,
         error: None,
         effort: Default::default(),
+        effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: Default::default(),
         hostname: None,
         mount_device_id: None,

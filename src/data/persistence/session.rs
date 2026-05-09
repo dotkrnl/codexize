@@ -152,6 +152,8 @@ impl SessionState {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
+        effort_mapping: crate::data::config::schema::EffortMapping,
+        effort_eligible: bool,
         modes: LaunchModes,
         section_path: Option<Vec<SectionPart>>,
     ) -> u64 {
@@ -166,6 +168,8 @@ impl SessionState {
             vendor,
             window_name,
             effort,
+            effort_mapping,
+            effort_eligible,
             modes,
             section_path,
         )
@@ -183,6 +187,8 @@ impl SessionState {
         vendor: String,
         window_name: String,
         effort: EffortLevel,
+        effort_mapping: crate::data::config::schema::EffortMapping,
+        effort_eligible: bool,
         modes: LaunchModes,
         section_path: Option<Vec<SectionPart>>,
     ) -> u64 {
@@ -202,6 +208,8 @@ impl SessionState {
             status: RunStatus::Running,
             error: None,
             effort,
+            effort_mapping,
+            effort_eligible,
             modes,
             hostname,
             mount_device_id,

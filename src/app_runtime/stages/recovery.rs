@@ -48,7 +48,8 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
+        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
+            chosen;
         let is_human_blocked = self
             .state
             .builder
@@ -101,6 +102,8 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         let recovery_guard_mode = if is_human_blocked {
@@ -109,7 +112,13 @@ impl App {
             guard::GuardMode::AutoReset
         };
         let dirty = self.capture_run_guard("recovery", None, round, attempt, recovery_guard_mode);
-        let window_name = run_label_with_model("[Recovery]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            "[Recovery]",
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("recovery", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
@@ -149,6 +158,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

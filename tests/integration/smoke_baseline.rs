@@ -25,6 +25,8 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         status,
         error: None,
         effort: codexize::adapters::EffortLevel::Normal,
+        effort_mapping: codexize::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes::default(),
         hostname: Some("test-host".to_string()),
         mount_device_id: Some(42),

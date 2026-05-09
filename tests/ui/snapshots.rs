@@ -1,7 +1,7 @@
 use codexize::{
     adapters::{EffortLevel, run_label_with_model},
     app,
-    selection::SubscriptionKind,
+    data::config::schema::EffortMapping,
 };
 use std::{
     fs,
@@ -48,14 +48,22 @@ fn footer_and_status_strings_match_snapshot() {
 
 #[test]
 fn acp_run_labels_match_snapshot() {
+    // Per-CLI effort mappings mirror what the baked provider rows ship for
+    // Claude (`max` on tough) and Codex (`xhigh` on tough). The launch label
+    // builder drives off the AgentRun's mapping/eligible fields, not a
+    // vendor-keyed table — these literal values keep the snapshot stable
+    // even if a future row tweaks its `effort_*` tokens.
+    let claude_mapping = EffortMapping::new("low", "medium", "max");
+    let codex_mapping = EffortMapping::new("low", "medium", "xhigh");
     let snapshot = [
         format!(
             "brainstorm={}",
             run_label_with_model(
                 "[Brainstorm]",
                 "claude-opus-4-7",
-                SubscriptionKind::Claude,
                 EffortLevel::Normal,
+                true,
+                &claude_mapping,
             )
         ),
         format!(
@@ -63,8 +71,9 @@ fn acp_run_labels_match_snapshot() {
             run_label_with_model(
                 "[Round 1 Coder]",
                 "gpt-5.5",
-                SubscriptionKind::Codex,
                 EffortLevel::Tough,
+                true,
+                &codex_mapping,
             )
         ),
         format!(
@@ -72,8 +81,9 @@ fn acp_run_labels_match_snapshot() {
             run_label_with_model(
                 "[Planning]",
                 "claude-sonnet-4.6",
-                SubscriptionKind::Claude,
                 EffortLevel::Low,
+                true,
+                &claude_mapping,
             )
         ),
     ]

@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 /// atomic block on disk: sparse-save emits the whole `[providers.
 /// effort_mapping]` table when any field diverges from the baked
 /// default, never just one sub-key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EffortMapping {
     pub cheap: String,
     pub normal: String,

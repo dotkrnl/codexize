@@ -22,6 +22,8 @@ fn sample_run(id: u64, stage: &str, round: u32, attempt: u32, error: Option<&str
         },
         error: error.map(|s| s.to_string()),
         effort: EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

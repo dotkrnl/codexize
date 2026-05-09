@@ -126,6 +126,8 @@ fn run_record(id: u64, status: RunStatus) -> RunRecord {
         status,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

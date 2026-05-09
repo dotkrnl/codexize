@@ -49,20 +49,25 @@ impl App {
         let chosen = override_model
             .as_ref()
             .map(|model| {
-                let (cli, launch_name) = super::pick_cli_and_launch_name(model);
+                let (cli, launch_name, effort_mapping, effort_eligible) =
+                    super::pick_cli_and_launch_name(model);
                 (
                     model.name.clone(),
                     model.subscription,
                     vendor_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
+                    effort_mapping,
+                    effort_eligible,
                 )
             })
             .or_else(|| self.session_selected_model_for_validator())
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Review, effort, modes.cheap)
             });
-        let Some((model, vendor_kind, vendor, cli, launch_name)) = chosen else {
+        let Some((model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible)) =
+            chosen
+        else {
             self.record_agent_error("no model available for final validation".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -99,6 +104,8 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         let dirty = self.capture_run_guard(
@@ -108,7 +115,13 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = run_label_with_model("[FinalValidation]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            "[FinalValidation]",
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("final-validation", None, round, attempt);
         let artifacts_dir = artifacts.clone();
@@ -138,6 +151,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );
@@ -253,6 +268,8 @@ mod tests {
             status: RunStatus::Running,
             error: None,
             effort: EffortLevel::Normal,
+            effort_mapping: crate::data::config::schema::EffortMapping::default(),
+            effort_eligible: false,
             modes: LaunchModes::default(),
             hostname: None,
             mount_device_id: None,

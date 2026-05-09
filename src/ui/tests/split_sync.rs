@@ -21,6 +21,8 @@ fn synchronize_split_target_force_opens_interactive_prompt() {
         status: RunStatus::Running,
         error: None,
         effort: EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes {
             interactive: true,
             ..Default::default()
@@ -100,6 +102,8 @@ fn esc_in_interactive_prompt_closes_split_but_sync_reopens() {
         status: RunStatus::Running,
         error: None,
         effort: EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes {
             interactive: true,
             ..Default::default()
@@ -146,6 +150,8 @@ fn interactive_split_input_routes_leading_colon_into_command_mode() {
         status: RunStatus::Running,
         error: None,
         effort: EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: LaunchModes {
             interactive: true,
             ..Default::default()

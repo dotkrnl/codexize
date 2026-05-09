@@ -28,6 +28,8 @@ fn coder_run_captures_iteration_loop_task_round_stage_path() {
         "claude".to_string(),
         "[Round 9 Coder]".to_string(),
         EffortLevel::Tough,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         LaunchModes::default(),
     );
     let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
@@ -71,6 +73,8 @@ fn simplifier_run_captures_iteration_simplification_round_stage_path() {
         "claude".to_string(),
         "[Simplifier]".to_string(),
         EffortLevel::Normal,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         LaunchModes::default(),
     );
     let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");
@@ -101,6 +105,8 @@ fn brainstorm_run_captures_brainstorm_stage_path() {
         "y".to_string(),
         "[Brainstorm]".to_string(),
         EffortLevel::Normal,
+        crate::data::config::schema::EffortMapping::default(),
+        false,
         LaunchModes::default(),
     );
     let run = state.agent_runs.iter().find(|r| r.id == id).expect("run");

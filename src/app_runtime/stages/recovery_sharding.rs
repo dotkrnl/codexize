@@ -47,7 +47,8 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
+        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
+            chosen;
         let completed = self.state.builder.done_task_ids();
         let id_floor = self.state.builder.max_task_id();
         let prompt = recovery_sharding_prompt(
@@ -75,6 +76,8 @@ impl App {
             launch_name,
             prompt_path: prompt_path.clone(),
             effort,
+            effort_mapping: effort_mapping.clone(),
+            effort_eligible,
             modes,
         };
         let dirty = self.capture_run_guard(
@@ -84,7 +87,13 @@ impl App {
             attempt,
             guard::GuardMode::AutoReset,
         );
-        let window_name = run_label_with_model("[Recovery Sharding]", &model, vendor_kind, effort);
+        let window_name = run_label_with_model(
+            "[Recovery Sharding]",
+            &model,
+            effort,
+            effort_eligible,
+            &effort_mapping,
+        );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("sharding", None, round, attempt);
         let artifacts_dir = session_state::session_dir(&self.state.session_id).join("artifacts");
@@ -114,6 +123,8 @@ impl App {
                     vendor,
                     window_name,
                     effort,
+                    effort_mapping,
+                    effort_eligible,
                     modes,
                     prompt_path,
                 );

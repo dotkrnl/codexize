@@ -16,6 +16,8 @@ fn run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
         status,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -190,6 +192,8 @@ fn test_collapse_review_single_round_multiple_attempts() {
         status: RunStatus::Failed,
         error: Some("quota exceeded".to_string()),
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -209,6 +213,8 @@ fn test_collapse_review_single_round_multiple_attempts() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -247,6 +253,8 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         status: RunStatus::Failed,
         error: Some("quota exceeded".to_string()),
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -266,6 +274,8 @@ fn test_retry_success_collapses_to_done_for_simple_stage() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -296,6 +306,8 @@ fn test_retry_success_collapses_round_status_in_builder() {
         status: RunStatus::Failed,
         error: Some("timeout".to_string()),
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -315,6 +327,8 @@ fn test_retry_success_collapses_round_status_in_builder() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -364,6 +378,8 @@ fn failed_unverified_run_maps_to_distinct_node_status() {
                 .to_string(),
         ),
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -412,6 +428,8 @@ fn builder_stage_orders_done_recovery_current_pending() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -588,6 +606,8 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -607,6 +627,8 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -628,6 +650,8 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -647,6 +671,8 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -666,6 +692,8 @@ fn recovery_plan_review_and_sharding_route_under_builder_recovery() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -973,6 +1001,8 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -992,6 +1022,8 @@ fn node_keys_distinguish_duplicate_mode_labels_by_ancestry() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -1028,6 +1060,8 @@ fn flatten_visible_rows_hides_collapsed_descendants() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -1077,6 +1111,8 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -1096,6 +1132,8 @@ fn active_stage_paths_prefer_latest_running_leaf() {
         status: RunStatus::Running,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,
@@ -1113,8 +1151,18 @@ fn active_stage_paths_prefer_latest_running_leaf() {
 
 #[test]
 fn test_agent_run_node_tough_suffix() {
+    // Suffix now derives from the per-tuple `effort_mapping` +
+    // `effort_eligible` mirrored onto each RunRecord at launch time, not
+    // from a vendor-string lookup. Codex/Claude rows ship effort-capable
+    // mappings (Codex tough=`xhigh`, Claude tough=`max`); non-effort rows
+    // (Gemini-style) carry the default mapping but `effort_eligible=false`,
+    // suppressing the suffix even at Tough.
+    use crate::data::config::schema::EffortMapping;
+
     let mut normal_run = run(1, "coder", RunStatus::Running);
     normal_run.effort = crate::adapters::EffortLevel::Normal;
+    normal_run.effort_eligible = true;
+    normal_run.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&normal_run);
     assert!(
         !node.label.contains(":xhigh") && !node.label.contains(":max"),
@@ -1124,7 +1172,8 @@ fn test_agent_run_node_tough_suffix() {
 
     let mut tough_codex = run(2, "coder", RunStatus::Running);
     tough_codex.effort = crate::adapters::EffortLevel::Tough;
-    tough_codex.vendor = "codex".to_string();
+    tough_codex.effort_eligible = true;
+    tough_codex.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&tough_codex);
     assert!(
         node.label.ends_with(":xhigh"),
@@ -1134,7 +1183,8 @@ fn test_agent_run_node_tough_suffix() {
 
     let mut tough_claude = run(3, "coder", RunStatus::Running);
     tough_claude.effort = crate::adapters::EffortLevel::Tough;
-    tough_claude.vendor = "claude".to_string();
+    tough_claude.effort_eligible = true;
+    tough_claude.effort_mapping = EffortMapping::new("low", "medium", "max");
     let node = agent_run_node(&tough_claude);
     assert!(
         node.label.ends_with(":max"),
@@ -1144,7 +1194,8 @@ fn test_agent_run_node_tough_suffix() {
 
     let mut tough_gemini = run(4, "coder", RunStatus::Running);
     tough_gemini.effort = crate::adapters::EffortLevel::Tough;
-    tough_gemini.vendor = "gemini".to_string();
+    tough_gemini.effort_eligible = false;
+    tough_gemini.effort_mapping = EffortMapping::default();
     let node = agent_run_node(&tough_gemini);
     assert!(
         !node.label.contains(":xhigh") && !node.label.contains(":max"),
@@ -1154,7 +1205,8 @@ fn test_agent_run_node_tough_suffix() {
 
     let mut low_codex = run(5, "coder", RunStatus::Running);
     low_codex.effort = crate::adapters::EffortLevel::Low;
-    low_codex.vendor = "codex".to_string();
+    low_codex.effort_eligible = true;
+    low_codex.effort_mapping = EffortMapping::new("low", "medium", "xhigh");
     let node = agent_run_node(&low_codex);
     assert!(
         node.label.ends_with(":low"),
@@ -1183,6 +1235,8 @@ fn test_task_node_tough_badge() {
         status: RunStatus::Done,
         error: None,
         effort: crate::adapters::EffortLevel::Normal,
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        effort_eligible: false,
         modes: crate::state::LaunchModes::default(),
         hostname: None,
         mount_device_id: None,

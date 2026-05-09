@@ -69,6 +69,10 @@ impl App {
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
         let failed_models = Self::rebuild_failed_models(&state);
+        let project_name = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_default();
         let mut app = Self {
             state,
             nodes,
@@ -145,6 +149,7 @@ impl App {
             command_return_target: None,
             config_panel: None,
             last_config_section: None,
+            project_name,
         };
         app.rebuild_visible_rows();
         app.restore_selection(app.selected_key.clone(), app.selected);

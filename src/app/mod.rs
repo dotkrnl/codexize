@@ -317,6 +317,13 @@ pub struct App {
     /// None across launches; the panel falls back to the default section
     /// when None or when the remembered section is no longer registered.
     pub(crate) last_config_section: Option<String>,
+    /// Project name captured once at App construction (basename of the
+    /// process cwd when the App was built). The top rule reads this
+    /// instead of `std::env::current_dir()` so the title bar stays
+    /// stable across the session — and so parallel tests that change
+    /// the process cwd cannot leak tempdir names into the rendered
+    /// title.
+    pub(crate) project_name: String,
 }
 fn default_expansion(
     row: &VisibleNodeRow,

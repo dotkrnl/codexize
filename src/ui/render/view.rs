@@ -384,13 +384,9 @@ impl App {
         }
     }
     fn build_top_rule(&self, view: &AppView, width: u16) -> Line<'static> {
-        let project = std::env::current_dir()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .unwrap_or_default();
         let right = self.top_rule_right_text();
         top_rule_with_left_spans(
-            top_rule_left_spans_for(&project, view.modes),
+            top_rule_left_spans_for(&self.project_name, view.modes),
             right.as_deref(),
             width,
         )

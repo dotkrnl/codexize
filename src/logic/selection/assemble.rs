@@ -322,10 +322,9 @@ pub fn merge_quota_payload(
         }
     }
     for (subscription, models) in fresh {
-        merged.values.insert(
-            vendor::vendor_kind_to_str(subscription).to_string(),
-            models,
-        );
+        merged
+            .values
+            .insert(vendor::vendor_kind_to_str(subscription).to_string(), models);
     }
     // Subscriptions whose fresh fetch did not return a map are
     // considered failed for this round; preserve any prior failure
@@ -354,10 +353,7 @@ pub fn merge_reset_payload(
         }
     }
     for (subscription, models) in fresh {
-        merged.insert(
-            vendor::vendor_kind_to_str(subscription).to_string(),
-            models,
-        );
+        merged.insert(vendor::vendor_kind_to_str(subscription).to_string(), models);
     }
     merged
 }

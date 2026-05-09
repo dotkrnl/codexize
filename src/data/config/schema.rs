@@ -739,8 +739,18 @@ mod tests {
     fn validate_rejects_duplicate_provider_tuple() {
         let mut c = Config::baked_defaults();
         c.providers = Override::explicit(vec![
-            provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7"),
-            provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7"),
+            provider_for(
+                "claude",
+                "claude-opus-4-7",
+                CliKind::Claude,
+                "claude-opus-4-7",
+            ),
+            provider_for(
+                "claude",
+                "claude-opus-4-7",
+                CliKind::Claude,
+                "claude-opus-4-7",
+            ),
         ]);
         let err = c.validate().unwrap_err();
         assert!(err.contains("duplicate tuple"), "{err}");
@@ -761,7 +771,12 @@ mod tests {
 
     #[test]
     fn provider_identity_disambiguates_by_cli_and_launch_name() {
-        let a = provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7");
+        let a = provider_for(
+            "claude",
+            "claude-opus-4-7",
+            CliKind::Claude,
+            "claude-opus-4-7",
+        );
         let b = provider_for(
             "claude",
             "claude-opus-4-7",

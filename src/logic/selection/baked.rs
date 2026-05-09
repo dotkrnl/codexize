@@ -248,9 +248,17 @@ mod tests {
 
     #[test]
     fn baked_table_seeds_known_claude_opus_with_max_tough_effort() {
-        let entry =
-            baked_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7").unwrap();
-        assert!(entry.official, "claude/claude-opus-4-7 is intrinsically official");
+        let entry = baked_for(
+            "claude",
+            "claude-opus-4-7",
+            CliKind::Claude,
+            "claude-opus-4-7",
+        )
+        .unwrap();
+        assert!(
+            entry.official,
+            "claude/claude-opus-4-7 is intrinsically official"
+        );
         assert!(entry.tough_eligible);
         assert!(entry.effort_eligible);
         assert_eq!(entry.effort_mapping.tough, "max");
@@ -286,10 +294,7 @@ mod tests {
                 assert!(
                     found,
                     "merged list missing baked tuple ({}, {}, {:?}, {})",
-                    row.vendor,
-                    row.model,
-                    baked.cli,
-                    baked.launch_name,
+                    row.vendor, row.model, baked.cli, baked.launch_name,
                 );
             }
         }
@@ -345,9 +350,7 @@ mod tests {
         let added = merged
             .iter()
             .find(|e| {
-                e.vendor == "claude"
-                    && e.model == "claude-opus-4-7"
-                    && e.cli == CliKind::Opencode
+                e.vendor == "claude" && e.model == "claude-opus-4-7" && e.cli == CliKind::Opencode
             })
             .expect("addition must appear in merged list");
         assert_eq!(added.display_order, ADDITION_DISPLAY_ORDER);
@@ -373,9 +376,7 @@ mod tests {
         let merged = merge_with_overrides(&user);
         let added = merged
             .iter()
-            .find(|e| {
-                e.vendor == "codex" && e.model == "gpt-5" && e.cli == CliKind::Opencode
-            })
+            .find(|e| e.vendor == "codex" && e.model == "gpt-5" && e.cli == CliKind::Opencode)
             .unwrap();
         assert_eq!(added.display_order, 7);
     }

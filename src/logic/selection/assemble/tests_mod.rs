@@ -238,33 +238,6 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
     );
 }
 
-#[test]
-#[ignore = "legacy kimi-latest synthesis is retired; baked table maps the kimi row directly"]
-fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
-    let dashboard = vec![
-        make_ipbr_entry("kimi-k2.6", "moonshotai", "kimi-k2.6"),
-        make_ipbr_entry("kimi-k2.6", "opencode", "kimi-k2.6"),
-    ];
-    let quotas = make_quota_payload(&[
-        ("moonshotai", "kimi-latest", Some(80)),
-        ("opencode-go", "kimi-k2.6", Some(70)),
-    ]);
-    let available = BTreeSet::from([CliKind::Kimi, CliKind::Opencode]);
-
-    let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].name, "kimi-k2.6");
-    assert!(
-        models[0]
-            .candidates
-            .iter()
-            .any(|candidate| candidate.subscription == SubscriptionKind::Kimi)
-    );
-    assert!(!models.iter().any(|model| model.name == "kimi-latest"));
-}
-
 fn all_clis() -> BTreeSet<CliKind> {
     [
         CliKind::Codex,
@@ -462,104 +435,6 @@ fn assemble_omits_models_with_unknown_vendor() {
 }
 
 #[test]
-#[ignore = "legacy provider-first Kimi collapse is retired by model-first rows"]
-fn assemble_collapses_kimi_models() {
-    // Stable inventory order (display_order) decides the canonical
-    // representative.
-    let dashboard = vec![
-        make_entry_with_order("kimi-k2", "moonshotai", 1),
-        make_entry_with_order("kimi-k1.5", "moonshotai", 5),
-    ];
-    let quotas = make_quota_payload(&[
-        ("moonshotai", "kimi-k2", Some(90)),
-        ("moonshotai", "kimi-k1.5", Some(90)),
-    ]);
-
-    let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
-
-    assert_eq!(models.len(), 1);
-    // Canonical surfaces under its real name (auto-inferred from the picked
-    // row), not a synthesized "kimi-latest" placeholder.
-    assert_eq!(models[0].name, "kimi-k2");
-    assert_eq!(models[0].subscription, SubscriptionKind::Kimi);
-}
-
-#[test]
-#[ignore = "legacy provider-first Kimi collapse is retired by model-first rows"]
-fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
-    // Real-feed scenario the previous display-order-only collapse mishandled:
-    // the inventory feed lists a weaker model ahead of the stronger one
-    // (lower display_order) but ipbr's phase scores show the latter is the
-    // canonical pick. The collapse MUST keep the better ipbr scores so
-    // downstream phase-rank / pool-weight cells reflect the canonical kimi.
-    let mut weaker_low_order = make_entry_with_order("kimi-k2-0905-preview", "moonshotai", 14);
-    weaker_low_order.score_source = crate::selection::ScoreSource::Ipbr;
-    weaker_low_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        idea: Some(22.8),
-        planning: Some(28.0),
-        build: Some(52.2),
-        review: Some(48.6),
-    };
-
-    let mut stronger_high_order = make_entry_with_order("kimi-real", "moonshotai", 15);
-    stronger_high_order.score_source = crate::selection::ScoreSource::Ipbr;
-    stronger_high_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        idea: Some(69.0),
-        planning: Some(69.4),
-        build: Some(73.6),
-        review: Some(80.1),
-    };
-
-    let dashboard = vec![weaker_low_order, stronger_high_order];
-    let quotas = make_quota_payload(&[("moonshotai", "kimi-k2-0905-preview", Some(90))]);
-
-    let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
-
-    assert_eq!(models.len(), 1);
-    let kimi = &models[0];
-    // Auto-inferred name: the picked entry's actual name surfaces.
-    assert_eq!(kimi.name, "kimi-real");
-    // The retained model must be the one with the higher ipbr phase-score
-    // sum, even though its display_order is later in the inventory feed.
-    assert_eq!(kimi.ipbr_phase_scores.build, Some(73.6));
-    assert_eq!(kimi.ipbr_phase_scores.review, Some(80.1));
-    assert_eq!(kimi.score_source, crate::selection::ScoreSource::Ipbr);
-}
-
-#[test]
-#[ignore = "legacy provider-first Kimi collapse is retired by model-first rows"]
-fn assemble_collapses_kimi_uses_stronger_ipbr_phase_scores() {
-    // The collapse must keep the row whose ipbr phase scores are stronger
-    // even when display_order would prefer the weaker sibling.
-    let mut weak = make_entry_with_order("kimi-k1.5", "moonshotai", 0);
-    weak.score_source = crate::selection::ScoreSource::Ipbr;
-    weak.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        build: Some(50.0),
-        review: Some(48.0),
-        ..Default::default()
-    };
-
-    let mut strong = make_entry_with_order("kimi-k2", "moonshotai", 5);
-    strong.score_source = crate::selection::ScoreSource::Ipbr;
-    strong.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        build: Some(80.0),
-        review: Some(78.0),
-        ..Default::default()
-    };
-
-    let dashboard = vec![weak, strong];
-    let quotas = make_quota_payload(&[("moonshotai", "kimi-k2", Some(90))]);
-
-    let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
-
-    assert_eq!(models.len(), 1);
-    let kimi = &models[0];
-    assert_eq!(kimi.name, "kimi-k2");
-    assert_eq!(kimi.ipbr_phase_scores.build, Some(80.0));
-    assert_eq!(kimi.ipbr_phase_scores.review, Some(78.0));
-}
-
-#[test]
 fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     use crate::selection::config::SelectionPhase;
     use crate::selection::ranking::phase_rank_score;
@@ -584,47 +459,6 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     // from the collapsed model.
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Build), Some(82.0));
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Review), Some(79.0));
-}
-
-#[test]
-#[ignore = "legacy sibling synthesis is retired by model-first rows"]
-fn assemble_synthesizes_missing_sibling() {
-    let dashboard = vec![make_entry("gpt-5.4", "openai")];
-    // Quota has gpt-5.5 which is missing from dashboard
-    let quotas = make_quota_payload(&[
-        ("openai", "gpt-5.4", Some(80)),
-        ("openai", "gpt-5.5", Some(70)),
-    ]);
-
-    let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
-
-    assert_eq!(models.len(), 2);
-    let synthesized = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
-    assert_eq!(synthesized.quota_percent, Some(70));
-}
-
-#[test]
-#[ignore = "legacy synthesized inventory rows are retired by model-first rows"]
-fn unavailable_clis_are_omitted_before_models_are_returned() {
-    let dashboard = vec![
-        make_entry("claude-sonnet-4-6", "claude"),
-        make_entry("gpt-5.5", "openai"),
-        make_entry("gemini-2.5-pro", "google"),
-    ];
-    let quotas = make_quota_payload(&[
-        ("claude", "claude-sonnet-4-6", Some(80)),
-        ("openai", "gpt-5.5", Some(70)),
-        ("google", "gemini-2.5-pro", Some(60)),
-    ]);
-    let available = BTreeSet::from([CliKind::Codex]);
-
-    let models =
-        assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].subscription, SubscriptionKind::Codex);
-    assert_eq!(models[0].name, "gpt-5.5");
-    assert_eq!(models[0].quota_percent, Some(70));
 }
 
 #[test]
@@ -733,24 +567,6 @@ fn dedup_keeps_direct_when_quota_meets_floor() {
         assert_eq!(survivor.subscription, SubscriptionKind::Claude);
         assert_eq!(survivor.name, "claude-opus-4-7");
         assert_eq!(survivor.quota_percent, direct_quota);
-    }
-}
-
-#[test]
-#[ignore = "legacy routed-model dedup is retired by candidate arbitration"]
-fn dedup_falls_back_to_opencode_when_direct_below_floor_and_opencode_higher() {
-    // Direct quota below 20% (or unknown) defers to opencode whenever
-    // opencode reports a strictly higher remaining quota.
-    for (direct_quota, opencode_quota) in [
-        (Some(19), Some(50)),
-        (Some(0), Some(1)),
-        (None, Some(80)),
-        (None, Some(0)),
-    ] {
-        let survivor = run_dedup(direct_quota, opencode_quota);
-        assert_eq!(survivor.subscription, SubscriptionKind::OpencodeGo);
-        assert_eq!(survivor.name, "opencode/claude-opus-4-7");
-        assert_eq!(survivor.quota_percent, opencode_quota);
     }
 }
 
@@ -1036,83 +852,6 @@ fn make_opencode_kimi_entry(name: &str, match_key: &str) -> DashboardEntry {
 }
 
 #[test]
-#[ignore = "legacy kimi-latest synthesis is retired by canonical rows"]
-fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
-    // kimi-code's shared pool is at 50% — well above the 20% floor — so the
-    // synthesized direct route must beat the opencode-routed sibling for the
-    // same kimi-2.6 ipbr row.
-    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
-    let quotas = make_quota_payload(&[
-        ("kimi", "kimi-shared", Some(50)),
-        ("opencode", "kimi-k2.6", Some(90)),
-    ]);
-
-    let (models, _warnings) = assemble_universe(
-        vec![routed],
-        quotas,
-        BTreeMap::new(),
-        &kimi_opencode_available(),
-        &[],
-    );
-
-    assert_eq!(models.len(), 1);
-    let survivor = &models[0];
-    assert_eq!(survivor.subscription, SubscriptionKind::Kimi);
-    assert_eq!(survivor.name, "kimi-latest");
-    assert_eq!(survivor.quota_percent, Some(50));
-    assert_eq!(survivor.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
-}
-
-#[test]
-#[ignore = "legacy kimi-latest synthesis is retired by canonical rows"]
-fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher() {
-    // kimi-code below the 20% floor + opencode strictly higher → dedup defers
-    // to opencode for this kimi row.
-    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
-    let quotas = make_quota_payload(&[
-        ("kimi", "kimi-shared", Some(5)),
-        ("opencode", "kimi-k2.6", Some(80)),
-    ]);
-
-    let (models, _warnings) = assemble_universe(
-        vec![routed],
-        quotas,
-        BTreeMap::new(),
-        &kimi_opencode_available(),
-        &[],
-    );
-
-    assert_eq!(models.len(), 1);
-    let survivor = &models[0];
-    assert_eq!(survivor.subscription, SubscriptionKind::OpencodeGo);
-    assert_eq!(survivor.name, "kimi-k2.6");
-    assert_eq!(survivor.quota_percent, Some(80));
-}
-
-#[test]
-#[ignore = "legacy kimi-latest synthesis is retired by canonical rows"]
-fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
-    // Direct quota unknown vs opencode unknown → direct wins per the
-    // existing dedup arm. The synth must still be present so this branch is
-    // reachable for kimi.
-    let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
-    let quotas = make_quota_payload(&[]);
-
-    let (models, _warnings) = assemble_universe(
-        vec![routed],
-        quotas,
-        BTreeMap::new(),
-        &kimi_opencode_available(),
-        &[],
-    );
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].subscription, SubscriptionKind::Kimi);
-    assert_eq!(models[0].name, "kimi-latest");
-    assert_eq!(models[0].quota_percent, None);
-}
-
-#[test]
 #[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
 fn synth_kimi_latest_skipped_when_no_kimi_semver() {
     // Only suffixed kimi variants (no k<major>.<minor>) means no row qualifies
@@ -1135,46 +874,6 @@ fn synth_kimi_latest_skipped_when_no_kimi_semver() {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
     assert_eq!(models[0].name, "kimi-k2-thinking");
-}
-
-#[test]
-#[ignore = "legacy kimi-latest synthesis is retired by canonical rows"]
-fn synth_kimi_latest_picks_highest_semver_among_routes() {
-    // With multiple opencode-routed kimis the synth must mirror the highest
-    // semver — kimi-k2.6 here, not kimi-k1.5 — so the dedup pairing lands
-    // against the right opencode sibling.
-    let older = make_opencode_kimi_entry("kimi-k1.5", "kimi-k1-5");
-    let latest = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
-    let quotas = make_quota_payload(&[
-        ("kimi", "kimi-shared", Some(80)),
-        ("opencode", "kimi-k1.5", Some(70)),
-        ("opencode", "kimi-k2.6", Some(70)),
-    ]);
-
-    let (models, _warnings) = assemble_universe(
-        vec![older, latest],
-        quotas,
-        BTreeMap::new(),
-        &kimi_opencode_available(),
-        &[],
-    );
-
-    // Surviving rows: kimi-latest (synth, won dedup over kimi-k2.6) and
-    // opencode kimi-k1.5 (different ipbr_match_key, no dedup pair).
-    let kimi_latest = models
-        .iter()
-        .find(|m| m.name == "kimi-latest")
-        .expect("synth kimi-latest should survive dedup with kimi above floor");
-    assert_eq!(kimi_latest.subscription, SubscriptionKind::Kimi);
-    assert_eq!(kimi_latest.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
-    assert!(
-        models.iter().any(|m| m.name == "kimi-k1.5"),
-        "older opencode kimi without a direct sibling stays in the universe"
-    );
-    assert!(
-        !models.iter().any(|m| m.name == "kimi-k2.6"),
-        "kimi-k2.6 opencode entry must be deduped out by the synth"
-    );
 }
 
 #[test]

@@ -142,7 +142,7 @@ impl Candidate {
 pub struct ModelRow {
     /// Compatibility mirror of the selected candidate's subscription for
     /// legacy picker and stage code. Candidate data is authoritative.
-    pub vendor: SubscriptionKind,
+    pub subscription: SubscriptionKind,
     pub name: String,
     /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
     /// auto-selection eligibility, or subscription backfill ordering.

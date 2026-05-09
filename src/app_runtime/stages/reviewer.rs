@@ -400,7 +400,7 @@ mod tests {
 
     fn cached_review_model() -> CachedModel {
         CachedModel {
-            vendor: SubscriptionKind::Codex,
+            subscription: SubscriptionKind::Codex,
             name: "review-model".to_string(),
             overall_score: 0.0,
             current_score: 0.0,

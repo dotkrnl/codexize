@@ -6,7 +6,7 @@ use codexize::logic::selection::{
 
 fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
     CachedModel {
-        vendor,
+        subscription: vendor,
         name: name.to_string(),
         overall_score: 85.0,
         current_score: 85.0,

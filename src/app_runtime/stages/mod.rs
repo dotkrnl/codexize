@@ -59,7 +59,7 @@ pub(crate) fn pick_cli_and_launch_name(row: &CachedModel) -> (CliKind, String) {
     if let Some(candidate) = row.selected_candidate() {
         return (candidate.cli, candidate.launch_name.clone());
     }
-    let cli = row.vendor.direct_cli().unwrap_or(CliKind::Opencode);
+    let cli = row.subscription.direct_cli().unwrap_or(CliKind::Opencode);
     (cli, row.name.clone())
 }
 impl App {
@@ -123,8 +123,8 @@ impl App {
             let (cli, launch_name) = pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
-                model.vendor,
-                vendor_tag(model.vendor).to_string(),
+                model.subscription,
+                vendor_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
             ));
@@ -133,8 +133,8 @@ impl App {
         let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
-            outcome.model.vendor,
-            vendor_tag(outcome.model.vendor).to_string(),
+            outcome.model.subscription,
+            vendor_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
         );
@@ -153,8 +153,8 @@ impl App {
             let (cli, launch_name) = pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
-                model.vendor,
-                vendor_tag(model.vendor).to_string(),
+                model.subscription,
+                vendor_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
             ));
@@ -164,8 +164,8 @@ impl App {
         let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
-            outcome.model.vendor,
-            vendor_tag(outcome.model.vendor).to_string(),
+            outcome.model.subscription,
+            vendor_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
         );
@@ -302,8 +302,8 @@ impl App {
         let (cli, launch_name) = pick_cli_and_launch_name(model);
         Some((
             model.name.clone(),
-            model.vendor,
-            vendor_tag(model.vendor).to_string(),
+            model.subscription,
+            vendor_tag(model.subscription).to_string(),
             cli,
             launch_name,
         ))

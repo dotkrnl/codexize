@@ -59,7 +59,7 @@ fn sample_model_with_score(
         quota_failed: false,
     };
     CachedModel {
-        vendor,
+        subscription: vendor,
         name: name.to_string(),
         overall_score: 85.0,
         current_score: 85.0,
@@ -191,7 +191,7 @@ fn pick_for_phase_respects_vendor_filter() {
         Some(SubscriptionKind::Claude),
     )
     .expect("should pick claude");
-    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
+    assert_eq!(chosen.subscription, SubscriptionKind::Claude);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -207,7 +207,7 @@ fn select_for_review_prefers_fresh_vendor() {
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
         select_for_review(&models, &used_vendors, &used_models).expect("should pick fresh vendor");
-    assert_eq!(chosen.vendor, SubscriptionKind::Codex);
+    assert_eq!(chosen.subscription, SubscriptionKind::Codex);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -390,7 +390,7 @@ fn pick_with_effort_normal_does_not_filter_ineligible_models() {
     )
     .expect("Normal must pick from non-empty slice");
     assert!(matches!(
-        chosen.vendor,
+        chosen.subscription,
         SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
 }
@@ -410,7 +410,7 @@ fn pick_with_effort_low_does_not_use_tough_filter() {
     )
     .expect("Low effort must use the non-tough path until cheap filtering is wired");
     assert!(matches!(
-        chosen.vendor,
+        chosen.subscription,
         SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
 }
@@ -440,7 +440,7 @@ fn pick_with_effort_cheap_filters_to_budget_subset() {
                 "claude-sonnet-4-6" | "gemini-2.5-flash"
             ),
             "cheap selection must not pick {:?} {}",
-            chosen.model.vendor,
+            chosen.model.subscription,
             chosen.model.name
         );
     }
@@ -483,10 +483,10 @@ fn pick_with_effort_tough_only_picks_eligible() {
         )
         .expect("eligible candidate exists");
         assert!(
-            (chosen.vendor == SubscriptionKind::Claude && chosen.name.contains("opus"))
-                || chosen.vendor == SubscriptionKind::Codex,
+            (chosen.subscription == SubscriptionKind::Claude && chosen.name.contains("opus"))
+                || chosen.subscription == SubscriptionKind::Codex,
             "tough must never pick {:?} {}",
-            chosen.vendor,
+            chosen.subscription,
             chosen.name
         );
     }
@@ -509,7 +509,7 @@ fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
     )
     .expect("degraded fallback must yield a candidate");
     assert!(matches!(
-        chosen.vendor,
+        chosen.subscription,
         SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -530,7 +530,7 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
         false,
     )
     .expect("degraded fallback must yield a candidate");
-    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
+    assert_eq!(chosen.subscription, SubscriptionKind::Claude);
     assert!(!chosen.name.contains("opus"));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -553,7 +553,7 @@ fn select_for_review_normal_can_pick_ineligible_vendor() {
         false,
     )
     .expect("Normal review picks fresh Kimi");
-    assert_eq!(chosen.vendor, SubscriptionKind::Kimi);
+    assert_eq!(chosen.subscription, SubscriptionKind::Kimi);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -575,7 +575,7 @@ fn select_for_review_low_can_pick_ineligible_vendor() {
         false,
     )
     .expect("Low review effort must use the non-tough path");
-    assert_eq!(chosen.vendor, SubscriptionKind::Kimi);
+    assert_eq!(chosen.subscription, SubscriptionKind::Kimi);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -637,7 +637,7 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
         false,
     )
     .expect("eligibility-dominated reuse expected");
-    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
+    assert_eq!(chosen.subscription, SubscriptionKind::Claude);
     assert_eq!(chosen.name, "claude-opus-4-7");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -652,7 +652,7 @@ fn select_for_review_tough_degrades_when_no_eligible_remain() {
     let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
         .expect("degraded fallback must yield a candidate");
     assert!(matches!(
-        chosen.vendor,
+        chosen.subscription,
         SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
@@ -671,11 +671,11 @@ fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
         .expect("degraded fallback must yield an available candidate");
     assert!(
         matches!(
-            chosen.vendor,
+            chosen.subscription,
             SubscriptionKind::Kimi | SubscriptionKind::Gemini
         ),
         "exhausted tough-eligible model was selected: {:?} {}",
-        chosen.vendor,
+        chosen.subscription,
         chosen.name
     );
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);

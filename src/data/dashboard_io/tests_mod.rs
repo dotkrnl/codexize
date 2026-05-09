@@ -6,7 +6,7 @@ use crate::selection::types::{CachedModel, SubscriptionKind};
 fn model(name: &str, score: f64) -> DashboardModel {
     DashboardModel {
         name: name.to_string(),
-        vendor: String::new(),
+        dashboard_vendor: String::new(),
         overall_score: score,
         current_score: score,
         standard_error: 0.0,
@@ -62,7 +62,7 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
 
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "gpt-5-nano");
-    assert_eq!(merged[0].vendor, "opencode");
+    assert_eq!(merged[0].dashboard_vendor, "opencode");
     assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
 }
 
@@ -104,7 +104,7 @@ fn opencode_go_inventory_surfaces_when_ipbr_matches() {
 
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "deepseek-v4-flash");
-    assert_eq!(merged[0].vendor, "opencode");
+    assert_eq!(merged[0].dashboard_vendor, "opencode");
     assert_eq!(
         merged[0].ipbr_match_key.as_deref(),
         Some("deepseek-v4-flash")
@@ -125,7 +125,7 @@ fn fixture_cached_models() -> Vec<CachedModel> {
         .expect("fixture should parse")
         .into_iter()
         .map(|entry| CachedModel {
-            vendor: match entry.vendor.as_str() {
+            subscription: match entry.vendor.as_str() {
                 "anthropic" | "claude" => SubscriptionKind::Claude,
                 "openai" => SubscriptionKind::Codex,
                 "google" => SubscriptionKind::Gemini,

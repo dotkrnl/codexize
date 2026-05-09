@@ -168,7 +168,7 @@ fn row_name_for_entry(entry: &DashboardEntry) -> Option<String> {
 
 fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     CachedModel {
-        vendor: SubscriptionKind::Direct,
+        subscription: SubscriptionKind::Direct,
         name,
         overall_score: entry.overall_score,
         current_score: entry.current_score,
@@ -197,7 +197,7 @@ pub fn subscription_for_dashboard(entry: &DashboardEntry) -> Option<Subscription
     if let Some(sub) = baked::primary_subscription_for_model(&entry.name) {
         return Some(sub);
     }
-    parse_subscription_str(&entry.vendor)
+    parse_subscription_str(&entry.dashboard_vendor)
 }
 
 /// Index of resolved providers (baked ⊕ user) keyed by `model`. Each
@@ -366,7 +366,7 @@ fn refresh_selected_candidate(row: &mut CachedModel) {
     row.selected_candidate = select_candidate_index(&row.candidates);
     let selected = row.selected_candidate().cloned();
     if let Some(candidate) = selected {
-        row.vendor = candidate.subscription;
+        row.subscription = candidate.subscription;
         // The row-level quota tracks the *selected* provider's effective
         // quota (per-spec: free/quota_disabled = 100, fetch failure = 50,
         // unknown = None). Downstream consumers (UI, candidate-pool
@@ -544,7 +544,7 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
     models
         .iter()
         .map(|m| DashboardEntry {
-            vendor: m.vendor.clone(),
+            dashboard_vendor: m.dashboard_vendor.clone(),
             name: m.name.clone(),
             overall_score: m.overall_score,
             current_score: m.current_score,

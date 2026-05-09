@@ -148,7 +148,7 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
         .into_iter()
         .map(|sc| DashboardModel {
             name: sc.name.clone(),
-            vendor: sc.vendor,
+            dashboard_vendor: sc.vendor,
             overall_score: sc.overall_score,
             current_score: sc.current_score,
             standard_error: sc.standard_error,
@@ -185,10 +185,10 @@ pub fn synthesize_sibling(
     })?;
     Some(DashboardModel {
         name: name.to_string(),
-        vendor: if !vendor.is_empty() {
+        dashboard_vendor: if !vendor.is_empty() {
             vendor.to_string()
         } else {
-            sibling.vendor.clone()
+            sibling.dashboard_vendor.clone()
         },
         overall_score: sibling.overall_score,
         current_score: sibling.current_score,
@@ -283,7 +283,7 @@ fn dashboard_model_from_score(
     let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
         name,
-        vendor: if !inventory_vendor.is_empty() {
+        dashboard_vendor: if !inventory_vendor.is_empty() {
             inventory_vendor.to_string()
         } else {
             sc.vendor.clone()

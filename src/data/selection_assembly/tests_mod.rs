@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 fn make_entry(name: &str, vendor: &str, overall: f64, current: f64) -> DashboardEntry {
     DashboardEntry {
-        vendor: vendor.to_string(),
+        dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
         overall_score: overall,
         current_score: current,
@@ -240,7 +240,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         .iter()
         .find(|m| m.name == "gpt-5-5")
         .expect("gpt-5-5 row must exist");
-    assert_eq!(gpt.vendor, SubscriptionKind::Codex);
+    assert_eq!(gpt.subscription, SubscriptionKind::Codex);
     assert_eq!(gpt.quota_percent, Some(70));
     let claude = models
         .iter()

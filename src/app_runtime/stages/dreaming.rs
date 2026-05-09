@@ -192,7 +192,7 @@ mod tests {
 
     fn cached_model() -> CachedModel {
         CachedModel {
-            vendor: SubscriptionKind::Codex,
+            subscription: SubscriptionKind::Codex,
             name: "dream-model".to_string(),
             overall_score: 0.0,
             current_score: 0.0,

@@ -121,7 +121,7 @@ fn render_full_table(
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .map(|model| {
-            let prefix = vendor_prefix(model.vendor);
+            let prefix = vendor_prefix(model.subscription);
             let short_name = model_names::display_name_for_vendor(&model.name, prefix);
             let mut w = short_name.width();
             if model.fallback_from.is_some() {
@@ -203,9 +203,11 @@ fn render_full_table(
             Some(sub) => vendor_color(sub),
             None => Color::DarkGray,
         };
-        let prefix = vendor_prefix(model.vendor);
+        let prefix = vendor_prefix(model.subscription);
         let short_name = model_names::display_name_for_vendor(&model.name, prefix);
-        let vendor_failed = quota_errors.iter().any(|err| err.vendor == model.vendor);
+        let vendor_failed = quota_errors
+            .iter()
+            .any(|err| err.vendor == model.subscription);
         let vendor_span = Span::styled(
             format!("{label:<vendor_width$}"),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -448,7 +450,7 @@ fn render_compact_quota(
     for vendor in order {
         if let Some(model) = models
             .iter()
-            .filter(|m| m.vendor == vendor)
+            .filter(|m| m.subscription == vendor)
             .min_by(|a, b| build_rank_order(a, b))
         {
             vendors_to_render.push((vendor, model));

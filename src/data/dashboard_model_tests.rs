@@ -296,7 +296,7 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
     let mut out = String::new();
     for model in sorted {
         out.push_str(&format!("- name: {}\n", model.name));
-        out.push_str(&format!("  vendor: {}\n", model.vendor));
+        out.push_str(&format!("  vendor: {}\n", model.dashboard_vendor));
         out.push_str(&format!("  overall_score: {:.4}\n", model.overall_score));
         out.push_str(&format!("  current_score: {:.4}\n", model.current_score));
         out.push_str(&format!("  standard_error: {:.4}\n", model.standard_error));

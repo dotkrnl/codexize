@@ -9,7 +9,7 @@ fn sample_entries_with_provenance(
     axis_provenance: BTreeMap<String, String>,
 ) -> Vec<DashboardEntry> {
     vec![DashboardEntry {
-        vendor: "claude".to_string(),
+        dashboard_vendor: "claude".to_string(),
         name: "claude-sonnet".to_string(),
         overall_score: 85.0,
         current_score: 82.0,

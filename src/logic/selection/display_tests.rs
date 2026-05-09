@@ -2,7 +2,7 @@ use super::*;
 
 fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8>) -> CachedModel {
     CachedModel {
-        vendor,
+        subscription: vendor,
         name: name.to_string(),
         overall_score: 85.0,
         current_score: 85.0,
@@ -29,7 +29,7 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
 
 fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) -> CachedModel {
     CachedModel {
-        vendor,
+        subscription: vendor,
         name: name.to_string(),
         overall_score: 85.0,
         current_score: 85.0,

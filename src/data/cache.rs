@@ -52,7 +52,12 @@ pub struct Section<T> {
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DashboardEntry {
-    pub vendor: String,
+    /// Renamed from `vendor` in-source to `dashboard_vendor` for symmetry
+    /// with `DashboardModel.dashboard_vendor`. The on-disk JSON field is
+    /// kept as `"vendor"` via `#[serde(rename)]` so existing cache files
+    /// continue to load without a `CACHE_VERSION` bump.
+    #[serde(rename = "vendor")]
+    pub dashboard_vendor: String,
     pub name: String,
     /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
     /// auto-selection eligibility, or vendor backfill ordering.

@@ -288,7 +288,7 @@ fn make_entry_with_order(
     display_order: usize,
 ) -> DashboardEntry {
     DashboardEntry {
-        vendor: vendor.to_string(),
+        dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
         overall_score: overall,
         current_score: current,
@@ -444,7 +444,7 @@ fn assemble_merges_dashboard_and_quotas() {
         .iter()
         .find(|m| m.name == "claude-sonnet-4-6")
         .unwrap();
-    assert_eq!(claude.vendor, SubscriptionKind::Claude);
+    assert_eq!(claude.subscription, SubscriptionKind::Claude);
     assert_eq!(claude.quota_percent, Some(80));
     assert_eq!(
         claude
@@ -454,7 +454,7 @@ fn assemble_merges_dashboard_and_quotas() {
         Some("suite:hourly")
     );
     let codex = models.iter().find(|m| m.name == "gpt-5-5").unwrap();
-    assert_eq!(codex.vendor, SubscriptionKind::Codex);
+    assert_eq!(codex.subscription, SubscriptionKind::Codex);
     assert_eq!(codex.quota_percent, Some(70));
 }
 
@@ -510,7 +510,7 @@ fn assemble_collapses_kimi_models() {
     // Canonical surfaces under its real name (auto-inferred from the picked
     // row), not a synthesized "kimi-latest" placeholder.
     assert_eq!(models[0].name, "kimi-k2");
-    assert_eq!(models[0].vendor, SubscriptionKind::Kimi);
+    assert_eq!(models[0].subscription, SubscriptionKind::Kimi);
     // Retains the lower-display-order model's cosmetic score (70.0),
     // proving overall_score did not drive the collapse.
     assert_eq!(models[0].overall_score, 70.0);
@@ -664,7 +664,7 @@ fn unavailable_clis_are_omitted_before_models_are_returned() {
         assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::Codex);
+    assert_eq!(models[0].subscription, SubscriptionKind::Codex);
     assert_eq!(models[0].name, "gpt-5.5");
     assert_eq!(models[0].quota_percent, Some(70));
 }
@@ -679,7 +679,7 @@ fn available_claude_keeps_anthropic_dashboard_entries() {
         assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::Claude);
+    assert_eq!(models[0].subscription, SubscriptionKind::Claude);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
     assert_eq!(models[0].quota_percent, Some(80));
 }
@@ -772,7 +772,7 @@ fn dedup_keeps_direct_when_quota_meets_floor() {
         (Some(21), None),
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
-        assert_eq!(survivor.vendor, SubscriptionKind::Claude);
+        assert_eq!(survivor.subscription, SubscriptionKind::Claude);
         assert_eq!(survivor.name, "claude-opus-4-7");
         assert_eq!(survivor.quota_percent, direct_quota);
     }
@@ -790,7 +790,7 @@ fn dedup_falls_back_to_opencode_when_direct_below_floor_and_opencode_higher() {
         (None, Some(0)),
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
-        assert_eq!(survivor.vendor, SubscriptionKind::OpencodeGo);
+        assert_eq!(survivor.subscription, SubscriptionKind::OpencodeGo);
         assert_eq!(survivor.name, "opencode/claude-opus-4-7");
         assert_eq!(survivor.quota_percent, opencode_quota);
     }
@@ -808,7 +808,7 @@ fn dedup_keeps_direct_below_floor_when_opencode_does_not_win() {
         (Some(0), Some(0)),
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
-        assert_eq!(survivor.vendor, SubscriptionKind::Claude);
+        assert_eq!(survivor.subscription, SubscriptionKind::Claude);
         assert_eq!(survivor.name, "claude-opus-4-7");
         assert_eq!(survivor.quota_percent, direct_quota);
     }
@@ -818,7 +818,7 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
     let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
     let mut routed = direct.clone();
     routed.name = "opencode/claude-opus-4-7".to_string();
-    routed.vendor = "opencode".to_string();
+    routed.dashboard_vendor = "opencode".to_string();
     let quotas = make_quota_payload(&[
         ("claude", "claude-opus-4-7", direct_quota),
         ("opencode", "opencode/claude-opus-4-7", opencode_quota),
@@ -867,7 +867,7 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
     );
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
+    assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
     assert_eq!(models[0].quota_percent, None);
     assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-7"));
 }
@@ -1099,7 +1099,7 @@ fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
 
     assert_eq!(models.len(), 1);
     let survivor = &models[0];
-    assert_eq!(survivor.vendor, SubscriptionKind::Kimi);
+    assert_eq!(survivor.subscription, SubscriptionKind::Kimi);
     assert_eq!(survivor.name, "kimi-latest");
     assert_eq!(survivor.quota_percent, Some(50));
     assert_eq!(survivor.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
@@ -1126,7 +1126,7 @@ fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher
 
     assert_eq!(models.len(), 1);
     let survivor = &models[0];
-    assert_eq!(survivor.vendor, SubscriptionKind::OpencodeGo);
+    assert_eq!(survivor.subscription, SubscriptionKind::OpencodeGo);
     assert_eq!(survivor.name, "kimi-k2.6");
     assert_eq!(survivor.quota_percent, Some(80));
 }
@@ -1149,7 +1149,7 @@ fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
     );
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::Kimi);
+    assert_eq!(models[0].subscription, SubscriptionKind::Kimi);
     assert_eq!(models[0].name, "kimi-latest");
     assert_eq!(models[0].quota_percent, None);
 }
@@ -1175,7 +1175,7 @@ fn synth_kimi_latest_skipped_when_no_kimi_semver() {
     );
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
+    assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
     assert_eq!(models[0].name, "kimi-k2-thinking");
 }
 
@@ -1207,7 +1207,7 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
         .iter()
         .find(|m| m.name == "kimi-latest")
         .expect("synth kimi-latest should survive dedup with kimi above floor");
-    assert_eq!(kimi_latest.vendor, SubscriptionKind::Kimi);
+    assert_eq!(kimi_latest.subscription, SubscriptionKind::Kimi);
     assert_eq!(kimi_latest.ipbr_match_key.as_deref(), Some("kimi-k2-6"));
     assert!(
         models.iter().any(|m| m.name == "kimi-k1.5"),
@@ -1232,7 +1232,7 @@ fn synth_kimi_latest_skipped_when_kimi_unavailable() {
         assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
+    assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
     assert!(!models.iter().any(|m| m.name == "kimi-latest"));
 }
 

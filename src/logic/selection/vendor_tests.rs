@@ -14,7 +14,7 @@ fn model_with_candidate_flags(
     effort: bool,
 ) -> CachedModel {
     let mut model = sample_cached_model();
-    model.vendor = vendor;
+    model.subscription = vendor;
     model.name = name.to_string();
     let cli = vendor.direct_cli().unwrap_or(CliKind::Opencode);
     model.candidates = vec![Candidate {
@@ -40,7 +40,7 @@ fn model_with_candidate_flags(
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
-        vendor: SubscriptionKind::Codex,
+        subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
         overall_score: 85.0,
         current_score: 85.0,

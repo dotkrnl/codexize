@@ -102,7 +102,7 @@ pub fn pick_for_phase_with_seed<'a>(
 ) -> Option<&'a CachedModel> {
     let candidates: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
+        .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
         .collect();
     pool_pick(&candidates, phase, sample_seed)
 }
@@ -145,7 +145,7 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
         let eligible: Vec<&'a CachedModel> = models
             .iter()
             .filter(|model| is_cheap_eligible(model))
-            .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
+            .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
             .collect();
         if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
             return Some(SelectionOutcome::ok(chosen));
@@ -170,7 +170,7 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
     let eligible: Vec<&'a CachedModel> = models
         .iter()
         .filter(|model| is_tough_eligible(model))
-        .filter(|model| vendor_filter.is_none_or(|v| v == model.vendor))
+        .filter(|model| vendor_filter.is_none_or(|v| v == model.subscription))
         .collect();
     if let Some(chosen) = pool_pick(&eligible, phase, sample_seed) {
         return Some(SelectionOutcome::ok(chosen));
@@ -202,8 +202,8 @@ pub fn select_for_review_with_seed<'a>(
     let tier_1: Vec<&'a CachedModel> = models
         .iter()
         .filter(|model| {
-            !used_vendors.contains(&model.vendor)
-                && !used_models.contains(&(model.vendor, model.name.clone()))
+            !used_vendors.contains(&model.subscription)
+                && !used_models.contains(&(model.subscription, model.name.clone()))
         })
         .collect();
     if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
@@ -211,7 +211,7 @@ pub fn select_for_review_with_seed<'a>(
     }
     let tier_2: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
+        .filter(|model| !used_models.contains(&(model.subscription, model.name.clone())))
         .collect();
     pool_pick(&tier_2, SelectionPhase::Review, sample_seed)
 }
@@ -303,8 +303,8 @@ fn select_for_review_from_eligible<'a>(
         .iter()
         .copied()
         .filter(|model| {
-            !used_vendors.contains(&model.vendor)
-                && !used_models.contains(&(model.vendor, model.name.clone()))
+            !used_vendors.contains(&model.subscription)
+                && !used_models.contains(&(model.subscription, model.name.clone()))
         })
         .collect();
     if let Some(chosen) = pool_pick(&tier_1, SelectionPhase::Review, sample_seed) {
@@ -314,7 +314,7 @@ fn select_for_review_from_eligible<'a>(
     let tier_2: Vec<&'a CachedModel> = eligible
         .iter()
         .copied()
-        .filter(|model| !used_models.contains(&(model.vendor, model.name.clone())))
+        .filter(|model| !used_models.contains(&(model.subscription, model.name.clone())))
         .collect();
     if let Some(chosen) = pool_pick(&tier_2, SelectionPhase::Review, sample_seed) {
         return Some(chosen);
@@ -348,7 +348,7 @@ pub fn select_excluding_with_seed<'a>(
     }
     let candidates: Vec<&'a CachedModel> = models
         .iter()
-        .filter(|model| !excluded.contains(&(model.vendor, model.name.clone())))
+        .filter(|model| !excluded.contains(&(model.subscription, model.name.clone())))
         .collect();
     pool_pick(&candidates, phase, sample_seed)
 }

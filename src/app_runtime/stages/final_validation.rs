@@ -52,8 +52,8 @@ impl App {
                 let (cli, launch_name) = super::pick_cli_and_launch_name(model);
                 (
                     model.name.clone(),
-                    model.vendor,
-                    vendor_tag(model.vendor).to_string(),
+                    model.subscription,
+                    vendor_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
                 )

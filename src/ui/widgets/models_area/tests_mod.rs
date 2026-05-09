@@ -13,7 +13,7 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
     // every ipbr phase so existing tests that vary only `axis_score` keep
     // their relative ordering and percentage shape under the new pipeline.
     CachedModel {
-        vendor: SubscriptionKind::Codex,
+        subscription: SubscriptionKind::Codex,
         name: name.to_string(),
         overall_score: axis_score,
         current_score: 99.0,
@@ -71,7 +71,7 @@ fn vendor_model_with_axis_score(
     display_order: usize,
 ) -> CachedModel {
     let mut model = model_with_axis_score(name, axis_score, display_order);
-    model.vendor = vendor;
+    model.subscription = vendor;
     let cli = vendor
         .direct_cli()
         .unwrap_or(crate::selection::CliKind::Opencode);
@@ -1244,7 +1244,7 @@ fn unscored_inventory_model(
     display_order: usize,
 ) -> CachedModel {
     CachedModel {
-        vendor,
+        subscription: vendor,
         name: name.to_string(),
         overall_score: 99.0,
         current_score: 99.0,

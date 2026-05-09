@@ -21,7 +21,7 @@ pub fn build_rank_order(a: &CachedModel, b: &CachedModel) -> Ordering {
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     }
-    .then_with(|| a.vendor.cmp(&b.vendor))
+    .then_with(|| a.subscription.cmp(&b.subscription))
     .then_with(|| a.name.cmp(&b.name))
 }
 /// Returns the set of model names that should be visible in the UI.
@@ -57,7 +57,7 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
     let visible_vendors: BTreeSet<SubscriptionKind> = models
         .iter()
         .filter(|m| visible.contains(&m.name))
-        .map(|m| m.vendor)
+        .map(|m| m.subscription)
         .collect();
     for vendor in [
         SubscriptionKind::Claude,
@@ -71,7 +71,7 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
         }
         if let Some(best) = models
             .iter()
-            .filter(|m| m.vendor == vendor)
+            .filter(|m| m.subscription == vendor)
             .min_by(|a, b| build_rank_order(a, b))
         {
             visible.insert(best.name.clone());

@@ -139,7 +139,7 @@ impl App {
                 MessageKind::Started,
                 format!(
                     "retrying with {}/{}",
-                    vendor_tag(next_model.vendor),
+                    vendor_tag(next_model.subscription),
                     next_model.name
                 ),
             );

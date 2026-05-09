@@ -73,7 +73,7 @@ pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
     pub name: String,
-    pub vendor: String,
+    pub dashboard_vendor: String,
     /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
     /// auto-selection eligibility, or vendor backfill ordering.
     pub overall_score: f64,

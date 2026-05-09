@@ -156,21 +156,17 @@ fn kimi_quota_returns_none_when_all_missing() {
 }
 
 #[test]
-fn live_map_direct_injects_known_gemini_quota_names() {
+fn live_map_direct_passthrough_per_model() {
+    // After dropping the GEMINI_KNOWN_QUOTA_MODELS injection, the map only
+    // contains entries for the models the provider's live API actually
+    // returned — no synthetic backfill names.
     let mapped = live_map_direct(vec![LiveModel {
         name: "gemini-3-pro".to_string(),
         quota_percent: Some(42),
         quota_resets_at: None,
     }]);
 
-    for name in [
-        "gemini-3-1-pro-preview",
-        "gemini-3-pro",
-        "gemini-3-flash",
-        "gemini-2-5-pro",
-        "gemini-2-5-flash",
-    ] {
-        assert_eq!(mapped.0.get(name), Some(&Some(42)), "{name} missing");
-        assert_eq!(mapped.1.get(name), Some(&None), "{name} reset missing");
-    }
+    assert_eq!(mapped.0.len(), 1);
+    assert_eq!(mapped.0.get("gemini-3-pro"), Some(&Some(42)));
+    assert_eq!(mapped.1.get("gemini-3-pro"), Some(&None));
 }

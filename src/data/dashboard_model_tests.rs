@@ -210,12 +210,10 @@ fn merge_drops_opencode_inventory_without_ipbr_match() {
 }
 
 #[test]
-fn merge_no_longer_applies_in_merge_sibling_synthesis() {
-    // The merge layer used to fall back to a same-stem sibling when an
-    // inventory row had no ipbr match. ipbr is now the sole authority for
-    // the supported universe, so the row is dropped instead. The public
-    // `synthesize_sibling` helper (used by `assemble_universe` for live-quota
-    // orphans) is still exercised below.
+fn merge_drops_inventory_without_ipbr_match() {
+    // Sibling synthesis was removed; ipbr is now the sole authority for
+    // the supported universe, so an inventory row with no ipbr match is
+    // dropped rather than borrowing a same-stem sibling's scores.
     let models = merge(
         vec![inventory("gpt-5.5", 0)],
         vec![ipbr_score("gpt-5.4", None, &[], 86.0, 1)],
@@ -229,15 +227,6 @@ fn scores_only_converts_scores_without_fallback() {
 
     assert_eq!(models[0].name, "gpt-5.4");
     assert_eq!(models[0].fallback_from, None);
-}
-
-#[test]
-fn synthesize_sibling_uses_same_stem_score() {
-    let existing = scores_only(vec![score("gpt-5.4", 0.8, 0)]);
-    let synthesized = synthesize_sibling("gpt-5.5", "", &existing).unwrap();
-
-    assert_eq!(synthesized.fallback_from.as_deref(), Some("gpt-5.4"));
-    assert_eq!(synthesized.overall_score, 0.8);
 }
 
 #[test]

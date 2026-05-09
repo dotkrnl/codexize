@@ -1,4 +1,3 @@
-pub use crate::data::dashboard_model::synthesize_sibling;
 use crate::data::dashboard_model::{
     InventoryEntry, ScoreEntry, merge_with_warnings, normalize_ipbr_key,
 };

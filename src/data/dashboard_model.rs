@@ -1,7 +1,6 @@
 use crate::dashboard::DashboardModel;
 #[cfg(test)]
 use crate::dashboard::IngestEvent;
-use crate::model_names;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 #[cfg(test)]
 use serde_json::Value;
@@ -167,45 +166,6 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
         })
         .collect()
 }
-pub fn synthesize_sibling(
-    name: &str,
-    vendor: &str,
-    existing: &[DashboardModel],
-) -> Option<DashboardModel> {
-    let sibling = explicit_fallback(name, existing).or_else(|| {
-        let stem = version_stem(name)?;
-        existing
-            .iter()
-            .filter(|m| m.name != name && version_stem(&m.name) == Some(stem))
-            .max_by(|a, b| {
-                a.overall_score
-                    .partial_cmp(&b.overall_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    })?;
-    Some(DashboardModel {
-        name: name.to_string(),
-        dashboard_vendor: if !vendor.is_empty() {
-            vendor.to_string()
-        } else {
-            sibling.dashboard_vendor.clone()
-        },
-        overall_score: sibling.overall_score,
-        current_score: sibling.current_score,
-        standard_error: sibling.standard_error,
-        axes: sibling.axes.clone(),
-        axis_provenance: sibling.axis_provenance.clone(),
-        // Sibling-synthesized models inherit cosmetic display state but
-        // MUST NOT inherit ipbr authority — only an explicit ipbr row
-        // match may set those fields. See spec "Model Matching".
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
-        display_order: sibling.display_order,
-        fallback_from: Some(sibling.name.clone()),
-    })
-}
 #[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(crate) fn merged_axes(
@@ -314,14 +274,6 @@ fn dashboard_model_from_score(
         },
         display_order: sc.display_order,
         fallback_from,
-    }
-}
-fn version_stem(name: &str) -> Option<&str> {
-    let (prefix, tail) = name.rsplit_once('.')?;
-    if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
-        Some(prefix)
-    } else {
-        None
     }
 }
 struct IpbrLookup {
@@ -453,13 +405,6 @@ fn push_merged_inventory(
         &scores[score_index],
         None,
     ));
-}
-fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {
-    let target = model_names::EXPLICIT_SCORE_FALLBACKS
-        .iter()
-        .find(|(from, _)| *from == name)
-        .map(|(_, to)| *to)?;
-    existing.iter().find(|m| m.name == target)
 }
 #[cfg(test)]
 #[path = "dashboard_model_tests.rs"]

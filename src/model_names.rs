@@ -1,14 +1,3 @@
-pub const EXPLICIT_SCORE_FALLBACKS: &[(&str, &str)] =
-    &[("gemini-3-1-pro-preview", "gemini-3-pro-preview")];
-
-pub const GEMINI_KNOWN_QUOTA_MODELS: &[&str] = &[
-    "gemini-3-1-pro-preview",
-    "gemini-3-pro",
-    "gemini-3-flash",
-    "gemini-2-5-pro",
-    "gemini-2-5-flash",
-];
-
 const DISPLAY: &[(&str, &str, &str)] = &[
     // (canonical, display_vendor, display_short)
     ("claude-opus-4-1", "claude", "opus 4.1"),

@@ -3,24 +3,6 @@ use crate::selection::config::SelectionPhase;
 use crate::selection::ranking::{phase_score_for_legacy_callers, stamp_selection_provenance};
 use crate::selection::types::{CachedModel, SubscriptionKind};
 
-fn model(name: &str, score: f64) -> DashboardModel {
-    DashboardModel {
-        name: name.to_string(),
-        dashboard_vendor: String::new(),
-        overall_score: score,
-        current_score: score,
-        standard_error: 0.0,
-        axes: Vec::new(),
-        axis_provenance: BTreeMap::new(),
-        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
-        score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
-        display_order: 0,
-        fallback_from: None,
-    }
-}
-
 #[test]
 fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() {
     let mut inventory = Vec::new();
@@ -161,24 +143,6 @@ fn fixture_cached_models() -> Vec<CachedModel> {
 
 fn rounded_probability(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
-}
-
-#[test]
-fn synthesize_gemini_3_1_pro_preview_falls_back_to_3_pro_preview() {
-    let existing = vec![
-        model("gemini-3-pro-preview", 80.0),
-        model("gemini-2.5-pro", 70.0),
-    ];
-    let synth = synthesize_sibling("gemini-3-1-pro-preview", "google", &existing).unwrap();
-    assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
-    assert_eq!(synth.overall_score, 80.0);
-}
-
-#[test]
-fn synthesize_gpt_5_5_uses_same_stem_sibling() {
-    let existing = vec![model("gpt-5.2", 70.0), model("gpt-4.1", 50.0)];
-    let synth = synthesize_sibling("gpt-5.5", "openai", &existing).unwrap();
-    assert_eq!(synth.fallback_from.as_deref(), Some("gpt-5.2"));
 }
 
 fn fixture_postchange_snapshot() -> BTreeMap<String, BTreeMap<String, f64>> {

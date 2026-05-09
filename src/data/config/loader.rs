@@ -203,19 +203,14 @@ fn migrate_free_models_into_providers(config: &mut Config) {
         if already {
             continue;
         }
-        let baked_seed = baked::baked_for(&vendor, &model, cli, &launch_name);
-        let provider = match baked_seed {
-            Some(mut seed) => {
-                seed.free = true;
-                seed
-            }
-            None => ProviderEntry {
+        let mut provider = baked::baked_for(&vendor, &model, cli, &launch_name)
+            .unwrap_or_else(|| ProviderEntry {
                 vendor,
                 model,
                 cli,
                 launch_name,
                 enabled: true,
-                free: true,
+                free: false,
                 official: false,
                 quota_disabled: false,
                 cheap_eligible: false,
@@ -223,8 +218,8 @@ fn migrate_free_models_into_providers(config: &mut Config) {
                 effort_eligible: false,
                 effort_mapping: EffortMapping::default(),
                 display_order: baked::ADDITION_DISPLAY_ORDER,
-            },
-        };
+            });
+        provider.free = true;
         merged.push(provider);
     }
     if providers_explicit || merged != *config.providers.value() {

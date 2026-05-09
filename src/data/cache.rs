@@ -8,17 +8,16 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bump from v3 → v4 because dashboard entries now carry ipbr-specific
-/// phase-score fields and a row-match flag. v3 entries cached old
-/// aistupidlevel scores in `axes`/`overall_score`; treating those as v4
-/// would let stale aistupidlevel data masquerade as ipbr authority on
-/// load, which the spec explicitly forbids.
+/// Bump from v4 → v5 because model-first assembly replaces the
+/// per-vendor `CachedModel` shape with rows carrying a `candidates`
+/// vector and `selected_candidate` index. v4 entries lack these
+/// fields; treating them as v5 would lose candidate data on load.
 ///
 /// Versioning applies to the dashboard section only. Quota and quota-
 /// reset sections are loaded independently under their own TTL, because
 /// their schema is unchanged across this bump and the task requires
 /// provider quota cache behavior to stay intact.
-pub const CACHE_VERSION: u32 = 4;
+pub const CACHE_VERSION: u32 = 5;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------

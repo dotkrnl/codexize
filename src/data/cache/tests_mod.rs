@@ -121,20 +121,19 @@ fn current_version_cache_without_quota_resets_loads() {
     assert!(loaded.quota_resets.is_none());
 }
 
-/// A v3 cache file (which only stored aistupidlevel-shaped score data
-/// in `axes` / `overall_score` and lacked any ipbr-specific fields)
-/// MUST NOT be readable as a v4 dashboard. Otherwise old aistupidlevel
-/// scores could masquerade as ipbr phase authority on load — the
-/// exact failure mode the task 1 schema bump is meant to prevent.
+/// A v4 cache file (which stores ipbr fields but lacks the
+/// model-first candidates shape) MUST NOT be readable as a v5
+/// dashboard. Otherwise old per-vendor entries could be interpreted
+/// as model rows with missing candidate data.
 ///
 /// Versioning applies to the dashboard section only: an unrelated
 /// quota section in the same file must still load under its normal
 /// TTL, so a dashboard schema bump never forces a quota re-fetch.
 #[test]
-fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
+fn old_v4_cache_cannot_masquerade_as_v5_dashboard() {
     let dir = TempDir::new().unwrap();
-    let v3_payload = serde_json::json!({
-        "version": 3,
+    let old_payload = serde_json::json!({
+        "version": 4,
         "dashboard": {
             "fetched_at": now_secs(),
             "data": [{
@@ -157,7 +156,7 @@ fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
     fs::create_dir_all(dir.path()).unwrap();
     fs::write(
         dir.path().join("models.json"),
-        serde_json::to_string(&v3_payload).unwrap(),
+        serde_json::to_string(&old_payload).unwrap(),
     )
     .unwrap();
 
@@ -165,7 +164,7 @@ fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
 
     assert!(
         loaded.dashboard.is_none(),
-        "v3 dashboard must not be readable under v{CACHE_VERSION}"
+        "v4 dashboard must not be readable under v{CACHE_VERSION}"
     );
     let quotas = loaded
         .quotas
@@ -192,8 +191,8 @@ fn old_v3_cache_cannot_masquerade_as_ipbr_phase_authority() {
 #[test]
 fn save_after_version_mismatch_preserves_quotas() {
     let dir = TempDir::new().unwrap();
-    let v3_payload = serde_json::json!({
-        "version": 3,
+    let old_payload = serde_json::json!({
+        "version": 4,
         "dashboard": {
             "fetched_at": now_secs(),
             "data": []
@@ -206,16 +205,16 @@ fn save_after_version_mismatch_preserves_quotas() {
     fs::create_dir_all(dir.path()).unwrap();
     fs::write(
         dir.path().join("models.json"),
-        serde_json::to_string(&v3_payload).unwrap(),
+        serde_json::to_string(&old_payload).unwrap(),
     )
     .unwrap();
 
-    // Saving a fresh dashboard should rewrite the file at v4 while
+    // Saving a fresh dashboard should rewrite the file at v5 while
     // carrying the existing quota section forward untouched.
     save_dashboard(dir.path(), &sample_entries()).unwrap();
 
     let loaded = load(dir.path());
-    assert!(loaded.dashboard.is_some(), "v4 dashboard rewritten on save");
+    assert!(loaded.dashboard.is_some(), "v5 dashboard rewritten on save");
     let quotas = loaded
         .quotas
         .expect("v3 quota section must survive the dashboard rewrite");
@@ -326,20 +325,20 @@ fn version_mismatch_drops_dashboard_only() {
 }
 
 #[test]
-fn v2_cache_file_drops_dashboard_only() {
+fn v3_cache_file_drops_dashboard_only() {
     let dir = TempDir::new().unwrap();
     save_dashboard(dir.path(), &sample_entries()).unwrap();
     save_quotas(dir.path(), &sample_quotas()).unwrap();
     let path = dir.path().join("models.json");
     let mut file: CacheFile = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    file.version = 2;
+    file.version = 3;
     fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
 
     let loaded = load(dir.path());
     assert!(loaded.dashboard.is_none());
     assert!(
         loaded.quotas.is_some(),
-        "v2 quota section keeps loading under the existing TTL"
+        "v3 quota section keeps loading under the existing TTL"
     );
 }
 

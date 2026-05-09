@@ -276,7 +276,7 @@ fn opencode_available() -> BTreeSet<SubscriptionKind> {
 }
 
 fn make_quota_payload(entries: &[(&str, &str, Option<u8>)]) -> QuotaPayload {
-    let mut payload: QuotaPayload = BTreeMap::new();
+    let mut payload = QuotaPayload::default();
     for (vendor, name, quota) in entries {
         payload
             .entry(vendor.to_string())
@@ -791,7 +791,7 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
 
     let (models, _warnings) = assemble_universe(
         vec![routed],
-        BTreeMap::new(),
+        QuotaPayload::default(),
         BTreeMap::new(),
         &opencode_available(),
         &[],
@@ -806,7 +806,7 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
 #[test]
 fn merge_preserves_expired_vendor_on_error() {
     // Cached has data for all four vendors.
-    let mut cached: QuotaPayload = BTreeMap::new();
+    let mut cached = QuotaPayload::default();
     cached.insert(
         "claude".to_string(),
         BTreeMap::from([("claude-sonnet".to_string(), Some(50))]),
@@ -852,7 +852,7 @@ fn merge_preserves_expired_vendor_on_error() {
 #[test]
 fn merge_overlays_when_cached_uses_alias_key() {
     // Cached used the str_to_vendor alias ("codex") rather than vendor_kind_to_str ("openai").
-    let mut cached: QuotaPayload = BTreeMap::new();
+    let mut cached = QuotaPayload::default();
     cached.insert(
         "codex".to_string(),
         BTreeMap::from([("gpt-5".to_string(), Some(40))]),
@@ -877,7 +877,7 @@ fn merge_overlays_when_cached_uses_alias_key() {
 
 #[test]
 fn merge_keeps_unknown_vendor_keys() {
-    let mut cached: QuotaPayload = BTreeMap::new();
+    let mut cached = QuotaPayload::default();
     cached.insert(
         "aliens".to_string(),
         BTreeMap::from([("ufo-9000".to_string(), Some(33))]),

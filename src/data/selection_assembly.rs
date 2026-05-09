@@ -75,7 +75,7 @@ async fn assemble_with_refresh(
     };
     let (cached_quota, quota_expired) = match loaded.quotas {
         Some(section) => (section.data, section.expired),
-        None => (std::collections::BTreeMap::new(), true),
+        None => (crate::cache::QuotaPayload::default(), true),
     };
     let (cached_resets, resets_expired) = match loaded.quota_resets {
         Some(section) => (section.data, section.expired),

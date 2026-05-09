@@ -1,23 +1,21 @@
 use crate::data::cache_lock;
-use crate::selection::{IpbrPhaseScores, ScoreSource};
+use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bump from v4 → v5 because model-first assembly replaces the
-/// per-vendor `CachedModel` shape with rows carrying a `candidates`
-/// vector and `selected_candidate` index. v4 entries lack these
-/// fields; treating them as v5 would lose candidate data on load.
-///
-/// Versioning applies to the dashboard section only. Quota and quota-
-/// reset sections are loaded independently under their own TTL, because
-/// their schema is unchanged across this bump and the task requires
-/// provider quota cache behavior to stay intact.
-pub const CACHE_VERSION: u32 = 6;
+/// Bumped to 7 because the quota section's payload shape changed: it
+/// now carries the set of subscriptions whose quota fetch failed so the
+/// selection layer can apply the 50% capacity assumption. Older quota
+/// payloads decode as a bare `BTreeMap` and would silently lose the
+/// failure set, so they're dropped on version mismatch alongside the
+/// dashboard payload.
+pub const CACHE_VERSION: u32 = 7;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
@@ -43,7 +41,7 @@ struct VersionedFile {
     #[serde(default)]
     dashboard: Option<serde_json::Value>,
     #[serde(default)]
-    quotas: Option<Section<QuotaPayload>>,
+    quotas: Option<serde_json::Value>,
     #[serde(default)]
     quota_resets: Option<Section<ResetPayload>>,
 }
@@ -89,8 +87,41 @@ pub struct DashboardEntry {
     #[serde(default)]
     pub fallback_from: Option<String>,
 }
-/// Per-vendor map of model name → optional quota percentage.
-pub type QuotaPayload = BTreeMap<String, BTreeMap<String, Option<u8>>>;
+/// Per-vendor map of model name → optional quota percentage, paired
+/// with the set of subscriptions whose most recent quota fetch failed.
+/// Selection treats a failed-subscription provider's effective quota as
+/// 50% (per spec §quota-failure plumbing). The struct deref's to its
+/// values map so the existing per-subscription/per-model lookup pattern
+/// keeps working without touching every call site.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct QuotaPayload {
+    #[serde(default)]
+    pub values: BTreeMap<String, BTreeMap<String, Option<u8>>>,
+    #[serde(default)]
+    pub failed_subscriptions: BTreeSet<SubscriptionKind>,
+}
+
+impl Deref for QuotaPayload {
+    type Target = BTreeMap<String, BTreeMap<String, Option<u8>>>;
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
+
+impl DerefMut for QuotaPayload {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.values
+    }
+}
+
+impl From<BTreeMap<String, BTreeMap<String, Option<u8>>>> for QuotaPayload {
+    fn from(values: BTreeMap<String, BTreeMap<String, Option<u8>>>) -> Self {
+        Self {
+            values,
+            failed_subscriptions: BTreeSet::new(),
+        }
+    }
+}
 /// Per-vendor map of model name → optional quota reset timestamp.
 pub type ResetPayload = BTreeMap<String, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>;
 pub struct LoadedCache {
@@ -131,11 +162,21 @@ pub fn load(dir: &Path) -> LoadedCache {
     };
     // Dashboard payload is dropped on any version mismatch so old
     // aistupidlevel-shaped entries cannot be read as ipbr phase
-    // authority. Quota / quota-reset sections fall through unchanged.
+    // authority. Quota payloads change shape at v7 (struct with
+    // `failed_subscriptions`); pre-v7 quota maps decode as plain
+    // BTreeMap and would silently lose the failure set, so they are
+    // dropped alongside the dashboard. Quota-reset shape is stable.
     let dashboard_section = if parsed.version == CACHE_VERSION {
         parsed
             .dashboard
             .and_then(|raw| serde_json::from_value::<Section<Vec<DashboardEntry>>>(raw).ok())
+    } else {
+        None
+    };
+    let quota_section = if parsed.version == CACHE_VERSION {
+        parsed
+            .quotas
+            .and_then(|raw| serde_json::from_value::<Section<QuotaPayload>>(raw).ok())
     } else {
         None
     };
@@ -145,7 +186,7 @@ pub fn load(dir: &Path) -> LoadedCache {
             expired: now.saturating_sub(s.fetched_at) >= DASHBOARD_TTL.as_secs(),
             data: s.data,
         }),
-        quotas: parsed.quotas.map(|s| LoadedSection {
+        quotas: quota_section.map(|s| LoadedSection {
             expired: now.saturating_sub(s.fetched_at) >= QUOTA_TTL.as_secs(),
             data: s.data,
         }),
@@ -216,10 +257,17 @@ fn load_raw_or_default(dir: &Path) -> CacheFile {
     } else {
         None
     };
+    let quotas = if parsed.version == CACHE_VERSION {
+        parsed
+            .quotas
+            .and_then(|raw| serde_json::from_value::<Section<QuotaPayload>>(raw).ok())
+    } else {
+        None
+    };
     CacheFile {
         version: CACHE_VERSION,
         dashboard,
-        quotas: parsed.quotas,
+        quotas,
         quota_resets: parsed.quota_resets,
     }
 }

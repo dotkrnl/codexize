@@ -35,6 +35,7 @@ pub fn assemble_universe(
     free_models: &[FreeModelEntry],
 ) -> (Vec<CachedModel>, Vec<String>) {
     let parsed_quotas: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = quota_payload
+        .values
         .into_iter()
         .filter_map(|(subscription_name, models)| {
             parse_subscription_str(&subscription_name).map(|subscription| (subscription, models))
@@ -308,22 +309,33 @@ pub fn merge_quota_payload(
     fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
 ) -> QuotaPayload {
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
-    let mut merged: QuotaPayload = BTreeMap::new();
-    for (subscription_str, models) in cached {
+    let mut merged = QuotaPayload::default();
+    for (subscription_str, models) in &cached.values {
         let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
             None => true,
         };
         if preserve {
-            merged.insert(subscription_str.clone(), models.clone());
+            merged
+                .values
+                .insert(subscription_str.clone(), models.clone());
         }
     }
     for (subscription, models) in fresh {
-        merged.insert(
+        merged.values.insert(
             vendor::vendor_kind_to_str(subscription).to_string(),
             models,
         );
     }
+    // Subscriptions whose fresh fetch did not return a map are
+    // considered failed for this round; preserve any prior failure
+    // markers for subscriptions we did not refresh in this call.
+    merged.failed_subscriptions = cached
+        .failed_subscriptions
+        .iter()
+        .copied()
+        .filter(|kind| !succeeded.contains(kind))
+        .collect();
     merged
 }
 pub fn merge_reset_payload(
@@ -350,7 +362,7 @@ pub fn merge_reset_payload(
     merged
 }
 pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool {
-    quotas.iter().any(|(subscription, models)| {
+    quotas.values.iter().any(|(subscription, models)| {
         let Some(reset_models) = resets.get(subscription) else {
             return true;
         };

@@ -32,7 +32,7 @@ fn free_model_entry_resolves_to_verbatim_launch_name_through_acp_path() {
 
     // Direct candidate at 50% — Free at 100% must beat it.
     let dashboard = vec![make_dashboard_entry("deepseek-v4-flash", "codex")];
-    let mut quotas: crate::cache::QuotaPayload = BTreeMap::new();
+    let mut quotas = crate::cache::QuotaPayload::default();
     quotas
         .entry("codex".to_string())
         .or_default()

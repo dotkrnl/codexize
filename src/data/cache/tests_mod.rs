@@ -28,9 +28,9 @@ fn sample_entries_with_provenance(
 fn sample_quotas() -> QuotaPayload {
     let mut inner = BTreeMap::new();
     inner.insert("claude-sonnet".to_string(), Some(75u8));
-    let mut payload = BTreeMap::new();
-    payload.insert("claude".to_string(), inner);
-    payload
+    let mut values = BTreeMap::new();
+    values.insert("claude".to_string(), inner);
+    QuotaPayload::from(values)
 }
 
 fn sample_resets() -> ResetPayload {
@@ -120,15 +120,13 @@ fn current_version_cache_without_quota_resets_loads() {
 }
 
 /// A v4 cache file (which stores ipbr fields but lacks the
-/// model-first candidates shape) MUST NOT be readable as a v5
-/// dashboard. Otherwise old per-vendor entries could be interpreted
-/// as model rows with missing candidate data.
-///
-/// Versioning applies to the dashboard section only: an unrelated
-/// quota section in the same file must still load under its normal
-/// TTL, so a dashboard schema bump never forces a quota re-fetch.
+/// model-first candidates shape) MUST NOT be readable as a current
+/// dashboard. v7 also reshapes the quota payload to carry
+/// `failed_subscriptions`, so the quota section in an older file is
+/// dropped on load — losing the previous "quota survives across a
+/// dashboard-only bump" property.
 #[test]
-fn old_v4_cache_cannot_masquerade_as_v5_dashboard() {
+fn old_v4_cache_cannot_masquerade_as_current_cache() {
     let dir = TempDir::new().unwrap();
     let old_payload = serde_json::json!({
         "version": 4,
@@ -164,30 +162,17 @@ fn old_v4_cache_cannot_masquerade_as_v5_dashboard() {
         loaded.dashboard.is_none(),
         "v4 dashboard must not be readable under v{CACHE_VERSION}"
     );
-    let quotas = loaded
-        .quotas
-        .expect("quota section is independent of dashboard schema version");
     assert!(
-        !quotas.expired,
-        "quota TTL is unaffected by a dashboard schema bump"
-    );
-    assert_eq!(
-        quotas
-            .data
-            .get("claude")
-            .unwrap()
-            .get("claude-sonnet")
-            .unwrap(),
-        &Some(75)
+        loaded.quotas.is_none(),
+        "v4 quota payload must be dropped at v{CACHE_VERSION} because the schema changed shape"
     );
 }
 
-/// When the dashboard section is dropped because of a version
-/// mismatch, any subsequent save must not lose unrelated cached
-/// quotas. Otherwise a stale dashboard schema would silently force a
-/// quota re-fetch on the next save path.
+/// On a version-mismatch reload the entire cache is rewritten at the
+/// current version, and a subsequent save round-trips correctly
+/// without leaking the old payload shapes back in.
 #[test]
-fn save_after_version_mismatch_preserves_quotas() {
+fn save_after_version_mismatch_rewrites_at_current_version() {
     let dir = TempDir::new().unwrap();
     let old_payload = serde_json::json!({
         "version": 4,
@@ -207,15 +192,21 @@ fn save_after_version_mismatch_preserves_quotas() {
     )
     .unwrap();
 
-    // Saving a fresh dashboard should rewrite the file at v5 while
-    // carrying the existing quota section forward untouched.
+    // Saving a fresh dashboard rewrites the file at the current
+    // version. The pre-bump quota payload is dropped (different shape),
+    // so the post-save quota section must come from a fresh save —
+    // exercise that round-trip explicitly here.
     save_dashboard(dir.path(), &sample_entries()).unwrap();
+    save_quotas(dir.path(), &sample_quotas()).unwrap();
 
     let loaded = load(dir.path());
-    assert!(loaded.dashboard.is_some(), "v5 dashboard rewritten on save");
+    assert!(
+        loaded.dashboard.is_some(),
+        "current-version dashboard rewritten on save"
+    );
     let quotas = loaded
         .quotas
-        .expect("v3 quota section must survive the dashboard rewrite");
+        .expect("freshly-saved quota section must round-trip");
     assert_eq!(
         quotas
             .data
@@ -316,13 +307,13 @@ fn version_mismatch_drops_dashboard_only() {
         "dashboard payload is dropped on any version mismatch"
     );
     assert!(
-        loaded.quotas.is_some(),
-        "quota section is independent of dashboard schema version"
+        loaded.quotas.is_none(),
+        "quota payload is dropped on version mismatch (v7 reshape)"
     );
 }
 
 #[test]
-fn v3_cache_file_drops_dashboard_only() {
+fn v3_cache_file_drops_all_versioned_sections() {
     let dir = TempDir::new().unwrap();
     save_dashboard(dir.path(), &sample_entries()).unwrap();
     save_quotas(dir.path(), &sample_quotas()).unwrap();
@@ -334,8 +325,8 @@ fn v3_cache_file_drops_dashboard_only() {
     let loaded = load(dir.path());
     assert!(loaded.dashboard.is_none());
     assert!(
-        loaded.quotas.is_some(),
-        "v3 quota section keeps loading under the existing TTL"
+        loaded.quotas.is_none(),
+        "v3 quota payload is dropped because the v7 quota schema differs"
     );
 }
 

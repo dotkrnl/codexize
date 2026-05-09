@@ -26,7 +26,7 @@ fn make_entry(name: &str, vendor: &str, overall: f64, current: f64) -> Dashboard
 }
 
 fn make_quota_payload(entries: &[(&str, &str, Option<u8>)]) -> QuotaPayload {
-    let mut payload: QuotaPayload = BTreeMap::new();
+    let mut payload = QuotaPayload::default();
     for (vendor, name, quota) in entries {
         payload
             .entry(vendor.to_string())

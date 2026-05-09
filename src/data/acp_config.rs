@@ -4,7 +4,7 @@ use crate::acp::{
 };
 use crate::data::config::schema::AcpAgentSection;
 use crate::data::config::view::{AcpAgentView, AcpInstallView};
-use crate::selection::{CliKind, SubscriptionKind, vendor::vendor_kind_to_str};
+use crate::selection::{SubscriptionKind, vendor::vendor_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 const CLAUDE_CLI: &str = "claude";
@@ -69,7 +69,6 @@ impl AcpConfig {
             request.vendor,
             request.route_provider.as_deref(),
             &request.model,
-            request.cli,
             &request.launch_name,
         );
         let entries = [
@@ -205,7 +204,6 @@ fn launch_model_for_vendor(
     vendor: SubscriptionKind,
     route_provider: Option<&str>,
     model: &str,
-    _cli: CliKind,
     launch_name: &str,
 ) -> String {
     // Free candidates pass the operator-supplied model name verbatim

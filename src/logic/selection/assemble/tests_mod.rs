@@ -1135,3 +1135,105 @@ fn synth_kimi_latest_skipped_when_kimi_unavailable() {
     assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
     assert!(!models.iter().any(|m| m.name == "kimi-latest"));
 }
+
+#[test]
+fn free_candidate_wins_arbitration_over_direct_below_quota() {
+    let mut direct = make_ipbr_entry("deepseek-v4-flash", "codex", "deepseek-v4-flash");
+    direct.display_order = 0;
+    let dashboard = vec![direct];
+    let quotas = make_quota_payload(&[
+        ("codex", "deepseek-v4-flash", Some(50)),
+    ]);
+    let free_models = vec![FreeModelEntry {
+        mapped_into: "deepseek-v4-flash".to_string(),
+        cli: CliKind::Opencode,
+        model_name: "dsk-4-flash".to_string(),
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
+
+    let (models, warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+    );
+
+    assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
+    assert_eq!(models.len(), 1);
+    let row = &models[0];
+    assert_eq!(row.candidates.len(), 2);
+    assert_eq!(
+        row.selected_candidate().map(|c| c.subscription),
+        Some(SubscriptionKind::Free),
+        "Free at 100% must beat Codex at 50%"
+    );
+    assert_eq!(
+        row.selected_candidate().map(|c| c.launch_name.as_str()),
+        Some("dsk-4-flash"),
+        "Free launch_name must be passed verbatim"
+    );
+    assert_eq!(
+        row.selected_candidate().map(|c| c.cli),
+        Some(CliKind::Opencode),
+    );
+}
+
+#[test]
+fn unmatched_mapped_into_produces_soft_warning() {
+    let dashboard = vec![make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7")];
+    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
+    let free_models = vec![FreeModelEntry {
+        mapped_into: "nonexistent-model".to_string(),
+        cli: CliKind::Opencode,
+        model_name: "free-xyz".to_string(),
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Claude]);
+
+    let (models, warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert!(
+        warnings[0].contains("nonexistent-model"),
+        "warning should mention the unmatched mapped_into: {:?}",
+        warnings
+    );
+    assert_eq!(models.len(), 1, "unmatched entry must not create a row");
+    assert_eq!(models[0].candidates.len(), 1, "only the direct candidate");
+}
+
+#[test]
+fn free_candidate_launch_name_is_verbatim_in_acp_request() {
+    let mut direct = make_ipbr_entry("deepseek-v4-flash", "codex", "deepseek-v4-flash");
+    direct.display_order = 0;
+    let dashboard = vec![direct];
+    let quotas = make_quota_payload(&[
+        ("codex", "deepseek-v4-flash", Some(50)),
+    ]);
+    let free_models = vec![FreeModelEntry {
+        mapped_into: "deepseek-v4-flash".to_string(),
+        cli: CliKind::Opencode,
+        model_name: "dsk-4-flash".to_string(),
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
+
+    let (models, _warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+    );
+
+    assert_eq!(models.len(), 1);
+    let selected = models[0].selected_candidate().unwrap();
+    assert_eq!(selected.subscription, SubscriptionKind::Free);
+    assert_eq!(selected.cli, CliKind::Opencode);
+    assert_eq!(selected.launch_name, "dsk-4-flash");
+}

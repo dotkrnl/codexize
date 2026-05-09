@@ -8,6 +8,8 @@ fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
         prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: "gpt-5.5".to_string(),
         route_provider: None,
+        cli: crate::selection::CliKind::Codex,
+        launch_name: "gpt-5.5".to_string(),
         requested_effort: EffortLevel::Normal,
         effective_effort: EffortLevel::Low,
         interactive: false,

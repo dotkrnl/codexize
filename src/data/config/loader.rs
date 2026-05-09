@@ -1273,4 +1273,91 @@ mod tests {
             Some(&"bar".to_string())
         );
     }
+
+    #[test]
+    fn free_models_single_entry_round_trips() {
+        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
+        let cfg = load_str(toml).unwrap();
+        assert_eq!(cfg.free_models.value().len(), 1);
+        let entry = &cfg.free_models.value()[0];
+        assert_eq!(entry.mapped_into, "deepseek-v4-flash");
+        assert_eq!(entry.cli, crate::selection::CliKind::Opencode);
+        assert_eq!(entry.model_name, "dsk-4-flash");
+    }
+
+    #[test]
+    fn free_models_multiple_entries_round_trip() {
+        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n\n[[free_models]]\nmapped_into = \"claude-opus-4-7\"\ncli = \"claude\"\nmodel_name = \"my-opus\"\n";
+        let cfg = load_str(toml).unwrap();
+        assert_eq!(cfg.free_models.value().len(), 2);
+        assert_eq!(cfg.free_models.value()[0].mapped_into, "deepseek-v4-flash");
+        assert_eq!(cfg.free_models.value()[1].mapped_into, "claude-opus-4-7");
+    }
+
+    #[test]
+    fn free_models_absent_yields_empty() {
+        let cfg = load_str("[meta]\nversion = 1\n").unwrap();
+        assert!(cfg.free_models.value().is_empty());
+        assert!(!cfg.free_models.is_explicit());
+    }
+
+    #[test]
+    fn free_models_unknown_cli_rejected() {
+        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"unknown\"\nmodel_name = \"dsk-4-flash\"\n";
+        let err = load_str(toml).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown"), "{msg}");
+        assert!(msg.contains("cli"), "{msg}");
+    }
+
+    #[test]
+    fn free_models_empty_model_name_rejected() {
+        let mut cfg = Config::baked_defaults();
+        cfg.free_models = Override::explicit(vec![FreeModelEntry {
+            mapped_into: "deepseek-v4-flash".to_string(),
+            cli: crate::selection::CliKind::Opencode,
+            model_name: "  ".to_string(),
+        }]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("model_name"), "{err}");
+    }
+
+    #[test]
+    fn free_models_empty_mapped_into_rejected() {
+        let mut cfg = Config::baked_defaults();
+        cfg.free_models = Override::explicit(vec![FreeModelEntry {
+            mapped_into: "  ".to_string(),
+            cli: crate::selection::CliKind::Opencode,
+            model_name: "dsk-4-flash".to_string(),
+        }]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("mapped_into"), "{err}");
+    }
+
+    #[test]
+    fn free_models_sparse_render_round_trips() {
+        let mut cfg = Config::baked_defaults();
+        cfg.free_models = Override::explicit(vec![
+            FreeModelEntry {
+                mapped_into: "deepseek-v4-flash".to_string(),
+                cli: crate::selection::CliKind::Opencode,
+                model_name: "dsk-4-flash".to_string(),
+            },
+        ]);
+        let out = render_sparse(&cfg);
+        assert!(out.contains("[[free_models]]"), "{out}");
+        assert!(out.contains("mapped_into = \"deepseek-v4-flash\""), "{out}");
+        assert!(out.contains("cli = \"opencode\""), "{out}");
+        assert!(out.contains("model_name = \"dsk-4-flash\""), "{out}");
+        let parsed = load_str(&out).unwrap();
+        assert_eq!(parsed.free_models.value().len(), 1);
+        assert_eq!(parsed.free_models.value()[0].mapped_into, "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn free_models_sparse_render_drops_when_empty() {
+        let cfg = Config::baked_defaults();
+        let out = render_sparse(&cfg);
+        assert!(!out.contains("free_models"), "empty default must not emit free_models: {out}");
+    }
 }

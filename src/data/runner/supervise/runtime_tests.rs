@@ -4,7 +4,7 @@ use crate::acp::{
     AcpSession, AcpSessionSpec, AcpSpawnSpec, ClientUpdate, PromptPayload,
 };
 use crate::data::runner::transport::{FakeAcpClock, FakeAcpDiagnostics, ManagedAcpLaunch};
-use crate::selection::VendorKind;
+use crate::selection::SubscriptionKind;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -174,7 +174,7 @@ impl AcpSession for FakeSession {
 fn launch_fixture(interactive: bool) -> ManagedAcpLaunch {
     ManagedAcpLaunch {
         resolved: AcpResolvedLaunch {
-            vendor: VendorKind::Kimi,
+            vendor: SubscriptionKind::Kimi,
             interactive,
             spawn: AcpSpawnSpec {
                 program: String::new(),

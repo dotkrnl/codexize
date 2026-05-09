@@ -370,7 +370,7 @@ mod tests {
     use crate::app::TestLaunchOutcome;
     use crate::app::test_support::{mk_app, with_temp_root};
     use crate::runner::{RunnerConfig, select_full_alignment};
-    use crate::selection::{CachedModel, IpbrPhaseScores, ScoreSource, VendorKind};
+    use crate::selection::{CachedModel, IpbrPhaseScores, ScoreSource, SubscriptionKind};
     use crate::state::{
         self as session_state, BuilderState, Phase, PipelineItem, PipelineItemStatus, SessionState,
     };
@@ -401,7 +401,7 @@ mod tests {
 
     fn cached_review_model() -> CachedModel {
         CachedModel {
-            vendor: VendorKind::Codex,
+            vendor: SubscriptionKind::Codex,
             name: "review-model".to_string(),
             overall_score: 0.0,
             current_score: 0.0,
@@ -417,6 +417,8 @@ mod tests {
             ipbr_match_key: Some("review-model".to_string()),
             route_underlying_vendor: None,
             route_provider: None,
+            candidates: Vec::new(),
+            selected_candidate: None,
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,

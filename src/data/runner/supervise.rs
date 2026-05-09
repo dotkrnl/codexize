@@ -14,7 +14,7 @@ mod test_support;
 use super::transport::{AcpCancelReason, AcpInput, ManagedAcpLaunch};
 use crate::acp::AcpLaunchPolicy;
 use crate::adapters::AgentRun;
-use crate::selection::VendorKind;
+use crate::selection::SubscriptionKind;
 use anyhow::{Result, bail};
 use dashmap::DashMap;
 pub(in crate::data::runner) use launch::append_launch_cause;
@@ -398,7 +398,7 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: VendorKind,
+        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,

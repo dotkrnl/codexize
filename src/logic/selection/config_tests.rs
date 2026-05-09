@@ -4,12 +4,16 @@ use super::*;
 fn vendor_bias_matches_opus_only_for_idea_and_planning() {
     let cfg = &SELECTION_CONFIG;
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Claude, "claude-opus-4", SelectionPhase::Idea),
+        cfg.vendor_bias(
+            SubscriptionKind::Claude,
+            "claude-opus-4",
+            SelectionPhase::Idea
+        ),
         1.5
     );
     assert_eq!(
         cfg.vendor_bias(
-            VendorKind::Claude,
+            SubscriptionKind::Claude,
             "claude-opus-4",
             SelectionPhase::Planning
         ),
@@ -18,7 +22,11 @@ fn vendor_bias_matches_opus_only_for_idea_and_planning() {
     // Non-opus Claude variants do not match the substring needle, so
     // the bias falls back to the neutral 1.0.
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Claude, "claude-sonnet-4", SelectionPhase::Idea),
+        cfg.vendor_bias(
+            SubscriptionKind::Claude,
+            "claude-sonnet-4",
+            SelectionPhase::Idea
+        ),
         1.0
     );
 }
@@ -29,16 +37,16 @@ fn vendor_bias_codex_review_uses_unrestricted_needle() {
     // The Codex Review entry has needle = None, so any model name
     // qualifies as long as the vendor + phase match.
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Codex, "gpt-5.5", SelectionPhase::Review),
+        cfg.vendor_bias(SubscriptionKind::Codex, "gpt-5.5", SelectionPhase::Review),
         1.5
     );
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Codex, "o1-mini", SelectionPhase::Review),
+        cfg.vendor_bias(SubscriptionKind::Codex, "o1-mini", SelectionPhase::Review),
         1.5
     );
     // Wrong phase: returns the neutral default.
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Codex, "gpt-5.5", SelectionPhase::Build),
+        cfg.vendor_bias(SubscriptionKind::Codex, "gpt-5.5", SelectionPhase::Build),
         1.0
     );
 }
@@ -48,11 +56,15 @@ fn vendor_bias_unknown_vendor_phase_combo_is_one() {
     let cfg = &SELECTION_CONFIG;
     // Gemini and Kimi have no vendor_phase_biases entries.
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Gemini, "gemini-2.5-pro", SelectionPhase::Idea),
+        cfg.vendor_bias(
+            SubscriptionKind::Gemini,
+            "gemini-2.5-pro",
+            SelectionPhase::Idea
+        ),
         1.0
     );
     assert_eq!(
-        cfg.vendor_bias(VendorKind::Kimi, "kimi-k2", SelectionPhase::Build),
+        cfg.vendor_bias(SubscriptionKind::Kimi, "kimi-k2", SelectionPhase::Build),
         1.0
     );
 }

@@ -7,14 +7,15 @@
 //! server-mode binary import everything selection-shaped from one root
 //! path; new logic/data callers should still prefer the layered names.
 pub use crate::logic::selection::{
-    CachedModel, IpbrPhaseScores, QuotaError, ScoreSource, VendorKind,
+    CachedModel, Candidate, CliKind, FreeModelEntry, IpbrPhaseScores, ModelRow, QuotaError,
+    ScoreSource, SubscriptionKind,
 };
 pub use crate::logic::selection::{config, display, ranking, types, vendor};
 pub use config::*;
 #[allow(clippy::module_inception)]
 pub mod selection {
     use crate::adapters::EffortLevel;
-    use crate::logic::selection::types::{CachedModel, VendorKind};
+    use crate::logic::selection::types::{CachedModel, SubscriptionKind};
     use crate::logic::selection::{SelectionPhase, selection as pure};
     fn sample_seed() -> u64 {
         chrono::Utc::now().timestamp_subsec_nanos() as u64
@@ -22,14 +23,14 @@ pub mod selection {
     pub fn pick_for_phase(
         models: &[CachedModel],
         phase: SelectionPhase,
-        vendor_filter: Option<VendorKind>,
+        vendor_filter: Option<SubscriptionKind>,
     ) -> Option<&CachedModel> {
         pure::pick_for_phase_with_seed(models, phase, vendor_filter, sample_seed())
     }
     pub fn pick_for_phase_with_effort<'a>(
         models: &'a [CachedModel],
         phase: SelectionPhase,
-        vendor_filter: Option<VendorKind>,
+        vendor_filter: Option<SubscriptionKind>,
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<pure::SelectionOutcome<'a>> {
@@ -44,8 +45,8 @@ pub mod selection {
     }
     pub fn select_for_review<'a>(
         models: &'a [CachedModel],
-        used_vendors: &[VendorKind],
-        used_models: &[(VendorKind, String)],
+        used_vendors: &[SubscriptionKind],
+        used_models: &[(SubscriptionKind, String)],
     ) -> Option<&'a CachedModel> {
         // Lifetime is explicit so callers can hold the picked model alive for
         // the lifetime of `models` independent of `used_*`.
@@ -53,8 +54,8 @@ pub mod selection {
     }
     pub fn select_for_review_with_effort<'a>(
         models: &'a [CachedModel],
-        used_vendors: &[VendorKind],
-        used_models: &[(VendorKind, String)],
+        used_vendors: &[SubscriptionKind],
+        used_models: &[(SubscriptionKind, String)],
         effort: EffortLevel,
         cheap: bool,
     ) -> Option<pure::SelectionOutcome<'a>> {
@@ -70,8 +71,8 @@ pub mod selection {
     pub fn select_excluding<'a>(
         models: &'a [CachedModel],
         phase: SelectionPhase,
-        excluded: &[(VendorKind, String)],
-        last_failed_vendor: Option<VendorKind>,
+        excluded: &[(SubscriptionKind, String)],
+        last_failed_vendor: Option<SubscriptionKind>,
     ) -> Option<&'a CachedModel> {
         pure::select_excluding_with_seed(models, phase, excluded, last_failed_vendor, sample_seed())
     }

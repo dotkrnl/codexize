@@ -1,6 +1,6 @@
 use super::config::SelectionPhase;
 #[cfg(test)]
-use super::types::VendorKind;
+use super::types::SubscriptionKind;
 use super::types::{CachedModel, ScoreSource};
 use std::sync::{Mutex, OnceLock};
 #[derive(Debug, Clone, PartialEq, Eq)]

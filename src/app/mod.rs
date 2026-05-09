@@ -53,7 +53,7 @@ pub(crate) use self::state::ModelRefreshState;
 use self::tree::{NodeKey, VisibleNodeRow};
 use crate::{
     cache,
-    selection::{CachedModel, QuotaError, VendorKind},
+    selection::{CachedModel, QuotaError, SubscriptionKind},
     state::{Message, Node, SessionState},
 };
 pub(crate) use footer::keymap::{Capability, KeyBinding, render_keymap_line};
@@ -66,7 +66,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 pub(crate) type RetryKey = (String, Option<u32>, u32);
-pub(crate) type FailedModelSet = HashSet<(VendorKind, String)>;
+pub(crate) type FailedModelSet = HashSet<(SubscriptionKind, String)>;
 const DEFAULT_STAMP_TIMEOUT_MS: u64 = 1500;
 const ENV_STAMP_TIMEOUT_MS: &str = "CODEXIZE_STAMP_TIMEOUT_MS";
 const DEFAULT_EVENT_POLL_MS: u64 = 250;

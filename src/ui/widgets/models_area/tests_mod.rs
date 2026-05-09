@@ -13,7 +13,7 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
     // every ipbr phase so existing tests that vary only `axis_score` keep
     // their relative ordering and percentage shape under the new pipeline.
     CachedModel {
-        vendor: VendorKind::Codex,
+        vendor: SubscriptionKind::Codex,
         name: name.to_string(),
         overall_score: axis_score,
         current_score: 99.0,
@@ -41,6 +41,8 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
         ipbr_match_key: Some(name.to_string()),
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: Some(100),
         quota_resets_at: None,
         display_order,
@@ -49,7 +51,7 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
 }
 
 fn vendor_model_with_axis_score(
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     name: &str,
     axis_score: f64,
     display_order: usize,
@@ -442,7 +444,7 @@ fn full_table_shows_full_name_on_wide_width() {
 #[test]
 fn full_table_uses_gemini_preview_display_label() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Gemini,
+        SubscriptionKind::Gemini,
         "gemini-3.1-pro-preview",
         1.0,
         0,
@@ -563,10 +565,10 @@ fn format_name_with_freshness_wide_display() {
 #[test]
 fn compact_quota_renders_per_vendor_entries() {
     let models = vec![
-        vendor_model_with_axis_score(VendorKind::Kimi, "kimi-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Codex, "gpt-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Gemini, "gemini-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-1", 50.0, 0),
     ];
 
     let (lines, mode) = responsive_models_area(
@@ -591,8 +593,8 @@ fn compact_quota_renders_per_vendor_entries() {
 #[test]
 fn compact_quota_keeps_full_vendor_names_below_60() {
     let models = vec![
-        vendor_model_with_axis_score(VendorKind::Kimi, "kimi-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-1", 50.0, 0),
     ];
 
     let (lines, _) = responsive_models_area(
@@ -610,7 +612,7 @@ fn compact_quota_keeps_full_vendor_names_below_60() {
 #[test]
 fn compact_quota_omits_below_40() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Kimi,
+        SubscriptionKind::Kimi,
         "kimi-1",
         50.0,
         0,
@@ -629,13 +631,13 @@ fn compact_quota_omits_below_40() {
 #[test]
 fn compact_quota_failed_fetch_renders_red_dashes() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Kimi,
+        SubscriptionKind::Kimi,
         "kimi-1",
         50.0,
         0,
     )];
     let errors = vec![QuotaError {
-        vendor: VendorKind::Kimi,
+        vendor: SubscriptionKind::Kimi,
         message: "boom".to_string(),
     }];
 
@@ -665,13 +667,13 @@ fn compact_quota_failed_fetch_renders_red_dashes() {
 #[test]
 fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Kimi,
+        SubscriptionKind::Kimi,
         "kimi-1",
         50.0,
         0,
     )];
     let errors = vec![QuotaError {
-        vendor: VendorKind::Kimi,
+        vendor: SubscriptionKind::Kimi,
         message: "boom".to_string(),
     }];
 
@@ -711,11 +713,11 @@ fn full_table_dot_color_tracks_quota_not_score() {
     // both rows even though `alpha` has zero quota (which collapses its
     // pool weight to 0 under the >10% visibility rule).
     let mut high_score_no_quota =
-        vendor_model_with_axis_score(VendorKind::Codex, "gpt-alpha", 1.0, 0);
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-alpha", 1.0, 0);
     high_score_no_quota.current_score = 99.0;
     high_score_no_quota.quota_percent = Some(0);
     let mut low_score_full_quota =
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 1.0, 1);
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-beta", 1.0, 1);
     low_score_full_quota.current_score = 1.0;
     low_score_full_quota.quota_percent = Some(100);
     let models = vec![high_score_no_quota, low_score_full_quota];
@@ -757,10 +759,10 @@ fn snapshot_models() -> Vec<CachedModel> {
     // Four vendors so width-tier collapse is observable. Scores stagger
     // so phase ranks are deterministic.
     vec![
-        vendor_model_with_axis_score(VendorKind::Kimi, "kimi-k2-thinking", 80.0, 0),
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
-        vendor_model_with_axis_score(VendorKind::Codex, "gpt-5-codex", 70.0, 0),
-        vendor_model_with_axis_score(VendorKind::Gemini, "gemini-2.5-pro", 60.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2-thinking", 80.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-codex", 70.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 60.0, 0),
     ]
 }
 
@@ -794,7 +796,7 @@ fn snapshot_matrix_widths() {
 #[test]
 fn wide_layout_shows_relative_reset_time() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
         Utc::now() + Duration::hours(2),
     )];
 
@@ -811,7 +813,7 @@ fn wide_layout_shows_relative_reset_time() {
 #[test]
 fn reset_time_stays_hidden_below_very_wide_threshold() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
         Utc::now() + Duration::hours(2),
     )];
 
@@ -828,7 +830,7 @@ fn reset_time_stays_hidden_below_very_wide_threshold() {
 #[test]
 fn wide_layout_marks_past_reset_as_expired() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
         Utc::now() - Duration::hours(1),
     )];
 
@@ -1065,9 +1067,9 @@ fn term_h_below_50_forces_compact_quota() {
 }
 #[test]
 fn full_table_orders_by_build_score_descending() {
-    let m1 = vendor_model_with_axis_score(VendorKind::Codex, "gpt-alpha", 0.5, 0);
-    let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 0.75, 0);
-    let m3 = vendor_model_with_axis_score(VendorKind::Gemini, "gemini-gamma", 1.0, 0);
+    let m1 = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-alpha", 0.5, 0);
+    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-beta", 0.75, 0);
+    let m3 = vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-gamma", 1.0, 0);
     let models = vec![m1, m2, m3];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
@@ -1085,8 +1087,8 @@ fn full_table_renders_vendor_label_on_every_row() {
     // weight visibility threshold. The intent is to assert the vendor
     // label is rendered on consecutive same-vendor rows, not to drive any
     // particular ranking outcome.
-    let m1 = vendor_model_with_axis_score(VendorKind::Claude, "claude-alpha", 100.0, 0);
-    let m2 = vendor_model_with_axis_score(VendorKind::Claude, "claude-beta", 100.0, 0);
+    let m1 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-alpha", 100.0, 0);
+    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-beta", 100.0, 0);
     let models = vec![m1, m2];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
@@ -1099,7 +1101,7 @@ fn full_table_renders_vendor_label_on_every_row() {
 #[test]
 fn compact_quota_renders_expanded_quota_when_space_permits() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Claude,
+        SubscriptionKind::Claude,
         "claude-alpha",
         100.0,
         0,
@@ -1121,10 +1123,10 @@ fn compact_quota_renders_expanded_quota_when_space_permits() {
 #[test]
 fn compact_quota_renders_narrow_quota_when_tight() {
     let models = vec![
-        vendor_model_with_axis_score(VendorKind::Kimi, "kimi-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Claude, "claude-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Codex, "gpt-1", 50.0, 0),
-        vendor_model_with_axis_score(VendorKind::Gemini, "gemini-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-1", 50.0, 0),
     ];
 
     let (lines, _) = responsive_models_area(
@@ -1144,7 +1146,7 @@ fn compact_quota_renders_narrow_quota_when_tight() {
 #[test]
 fn full_table_expands_quota_and_phase_labels_when_space_permits() {
     let models = vec![vendor_model_with_axis_score(
-        VendorKind::Claude,
+        SubscriptionKind::Claude,
         "claude",
         100.0,
         0,
@@ -1160,7 +1162,7 @@ fn full_table_expands_quota_and_phase_labels_when_space_permits() {
 // ----- new ipbr-pipeline display contracts -----
 
 fn unscored_inventory_model(
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     name: &str,
     quota: Option<u8>,
     display_order: usize,
@@ -1179,6 +1181,8 @@ fn unscored_inventory_model(
         ipbr_match_key: None,
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: quota,
         quota_resets_at: None,
         display_order,
@@ -1191,9 +1195,9 @@ fn full_table_inventory_only_model_renders_as_unscored_for_current_phase() {
     // Spec: inventory/CLI-visible models with no ipbr phase score remain
     // visible (via vendor backfill) but render with no sampling weight and
     // no rank-1 highlight for any phase.
-    let mut ranked = vendor_model_with_axis_score(VendorKind::Codex, "gpt-ranked", 90.0, 0);
+    let mut ranked = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-ranked", 90.0, 0);
     ranked.quota_percent = Some(80);
-    let inventory_only = unscored_inventory_model(VendorKind::Claude, "inv", Some(80), 0);
+    let inventory_only = unscored_inventory_model(SubscriptionKind::Claude, "inv", Some(80), 0);
 
     let models = vec![ranked, inventory_only];
 
@@ -1222,7 +1226,7 @@ fn full_table_unknown_quota_renders_as_unknown_not_exhausted() {
     // Spec: missing quota displays as unknown (DarkGray), not exhausted
     // (Red). Selection still treats it as effective-30, but the dot color
     // must distinguish unknown from known-zero.
-    let mut model = vendor_model_with_axis_score(VendorKind::Codex, "gpt-unknown", 80.0, 0);
+    let mut model = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-unknown", 80.0, 0);
     model.quota_percent = None;
     let models = vec![model];
 
@@ -1243,9 +1247,9 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
     // Spec: known zero quota = exhausted (red dot) AND must not be
     // auto-selected. The pool scorer drops zero-quota candidates, so the
     // sampling cell should render at 0%.
-    let mut zero_quota = vendor_model_with_axis_score(VendorKind::Codex, "gpt-zero", 90.0, 0);
+    let mut zero_quota = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-zero", 90.0, 0);
     zero_quota.quota_percent = Some(0);
-    let healthy = vendor_model_with_axis_score(VendorKind::Claude, "claude-ok", 90.0, 0);
+    let healthy = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-ok", 90.0, 0);
     let models = vec![zero_quota, healthy];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
@@ -1288,8 +1292,8 @@ fn full_table_sampling_percentage_sourced_from_pool_weights_not_phase_score() {
     // With two ipbr-ranked models at scores 90 and 75, the pool softmax
     // assigns the lower-scored model a small but nonzero share (well below
     // its share of phase-score totals, which would be 75/(90+75) ≈ 45%).
-    let high = vendor_model_with_axis_score(VendorKind::Codex, "gpt-high", 90.0, 0);
-    let low = vendor_model_with_axis_score(VendorKind::Claude, "low", 75.0, 0);
+    let high = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-high", 90.0, 0);
+    let low = vendor_model_with_axis_score(SubscriptionKind::Claude, "low", 75.0, 0);
     let models = vec![high, low];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);

@@ -8,7 +8,7 @@
 //! public control surface).
 use crate::acp::AcpLaunchPolicy;
 use crate::adapters::AgentRun;
-use crate::selection::VendorKind;
+use crate::selection::SubscriptionKind;
 use anyhow::{Context, Result};
 use std::{
     path::Path,
@@ -78,7 +78,7 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: VendorKind,
+        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,
@@ -101,7 +101,7 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: VendorKind,
+        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,
@@ -128,7 +128,7 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: VendorKind,
+        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,
@@ -151,7 +151,7 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: VendorKind,
+        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,
@@ -175,7 +175,7 @@ impl Supervisor {
 pub fn launch_interactive(
     window_name: &str,
     run: &AgentRun,
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
@@ -196,7 +196,7 @@ pub fn launch_interactive(
 pub fn launch_noninteractive(
     window_name: &str,
     run: &AgentRun,
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,
@@ -217,7 +217,7 @@ pub fn launch_noninteractive(
 pub fn launch_noninteractive_with_policy(
     window_name: &str,
     run: &AgentRun,
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     run_key: &str,
     artifacts_dir: &Path,
     required_artifact: Option<&Path>,

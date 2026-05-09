@@ -1,14 +1,14 @@
 use crate::acp::{AcpConfig, AcpLaunchPolicy, AcpLaunchRequest, PromptPayload};
 use crate::adapters::AgentRun;
 use crate::runner::transport::{ManagedAcpLaunch, acp_trace_path_from_cause_path};
-use crate::selection::VendorKind;
+use crate::selection::SubscriptionKind;
 use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_managed_acp_launch(
     acp_config: &AcpConfig,
     window_name: &str,
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     run: &AgentRun,
     run_key: &str,
     artifacts_dir: &Path,

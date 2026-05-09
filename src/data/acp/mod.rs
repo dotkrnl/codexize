@@ -29,8 +29,8 @@ pub use super::acp_events::{
     ClientUpdate, ToolCallActivityKind, translate_update,
 };
 use crate::{
-    adapters::EffortLevel, logic::memory::memory_glob_from_session_path, selection::VendorKind,
-    state::LaunchModes,
+    adapters::EffortLevel, logic::memory::memory_glob_from_session_path,
+    selection::SubscriptionKind, state::LaunchModes,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -151,7 +151,7 @@ impl AcpLaunchPolicy {
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
-    pub vendor: VendorKind, pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
+    pub vendor: SubscriptionKind, pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
     /// Opencode sub-provider for the requested model (`opencode` or
     /// `opencode-go`). The launch boundary uses this to qualify a bare
     /// `model` with the right tier prefix; `None` for direct vendors.
@@ -172,5 +172,5 @@ pub struct AcpSessionSpec {
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpResolvedLaunch {
-    pub vendor: VendorKind, pub interactive: bool, pub spawn: AcpSpawnSpec, pub session: AcpSessionSpec,
+    pub vendor: SubscriptionKind, pub interactive: bool, pub spawn: AcpSpawnSpec, pub session: AcpSessionSpec,
 }

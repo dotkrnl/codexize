@@ -1,6 +1,6 @@
 use super::*;
 
-fn ipbr_model(vendor: VendorKind, name: &str, score: f64, quota: Option<u8>) -> CachedModel {
+fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8>) -> CachedModel {
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -20,6 +20,8 @@ fn ipbr_model(vendor: VendorKind, name: &str, score: f64, quota: Option<u8>) -> 
         ipbr_match_key: Some(name.to_string()),
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: quota,
         quota_resets_at: None,
         display_order: 0,
@@ -27,7 +29,7 @@ fn ipbr_model(vendor: VendorKind, name: &str, score: f64, quota: Option<u8>) -> 
     }
 }
 
-fn unscored_model(vendor: VendorKind, name: &str, display_order: usize) -> CachedModel {
+fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) -> CachedModel {
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -42,6 +44,8 @@ fn unscored_model(vendor: VendorKind, name: &str, display_order: usize) -> Cache
         ipbr_match_key: None,
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order,
@@ -56,10 +60,10 @@ fn visible_models_keeps_models_above_pool_weight_threshold() {
     // collapses below the visibility threshold. The per-vendor floor still
     // admits one Claude row, but it picks the strongest, not the bottom.
     let models = vec![
-        ipbr_model(VendorKind::Claude, "claude-a", 95.0, Some(80)),
-        ipbr_model(VendorKind::Claude, "claude-b", 94.0, Some(80)),
-        ipbr_model(VendorKind::Claude, "claude-c", 93.0, Some(80)),
-        ipbr_model(VendorKind::Claude, "claude-d", 10.0, Some(100)),
+        ipbr_model(SubscriptionKind::Claude, "claude-a", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Claude, "claude-b", 94.0, Some(80)),
+        ipbr_model(SubscriptionKind::Claude, "claude-c", 93.0, Some(80)),
+        ipbr_model(SubscriptionKind::Claude, "claude-d", 10.0, Some(100)),
     ];
     let visible = visible_models(&models);
 
@@ -75,9 +79,9 @@ fn visible_models_keeps_models_above_pool_weight_threshold() {
 #[test]
 fn visible_models_backfills_missing_vendors_by_build_rank() {
     let models = vec![
-        ipbr_model(VendorKind::Claude, "claude-top", 95.0, Some(80)),
-        ipbr_model(VendorKind::Codex, "codex-top", 95.0, Some(80)),
-        ipbr_model(VendorKind::Gemini, "gemini-top", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Claude, "claude-top", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Codex, "codex-top", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Gemini, "gemini-top", 95.0, Some(80)),
         // Two Kimi models — the per-vendor floor must pick the higher
         // ipbr Build score, not the lower `display_order` or any
         // cosmetic summary score.
@@ -90,7 +94,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
             },
             current_score: 99.0,
             display_order: 0,
-            ..ipbr_model(VendorKind::Kimi, "kimi-weak", 40.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Kimi, "kimi-weak", 40.0, Some(80))
         },
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
@@ -101,7 +105,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
             },
             current_score: 50.0,
             display_order: 5,
-            ..ipbr_model(VendorKind::Kimi, "kimi-strong", 60.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Kimi, "kimi-strong", 60.0, Some(80))
         },
     ];
     let visible = visible_models(&models);
@@ -121,10 +125,10 @@ fn visible_models_inventory_only_model_remains_via_vendor_backfill() {
     // Spec: inventory/CLI-visible models stay visible even with no ipbr
     // score. The backfill rule is the visibility safety net.
     let models = vec![
-        ipbr_model(VendorKind::Claude, "claude-top", 95.0, Some(80)),
-        ipbr_model(VendorKind::Codex, "codex-top", 95.0, Some(80)),
-        ipbr_model(VendorKind::Gemini, "gemini-top", 95.0, Some(80)),
-        unscored_model(VendorKind::Kimi, "kimi-cli-only", 0),
+        ipbr_model(SubscriptionKind::Claude, "claude-top", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Codex, "codex-top", 95.0, Some(80)),
+        ipbr_model(SubscriptionKind::Gemini, "gemini-top", 95.0, Some(80)),
+        unscored_model(SubscriptionKind::Kimi, "kimi-cli-only", 0),
     ];
     let visible = visible_models(&models);
 
@@ -139,21 +143,21 @@ fn phase_rank_orders_by_ipbr_phase_score_descending() {
                 build: Some(95.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Claude, "top", 95.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Claude, "top", 95.0, Some(80))
         },
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
                 build: Some(50.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Codex, "mid", 50.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Codex, "mid", 50.0, Some(80))
         },
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
                 build: Some(10.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Gemini, "low", 10.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Gemini, "low", 10.0, Some(80))
         },
     ];
     let ranks = phase_rank(&models, SelectionPhase::Build);
@@ -169,7 +173,7 @@ fn phase_rank_omits_unscored_and_non_ipbr_models() {
     // Unscored / cosmetic-only models render as unranked: they must
     // not appear in the rank map at all (callers treat absence as
     // "no rank for this phase").
-    let mut cosmetic_only = unscored_model(VendorKind::Claude, "cosmetic", 0);
+    let mut cosmetic_only = unscored_model(SubscriptionKind::Claude, "cosmetic", 0);
     cosmetic_only.score_source = crate::selection::ScoreSource::Aistupidlevel;
     cosmetic_only.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(99.0),
@@ -177,8 +181,8 @@ fn phase_rank_omits_unscored_and_non_ipbr_models() {
     };
 
     let models = vec![
-        ipbr_model(VendorKind::Codex, "ranked", 80.0, Some(80)),
-        unscored_model(VendorKind::Gemini, "inventory-only", 0),
+        ipbr_model(SubscriptionKind::Codex, "ranked", 80.0, Some(80)),
+        unscored_model(SubscriptionKind::Gemini, "inventory-only", 0),
         cosmetic_only,
     ];
     let ranks = phase_rank(&models, SelectionPhase::Build);
@@ -197,21 +201,21 @@ fn phase_rank_dense_after_tie() {
                 build: Some(90.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Claude, "tie-a", 90.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Claude, "tie-a", 90.0, Some(80))
         },
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
                 build: Some(90.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Codex, "tie-b", 90.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Codex, "tie-b", 90.0, Some(80))
         },
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
                 build: Some(50.0),
                 ..crate::selection::IpbrPhaseScores::default()
             },
-            ..ipbr_model(VendorKind::Gemini, "lower", 50.0, Some(80))
+            ..ipbr_model(SubscriptionKind::Gemini, "lower", 50.0, Some(80))
         },
     ];
     let ranks = phase_rank(&models, SelectionPhase::Build);
@@ -225,7 +229,7 @@ fn phase_rank_dense_after_tie() {
 fn phase_rank_empty_when_no_models_or_no_scores() {
     assert!(phase_rank(&[], SelectionPhase::Build).is_empty());
 
-    let unscored = vec![unscored_model(VendorKind::Claude, "a", 0)];
+    let unscored = vec![unscored_model(SubscriptionKind::Claude, "a", 0)];
     assert!(phase_rank(&unscored, SelectionPhase::Build).is_empty());
 }
 

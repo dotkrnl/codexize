@@ -1,10 +1,10 @@
 use codexize::logic::selection::{
     SelectionPhase,
     selection::pick_for_phase_with_seed,
-    types::{CachedModel, IpbrPhaseScores, ScoreSource, VendorKind},
+    types::{CachedModel, IpbrPhaseScores, ScoreSource, SubscriptionKind},
 };
 
-fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
+fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -29,6 +29,8 @@ fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
         ipbr_match_key: Some(name.to_string()),
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,
@@ -39,8 +41,8 @@ fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
 #[test]
 fn pick_for_phase_with_seed_is_deterministic_without_clock_access() {
     let models = vec![
-        sample_model(VendorKind::Claude, "high", 80),
-        sample_model(VendorKind::Codex, "low", 1),
+        sample_model(SubscriptionKind::Claude, "high", 80),
+        sample_model(SubscriptionKind::Codex, "low", 1),
     ];
     let chosen = pick_for_phase_with_seed(&models, SelectionPhase::Build, None, 1)
         .expect("should pick a model");

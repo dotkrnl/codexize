@@ -1,6 +1,6 @@
 //! Pure model-universe assembly: given already-fetched dashboard entries,
-//! quota maps, and reset maps, produce the canonical `CachedModel` list with
-//! Kimi collapse, sibling synthesis, and provenance stamping applied.
+//! quota maps, and reset maps, produce one model-first row per ipbr canonical
+//! name with all known launch candidates attached.
 //!
 //! This module performs NO backend IO. All cache reads/writes, dashboard
 //! refresh fetches, and quota refresh fetches live in the data layer
@@ -9,182 +9,266 @@
 //! exposed because that orchestrator needs them between IO calls.
 use super::quota;
 use super::ranking::stamp_selection_provenance;
-use super::types::{CachedModel, QuotaError, ScoreSource, VendorKind};
+use super::types::{CachedModel, Candidate, CliKind, FreeModelEntry, QuotaError, SubscriptionKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
-use crate::dashboard::{self, DashboardModel};
+use crate::dashboard::DashboardModel;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+const DIRECT_QUOTA_FLOOR: u8 = 20;
+
 /// Build the canonical model universe from already-resolved snapshots.
 ///
 /// Pure: callers (the data-layer adapter) are responsible for any cache
 /// reads, refresh fetches, and writes that produced these inputs. This
-/// function only merges / collapses / ranks them.
+/// function only merges, groups, and ranks those snapshots.
 pub fn assemble_universe(
     dashboard_entries: Vec<DashboardEntry>,
     quota_payload: QuotaPayload,
     reset_payload: ResetPayload,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_subscriptions: &BTreeSet<SubscriptionKind>,
+    free_models: &[FreeModelEntry],
 ) -> Vec<CachedModel> {
-    // Parse quota payload into typed map.
-    // Keys may come from vendor_kind_to_str ("openai", "google", "moonshotai")
-    // or from str_to_vendor-compatible strings ("codex", "gemini", "kimi").
-    let parsed_quotas: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>> = quota_payload
+    let parsed_quotas: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = quota_payload
         .into_iter()
-        .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
-        .filter(|(vendor, _)| available_vendors.contains(vendor))
+        .filter_map(|(subscription_name, models)| {
+            parse_subscription_str(&subscription_name).map(|subscription| (subscription, models))
+        })
+        .filter(|(subscription, _)| available_subscriptions.contains(subscription))
         .collect();
     let parsed_resets: BTreeMap<
-        VendorKind,
+        SubscriptionKind,
         BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
     > = reset_payload
         .into_iter()
-        .filter_map(|(vendor_name, models)| parse_vendor_str(&vendor_name).map(|v| (v, models)))
-        .filter(|(vendor, _)| available_vendors.contains(vendor))
-        .collect();
-    // Convert dashboard entries to DashboardModels for sibling synthesis
-    let mut dashboard_models: Vec<DashboardModel> = dashboard_entries
-        .into_iter()
-        .filter(|entry| {
-            parse_vendor_str(&entry.vendor)
-                .is_some_and(|vendor| available_vendors.contains(&vendor))
+        .filter_map(|(subscription_name, models)| {
+            parse_subscription_str(&subscription_name).map(|subscription| (subscription, models))
         })
-        .map(|e| DashboardModel {
-            name: e.name,
-            vendor: e.vendor,
-            overall_score: e.overall_score,
-            current_score: e.current_score,
-            standard_error: e.standard_error,
-            axes: e.axes,
-            axis_provenance: e.axis_provenance,
-            ipbr_phase_scores: e.ipbr_phase_scores,
-            score_source: e.score_source,
-            ipbr_row_matched: e.ipbr_row_matched,
-            ipbr_match_key: e.ipbr_match_key,
-            route_underlying_vendor: e.route_underlying_vendor,
-            route_provider: e.route_provider,
-            display_order: e.display_order,
-            fallback_from: e.fallback_from,
-        })
+        .filter(|(subscription, _)| available_subscriptions.contains(subscription))
         .collect();
-    // Synthesize entries for live-quota models missing from the ranking API
-    let existing: HashSet<String> = dashboard_models.iter().map(|m| m.name.clone()).collect();
-    let mut synthesized: HashSet<String> = HashSet::new();
-    for (vendor_kind, models) in &parsed_quotas {
-        let vendor_str = vendor::vendor_kind_to_str(*vendor_kind);
-        for name in models.keys() {
-            if existing.contains(name) || synthesized.contains(name) {
-                continue;
-            }
-            if let Some(model) = dashboard::synthesize_sibling(name, vendor_str, &dashboard_models)
-            {
-                synthesized.insert(name.clone());
-                dashboard_models.push(model);
-            }
+
+    let mut rows: BTreeMap<String, CachedModel> = BTreeMap::new();
+    for entry in dashboard_entries {
+        let Some(row_name) = row_name_for_entry(&entry) else {
+            continue;
+        };
+        let subscription = parse_dashboard_subscription(&entry);
+        let candidate = subscription.and_then(|subscription| {
+            build_candidate(
+                subscription,
+                &entry.name,
+                entry.display_order,
+                &parsed_quotas,
+                &parsed_resets,
+                available_subscriptions,
+            )
+        });
+        let row = rows
+            .entry(row_name.clone())
+            .or_insert_with(|| row_from_entry(row_name.clone(), &entry));
+        if let Some(candidate) = candidate {
+            row.candidates.push(candidate);
         }
     }
-    // Build CachedModel list — omit models with no dashboard entry (guaranteed by
-    // the fact we only iterate dashboard_models)
-    let mut models: Vec<CachedModel> = dashboard_models
-        .into_iter()
-        .filter_map(|m| {
-            let vendor = vendor::vendor_for_dashboard_model(&m)?;
-            let quota_percent = parsed_quotas
-                .get(&vendor)
-                .and_then(|by_model| by_model.get(&m.name))
-                .copied()
-                .flatten()
-                .or_else(|| quota::find_quota_by_heuristic(&m.name, vendor, &parsed_quotas));
-            let quota_resets_at = parsed_resets
-                .get(&vendor)
-                .and_then(|by_model| by_model.get(&m.name))
-                .copied()
-                .flatten()
-                .or_else(|| quota::find_reset_by_heuristic(&m.name, vendor, &parsed_resets));
-            Some(CachedModel {
-                vendor,
-                name: m.name,
-                overall_score: m.overall_score,
-                current_score: m.current_score,
-                standard_error: m.standard_error,
-                axes: m.axes,
-                axis_provenance: m.axis_provenance,
-                ipbr_phase_scores: m.ipbr_phase_scores,
-                score_source: m.score_source,
-                ipbr_row_matched: m.ipbr_row_matched,
-                ipbr_match_key: m.ipbr_match_key,
-                route_underlying_vendor: m.route_underlying_vendor,
-                route_provider: m.route_provider,
-                quota_percent,
-                quota_resets_at,
-                display_order: m.display_order,
-                fallback_from: m.fallback_from,
-            })
+
+    for free in free_models {
+        let Some(row) = rows.get_mut(&free.mapped_into) else {
+            continue;
+        };
+        row.candidates.push(Candidate {
+            subscription: SubscriptionKind::Free,
+            cli: free.cli,
+            launch_name: free.model_name.clone(),
+            quota_percent: Some(100),
+            quota_resets_at: None,
+            display_order: row.display_order,
+        });
+    }
+
+    let mut models: Vec<CachedModel> = rows
+        .into_values()
+        .map(|mut row| {
+            refresh_selected_candidate(&mut row);
+            stamp_selection_provenance(&mut row);
+            row
         })
         .collect();
-    // Collapse all direct-Kimi models into a single representative whose
-    // name is auto-inferred from the picked row — the ipbr-matched sibling
-    // with the largest sum of present phase scores. This used to rename to
-    // a hardcoded `"kimi-latest"`; we now keep the actual name (e.g.
-    // `kimi-k2.6`) so the model_universe surface reflects the real ipbr
-    // canonical and shares an `ipbr_match_key` with any opencode-routed
-    // sibling for the same row, letting `deduplicate_routed_models` choose
-    // the better route by quota.
-    //
-    // ipbr scores are authoritative (unlike cosmetic overall_score /
-    // current_score, which selection MUST NOT consult). Display_order and
-    // name only break ties — including the no-ipbr case, where every
-    // candidate has phase-score sum 0 and falls through to stable
-    // inventory order.
-    let best_kimi_idx = models
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.vendor == VendorKind::Kimi)
-        .min_by(|(_, a), (_, b)| {
-            let ipbr = |m: &CachedModel| m.score_source == ScoreSource::Ipbr;
-            let phase_score_sum = |m: &CachedModel| -> f64 {
-                let scores = m.ipbr_phase_scores;
-                [scores.idea, scores.planning, scores.build, scores.review]
-                    .into_iter()
-                    .flatten()
-                    .sum()
-            };
-            // `min_by` picks the smaller key, so reverse the "prefer ipbr"
-            // and "prefer higher score" comparisons.
-            ipbr(b)
-                .cmp(&ipbr(a))
-                .then_with(|| {
-                    phase_score_sum(b)
-                        .partial_cmp(&phase_score_sum(a))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .then_with(|| a.display_order.cmp(&b.display_order))
-                .then_with(|| a.name.cmp(&b.name))
-        })
-        .map(|(i, _)| i);
-    if let Some(i) = best_kimi_idx {
-        let canonical = models[i].clone();
-        models.retain(|m| m.vendor != VendorKind::Kimi);
-        models.push(canonical);
-    }
-    synthesize_kimi_latest_sibling(
-        &mut models,
-        &parsed_quotas,
-        &parsed_resets,
-        available_vendors,
-    );
-    models = deduplicate_routed_models(models);
-    // Stamp fallback:overall provenance for zero-as-missing and truly-missing
-    // axes, and emit selection.zero_as_missing counters.
-    for model in &mut models {
-        stamp_selection_provenance(model);
-    }
+    models.sort_by(|a, b| {
+        a.display_order
+            .cmp(&b.display_order)
+            .then_with(|| a.name.cmp(&b.name))
+    });
     models
 }
-/// Returns the `(major, minor)` version parsed from a Kimi name shaped like
-/// `kimi-k2.6` -> `(2, 6)` or `kimi-k2` -> `(2, 0)`. Names with non-version
-/// trailers (`kimi-k2-0905-preview`, `kimi-k2-thinking`, `kimi-shared`)
-/// return `None` so they cannot be picked as "the latest kimi".
+
+fn row_name_for_entry(entry: &DashboardEntry) -> Option<String> {
+    if entry.ipbr_row_matched {
+        Some(
+            entry
+                .ipbr_match_key
+                .clone()
+                .unwrap_or_else(|| entry.name.clone()),
+        )
+    } else {
+        parse_dashboard_subscription(entry).map(|_| entry.name.clone())
+    }
+}
+
+fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
+    CachedModel {
+        vendor: SubscriptionKind::Free,
+        name,
+        overall_score: entry.overall_score,
+        current_score: entry.current_score,
+        standard_error: entry.standard_error,
+        axes: entry.axes.clone(),
+        axis_provenance: entry.axis_provenance.clone(),
+        ipbr_phase_scores: entry.ipbr_phase_scores,
+        score_source: entry.score_source,
+        ipbr_row_matched: entry.ipbr_row_matched,
+        ipbr_match_key: entry.ipbr_match_key.clone(),
+        route_underlying_vendor: entry.route_underlying_vendor,
+        route_provider: entry.route_provider.clone(),
+        candidates: Vec::new(),
+        selected_candidate: None,
+        quota_percent: None,
+        quota_resets_at: None,
+        display_order: entry.display_order,
+        fallback_from: entry.fallback_from.clone(),
+    }
+}
+
+fn parse_dashboard_subscription(entry: &DashboardEntry) -> Option<SubscriptionKind> {
+    if entry.vendor == "opencode" {
+        Some(SubscriptionKind::OpencodeGo)
+    } else {
+        parse_subscription_str(&entry.vendor)
+    }
+}
+
+fn build_candidate(
+    subscription: SubscriptionKind,
+    dashboard_name: &str,
+    display_order: usize,
+    parsed_quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
+    parsed_resets: &BTreeMap<
+        SubscriptionKind,
+        BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
+    >,
+    available_subscriptions: &BTreeSet<SubscriptionKind>,
+) -> Option<Candidate> {
+    if !available_subscriptions.contains(&subscription) {
+        return None;
+    }
+    let cli = match subscription {
+        SubscriptionKind::OpencodeGo => CliKind::Opencode,
+        SubscriptionKind::Free => return None,
+        direct => direct.direct_cli()?,
+    };
+    let launch_name = if subscription == SubscriptionKind::Kimi
+        && parsed_quotas
+            .get(&SubscriptionKind::Kimi)
+            .is_some_and(|models| models.contains_key("kimi-latest"))
+    {
+        "kimi-latest"
+    } else {
+        dashboard_name
+    };
+    let quota_percent = parsed_quotas
+        .get(&subscription)
+        .and_then(|by_model| by_model.get(launch_name))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_quota_by_heuristic(launch_name, subscription, parsed_quotas))
+        .or_else(|| {
+            (launch_name != dashboard_name)
+                .then(|| {
+                    quota::find_quota_by_heuristic(dashboard_name, subscription, parsed_quotas)
+                })
+                .flatten()
+        });
+    let quota_resets_at = parsed_resets
+        .get(&subscription)
+        .and_then(|by_model| by_model.get(launch_name))
+        .copied()
+        .flatten()
+        .or_else(|| quota::find_reset_by_heuristic(launch_name, subscription, parsed_resets));
+    Some(Candidate {
+        subscription,
+        cli,
+        launch_name: launch_name.to_string(),
+        quota_percent,
+        quota_resets_at,
+        display_order,
+    })
+}
+
+fn refresh_selected_candidate(row: &mut CachedModel) {
+    row.selected_candidate = select_candidate_index(&row.candidates);
+    let selected = row.selected_candidate().cloned();
+    if let Some(candidate) = selected {
+        row.vendor = candidate.subscription;
+        row.quota_percent = candidate.quota_percent;
+        row.quota_resets_at = candidate.quota_resets_at;
+        row.route_provider = (candidate.subscription == SubscriptionKind::OpencodeGo)
+            .then(|| "opencode-go".to_string());
+        row.route_underlying_vendor = (candidate.subscription == SubscriptionKind::OpencodeGo)
+            .then(|| vendor::infer_underlying_vendor_from_name(&row.name));
+    }
+}
+
+pub(crate) fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> {
+    let eligible: Vec<usize> = if candidates.iter().any(|candidate| {
+        candidate.subscription != SubscriptionKind::OpencodeGo
+            && matches!(candidate.quota_percent, Some(quota) if quota >= DIRECT_QUOTA_FLOOR)
+    }) {
+        candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                (candidate.subscription != SubscriptionKind::OpencodeGo).then_some(index)
+            })
+            .collect()
+    } else {
+        (0..candidates.len()).collect()
+    };
+
+    eligible
+        .into_iter()
+        .min_by(|a, b| compare_candidate(&candidates[*a], &candidates[*b]))
+}
+
+fn compare_candidate(a: &Candidate, b: &Candidate) -> Ordering {
+    compare_quota_for_candidate(a.quota_percent, b.quota_percent)
+        .then_with(|| {
+            subscription_tiebreaker(a.subscription).cmp(&subscription_tiebreaker(b.subscription))
+        })
+        .then_with(|| a.display_order.cmp(&b.display_order))
+        .then_with(|| a.launch_name.cmp(&b.launch_name))
+}
+
+fn subscription_tiebreaker(subscription: SubscriptionKind) -> u8 {
+    match subscription {
+        SubscriptionKind::Free => 0,
+        SubscriptionKind::OpencodeGo => 2,
+        SubscriptionKind::Claude
+        | SubscriptionKind::Codex
+        | SubscriptionKind::Gemini
+        | SubscriptionKind::Kimi => 1,
+    }
+}
+
+fn compare_quota_for_candidate(a: Option<u8>, b: Option<u8>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => b.cmp(&a),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+#[cfg(test)]
 fn parse_kimi_semver(name: &str) -> Option<(u64, u64)> {
     let lower = name.to_ascii_lowercase();
     let after_prefix = lower.strip_prefix("kimi-k")?;
@@ -195,195 +279,69 @@ fn parse_kimi_semver(name: &str) -> Option<(u64, u64)> {
     if !minor_str.is_empty() && !minor_str.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    let major: u64 = major_str.parse().ok()?;
-    let minor: u64 = if minor_str.is_empty() {
-        0
-    } else {
-        minor_str.parse().ok()?
-    };
-    Some((major, minor))
-}
-
-/// Push a `vendor = Kimi`, `name = "kimi-latest"` sibling of the highest-
-/// semver kimi row already in the universe (whether it surfaced as a direct
-/// Kimi entry or via opencode). The synth carries the source row's ipbr
-/// score data and `ipbr_match_key`, so `deduplicate_routed_models` pairs it
-/// against the opencode-routed sibling and arbitrates by quota — kimi-code
-/// wins above the 20% floor; below it, the higher-quota route wins.
-///
-/// Skipped when Kimi is not in `available_vendors`, when no kimi row has a
-/// clean `<major>.<minor>` semver (e.g. only `kimi-k2-thinking`), or when
-/// the picked source has no `ipbr_match_key` to anchor dedup.
-fn synthesize_kimi_latest_sibling(
-    models: &mut Vec<CachedModel>,
-    parsed_quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
-    parsed_resets: &BTreeMap<VendorKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
-    available_vendors: &BTreeSet<VendorKind>,
-) {
-    if !available_vendors.contains(&VendorKind::Kimi) {
-        return;
-    }
-    let source_idx = models
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| vendor::route_identity_for_model(m) == VendorKind::Kimi)
-        .filter_map(|(i, m)| parse_kimi_semver(&m.name).map(|sv| (i, sv)))
-        .max_by(|(_, a), (_, b)| a.cmp(b))
-        .map(|(i, _)| i);
-    let Some(idx) = source_idx else {
-        return;
-    };
-    if models[idx].ipbr_match_key.is_none() {
-        return;
-    }
-    let source = models[idx].clone();
-    let quota_percent = parsed_quotas
-        .get(&VendorKind::Kimi)
-        .and_then(|by_model| by_model.get("kimi-latest"))
-        .copied()
-        .flatten()
-        .or_else(|| quota::find_quota_by_heuristic("kimi-latest", VendorKind::Kimi, parsed_quotas));
-    let quota_resets_at = parsed_resets
-        .get(&VendorKind::Kimi)
-        .and_then(|by_model| by_model.get("kimi-latest"))
-        .copied()
-        .flatten()
-        .or_else(|| quota::find_reset_by_heuristic("kimi-latest", VendorKind::Kimi, parsed_resets));
-    models.push(CachedModel {
-        vendor: VendorKind::Kimi,
-        name: "kimi-latest".to_string(),
-        route_underlying_vendor: None,
-        route_provider: None,
-        quota_percent,
-        quota_resets_at,
-        fallback_from: None,
-        ..source
-    });
-}
-
-fn deduplicate_routed_models(models: Vec<CachedModel>) -> Vec<CachedModel> {
-    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (index, model) in models.iter().enumerate() {
-        if let Some(key) = &model.ipbr_match_key {
-            groups.entry(key.clone()).or_default().push(index);
-        }
-    }
-    let mut drop_indexes = HashSet::new();
-    for indexes in groups.values().filter(|indexes| indexes.len() > 1) {
-        let best_direct = indexes
-            .iter()
-            .copied()
-            .filter(|index| models[*index].vendor != VendorKind::Opencode)
-            .min_by(|a, b| compare_route_candidate(&models[*a], &models[*b]));
-        let best_opencode = indexes
-            .iter()
-            .copied()
-            .filter(|index| models[*index].vendor == VendorKind::Opencode)
-            .min_by(|a, b| compare_route_candidate(&models[*a], &models[*b]));
-        let (Some(direct_index), Some(opencode_index)) = (best_direct, best_opencode) else {
-            continue;
-        };
-        // Prefer the official route whenever it has real headroom; only
-        // fall back to opencode when direct is scarce or unknown AND
-        // opencode genuinely has more headroom. Ties keep direct.
-        let survivor = if opencode_wins_over_direct(
-            models[opencode_index].quota_percent,
-            models[direct_index].quota_percent,
-        ) {
-            opencode_index
+    Some((
+        major_str.parse().ok()?,
+        if minor_str.is_empty() {
+            0
         } else {
-            direct_index
-        };
-        for index in indexes {
-            if *index != survivor {
-                drop_indexes.insert(*index);
-            }
-        }
-    }
-    models
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, model)| (!drop_indexes.contains(&index)).then_some(model))
-        .collect()
-}
-/// Floor below which the official-vendor route loses its automatic
-/// preference. Operator-stated rule: at or above this percent of remaining
-/// quota, never deflect to opencode for the same model.
-const DIRECT_QUOTA_FLOOR: u8 = 20;
-
-fn opencode_wins_over_direct(opencode: Option<u8>, direct: Option<u8>) -> bool {
-    if matches!(direct, Some(q) if q >= DIRECT_QUOTA_FLOOR) {
-        return false;
-    }
-    // Direct is below the floor or unknown: pick the higher quota; ties
-    // and both-unknown keep direct.
-    match (opencode, direct) {
-        (Some(o), Some(d)) => o > d,
-        (Some(_), None) => true,
-        (None, _) => false,
-    }
+            minor_str.parse().ok()?
+        },
+    ))
 }
 
-fn compare_route_candidate(a: &CachedModel, b: &CachedModel) -> Ordering {
-    compare_quota_for_candidate(a.quota_percent, b.quota_percent)
-        .then_with(|| a.display_order.cmp(&b.display_order))
-        .then_with(|| a.name.cmp(&b.name))
-}
-fn compare_quota_for_candidate(a: Option<u8>, b: Option<u8>) -> Ordering {
-    match (a, b) {
-        (Some(a), Some(b)) => b.cmp(&a),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-/// Merge a freshly-fetched quota map (keyed by `VendorKind`) into the cached
-/// payload (keyed by vendor string). Successfully-refreshed vendors overwrite
-/// cached entries; cached entries for vendors that did not refresh
+/// Merge a freshly-fetched quota map (keyed by `SubscriptionKind`) into the cached
+/// payload (keyed by subscription string). Successfully-refreshed subscriptions overwrite
+/// cached entries; cached entries for subscriptions that did not refresh
 /// successfully are carried forward (stale-on-error fallback).
 pub fn merge_quota_payload(
     cached: &QuotaPayload,
-    fresh: BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+    fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
 ) -> QuotaPayload {
-    let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
+    let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged: QuotaPayload = BTreeMap::new();
-    for (vendor_str, models) in cached {
-        let preserve = match parse_vendor_str(vendor_str) {
+    for (subscription_str, models) in cached {
+        let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
             None => true,
         };
         if preserve {
-            merged.insert(vendor_str.clone(), models.clone());
+            merged.insert(subscription_str.clone(), models.clone());
         }
     }
-    for (vendor, models) in fresh {
-        merged.insert(vendor::vendor_kind_to_str(vendor).to_string(), models);
+    for (subscription, models) in fresh {
+        merged.insert(
+            vendor::subscription_kind_to_str(subscription).to_string(),
+            models,
+        );
     }
     merged
 }
 pub fn merge_reset_payload(
     cached: &ResetPayload,
-    fresh: BTreeMap<VendorKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
+    fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>>,
 ) -> ResetPayload {
-    let succeeded: HashSet<VendorKind> = fresh.keys().copied().collect();
+    let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged: ResetPayload = BTreeMap::new();
-    for (vendor_str, models) in cached {
-        let preserve = match parse_vendor_str(vendor_str) {
+    for (subscription_str, models) in cached {
+        let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
             None => true,
         };
         if preserve {
-            merged.insert(vendor_str.clone(), models.clone());
+            merged.insert(subscription_str.clone(), models.clone());
         }
     }
-    for (vendor, models) in fresh {
-        merged.insert(vendor::vendor_kind_to_str(vendor).to_string(), models);
+    for (subscription, models) in fresh {
+        merged.insert(
+            vendor::subscription_kind_to_str(subscription).to_string(),
+            models,
+        );
     }
     merged
 }
 pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool {
-    quotas.iter().any(|(vendor, models)| {
-        let Some(reset_models) = resets.get(vendor) else {
+    quotas.iter().any(|(subscription, models)| {
+        let Some(reset_models) = resets.get(subscription) else {
             return true;
         };
         models.keys().any(|name| !reset_models.contains_key(name))
@@ -418,20 +376,22 @@ pub fn dashboard_warnings_to_quota_errors(warnings: Vec<String>) -> Vec<QuotaErr
             // Dashboard refresh diagnostics are currently displayed
             // through the shared QuotaError list; Claude is the existing
             // sentinel for dashboard-sourced notices.
-            vendor: VendorKind::Claude,
+            vendor: SubscriptionKind::Claude,
             message: format!("dashboard warning: {message}"),
         })
         .collect()
 }
-pub fn parse_vendor_str(s: &str) -> Option<VendorKind> {
+pub fn parse_subscription_str(s: &str) -> Option<SubscriptionKind> {
     match s {
-        "anthropic" | "claude" => Some(VendorKind::Claude),
-        "codex" | "openai" => Some(VendorKind::Codex),
-        "gemini" | "google" => Some(VendorKind::Gemini),
-        "kimi" | "moonshotai" => Some(VendorKind::Kimi),
-        "opencode" => Some(VendorKind::Opencode),
+        "anthropic" | "claude" => Some(SubscriptionKind::Claude),
+        "codex" | "openai" => Some(SubscriptionKind::Codex),
+        "gemini" | "google" => Some(SubscriptionKind::Gemini),
+        "kimi" | "moonshotai" => Some(SubscriptionKind::Kimi),
+        "opencode" | "opencode-go" => Some(SubscriptionKind::OpencodeGo),
+        "free" => Some(SubscriptionKind::Free),
         _ => None,
     }
 }
+pub use parse_subscription_str as parse_vendor_str;
 #[cfg(test)]
 mod tests_mod;

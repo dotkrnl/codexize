@@ -16,7 +16,7 @@ use super::state::{
 use crate::app::models::{vendor_color, vendor_prefix};
 use crate::model_names;
 use crate::selection::{
-    CachedModel, QuotaError, VendorKind,
+    CachedModel, QuotaError, SubscriptionKind,
     config::SelectionPhase,
     display::{build_rank_order, phase_rank, visible_models},
     ranking::candidate_pool_weights,
@@ -379,13 +379,14 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 // Full table mode
 // ---------------------------------------------------------------------------
 const STATUS_DOT: &str = "●";
-fn vendor_label(vendor: VendorKind) -> &'static str {
+fn vendor_label(vendor: SubscriptionKind) -> &'static str {
     match vendor {
-        VendorKind::Claude => "claude",
-        VendorKind::Codex => "codex",
-        VendorKind::Gemini => "gemini",
-        VendorKind::Kimi => "kimi",
-        VendorKind::Opencode => "opencode",
+        SubscriptionKind::Claude => "claude",
+        SubscriptionKind::Codex => "codex",
+        SubscriptionKind::Gemini => "gemini",
+        SubscriptionKind::Kimi => "kimi",
+        SubscriptionKind::OpencodeGo => "opencode",
+        SubscriptionKind::Free => "free",
     }
 }
 /// Width of the vendor-tag column (padded).
@@ -419,11 +420,11 @@ fn render_compact_quota(
         return Vec::new();
     }
     let order = [
-        VendorKind::Kimi,
-        VendorKind::Claude,
-        VendorKind::Codex,
-        VendorKind::Gemini,
-        VendorKind::Opencode,
+        SubscriptionKind::Kimi,
+        SubscriptionKind::Claude,
+        SubscriptionKind::Codex,
+        SubscriptionKind::Gemini,
+        SubscriptionKind::OpencodeGo,
     ];
     // Pick each vendor's representative by `build_rank_order` so the
     // compact strip mirrors the full table's ranking. Cosmetic

@@ -76,11 +76,11 @@ fn parse_verbose_extracts_each_block() {
     assert_eq!(models[0].id, "big-pickle");
     assert_eq!(models[0].provider_id, "opencode");
     assert_eq!(models[0].display_name.as_deref(), Some("Big Pickle"));
-    assert_eq!(models[0].underlying_vendor, Some(VendorKind::Claude));
+    assert_eq!(models[0].underlying_vendor, Some(SubscriptionKind::Claude));
     assert_eq!(models[1].id, "gpt-5-nano");
-    assert_eq!(models[1].underlying_vendor, Some(VendorKind::Codex));
+    assert_eq!(models[1].underlying_vendor, Some(SubscriptionKind::Codex));
     assert_eq!(models[2].id, "kimi-something");
-    assert_eq!(models[2].underlying_vendor, Some(VendorKind::Kimi));
+    assert_eq!(models[2].underlying_vendor, Some(SubscriptionKind::Kimi));
 }
 
 #[test]

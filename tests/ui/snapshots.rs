@@ -1,7 +1,7 @@
 use codexize::{
     adapters::{EffortLevel, run_label_with_model},
     app,
-    selection::VendorKind,
+    selection::SubscriptionKind,
 };
 use std::{
     fs,
@@ -54,7 +54,7 @@ fn acp_run_labels_match_snapshot() {
             run_label_with_model(
                 "[Brainstorm]",
                 "claude-opus-4-7",
-                VendorKind::Claude,
+                SubscriptionKind::Claude,
                 EffortLevel::Normal,
             )
         ),
@@ -63,7 +63,7 @@ fn acp_run_labels_match_snapshot() {
             run_label_with_model(
                 "[Round 1 Coder]",
                 "gpt-5.5",
-                VendorKind::Codex,
+                SubscriptionKind::Codex,
                 EffortLevel::Tough,
             )
         ),
@@ -72,7 +72,7 @@ fn acp_run_labels_match_snapshot() {
             run_label_with_model(
                 "[Planning]",
                 "claude-sonnet-4.6",
-                VendorKind::Claude,
+                SubscriptionKind::Claude,
                 EffortLevel::Low,
             )
         ),

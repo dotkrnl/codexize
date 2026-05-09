@@ -8,4 +8,7 @@ pub mod selection;
 pub mod types;
 pub mod vendor;
 pub use config::*;
-pub use types::{CachedModel, IpbrPhaseScores, QuotaError, ScoreSource, VendorKind};
+pub use types::{
+    CachedModel, Candidate, CliKind, FreeModelEntry, IpbrPhaseScores, ModelRow, QuotaError,
+    ScoreSource, SubscriptionKind,
+};

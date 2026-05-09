@@ -374,4 +374,3 @@ fn enter_final_validation_rejects_illegal_source_phase() {
         assert_eq!(state.current_phase, Phase::IdeaInput);
     });
 }
-

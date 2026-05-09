@@ -2,17 +2,17 @@
 //! IO-performing loader. These helpers take an already-resolved quota or
 //! reset map and pick the best fallback for a given model name; they
 //! perform no backend IO and so are safe to call from the logic layer.
-use super::types::VendorKind;
+use super::types::SubscriptionKind;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 pub fn find_quota_by_heuristic(
     model_name: &str,
-    vendor: VendorKind,
-    quotas: &BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>,
+    vendor: SubscriptionKind,
+    quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
 ) -> Option<u8> {
     let vendor_quotas = quotas.get(&vendor)?;
     match vendor {
-        VendorKind::Codex => {
+        SubscriptionKind::Codex => {
             if model_name.contains("spark") || model_name.contains("mini") {
                 vendor_quotas
                     .iter()
@@ -25,8 +25,8 @@ pub fn find_quota_by_heuristic(
                     .and_then(|(_, quota)| *quota)
             }
         }
-        VendorKind::Claude => vendor_quotas.values().find_map(|q| *q),
-        VendorKind::Gemini => {
+        SubscriptionKind::Claude => vendor_quotas.values().find_map(|q| *q),
+        SubscriptionKind::Gemini => {
             if model_name.contains("flash") || model_name.contains("nano") {
                 vendor_quotas
                     .iter()
@@ -40,17 +40,20 @@ pub fn find_quota_by_heuristic(
                     .or_else(|| vendor_quotas.values().find_map(|q| *q))
             }
         }
-        VendorKind::Kimi | VendorKind::Opencode => vendor_quotas.values().find_map(|q| *q),
+        SubscriptionKind::Kimi | SubscriptionKind::OpencodeGo => {
+            vendor_quotas.values().find_map(|q| *q)
+        }
+        SubscriptionKind::Free => Some(100),
     }
 }
 pub fn find_reset_by_heuristic(
     model_name: &str,
-    vendor: VendorKind,
-    resets: &BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>,
+    vendor: SubscriptionKind,
+    resets: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<DateTime<Utc>>>>,
 ) -> Option<DateTime<Utc>> {
     let vendor_resets = resets.get(&vendor)?;
     match vendor {
-        VendorKind::Claude => vendor_resets
+        SubscriptionKind::Claude => vendor_resets
             .get(model_name)
             .copied()
             .flatten()

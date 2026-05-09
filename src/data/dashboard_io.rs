@@ -95,7 +95,7 @@ pub struct DashboardModel {
     /// key. Inventory-/CLI-only visible models keep this `false`.
     pub ipbr_row_matched: bool,
     pub ipbr_match_key: Option<String>,
-    pub route_underlying_vendor: Option<crate::selection::VendorKind>,
+    pub route_underlying_vendor: Option<crate::selection::SubscriptionKind>,
     /// Opencode sub-provider this row was advertised under (`opencode` or
     /// `opencode-go`). Carried so the ACP launch boundary can qualify the
     /// bare `name` with the right tier prefix. `None` for direct vendors.

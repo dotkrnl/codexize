@@ -1,5 +1,5 @@
 use crate::data::cache_lock;
-use crate::selection::{IpbrPhaseScores, ScoreSource, VendorKind};
+use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -87,7 +87,7 @@ pub struct DashboardEntry {
     #[serde(default)]
     pub ipbr_match_key: Option<String>,
     #[serde(default)]
-    pub route_underlying_vendor: Option<VendorKind>,
+    pub route_underlying_vendor: Option<SubscriptionKind>,
     /// Opencode sub-provider (`opencode` or `opencode-go`). Persisted so a
     /// cached entry survives a restart and the launch boundary can still
     /// pick the right tier qualifier without re-querying the CLI.

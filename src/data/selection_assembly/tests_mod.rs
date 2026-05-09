@@ -116,7 +116,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
         ("claude", "claude-opus-4-1", Some(80)),
     ]);
     let resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
-    let available = BTreeSet::from([VendorKind::Claude]);
+    let available = BTreeSet::from([SubscriptionKind::Claude]);
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -163,7 +163,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
 
     assert_eq!(models.len(), 2);
     assert_eq!(errors.len(), 1, "partial reset gaps should trigger refresh");
-    assert_eq!(errors[0].vendor, VendorKind::Claude);
+    assert_eq!(errors[0].vendor, SubscriptionKind::Claude);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
 
     let models = outcome.expect("assemble_from_loaded should not panic");
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, VendorKind::Codex);
+    assert_eq!(models[0].vendor, SubscriptionKind::Codex);
     assert_eq!(models[0].name, "gpt-5.5");
 }
 

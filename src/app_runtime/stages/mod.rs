@@ -29,7 +29,7 @@ use crate::{
     adapters::EffortLevel,
     app::App,
     selection::{
-        CachedModel, VendorKind,
+        CachedModel, SubscriptionKind,
         config::SelectionPhase,
         selection::{pick_for_phase_with_effort, select_for_review_with_effort},
     },
@@ -93,7 +93,7 @@ impl App {
         phase: SelectionPhase,
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, VendorKind, String, Option<String>)> {
+    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
         if let Some(model) = override_model {
             return Some((
                 model.name.clone(),
@@ -115,11 +115,11 @@ impl App {
     pub(crate) fn choose_review_model(
         &mut self,
         override_model: Option<&CachedModel>,
-        used_vendors: &[VendorKind],
-        used_models: &[(VendorKind, String)],
+        used_vendors: &[SubscriptionKind],
+        used_models: &[(SubscriptionKind, String)],
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, VendorKind, String, Option<String>)> {
+    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
         if let Some(model) = override_model {
             return Some((
                 model.name.clone(),
@@ -267,7 +267,7 @@ impl App {
     }
     fn session_selected_model_for_validator(
         &mut self,
-    ) -> Option<(String, VendorKind, String, Option<String>)> {
+    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
         let name = self.state.selected_model.as_ref()?.clone();
         let model = self.models.iter().find(|m| m.name == name)?;
         Some((
@@ -291,7 +291,7 @@ impl App {
         &self,
         stage: &str,
         round: u32,
-    ) -> Option<(String, VendorKind, String, Option<String>)> {
+    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
         let last = self
             .state
             .agent_runs

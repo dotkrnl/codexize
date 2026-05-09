@@ -1,6 +1,6 @@
 use super::models::vendor_tag;
 use super::{App, FailedModelSet, RetryKey};
-use crate::selection::{self, VendorKind, selection::select_excluding};
+use crate::selection::{self, SubscriptionKind, selection::select_excluding};
 use crate::state::{MessageKind, RunStatus, SessionState};
 use std::collections::{HashMap, HashSet};
 impl App {
@@ -117,7 +117,7 @@ impl App {
             let summary = self.retry_exhausted_summary(failed_run);
             return self.handle_retry_exhausted(failed_run, summary, true);
         }
-        let excluded: Vec<(VendorKind, String)> = self
+        let excluded: Vec<(SubscriptionKind, String)> = self
             .failed_models
             .get(&key)
             .cloned()

@@ -2,7 +2,7 @@ use crate::dashboard::DashboardModel;
 #[cfg(test)]
 use crate::dashboard::IngestEvent;
 use crate::model_names;
-use crate::selection::{IpbrPhaseScores, ScoreSource, VendorKind};
+use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
 #[cfg(test)]
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
-    pub(crate) route_underlying_vendor: Option<VendorKind>,
+    pub(crate) route_underlying_vendor: Option<SubscriptionKind>,
     /// Opencode sub-provider this row was advertised under (`opencode` or
     /// `opencode-go`). The bare `name` stays ipbr-compatible; route_provider
     /// is what the launch boundary qualifies the model with so the spawn
@@ -291,7 +291,7 @@ fn dashboard_model_from_score(
     inventory_vendor: &str,
     sc: &ScoreEntry,
     fallback_from: Option<String>,
-    route_underlying_vendor: Option<VendorKind>,
+    route_underlying_vendor: Option<SubscriptionKind>,
     route_provider: Option<String>,
 ) -> DashboardModel {
     let is_sibling_fallback = fallback_from.is_some();
@@ -332,13 +332,13 @@ fn dashboard_model_from_score(
         fallback_from,
     }
 }
-fn vendor_kind_from_score_vendor(vendor: &str) -> Option<VendorKind> {
+fn vendor_kind_from_score_vendor(vendor: &str) -> Option<SubscriptionKind> {
     match vendor {
-        "anthropic" | "claude" => Some(VendorKind::Claude),
-        "codex" | "openai" => Some(VendorKind::Codex),
-        "gemini" | "google" => Some(VendorKind::Gemini),
-        "kimi" | "moonshotai" => Some(VendorKind::Kimi),
-        "opencode" => Some(VendorKind::Opencode),
+        "anthropic" | "claude" => Some(SubscriptionKind::Claude),
+        "codex" | "openai" => Some(SubscriptionKind::Codex),
+        "gemini" | "google" => Some(SubscriptionKind::Gemini),
+        "kimi" | "moonshotai" => Some(SubscriptionKind::Kimi),
+        "opencode" => Some(SubscriptionKind::OpencodeGo),
         _ => None,
     }
 }

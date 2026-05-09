@@ -7,32 +7,32 @@ use crate::cache::{self, LoadedCache};
 use crate::dashboard::{self, LoadOutcome};
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
-use crate::logic::selection::types::{CachedModel, QuotaError, VendorKind};
+use crate::logic::selection::types::{CachedModel, QuotaError, SubscriptionKind};
 use std::collections::BTreeSet;
 use std::path::Path;
 pub async fn assemble_models_async(
     cache_dir: &Path,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_vendors: &BTreeSet<SubscriptionKind>,
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load(cache_dir);
     assemble_with_refresh(cache_dir, loaded, available_vendors).await
 }
 pub fn assemble_from_cached_only(
     cache_dir: &Path,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_vendors: &BTreeSet<SubscriptionKind>,
 ) -> Vec<CachedModel> {
     let loaded = cache::load(cache_dir);
     assemble_from_loaded_with_available(&loaded, available_vendors)
 }
 pub fn assemble_from_loaded(
     loaded: &LoadedCache,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_vendors: &BTreeSet<SubscriptionKind>,
 ) -> Vec<CachedModel> {
     assemble_from_loaded_with_available(loaded, available_vendors)
 }
 fn assemble_from_loaded_with_available(
     loaded: &LoadedCache,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_vendors: &BTreeSet<SubscriptionKind>,
 ) -> Vec<CachedModel> {
     if loaded.dashboard.is_none() {
         return Vec::new();
@@ -52,12 +52,12 @@ fn assemble_from_loaded_with_available(
         .as_ref()
         .map(|section| section.data.clone())
         .unwrap_or_default();
-    pure::assemble_universe(dashboard, quotas, resets, available_vendors)
+    pure::assemble_universe(dashboard, quotas, resets, available_vendors, &[])
 }
 async fn assemble_with_refresh(
     cache_dir: &Path,
     loaded: LoadedCache,
-    available_vendors: &BTreeSet<VendorKind>,
+    available_vendors: &BTreeSet<SubscriptionKind>,
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let (cached_dashboard, dashboard_expired) = match loaded.dashboard {
         Some(section) => (section.data, section.expired),
@@ -87,7 +87,7 @@ async fn assemble_with_refresh(
             }
             Err(e) => {
                 quota_errors.push(QuotaError {
-                    vendor: VendorKind::Claude,
+                    vendor: SubscriptionKind::Claude,
                     message: format!("dashboard fetch failed: {e}"),
                 });
                 cached_dashboard
@@ -123,6 +123,7 @@ async fn assemble_with_refresh(
         quota_payload,
         reset_payload,
         available_vendors,
+        &[],
     );
     (models, quota_errors)
 }

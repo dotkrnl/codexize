@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
-        vendor: VendorKind::Codex,
+        vendor: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
         overall_score: 88.0,
         current_score: 86.0,
@@ -21,6 +21,8 @@ fn sample_cached_model() -> CachedModel {
         ipbr_match_key: None,
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 1,
@@ -155,10 +157,10 @@ fn candidate_pool_weights_all_unknown_quota_has_uniform_quota_factor() {
 #[test]
 fn phase_score_for_legacy_callers_returns_ipbr_phase_score() {
     let mut high_variance_old_flash = ipbr_model("gemini-2.5-flash", 90.0, Some(80));
-    high_variance_old_flash.vendor = VendorKind::Gemini;
+    high_variance_old_flash.vendor = SubscriptionKind::Gemini;
     high_variance_old_flash.standard_error = 99.0;
     let low_variance_pro = CachedModel {
-        vendor: VendorKind::Gemini,
+        vendor: SubscriptionKind::Gemini,
         name: "gemini-2.5-pro".to_string(),
         standard_error: 0.0,
         ..ipbr_model("gemini-2.5-pro", 80.0, Some(80))

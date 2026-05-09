@@ -1,7 +1,7 @@
 use super::{App, state::ModelRefreshState, status_line::Severity};
 use crate::{
     cache,
-    selection::{CachedModel, QuotaError, VendorKind},
+    selection::{CachedModel, QuotaError, SubscriptionKind},
 };
 use ratatui::style::Color;
 use std::collections::BTreeSet;
@@ -12,7 +12,7 @@ const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn spawn_refresh(
     cache_dir: PathBuf,
-    available_vendors: BTreeSet<VendorKind>,
+    available_vendors: BTreeSet<SubscriptionKind>,
 ) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -37,31 +37,34 @@ pub(crate) fn spawn_refresh(
     }
     rx
 }
-pub(crate) fn vendor_tag(vendor: VendorKind) -> &'static str {
+pub(crate) fn vendor_tag(vendor: SubscriptionKind) -> &'static str {
     match vendor {
-        VendorKind::Claude => "claude",
-        VendorKind::Codex => "codex",
-        VendorKind::Gemini => "gemini",
-        VendorKind::Kimi => "kimi",
-        VendorKind::Opencode => "opencode",
+        SubscriptionKind::Claude => "claude",
+        SubscriptionKind::Codex => "codex",
+        SubscriptionKind::Gemini => "gemini",
+        SubscriptionKind::Kimi => "kimi",
+        SubscriptionKind::OpencodeGo => "opencode",
+        SubscriptionKind::Free => "free",
     }
 }
-pub(crate) fn vendor_color(vendor: VendorKind) -> Color {
+pub(crate) fn vendor_color(vendor: SubscriptionKind) -> Color {
     match vendor {
-        VendorKind::Claude => Color::Magenta,
-        VendorKind::Codex => Color::Green,
-        VendorKind::Gemini => Color::Blue,
-        VendorKind::Kimi => Color::Yellow,
-        VendorKind::Opencode => Color::Cyan,
+        SubscriptionKind::Claude => Color::Magenta,
+        SubscriptionKind::Codex => Color::Green,
+        SubscriptionKind::Gemini => Color::Blue,
+        SubscriptionKind::Kimi => Color::Yellow,
+        SubscriptionKind::OpencodeGo => Color::Cyan,
+        SubscriptionKind::Free => Color::LightGreen,
     }
 }
-pub(crate) fn vendor_prefix(vendor: VendorKind) -> &'static str {
+pub(crate) fn vendor_prefix(vendor: SubscriptionKind) -> &'static str {
     match vendor {
-        VendorKind::Claude => "claude-",
-        VendorKind::Codex => "gpt-",
-        VendorKind::Gemini => "gemini-",
-        VendorKind::Kimi => "kimi-",
-        VendorKind::Opencode => "",
+        SubscriptionKind::Claude => "claude-",
+        SubscriptionKind::Codex => "gpt-",
+        SubscriptionKind::Gemini => "gemini-",
+        SubscriptionKind::Kimi => "kimi-",
+        SubscriptionKind::OpencodeGo => "",
+        SubscriptionKind::Free => "",
     }
 }
 fn quota_error_summary(errors: &[QuotaError]) -> String {
@@ -73,7 +76,7 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
     }
 }
 impl App {
-    fn available_vendors(&self) -> BTreeSet<VendorKind> {
+    fn available_vendors(&self) -> BTreeSet<SubscriptionKind> {
         crate::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),

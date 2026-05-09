@@ -1,6 +1,6 @@
 use super::config::SelectionPhase;
 use super::ranking::candidate_pool_weights;
-use super::types::{CachedModel, VendorKind};
+use super::types::{CachedModel, SubscriptionKind};
 use super::vendor::{is_cheap_eligible, is_tough_eligible};
 use crate::adapters::EffortLevel;
 use std::cmp::Ordering;
@@ -81,14 +81,14 @@ fn pool_pick<'a>(
 pub fn pick_for_phase(
     models: &[CachedModel],
     phase: SelectionPhase,
-    vendor_filter: Option<VendorKind>,
+    vendor_filter: Option<SubscriptionKind>,
 ) -> Option<&CachedModel> {
     pick_for_phase_with_seed(models, phase, vendor_filter, test_sample_seed())
 }
 pub fn pick_for_phase_with_seed<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
-    vendor_filter: Option<VendorKind>,
+    vendor_filter: Option<SubscriptionKind>,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let candidates: Vec<&'a CachedModel> = models
@@ -111,7 +111,7 @@ pub fn pick_for_phase_with_seed<'a>(
 pub fn pick_for_phase_with_effort<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
-    vendor_filter: Option<VendorKind>,
+    vendor_filter: Option<SubscriptionKind>,
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
@@ -127,7 +127,7 @@ pub fn pick_for_phase_with_effort<'a>(
 pub fn pick_for_phase_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
-    vendor_filter: Option<VendorKind>,
+    vendor_filter: Option<SubscriptionKind>,
     effort: EffortLevel,
     cheap: bool,
     sample_seed: u64,
@@ -179,15 +179,15 @@ pub fn pick_for_phase_with_effort_and_seed<'a>(
 #[cfg(test)]
 pub fn select_for_review<'a>(
     models: &'a [CachedModel],
-    used_vendors: &[VendorKind],
-    used_models: &[(VendorKind, String)],
+    used_vendors: &[SubscriptionKind],
+    used_models: &[(SubscriptionKind, String)],
 ) -> Option<&'a CachedModel> {
     select_for_review_with_seed(models, used_vendors, used_models, test_sample_seed())
 }
 pub fn select_for_review_with_seed<'a>(
     models: &'a [CachedModel],
-    used_vendors: &[VendorKind],
-    used_models: &[(VendorKind, String)],
+    used_vendors: &[SubscriptionKind],
+    used_models: &[(SubscriptionKind, String)],
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     let tier_1: Vec<&'a CachedModel> = models
@@ -221,8 +221,8 @@ pub fn select_for_review_with_seed<'a>(
 #[cfg(test)]
 pub fn select_for_review_with_effort<'a>(
     models: &'a [CachedModel],
-    used_vendors: &[VendorKind],
-    used_models: &[(VendorKind, String)],
+    used_vendors: &[SubscriptionKind],
+    used_models: &[(SubscriptionKind, String)],
     effort: EffortLevel,
     cheap: bool,
 ) -> Option<SelectionOutcome<'a>> {
@@ -237,8 +237,8 @@ pub fn select_for_review_with_effort<'a>(
 }
 pub fn select_for_review_with_effort_and_seed<'a>(
     models: &'a [CachedModel],
-    used_vendors: &[VendorKind],
-    used_models: &[(VendorKind, String)],
+    used_vendors: &[SubscriptionKind],
+    used_models: &[(SubscriptionKind, String)],
     effort: EffortLevel,
     cheap: bool,
     sample_seed: u64,
@@ -285,8 +285,8 @@ pub fn select_for_review_with_effort_and_seed<'a>(
 }
 fn select_for_review_from_eligible<'a>(
     eligible: &[&'a CachedModel],
-    used_vendors: &[VendorKind],
-    used_models: &[(VendorKind, String)],
+    used_vendors: &[SubscriptionKind],
+    used_models: &[(SubscriptionKind, String)],
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     // Tier 1: eligible AND fresh-vendor AND fresh-model.
@@ -322,16 +322,16 @@ fn select_for_review_from_eligible<'a>(
 pub fn select_excluding<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
-    excluded: &[(VendorKind, String)],
-    _last_failed_vendor: Option<VendorKind>,
+    excluded: &[(SubscriptionKind, String)],
+    _last_failed_vendor: Option<SubscriptionKind>,
 ) -> Option<&'a CachedModel> {
     select_excluding_with_seed(models, phase, excluded, None, test_sample_seed())
 }
 pub fn select_excluding_with_seed<'a>(
     models: &'a [CachedModel],
     phase: SelectionPhase,
-    excluded: &[(VendorKind, String)],
-    _last_failed_vendor: Option<VendorKind>,
+    excluded: &[(SubscriptionKind, String)],
+    _last_failed_vendor: Option<SubscriptionKind>,
     sample_seed: u64,
 ) -> Option<&'a CachedModel> {
     if models.is_empty() {

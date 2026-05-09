@@ -11,7 +11,7 @@
 //! HTTP catalog endpoint is hit because opencode.ai exposes no documented
 //! unauthenticated catalog and authenticated cookie flows are out of scope.
 use super::LiveModel;
-use crate::logic::selection::types::VendorKind;
+use crate::logic::selection::types::SubscriptionKind;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::process::Command;
@@ -39,7 +39,7 @@ pub struct OpencodeModelMeta {
     /// relying on display-name heuristics.
     pub api_npm: Option<String>,
     /// Underlying provider this model is resold from, when inferable.
-    pub underlying_vendor: Option<VendorKind>,
+    pub underlying_vendor: Option<SubscriptionKind>,
 }
 /// Live quota fetch entry point used by the data-side selection plumbing.
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
@@ -179,12 +179,12 @@ pub fn parse_verbose_models(text: &str) -> Vec<OpencodeModelMeta> {
 /// keeping them visible here lets the fallback path round-trip parity with
 /// the live CLI for tests and for any future ipbr coverage.
 fn hardcoded_fallback_for(provider: &str) -> Vec<OpencodeModelMeta> {
-    let entries: &[(&str, Option<VendorKind>)] = match provider {
+    let entries: &[(&str, Option<SubscriptionKind>)] = match provider {
         OPENCODE_PROVIDER => &[
             ("big-pickle", None),
-            ("gpt-5-nano", Some(VendorKind::Codex)),
+            ("gpt-5-nano", Some(SubscriptionKind::Codex)),
             ("hy3-preview-free", None),
-            ("minimax-m2.5-free", Some(VendorKind::Kimi)),
+            ("minimax-m2.5-free", Some(SubscriptionKind::Kimi)),
             ("nemotron-3-super-free", None),
         ],
         OPENCODE_GO_PROVIDER => &[
@@ -192,8 +192,8 @@ fn hardcoded_fallback_for(provider: &str) -> Vec<OpencodeModelMeta> {
             ("deepseek-v4-pro", None),
             ("glm-5", None),
             ("glm-5.1", None),
-            ("kimi-k2.5", Some(VendorKind::Kimi)),
-            ("kimi-k2.6", Some(VendorKind::Kimi)),
+            ("kimi-k2.5", Some(SubscriptionKind::Kimi)),
+            ("kimi-k2.6", Some(SubscriptionKind::Kimi)),
             ("mimo-v2.5", None),
             ("mimo-v2.5-pro", None),
             ("minimax-m2.5", None),
@@ -267,12 +267,12 @@ fn model_meta_from_value(value: &Value) -> Option<OpencodeModelMeta> {
         underlying_vendor,
     })
 }
-fn underlying_vendor_from_npm(npm: &str) -> Option<VendorKind> {
+fn underlying_vendor_from_npm(npm: &str) -> Option<SubscriptionKind> {
     match npm {
-        "@ai-sdk/anthropic" => Some(VendorKind::Claude),
-        "@ai-sdk/openai" => Some(VendorKind::Codex),
-        "@ai-sdk/google" => Some(VendorKind::Gemini),
-        "@ai-sdk/moonshotai" | "@ai-sdk/moonshot" => Some(VendorKind::Kimi),
+        "@ai-sdk/anthropic" => Some(SubscriptionKind::Claude),
+        "@ai-sdk/openai" => Some(SubscriptionKind::Codex),
+        "@ai-sdk/google" => Some(SubscriptionKind::Gemini),
+        "@ai-sdk/moonshotai" | "@ai-sdk/moonshot" => Some(SubscriptionKind::Kimi),
         _ => None,
     }
 }

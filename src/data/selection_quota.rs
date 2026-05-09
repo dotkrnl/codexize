@@ -3,18 +3,18 @@
 //! maps live in [`crate::logic::selection::quota`].
 use crate::data::providers::{self, LiveModel};
 pub use crate::logic::selection::quota::{find_quota_by_heuristic, find_reset_by_heuristic};
-use crate::logic::selection::types::{QuotaError, VendorKind};
+use crate::logic::selection::types::{QuotaError, SubscriptionKind};
 use crate::model_names;
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
-type VendorQuotaMap = BTreeMap<VendorKind, BTreeMap<String, Option<u8>>>;
-type VendorResetMap = BTreeMap<VendorKind, BTreeMap<String, Option<DateTime<Utc>>>>;
+type VendorQuotaMap = BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>;
+type VendorResetMap = BTreeMap<SubscriptionKind, BTreeMap<String, Option<DateTime<Utc>>>>;
 type ModelQuotaMap = BTreeMap<String, Option<u8>>;
 type ModelResetMap = BTreeMap<String, Option<DateTime<Utc>>>;
 type ModelQuotaAndResetMaps = (ModelQuotaMap, ModelResetMap);
 type QuotaLoadResult = (VendorQuotaMap, VendorResetMap, Vec<QuotaError>);
 pub async fn load_quota_maps_for_async(
-    vendors: impl IntoIterator<Item = VendorKind>,
+    vendors: impl IntoIterator<Item = SubscriptionKind>,
 ) -> QuotaLoadResult {
     let vendors = vendors.into_iter().collect::<Vec<_>>();
     let tasks = vendors
@@ -47,28 +47,31 @@ pub async fn load_quota_maps_for_async(
     }
     (maps, reset_maps, errors)
 }
-async fn load_quota_map_for_vendor(vendor: VendorKind) -> Result<ModelQuotaAndResetMaps, String> {
+async fn load_quota_map_for_vendor(
+    vendor: SubscriptionKind,
+) -> Result<ModelQuotaAndResetMaps, String> {
     match vendor {
-        VendorKind::Codex => providers::codex::load_live_models_async()
+        SubscriptionKind::Codex => providers::codex::load_live_models_async()
             .await
             .map(live_map_codex)
             .map_err(|e| e.to_string()),
-        VendorKind::Claude => providers::claude::load_live_models_async()
+        SubscriptionKind::Claude => providers::claude::load_live_models_async()
             .await
             .map(live_map_claude)
             .map_err(|e| e.to_string()),
-        VendorKind::Gemini => providers::gemini::load_live_models_async()
+        SubscriptionKind::Gemini => providers::gemini::load_live_models_async()
             .await
             .map(live_map_direct)
             .map_err(|e| e.to_string()),
-        VendorKind::Kimi => providers::kimi::load_live_models_async()
+        SubscriptionKind::Kimi => providers::kimi::load_live_models_async()
             .await
             .map(live_map_kimi)
             .map_err(|e| e.to_string()),
-        VendorKind::Opencode => providers::opencode::load_live_models_async()
+        SubscriptionKind::OpencodeGo => providers::opencode::load_live_models_async()
             .await
             .map(live_map_opencode)
             .map_err(|e| e.to_string()),
+        SubscriptionKind::Free => Ok((BTreeMap::new(), BTreeMap::new())),
     }
 }
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {

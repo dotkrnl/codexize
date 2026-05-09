@@ -1,14 +1,19 @@
 use super::*;
 use crate::selection::types::{IpbrPhaseScores, ScoreSource};
 
-fn sample_model(vendor: VendorKind, name: &str, quota: u8) -> CachedModel {
+fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
     sample_model_with_score(vendor, name, quota, 85.0)
 }
 
 /// Like [`sample_model`] but lets the caller pin the ipbr phase score.
 /// Useful for tests that want to differentiate models by rank without
 /// touching quota.
-fn sample_model_with_score(vendor: VendorKind, name: &str, quota: u8, score: f64) -> CachedModel {
+fn sample_model_with_score(
+    vendor: SubscriptionKind,
+    name: &str,
+    quota: u8,
+    score: f64,
+) -> CachedModel {
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -33,6 +38,8 @@ fn sample_model_with_score(vendor: VendorKind, name: &str, quota: u8, score: f64
         ipbr_match_key: Some(name.to_string()),
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,
@@ -52,8 +59,8 @@ fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
     // (deficit 79 → ≥40 floor). Both have the same ipbr score, so the
     // weighted sample with seed=1 deterministically chooses "high".
     let models = vec![
-        sample_model(VendorKind::Claude, "high", 80),
-        sample_model(VendorKind::Codex, "low", 1),
+        sample_model(SubscriptionKind::Claude, "high", 80),
+        sample_model(SubscriptionKind::Codex, "low", 1),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
@@ -65,8 +72,8 @@ fn pick_for_phase_low_quota_loses_to_high_quota_via_pool_factor() {
 #[test]
 fn pick_for_phase_excludes_known_zero_quota() {
     let models = vec![
-        sample_model(VendorKind::Claude, "exhausted", 0),
-        sample_model(VendorKind::Codex, "available", 80),
+        sample_model(SubscriptionKind::Claude, "exhausted", 0),
+        sample_model(SubscriptionKind::Codex, "available", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
@@ -78,8 +85,8 @@ fn pick_for_phase_excludes_known_zero_quota() {
 #[test]
 fn pick_for_phase_excludes_models_missing_phase_score() {
     let mut models = vec![
-        sample_model(VendorKind::Claude, "ranked", 80),
-        sample_model(VendorKind::Codex, "missing-build", 80),
+        sample_model(SubscriptionKind::Claude, "ranked", 80),
+        sample_model(SubscriptionKind::Codex, "missing-build", 80),
     ];
     // Strip the Build phase score from the second model — it should be
     // unselectable for Build but its presence in the slice must not
@@ -96,7 +103,7 @@ fn pick_for_phase_excludes_models_missing_phase_score() {
 fn pick_for_phase_unknown_quota_remains_selectable() {
     // None quota → effective 30 inside the pool scorer. With only one
     // candidate the effective-30 baseline still produces a non-zero weight.
-    let mut model = sample_model(VendorKind::Claude, "unknown-quota", 0);
+    let mut model = sample_model(SubscriptionKind::Claude, "unknown-quota", 0);
     model.quota_percent = None;
     let models = vec![model];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
@@ -112,11 +119,14 @@ fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
     // Every candidate is either exhausted or unranked for the phase;
     // the function must surface the no-eligible-model condition rather
     // than fall back to unscored data.
-    let mut unranked = sample_model(VendorKind::Claude, "unranked", 80);
+    let mut unranked = sample_model(SubscriptionKind::Claude, "unranked", 80);
     unranked.ipbr_phase_scores = IpbrPhaseScores::default();
     unranked.score_source = ScoreSource::None;
     unranked.ipbr_row_matched = false;
-    let models = vec![sample_model(VendorKind::Claude, "exhausted", 0), unranked];
+    let models = vec![
+        sample_model(SubscriptionKind::Claude, "exhausted", 0),
+        unranked,
+    ];
     let chosen = pick_for_phase(&models, SelectionPhase::Build, None);
     assert!(chosen.is_none());
 }
@@ -124,40 +134,44 @@ fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
 #[test]
 fn pick_for_phase_respects_vendor_filter() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-model", 80),
-        sample_model(VendorKind::Codex, "codex-model", 80),
+        sample_model(SubscriptionKind::Claude, "claude-model", 80),
+        sample_model(SubscriptionKind::Codex, "codex-model", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
-    let chosen = pick_for_phase(&models, SelectionPhase::Build, Some(VendorKind::Claude))
-        .expect("should pick claude");
-    assert_eq!(chosen.vendor, VendorKind::Claude);
+    let chosen = pick_for_phase(
+        &models,
+        SelectionPhase::Build,
+        Some(SubscriptionKind::Claude),
+    )
+    .expect("should pick claude");
+    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
 fn select_for_review_prefers_fresh_vendor() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-1", 80),
-        sample_model(VendorKind::Codex, "codex-1", 80),
+        sample_model(SubscriptionKind::Claude, "claude-1", 80),
+        sample_model(SubscriptionKind::Codex, "codex-1", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
         select_for_review(&models, &used_vendors, &used_models).expect("should pick fresh vendor");
-    assert_eq!(chosen.vendor, VendorKind::Codex);
+    assert_eq!(chosen.vendor, SubscriptionKind::Codex);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
 fn select_for_review_falls_back_to_unused_model_same_vendor() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-1", 80),
-        sample_model(VendorKind::Claude, "claude-2", 80),
+        sample_model(SubscriptionKind::Claude, "claude-1", 80),
+        sample_model(SubscriptionKind::Claude, "claude-2", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-1".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
@@ -168,9 +182,9 @@ fn select_for_review_falls_back_to_unused_model_same_vendor() {
 
 #[test]
 fn select_for_review_returns_none_when_all_used() {
-    let models = vec![sample_model(VendorKind::Claude, "claude-1", 80)];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-1".to_string())];
+    let models = vec![sample_model(SubscriptionKind::Claude, "claude-1", 80)];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-1".to_string())];
 
     let chosen = select_for_review(&models, &used_vendors, &used_models);
     assert!(chosen.is_none());
@@ -179,10 +193,10 @@ fn select_for_review_returns_none_when_all_used() {
 #[test]
 fn select_excluding_excludes_listed_models() {
     let models = vec![
-        sample_model(VendorKind::Claude, "excluded", 80),
-        sample_model(VendorKind::Codex, "included", 80),
+        sample_model(SubscriptionKind::Claude, "excluded", 80),
+        sample_model(SubscriptionKind::Codex, "included", 80),
     ];
-    let excluded = vec![(VendorKind::Claude, "excluded".to_string())];
+    let excluded = vec![(SubscriptionKind::Claude, "excluded".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None)
@@ -200,8 +214,8 @@ fn select_excluding_excludes_listed_models() {
 
 #[test]
 fn select_excluding_returns_none_when_all_excluded() {
-    let models = vec![sample_model(VendorKind::Claude, "model-1", 80)];
-    let excluded = vec![(VendorKind::Claude, "model-1".to_string())];
+    let models = vec![sample_model(SubscriptionKind::Claude, "model-1", 80)];
+    let excluded = vec![(SubscriptionKind::Claude, "model-1".to_string())];
 
     let chosen = select_excluding(&models, SelectionPhase::Build, &excluded, None);
     assert!(chosen.is_none());
@@ -215,8 +229,8 @@ fn weighted_sample_returns_none_for_empty() {
 
 #[test]
 fn weighted_sample_returns_first_when_all_zero_weight() {
-    let m1 = sample_model(VendorKind::Claude, "first", 80);
-    let m2 = sample_model(VendorKind::Codex, "second", 80);
+    let m1 = sample_model(SubscriptionKind::Claude, "first", 80);
+    let m2 = sample_model(SubscriptionKind::Codex, "second", 80);
     let candidates = vec![(&m1, 0.0), (&m2, 0.0)];
 
     let chosen = weighted_sample(&candidates, 1).expect("should pick first");
@@ -225,8 +239,8 @@ fn weighted_sample_returns_first_when_all_zero_weight() {
 
 #[test]
 fn weighted_sample_uses_weights_for_random() {
-    let m1 = sample_model(VendorKind::Claude, "high-weight", 80);
-    let m2 = sample_model(VendorKind::Codex, "low-weight", 80);
+    let m1 = sample_model(SubscriptionKind::Claude, "high-weight", 80);
+    let m2 = sample_model(SubscriptionKind::Codex, "low-weight", 80);
     let candidates = vec![(&m1, 1000.0), (&m2, 1.0)];
 
     let mut high_count = 0;
@@ -244,19 +258,19 @@ fn weighted_sample_uses_weights_for_random() {
 
 fn opus_sonnet_codex_kimi() -> Vec<CachedModel> {
     vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
-        sample_model(VendorKind::Claude, "claude-haiku-4-5", 80),
-        sample_model(VendorKind::Codex, "gpt-5.5", 80),
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
+        sample_model(SubscriptionKind::Claude, "claude-haiku-4-5", 80),
+        sample_model(SubscriptionKind::Codex, "gpt-5.5", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ]
 }
 
 #[test]
 fn pick_with_effort_normal_does_not_filter_ineligible_models() {
     let models = vec![
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     let chosen = pick_for_phase_with_effort(
         &models,
@@ -268,15 +282,15 @@ fn pick_with_effort_normal_does_not_filter_ineligible_models() {
     .expect("Normal must pick from non-empty slice");
     assert!(matches!(
         chosen.vendor,
-        VendorKind::Kimi | VendorKind::Gemini
+        SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
 }
 
 #[test]
 fn pick_with_effort_low_does_not_use_tough_filter() {
     let models = vec![
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     let chosen = pick_for_phase_with_effort(
         &models,
@@ -288,17 +302,17 @@ fn pick_with_effort_low_does_not_use_tough_filter() {
     .expect("Low effort must use the non-tough path until cheap filtering is wired");
     assert!(matches!(
         chosen.vendor,
-        VendorKind::Kimi | VendorKind::Gemini
+        SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
 }
 
 #[test]
 fn pick_with_effort_cheap_filters_to_budget_subset() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5-flash", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5-flash", 80),
     ];
     for seed in 1..100_u64 {
         TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
@@ -327,9 +341,9 @@ fn pick_with_effort_cheap_filters_to_budget_subset() {
 #[test]
 fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 0),
-        sample_model(VendorKind::Gemini, "gemini-2.5-flash", 0),
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 0),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5-flash", 0),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
@@ -360,8 +374,8 @@ fn pick_with_effort_tough_only_picks_eligible() {
         )
         .expect("eligible candidate exists");
         assert!(
-            (chosen.vendor == VendorKind::Claude && chosen.name.contains("opus"))
-                || chosen.vendor == VendorKind::Codex,
+            (chosen.vendor == SubscriptionKind::Claude && chosen.name.contains("opus"))
+                || chosen.vendor == SubscriptionKind::Codex,
             "tough must never pick {:?} {}",
             chosen.vendor,
             chosen.name
@@ -373,8 +387,8 @@ fn pick_with_effort_tough_only_picks_eligible() {
 #[test]
 fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
     let models = vec![
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase_with_effort(
@@ -387,7 +401,7 @@ fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
     .expect("degraded fallback must yield a candidate");
     assert!(matches!(
         chosen.vendor,
-        VendorKind::Kimi | VendorKind::Gemini
+        SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -395,8 +409,8 @@ fn pick_with_effort_tough_falls_back_to_kimi_gemini() {
 #[test]
 fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
-        sample_model(VendorKind::Claude, "claude-haiku-4-5", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
+        sample_model(SubscriptionKind::Claude, "claude-haiku-4-5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase_with_effort(
@@ -407,7 +421,7 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
         false,
     )
     .expect("degraded fallback must yield a candidate");
-    assert_eq!(chosen.vendor, VendorKind::Claude);
+    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
     assert!(!chosen.name.contains("opus"));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -415,11 +429,11 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
 #[test]
 fn select_for_review_normal_can_pick_ineligible_vendor() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -430,18 +444,18 @@ fn select_for_review_normal_can_pick_ineligible_vendor() {
         false,
     )
     .expect("Normal review picks fresh Kimi");
-    assert_eq!(chosen.vendor, VendorKind::Kimi);
+    assert_eq!(chosen.vendor, SubscriptionKind::Kimi);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
 fn select_for_review_low_can_pick_ineligible_vendor() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -452,18 +466,18 @@ fn select_for_review_low_can_pick_ineligible_vendor() {
         false,
     )
     .expect("Low review effort must use the non-tough path");
-    assert_eq!(chosen.vendor, VendorKind::Kimi);
+    assert_eq!(chosen.vendor, SubscriptionKind::Kimi);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
 #[test]
 fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-sonnet-4-6".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-sonnet-4-6".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
@@ -477,9 +491,9 @@ fn select_for_review_cheap_reuses_used_eligible_before_expensive_fresh_model() {
 #[test]
 fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 0),
-        sample_model(VendorKind::Kimi, "kimi-k2", 0),
-        sample_model(VendorKind::Gemini, "gemini-2.5-pro", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 0),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 0),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Low, true)
@@ -498,12 +512,12 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
 #[test]
 fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 80),
-        sample_model(VendorKind::Claude, "claude-sonnet-4-6", 80),
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
-    let used_vendors = vec![VendorKind::Claude];
-    let used_models = vec![(VendorKind::Claude, "claude-opus-4-7".to_string())];
+    let used_vendors = vec![SubscriptionKind::Claude];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -514,7 +528,7 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
         false,
     )
     .expect("eligibility-dominated reuse expected");
-    assert_eq!(chosen.vendor, VendorKind::Claude);
+    assert_eq!(chosen.vendor, SubscriptionKind::Claude);
     assert_eq!(chosen.name, "claude-opus-4-7");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -522,15 +536,15 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
 #[test]
 fn select_for_review_tough_degrades_when_no_eligible_remain() {
     let models = vec![
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
         .expect("degraded fallback must yield a candidate");
     assert!(matches!(
         chosen.vendor,
-        VendorKind::Kimi | VendorKind::Gemini
+        SubscriptionKind::Kimi | SubscriptionKind::Gemini
     ));
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
@@ -538,16 +552,19 @@ fn select_for_review_tough_degrades_when_no_eligible_remain() {
 #[test]
 fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
     let models = vec![
-        sample_model(VendorKind::Claude, "claude-opus-4-7", 0),
-        sample_model(VendorKind::Codex, "gpt-5.5", 0),
-        sample_model(VendorKind::Kimi, "kimi-k2", 80),
-        sample_model(VendorKind::Gemini, "gemini-2.5", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 0),
+        sample_model(SubscriptionKind::Codex, "gpt-5.5", 0),
+        sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
+        sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(&models, &[], &[], EffortLevel::Tough, false)
         .expect("degraded fallback must yield an available candidate");
     assert!(
-        matches!(chosen.vendor, VendorKind::Kimi | VendorKind::Gemini),
+        matches!(
+            chosen.vendor,
+            SubscriptionKind::Kimi | SubscriptionKind::Gemini
+        ),
         "exhausted tough-eligible model was selected: {:?} {}",
         chosen.vendor,
         chosen.name

@@ -1,6 +1,6 @@
 use super::{App, DEFAULT_STAMP_TIMEOUT_MS, ENV_STAMP_TIMEOUT_MS, guard, status_line};
 use crate::{
-    selection::{self, VendorKind, config::SelectionPhase, selection::SelectionWarning},
+    selection::{self, SubscriptionKind, config::SelectionPhase, selection::SelectionWarning},
     state::{self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus},
     tasks,
 };
@@ -154,7 +154,7 @@ impl App {
     }
     pub(crate) fn used_review_pairs(
         runs: &[crate::state::RunRecord],
-    ) -> (Vec<VendorKind>, Vec<(VendorKind, String)>) {
+    ) -> (Vec<SubscriptionKind>, Vec<(SubscriptionKind, String)>) {
         let mut vendors = Vec::new();
         let mut models = Vec::new();
         for run in runs {

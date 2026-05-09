@@ -1,7 +1,7 @@
 use super::*;
 use crate::{acp, adapters::EffortLevel, state::LaunchModes};
 
-fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
+fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
         vendor,
         cwd: PathBuf::from("workspace"),
@@ -20,7 +20,7 @@ fn sample_request(vendor: VendorKind) -> AcpLaunchRequest {
     }
 }
 
-fn non_yolo_request(vendor: VendorKind) -> AcpLaunchRequest {
+fn non_yolo_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
         modes: LaunchModes {
             yolo: false,
@@ -34,10 +34,10 @@ fn non_yolo_request(vendor: VendorKind) -> AcpLaunchRequest {
 #[test]
 fn resolves_vendor_keyed_definitions_with_launch_metadata() {
     let resolved = AcpConfig::default()
-        .resolve(&sample_request(VendorKind::Gemini))
+        .resolve(&sample_request(SubscriptionKind::Gemini))
         .expect("resolve gemini");
 
-    assert_eq!(resolved.vendor, VendorKind::Gemini);
+    assert_eq!(resolved.vendor, SubscriptionKind::Gemini);
     assert_eq!(resolved.spawn.program, "gemini");
     assert_eq!(
         resolved.spawn.args,
@@ -58,7 +58,7 @@ fn resolves_vendor_keyed_definitions_with_launch_metadata() {
 #[test]
 fn missing_vendor_configuration_is_reported_as_human_block() {
     let err = AcpConfig::empty()
-        .resolve(&sample_request(VendorKind::Claude))
+        .resolve(&sample_request(SubscriptionKind::Claude))
         .expect_err("missing config");
     assert!(matches!(err, AcpError::HumanBlock(_)));
 }
@@ -66,7 +66,7 @@ fn missing_vendor_configuration_is_reported_as_human_block() {
 #[test]
 fn launch_translation_preserves_model_and_cheap_derived_effort() {
     let resolved = AcpConfig::default()
-        .resolve(&sample_request(VendorKind::Codex))
+        .resolve(&sample_request(SubscriptionKind::Codex))
         .expect("resolve codex");
 
     assert_eq!(
@@ -102,7 +102,7 @@ fn launch_translation_preserves_model_and_cheap_derived_effort() {
 fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
     let request = AcpLaunchRequest {
         model: "gpt-5-nano".to_string(),
-        ..sample_request(VendorKind::Opencode)
+        ..sample_request(SubscriptionKind::OpencodeGo)
     };
 
     let resolved = AcpConfig::default()
@@ -134,7 +134,7 @@ fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
 fn opencode_launch_preserves_provider_qualified_model() {
     let request = AcpLaunchRequest {
         model: "opencode/big-pickle".to_string(),
-        ..sample_request(VendorKind::Opencode)
+        ..sample_request(SubscriptionKind::OpencodeGo)
     };
 
     let resolved = AcpConfig::default()
@@ -161,7 +161,7 @@ fn opencode_go_route_provider_drives_launch_qualifier() {
     let request = AcpLaunchRequest {
         model: "deepseek-v4-flash".to_string(),
         route_provider: Some("opencode-go".to_string()),
-        ..sample_request(VendorKind::Opencode)
+        ..sample_request(SubscriptionKind::OpencodeGo)
     };
 
     let resolved = AcpConfig::default()
@@ -182,7 +182,7 @@ fn opencode_go_route_provider_drives_launch_qualifier() {
 #[test]
 fn acp_launches_use_code_permission_mode_even_without_codexize_yolo() {
     let resolved = AcpConfig::default()
-        .resolve(&non_yolo_request(VendorKind::Kimi))
+        .resolve(&non_yolo_request(SubscriptionKind::Kimi))
         .expect("resolve kimi");
 
     assert_eq!(
@@ -222,7 +222,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
-        ..sample_request(VendorKind::Codex)
+        ..sample_request(SubscriptionKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -307,7 +307,7 @@ fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
-        ..sample_request(VendorKind::Codex)
+        ..sample_request(SubscriptionKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -361,7 +361,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
-        ..sample_request(VendorKind::Codex)
+        ..sample_request(SubscriptionKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -512,13 +512,13 @@ fn codex_acp_install_prompt_requires_codex_cli_and_missing_acp() {
 fn available_vendors_follow_configured_programs() {
     let config = AcpConfig::from_agents([
         AcpAgentDefinition {
-            vendor: VendorKind::Claude,
+            vendor: SubscriptionKind::Claude,
             program: "/definitely/missing/claude-acp".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
         AcpAgentDefinition {
-            vendor: VendorKind::Codex,
+            vendor: SubscriptionKind::Codex,
             program: "/bin/sh".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
@@ -528,21 +528,21 @@ fn available_vendors_follow_configured_programs() {
     let available = config.available_vendors();
 
     assert_eq!(available.len(), 1);
-    assert!(available.contains(&VendorKind::Codex));
-    assert!(!available.contains(&VendorKind::Claude));
+    assert!(available.contains(&SubscriptionKind::Codex));
+    assert!(!available.contains(&SubscriptionKind::Claude));
 }
 
 #[test]
 fn available_vendors_include_opencode_only_when_program_is_executable() {
     let config = AcpConfig::from_agents([
         AcpAgentDefinition {
-            vendor: VendorKind::Opencode,
+            vendor: SubscriptionKind::OpencodeGo,
             program: "/definitely/missing/opencode".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
         AcpAgentDefinition {
-            vendor: VendorKind::Codex,
+            vendor: SubscriptionKind::Codex,
             program: "/bin/sh".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
@@ -551,8 +551,8 @@ fn available_vendors_include_opencode_only_when_program_is_executable() {
 
     let available = config.available_vendors();
 
-    assert!(available.contains(&VendorKind::Codex));
-    assert!(!available.contains(&VendorKind::Opencode));
+    assert!(available.contains(&SubscriptionKind::Codex));
+    assert!(!available.contains(&SubscriptionKind::OpencodeGo));
 }
 
 fn write_fake_executable(path: &Path) {

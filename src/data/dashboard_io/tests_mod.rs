@@ -1,7 +1,7 @@
 use super::*;
 use crate::selection::config::SelectionPhase;
 use crate::selection::ranking::{phase_score_for_legacy_callers, stamp_selection_provenance};
-use crate::selection::types::{CachedModel, VendorKind};
+use crate::selection::types::{CachedModel, SubscriptionKind};
 
 fn model(name: &str, score: f64) -> DashboardModel {
     DashboardModel {
@@ -34,7 +34,7 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
                 provider_id: "opencode".to_string(),
                 display_name: None,
                 api_npm: None,
-                underlying_vendor: Some(VendorKind::Codex),
+                underlying_vendor: Some(SubscriptionKind::Codex),
             },
             crate::data::providers::opencode::OpencodeModelMeta {
                 id: "opencode-only-model".to_string(),
@@ -66,7 +66,10 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
     assert_eq!(merged[0].name, "gpt-5-nano");
     assert_eq!(merged[0].vendor, "opencode");
     assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
-    assert_eq!(merged[0].route_underlying_vendor, Some(VendorKind::Codex));
+    assert_eq!(
+        merged[0].route_underlying_vendor,
+        Some(SubscriptionKind::Codex)
+    );
     assert_eq!(merged[0].route_provider.as_deref(), Some("opencode"));
 }
 
@@ -135,10 +138,10 @@ fn fixture_cached_models() -> Vec<CachedModel> {
         .into_iter()
         .map(|entry| CachedModel {
             vendor: match entry.vendor.as_str() {
-                "anthropic" | "claude" => VendorKind::Claude,
-                "openai" => VendorKind::Codex,
-                "google" => VendorKind::Gemini,
-                "moonshotai" => VendorKind::Kimi,
+                "anthropic" | "claude" => SubscriptionKind::Claude,
+                "openai" => SubscriptionKind::Codex,
+                "google" => SubscriptionKind::Gemini,
+                "moonshotai" => SubscriptionKind::Kimi,
                 other => panic!("fixture vendor {other} is not mapped"),
             },
             name: entry.name.clone(),
@@ -163,6 +166,8 @@ fn fixture_cached_models() -> Vec<CachedModel> {
             ipbr_match_key: Some(entry.name.clone()),
             route_underlying_vendor: None,
             route_provider: None,
+            candidates: Vec::new(),
+            selected_candidate: None,
             quota_percent: Some(80),
             quota_resets_at: None,
             display_order: entry.display_order,

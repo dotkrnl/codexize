@@ -2,7 +2,7 @@ use super::*;
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
-        vendor: VendorKind::Codex,
+        vendor: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
         overall_score: 88.4,
         current_score: 86.2,
@@ -22,6 +22,8 @@ fn sample_cached_model() -> CachedModel {
         ipbr_match_key: None,
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
     }
 }
 
@@ -45,7 +47,7 @@ fn cached_model_clone_and_fields_remain_accessible() {
     let cloned = model.clone();
 
     assert_eq!(cloned, model);
-    assert_eq!(cloned.vendor, VendorKind::Codex);
+    assert_eq!(cloned.vendor, SubscriptionKind::Codex);
     assert_eq!(cloned.name, "gpt-5.5");
     assert_eq!(cloned.overall_score, 88.4);
     assert_eq!(cloned.current_score, 86.2);

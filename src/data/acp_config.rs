@@ -4,7 +4,7 @@ use crate::acp::{
 };
 use crate::data::config::schema::AcpAgentSection;
 use crate::data::config::view::{AcpAgentView, AcpInstallView};
-use crate::selection::{VendorKind, vendor::vendor_kind_to_str};
+use crate::selection::{SubscriptionKind, vendor::vendor_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 const CLAUDE_CLI: &str = "claude";
@@ -12,14 +12,14 @@ const CODEX_CLI: &str = "codex";
 const CODEX_ACP_CLI: &str = "codex-acp";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpAgentDefinition {
-    pub vendor: VendorKind,
+    pub vendor: SubscriptionKind,
     pub program: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpConfig {
-    agents: BTreeMap<VendorKind, AcpAgentDefinition>,
+    agents: BTreeMap<SubscriptionKind, AcpAgentDefinition>,
 }
 #[rustfmt::skip]
 impl AcpConfig {
@@ -27,7 +27,7 @@ impl AcpConfig {
     pub fn from_agents(agents: impl IntoIterator<Item = AcpAgentDefinition>) -> Self {
         Self { agents: agents.into_iter().map(|a| (a.vendor, a)).collect() }
     }
-    pub fn available_vendors(&self) -> std::collections::BTreeSet<VendorKind> {
+    pub fn available_vendors(&self) -> std::collections::BTreeSet<SubscriptionKind> {
         self.agents.iter()
             .filter(|(_, a)| !a.program.trim().is_empty() && program_is_executable(&a.program))
             .map(|(v, _)| *v).collect()
@@ -94,7 +94,7 @@ impl AcpConfig {
         agents: &crate::data::config::schema::AcpAgents,
         install: &AcpInstallView,
     ) -> Self {
-        let view_for = |vendor: VendorKind, section: &AcpAgentSection| -> Option<AcpAgentDefinition> {
+        let view_for = |vendor: SubscriptionKind, section: &AcpAgentSection| -> Option<AcpAgentDefinition> {
             let v = AcpAgentView {
                 enabled: *section.enabled.value(),
                 program: section.program.value().clone(),
@@ -102,7 +102,7 @@ impl AcpConfig {
                 env: section.env.value().clone(),
             };
             if !v.enabled { return None }
-            let program = if vendor == VendorKind::Claude && install.prefer_local_claude_acp {
+            let program = if vendor == SubscriptionKind::Claude && install.prefer_local_claude_acp {
                 let local = &install.claude_acp_root.join("node_modules").join(".bin").join("claude-agent-acp");
                 if path_is_executable(local) { local.display().to_string() } else { v.program.clone() }
             } else {
@@ -112,11 +112,12 @@ impl AcpConfig {
             #[cfg(test)]
             {
                 let key = match vendor {
-                    VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
-                    VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
-                    VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
-                    VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
-                    VendorKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+                    SubscriptionKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+                    SubscriptionKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                    SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+                    SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+                    SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+                    SubscriptionKind::Free => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
                 };
                 if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
                     return Some(AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() });
@@ -125,11 +126,11 @@ impl AcpConfig {
             Some(def)
         };
         let mut defs = Vec::new();
-        if let Some(d) = view_for(VendorKind::Claude, &agents.claude) { defs.push(d) }
-        if let Some(d) = view_for(VendorKind::Codex, &agents.codex) { defs.push(d) }
-        if let Some(d) = view_for(VendorKind::Gemini, &agents.gemini) { defs.push(d) }
-        if let Some(d) = view_for(VendorKind::Kimi, &agents.kimi) { defs.push(d) }
-        if let Some(d) = view_for(VendorKind::Opencode, &agents.opencode) { defs.push(d) }
+        if let Some(d) = view_for(SubscriptionKind::Claude, &agents.claude) { defs.push(d) }
+        if let Some(d) = view_for(SubscriptionKind::Codex, &agents.codex) { defs.push(d) }
+        if let Some(d) = view_for(SubscriptionKind::Gemini, &agents.gemini) { defs.push(d) }
+        if let Some(d) = view_for(SubscriptionKind::Kimi, &agents.kimi) { defs.push(d) }
+        if let Some(d) = view_for(SubscriptionKind::OpencodeGo, &agents.opencode) { defs.push(d) }
         Self::from_agents(defs)
     }
 }
@@ -141,12 +142,12 @@ impl Default for AcpConfig {
         let local = claude_acp_local_program_for(&claude_acp_install_root());
         let claude = if path_is_executable(&local) { local.display().to_string() } else { "claude-agent-acp".into() };
         Self::from_agents([
-            agent_def(VendorKind::Claude, &claude, Vec::new()),
-            agent_def(VendorKind::Codex, "codex-acp",
+            agent_def(SubscriptionKind::Claude, &claude, Vec::new()),
+            agent_def(SubscriptionKind::Codex, "codex-acp",
                 argv(&["-c", "sandbox_mode=\"danger-full-access\"", "-c", "approval_policy=\"never\""])),
-            agent_def(VendorKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
-            agent_def(VendorKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
-            agent_def(VendorKind::Opencode, "opencode", argv(&["acp"])),
+            agent_def(SubscriptionKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
+            agent_def(SubscriptionKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
+            agent_def(SubscriptionKind::OpencodeGo, "opencode", argv(&["acp"])),
         ])
     }
 }
@@ -170,15 +171,16 @@ pub fn should_offer_codex_acp_install() -> bool {
     program_is_executable(CODEX_CLI) && !program_is_executable(CODEX_ACP_CLI)
 }
 #[rustfmt::skip]
-fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
+fn agent_def(vendor: SubscriptionKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
     #[cfg(test)]
     {
         let key = match vendor {
-            VendorKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
-            VendorKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
-            VendorKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
-            VendorKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
-            VendorKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+            SubscriptionKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+            SubscriptionKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+            SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+            SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+            SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+            SubscriptionKind::Free => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
         };
         if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
             return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };
@@ -188,11 +190,11 @@ fn agent_def(vendor: VendorKind, program: &str, args: Vec<String>) -> AcpAgentDe
 }
 #[rustfmt::skip]
 fn launch_model_for_vendor(
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     route_provider: Option<&str>,
     model: &str,
 ) -> String {
-    if vendor == VendorKind::Opencode && !model.contains('/') {
+    if vendor == SubscriptionKind::OpencodeGo && !model.contains('/') {
         // opencode's ACP `model` config advertises provider-qualified values
         // (`opencode/<id>` for the zen tier, `opencode-go/<id>` for the Go
         // tier), while inventory stores bare ids for ipbr matching. Default

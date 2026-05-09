@@ -1,4 +1,4 @@
-use super::types::VendorKind;
+use super::types::SubscriptionKind;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, strum::IntoStaticStr)]
 pub enum SelectionPhase {
     #[strum(to_string = "idea")]
@@ -75,7 +75,8 @@ pub struct SelectionConfig {
     pub flash_tier_penalty: f64,
     /// Multiplicative biases applied when a vendor (optionally restricted
     /// to a model-name substring) is being considered for the given phase.
-    pub vendor_phase_biases: &'static [(VendorKind, Option<&'static str>, SelectionPhase, f64)],
+    pub vendor_phase_biases:
+        &'static [(SubscriptionKind, Option<&'static str>, SelectionPhase, f64)],
 }
 pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     role_score_exponent: 3,
@@ -92,18 +93,23 @@ pub const SELECTION_CONFIG: SelectionConfig = SelectionConfig {
     std_err_penalty_multiplier: 1.0,
     flash_tier_penalty: 0.05,
     vendor_phase_biases: &[
-        (VendorKind::Claude, Some("opus"), SelectionPhase::Idea, 1.5),
         (
-            VendorKind::Claude,
+            SubscriptionKind::Claude,
+            Some("opus"),
+            SelectionPhase::Idea,
+            1.5,
+        ),
+        (
+            SubscriptionKind::Claude,
             Some("opus"),
             SelectionPhase::Planning,
             1.5,
         ),
-        (VendorKind::Codex, None, SelectionPhase::Review, 1.5),
+        (SubscriptionKind::Codex, None, SelectionPhase::Review, 1.5),
     ],
 };
 impl SelectionConfig {
-    pub fn vendor_bias(&self, vendor: VendorKind, name: &str, phase: SelectionPhase) -> f64 {
+    pub fn vendor_bias(&self, vendor: SubscriptionKind, name: &str, phase: SelectionPhase) -> f64 {
         self.vendor_phase_biases
             .iter()
             .find(|(v, name_match, p, _)| {

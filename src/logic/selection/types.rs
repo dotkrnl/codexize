@@ -1,7 +1,18 @@
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum VendorKind {
+pub enum SubscriptionKind {
+    Claude,
+    Codex,
+    Gemini,
+    Kimi,
+    #[serde(rename = "opencode-go")]
+    OpencodeGo,
+    Free,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CliKind {
     Claude,
     Codex,
     Gemini,
@@ -10,7 +21,7 @@ pub enum VendorKind {
 }
 #[derive(Debug, Clone)]
 pub struct QuotaError {
-    pub vendor: VendorKind,
+    pub vendor: SubscriptionKind,
     pub message: String,
 }
 use std::collections::BTreeMap;
@@ -51,11 +62,28 @@ pub struct IpbrPhaseScores {
     pub review: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq)]
-pub struct CachedModel {
-    pub vendor: VendorKind,
+pub struct Candidate {
+    pub subscription: SubscriptionKind,
+    pub cli: CliKind,
+    pub launch_name: String,
+    pub quota_percent: Option<u8>,
+    pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub display_order: usize,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeModelEntry {
+    pub mapped_into: String,
+    pub cli: CliKind,
+    pub model_name: String,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelRow {
+    /// Compatibility mirror of the selected candidate's subscription for
+    /// legacy picker and stage code. Candidate data is authoritative.
+    pub vendor: SubscriptionKind,
     pub name: String,
     /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
-    /// auto-selection eligibility, or vendor backfill ordering.
+    /// auto-selection eligibility, or subscription backfill ordering.
     pub overall_score: f64,
     /// Cosmetic display-only summary score. Same constraint as
     /// `overall_score`.
@@ -77,19 +105,14 @@ pub struct CachedModel {
     /// "matched ipbr row but missing phase score" (still eligible for
     /// other phases) from "no ipbr row at all".
     pub ipbr_row_matched: bool,
-    /// Stored normalized/canonical ipbr match key. Route vendors can expose
+    /// Stored normalized/canonical ipbr match key. Route subscriptions can expose
     /// different model labels for the same ipbr row, so later dedup must use
     /// this stable key instead of recomputing from display names.
     pub ipbr_match_key: Option<String>,
-    /// Underlying provider for a routed model. For direct providers this is
-    /// normally `None`; opencode-routed models use it for eligibility and
-    /// effort suffix decisions while still displaying `vendor = Opencode`.
-    pub route_underlying_vendor: Option<VendorKind>,
-    /// Opencode sub-provider (`opencode` or `opencode-go`). The bare `name`
-    /// stays ipbr-compatible; the launch boundary qualifies it with this
-    /// prefix so spawn calls reach the correct opencode tier. `None` for
-    /// direct vendors.
+    pub route_underlying_vendor: Option<SubscriptionKind>,
     pub route_provider: Option<String>,
+    pub candidates: Vec<Candidate>,
+    pub selected_candidate: Option<usize>,
     pub quota_percent: Option<u8>,
     pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,
@@ -97,12 +120,36 @@ pub struct CachedModel {
     /// has no entry yet. `None` for normal models.
     pub fallback_from: Option<String>,
 }
-impl CachedModel {
+pub type CachedModel = ModelRow;
+impl ModelRow {
     pub fn axis(&self, key: &str) -> Option<f64> {
         self.axes
             .iter()
             .find(|(axis_key, _)| axis_key == key)
             .map(|(_, value)| *value)
+    }
+    pub fn selected_candidate(&self) -> Option<&Candidate> {
+        self.selected_candidate
+            .and_then(|index| self.candidates.get(index))
+    }
+    pub fn selected_cli(&self) -> Option<CliKind> {
+        self.selected_candidate().map(|candidate| candidate.cli)
+    }
+    pub fn selected_launch_name(&self) -> &str {
+        self.selected_candidate()
+            .map(|candidate| candidate.launch_name.as_str())
+            .unwrap_or(&self.name)
+    }
+}
+impl SubscriptionKind {
+    pub fn direct_cli(self) -> Option<CliKind> {
+        match self {
+            SubscriptionKind::Claude => Some(CliKind::Claude),
+            SubscriptionKind::Codex => Some(CliKind::Codex),
+            SubscriptionKind::Gemini => Some(CliKind::Gemini),
+            SubscriptionKind::Kimi => Some(CliKind::Kimi),
+            SubscriptionKind::OpencodeGo | SubscriptionKind::Free => None,
+        }
     }
 }
 #[cfg(test)]

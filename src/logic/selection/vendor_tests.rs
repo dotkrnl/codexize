@@ -23,7 +23,7 @@ fn dashboard_model(name: &str, vendor: &str) -> dashboard::DashboardModel {
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
-        vendor: VendorKind::Codex,
+        vendor: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
         overall_score: 85.0,
         current_score: 85.0,
@@ -40,33 +40,35 @@ fn sample_cached_model() -> CachedModel {
         ipbr_match_key: None,
         route_underlying_vendor: None,
         route_provider: None,
+        candidates: Vec::new(),
+        selected_candidate: None,
     }
 }
 
 #[test]
 fn is_effort_capable_only_claude_and_codex() {
-    assert!(is_effort_capable(VendorKind::Claude));
-    assert!(is_effort_capable(VendorKind::Codex));
-    assert!(!is_effort_capable(VendorKind::Gemini));
-    assert!(!is_effort_capable(VendorKind::Kimi));
+    assert!(is_effort_capable(SubscriptionKind::Claude));
+    assert!(is_effort_capable(SubscriptionKind::Codex));
+    assert!(!is_effort_capable(SubscriptionKind::Gemini));
+    assert!(!is_effort_capable(SubscriptionKind::Kimi));
 }
 
 #[test]
 fn is_effort_capable_includes_opencode_route_vendor() {
-    assert!(is_effort_capable(VendorKind::Opencode));
+    assert!(is_effort_capable(SubscriptionKind::OpencodeGo));
 }
 
 #[test]
 fn is_cheap_eligible_matches_budget_subset() {
     let cases = [
-        (VendorKind::Claude, "claude-opus-4-7", false),
-        (VendorKind::Claude, "claude-sonnet-4-6", true),
-        (VendorKind::Claude, "claude-haiku-4-5", true),
-        (VendorKind::Codex, "gpt-5.5", true),
-        (VendorKind::Kimi, "kimi-k2", true),
-        (VendorKind::Gemini, "gemini-2.5-pro", false),
-        (VendorKind::Gemini, "gemini-2.5-flash", true),
-        (VendorKind::Gemini, "gemini-nano", true),
+        (SubscriptionKind::Claude, "claude-opus-4-7", false),
+        (SubscriptionKind::Claude, "claude-sonnet-4-6", true),
+        (SubscriptionKind::Claude, "claude-haiku-4-5", true),
+        (SubscriptionKind::Codex, "gpt-5.5", true),
+        (SubscriptionKind::Kimi, "kimi-k2", true),
+        (SubscriptionKind::Gemini, "gemini-2.5-pro", false),
+        (SubscriptionKind::Gemini, "gemini-2.5-flash", true),
+        (SubscriptionKind::Gemini, "gemini-nano", true),
     ];
 
     for (vendor, name, expected) in cases {
@@ -84,9 +86,9 @@ fn is_cheap_eligible_matches_budget_subset() {
 #[test]
 fn opencode_tough_eligibility_uses_underlying_model_identity() {
     let mut opus = sample_cached_model();
-    opus.vendor = VendorKind::Opencode;
+    opus.vendor = SubscriptionKind::OpencodeGo;
     opus.name = "opencode/claude-opus-4.7".to_string();
-    opus.route_underlying_vendor = Some(VendorKind::Claude);
+    opus.route_underlying_vendor = Some(SubscriptionKind::Claude);
     assert!(is_tough_eligible(&opus));
 
     let mut sonnet = opus.clone();
@@ -97,9 +99,9 @@ fn opencode_tough_eligibility_uses_underlying_model_identity() {
 #[test]
 fn opencode_cheap_eligibility_uses_underlying_model_identity() {
     let mut flash = sample_cached_model();
-    flash.vendor = VendorKind::Opencode;
+    flash.vendor = SubscriptionKind::OpencodeGo;
     flash.name = "opencode/gemini-2.5-flash".to_string();
-    flash.route_underlying_vendor = Some(VendorKind::Gemini);
+    flash.route_underlying_vendor = Some(SubscriptionKind::Gemini);
     assert!(is_cheap_eligible(&flash));
 
     let mut pro = flash.clone();
@@ -109,12 +111,18 @@ fn opencode_cheap_eligibility_uses_underlying_model_identity() {
 
 #[test]
 fn str_to_vendor_round_trips_known_values() {
-    assert_eq!(str_to_vendor("claude"), Some(VendorKind::Claude));
-    assert_eq!(str_to_vendor("codex"), Some(VendorKind::Codex));
-    assert_eq!(str_to_vendor("gemini"), Some(VendorKind::Gemini));
-    assert_eq!(str_to_vendor("kimi"), Some(VendorKind::Kimi));
-    assert_eq!(str_to_vendor("opencode"), Some(VendorKind::Opencode));
-    assert_eq!(vendor_kind_to_str(VendorKind::Opencode), "opencode");
+    assert_eq!(str_to_vendor("claude"), Some(SubscriptionKind::Claude));
+    assert_eq!(str_to_vendor("codex"), Some(SubscriptionKind::Codex));
+    assert_eq!(str_to_vendor("gemini"), Some(SubscriptionKind::Gemini));
+    assert_eq!(str_to_vendor("kimi"), Some(SubscriptionKind::Kimi));
+    assert_eq!(
+        str_to_vendor("opencode"),
+        Some(SubscriptionKind::OpencodeGo)
+    );
+    assert_eq!(
+        vendor_kind_to_str(SubscriptionKind::OpencodeGo),
+        "opencode-go"
+    );
 }
 
 #[test]
@@ -129,27 +137,27 @@ fn str_to_vendor_rejects_unknown_and_alias_strings() {
 fn vendor_for_dashboard_model_matches_name_prefixes() {
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("claude-sonnet-4", "")),
-        Some(VendorKind::Claude)
+        Some(SubscriptionKind::Claude)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("gpt-5.5", "")),
-        Some(VendorKind::Codex)
+        Some(SubscriptionKind::Codex)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("o1-mini", "")),
-        Some(VendorKind::Codex)
+        Some(SubscriptionKind::Codex)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("gemini-2.5-pro", "")),
-        Some(VendorKind::Gemini)
+        Some(SubscriptionKind::Gemini)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("kimi-k2", "")),
-        Some(VendorKind::Kimi)
+        Some(SubscriptionKind::Kimi)
     );
     assert_ne!(
         vendor_for_dashboard_model(&dashboard_model("opencode/claude-opus-4.7", "")),
-        Some(VendorKind::Opencode),
+        Some(SubscriptionKind::OpencodeGo),
         "opencode is a route vendor and must not be inferred from model names"
     );
 }
@@ -158,23 +166,23 @@ fn vendor_for_dashboard_model_matches_name_prefixes() {
 fn vendor_for_dashboard_model_falls_back_to_vendor_field() {
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("model-x", "anthropic")),
-        Some(VendorKind::Claude)
+        Some(SubscriptionKind::Claude)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("model-x", "openai")),
-        Some(VendorKind::Codex)
+        Some(SubscriptionKind::Codex)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("model-x", "google")),
-        Some(VendorKind::Gemini)
+        Some(SubscriptionKind::Gemini)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("model-x", "moonshotai")),
-        Some(VendorKind::Kimi)
+        Some(SubscriptionKind::Kimi)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("claude-opus-4.7", "opencode")),
-        Some(VendorKind::Opencode)
+        Some(SubscriptionKind::OpencodeGo)
     );
 }
 
@@ -182,15 +190,15 @@ fn vendor_for_dashboard_model_falls_back_to_vendor_field() {
 fn vendor_for_dashboard_model_uses_name_substring_heuristics_for_unknown_vendor() {
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("legacy-opus", "unknown")),
-        Some(VendorKind::Claude)
+        Some(SubscriptionKind::Claude)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("foo-davinci", "unknown")),
-        Some(VendorKind::Codex)
+        Some(SubscriptionKind::Codex)
     );
     assert_eq!(
         vendor_for_dashboard_model(&dashboard_model("ada-palm", "unknown")),
-        Some(VendorKind::Gemini)
+        Some(SubscriptionKind::Gemini)
     );
 }
 

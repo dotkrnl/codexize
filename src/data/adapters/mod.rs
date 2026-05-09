@@ -1,4 +1,4 @@
-use crate::selection::VendorKind;
+use crate::selection::SubscriptionKind;
 use crate::state::LaunchModes;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -21,39 +21,45 @@ pub struct AgentRun {
     pub effort: EffortLevel,
     pub modes: LaunchModes,
 }
-pub fn all_vendors() -> [VendorKind; 5] {
+pub fn all_vendors() -> [SubscriptionKind; 5] {
     [
-        VendorKind::Codex,
-        VendorKind::Claude,
-        VendorKind::Gemini,
-        VendorKind::Kimi,
-        VendorKind::Opencode,
+        SubscriptionKind::Codex,
+        SubscriptionKind::Claude,
+        SubscriptionKind::Gemini,
+        SubscriptionKind::Kimi,
+        SubscriptionKind::OpencodeGo,
     ]
 }
 pub fn short_model(model: &str) -> String {
     crate::model_names::run_label_name(model)
 }
-pub fn effort_suffix(vendor: VendorKind, effort: EffortLevel) -> &'static str {
+pub fn effort_suffix(vendor: SubscriptionKind, effort: EffortLevel) -> &'static str {
     match effort {
         EffortLevel::Normal => "",
         EffortLevel::Low => match vendor {
-            VendorKind::Codex | VendorKind::Claude => ":low",
-            VendorKind::Gemini | VendorKind::Kimi | VendorKind::Opencode => "",
+            SubscriptionKind::Codex | SubscriptionKind::Claude => ":low",
+            SubscriptionKind::Gemini
+            | SubscriptionKind::Kimi
+            | SubscriptionKind::OpencodeGo
+            | SubscriptionKind::Free => "",
         },
         EffortLevel::Tough => match vendor {
-            VendorKind::Codex => ":xhigh",
-            VendorKind::Claude => ":max",
-            VendorKind::Gemini | VendorKind::Kimi | VendorKind::Opencode => "",
+            SubscriptionKind::Codex => ":xhigh",
+            SubscriptionKind::Claude => ":max",
+            SubscriptionKind::Gemini
+            | SubscriptionKind::Kimi
+            | SubscriptionKind::OpencodeGo
+            | SubscriptionKind::Free => "",
         },
     }
 }
 pub fn effort_suffix_for_model(
-    vendor: VendorKind,
-    route_underlying_vendor: Option<VendorKind>,
+    vendor: SubscriptionKind,
+    route_underlying_vendor: Option<SubscriptionKind>,
     model: &str,
     effort: EffortLevel,
 ) -> &'static str {
-    let suffix_vendor = if vendor == VendorKind::Opencode {
+    let suffix_vendor = if vendor == SubscriptionKind::OpencodeGo {
         route_underlying_vendor
             .unwrap_or_else(|| crate::selection::vendor::infer_underlying_vendor_from_name(model))
     } else {
@@ -70,7 +76,7 @@ pub fn effort_suffix_from_str(vendor_str: &str, effort: EffortLevel) -> &'static
 pub fn run_label_with_model(
     base: &str,
     model: &str,
-    vendor: VendorKind,
+    vendor: SubscriptionKind,
     effort: EffortLevel,
 ) -> String {
     let short = short_model(model);

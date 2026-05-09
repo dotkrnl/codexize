@@ -1,6 +1,6 @@
 use super::config::SelectionPhase;
 use super::ranking::{candidate_pool_weights, phase_rank_score};
-use super::types::{CachedModel, VendorKind};
+use super::types::{CachedModel, SubscriptionKind};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 /// Pool weight a model must exceed in some phase to count as "selectable
@@ -54,17 +54,17 @@ pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
     // no phase pool lifted any of its rows above the threshold. The pick
     // uses `build_rank_order` so the vendor's strongest ipbr-scored row
     // wins, falling back to alphabetical when no ipbr score exists.
-    let visible_vendors: BTreeSet<VendorKind> = models
+    let visible_vendors: BTreeSet<SubscriptionKind> = models
         .iter()
         .filter(|m| visible.contains(&m.name))
         .map(|m| m.vendor)
         .collect();
     for vendor in [
-        VendorKind::Claude,
-        VendorKind::Codex,
-        VendorKind::Gemini,
-        VendorKind::Kimi,
-        VendorKind::Opencode,
+        SubscriptionKind::Claude,
+        SubscriptionKind::Codex,
+        SubscriptionKind::Gemini,
+        SubscriptionKind::Kimi,
+        SubscriptionKind::OpencodeGo,
     ] {
         if visible_vendors.contains(&vendor) {
             continue;

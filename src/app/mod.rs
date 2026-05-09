@@ -256,11 +256,6 @@ pub struct App {
     pub(crate) input_buffer: String,
     pub(crate) input_cursor: usize,
     pub(crate) pending_view_path: Option<std::path::PathBuf>,
-    /// Phase to enter once the editor opened via `pending_view_path` exits.
-    /// Lets approval flows hand the operator the artifact to edit *before*
-    /// running validation that would otherwise fail on the pre-edit copy and
-    /// silently strand the modal.
-    pub(crate) pending_post_view_phase: Option<crate::state::Phase>,
     pub(crate) confirm_back: bool,
     pub(crate) startup_origin: AppStartupOrigin,
     pub(crate) run_launched: bool,

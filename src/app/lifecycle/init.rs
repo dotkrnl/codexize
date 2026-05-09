@@ -98,7 +98,6 @@ impl App {
             input_buffer: String::new(),
             input_cursor: 0,
             pending_view_path: None,
-            pending_post_view_phase: None,
             confirm_back: false,
             startup_origin,
             run_launched: false,

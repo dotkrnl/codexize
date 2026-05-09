@@ -205,7 +205,7 @@ fn launch_model_for_vendor(
     vendor: SubscriptionKind,
     route_provider: Option<&str>,
     model: &str,
-    cli: CliKind,
+    _cli: CliKind,
     launch_name: &str,
 ) -> String {
     // Free candidates pass the operator-supplied model name verbatim

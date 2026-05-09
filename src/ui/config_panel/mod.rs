@@ -394,12 +394,6 @@ pub(crate) struct ConfigPanelState {
     save_error: Option<String>,
     pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
-    /// Snapshot of ipbr canonical names known at panel-open time. Used by
-    /// the providers sub-panel to flag entries whose `mapped_into` no
-    /// longer matches any row with `(no matching ipbr row)`. The list is
-    /// frozen on open — refreshing the universe mid-edit must not silently
-    /// retag entries the operator is currently editing.
-    pub(crate) known_models: Vec<String>,
     pub(crate) providers_cursor: usize,
     pub(crate) providers_prop_cursor: usize,
 }
@@ -413,21 +407,6 @@ impl ConfigPanelState {
         path: PathBuf,
         read_only: bool,
         initial_section: Option<&str>,
-    ) -> Self {
-        Self::open_at_with_models(config, path, read_only, initial_section, Vec::new())
-    }
-
-    /// Same as `open_at` but seeds the panel with the current model universe
-    /// so the free-models sub-panel can render the soft-warning suffix
-    /// without re-querying the assemble pipeline. Production callers pass
-    /// the canonical names from `App::models`; tests can pass an empty
-    /// vector to exercise the all-unmatched path.
-    pub(crate) fn open_at_with_models(
-        config: &Config,
-        path: PathBuf,
-        read_only: bool,
-        initial_section: Option<&str>,
-        known_models: Vec<String>,
     ) -> Self {
         let opened_mtime = mtime(&path);
         let selected_section = initial_section
@@ -452,7 +431,6 @@ impl ConfigPanelState {
             save_error: None,
             read_only,
             searching: None,
-            known_models,
             providers_cursor: 0,
             providers_prop_cursor: 0,
         };
@@ -992,25 +970,23 @@ impl ConfigPanelState {
                 self.status = "provider property toggled".to_string();
             }
             providers::ProvidersLine::AddAction => {
-                // Open Add Provider modal
-                // Assuming known_models contains strings like "vendor/model" or just "model"
-                // Actually, dashboard entries are usually (vendor, model).
-                // Let's assume for now we just allow string input for vendor/model in the modal,
-                // or we use known_models if they are formatted correctly.
-
-                // For simplicity, let's just use a basic editor for now.
-                let available: Vec<(String, String)> = self
-                    .known_models
-                    .iter()
-                    .filter_map(|s| {
-                        let parts: Vec<&str> = s.split('/').collect();
-                        if parts.len() == 2 {
-                            Some((parts[0].to_string(), parts[1].to_string()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                // Derive the (vendor, model) universe from the merged
+                // baked + user provider list so the modal is self-contained.
+                // Reading from `self.config.providers` (rather than threading
+                // the dashboard model list through `open_at`) keeps the
+                // production and test paths identical and lets the modal
+                // populate even when the panel is opened before any
+                // dashboard refresh has occurred.
+                let merged = crate::logic::selection::baked::merge_with_overrides(
+                    self.config.providers.value(),
+                );
+                let mut available: Vec<(String, String)> = Vec::new();
+                for entry in &merged {
+                    let pair = (entry.vendor.clone(), entry.model.clone());
+                    if !available.contains(&pair) {
+                        available.push(pair);
+                    }
+                }
 
                 self.editing = Some(Editing::AddProvider(providers::ProvidersEditor::new(
                     available,
@@ -2416,12 +2392,11 @@ mod tests {
                 display_order: 0,
             },
         ]);
-        let mut state = ConfigPanelState::open_at_with_models(
+        let mut state = ConfigPanelState::open_at(
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
             Some("providers"),
-            vec!["claude/claude-opus-4-7".to_string()],
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
 
@@ -2439,12 +2414,11 @@ mod tests {
     #[test]
     fn providers_section_shows_baked_models_by_default() {
         let config = Config::baked_defaults();
-        let mut state = ConfigPanelState::open_at_with_models(
+        let mut state = ConfigPanelState::open_at(
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
             Some("providers"),
-            Vec::new(),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
 
@@ -2457,6 +2431,44 @@ mod tests {
             text.contains("[ Add Provider ]"),
             "should show add button: {text}"
         );
+    }
+
+    #[test]
+    fn add_provider_modal_populates_models_from_baked_universe() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("providers"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
+
+        let lines = providers::get_lines(&state.config);
+        let add_idx = lines
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::AddAction))
+            .expect("AddAction line present");
+        state.providers_cursor = add_idx;
+        state.activate_provider_line();
+
+        let Some(Editing::AddProvider(editor)) = state.editing.as_ref() else {
+            panic!("AddProvider modal should be active");
+        };
+        assert!(
+            !editor.available_models.is_empty(),
+            "modal should derive models from the baked + override universe"
+        );
+        assert!(
+            editor
+                .available_models
+                .iter()
+                .any(|(v, m)| v == "claude" && m == "claude-opus-4-7"),
+            "expected baked claude/claude-opus-4-7 in available models: {:?}",
+            editor.available_models,
+        );
+        assert_eq!(editor.vendor, editor.available_models[0].0);
+        assert_eq!(editor.model, editor.available_models[0].1);
     }
 
     #[test]

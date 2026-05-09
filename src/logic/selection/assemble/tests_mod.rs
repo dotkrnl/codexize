@@ -853,7 +853,7 @@ fn merge_preserves_expired_vendor_on_error() {
         BTreeMap::from([("claude-sonnet".to_string(), Some(80))]),
     );
 
-    let merged = merge_quota_payload(&cached, fresh);
+    let merged = merge_quota_payload(&cached, fresh, &BTreeSet::new());
 
     // Claude was refreshed → fresh value wins.
     assert_eq!(
@@ -890,7 +890,7 @@ fn merge_overlays_when_cached_uses_alias_key() {
         BTreeMap::from([("gpt-5".to_string(), Some(90))]),
     );
 
-    let merged = merge_quota_payload(&cached, fresh);
+    let merged = merge_quota_payload(&cached, fresh, &BTreeSet::new());
 
     // The alias entry is dropped (its vendor was refreshed) and the canonical
     // "openai" key carries the fresh value.
@@ -902,6 +902,53 @@ fn merge_overlays_when_cached_uses_alias_key() {
 }
 
 #[test]
+fn merge_records_freshly_failed_subscriptions() {
+    // Codex fetch errored this round (no fresh map, present in `failed`)
+    // → its prior cached values stay (stale-on-error) AND it gets a
+    // failure marker so selection applies the 50% rule.
+    let mut cached = QuotaPayload::default();
+    cached.insert(
+        "openai".to_string(),
+        BTreeMap::from([("gpt-5".to_string(), Some(70))]),
+    );
+    let failed = BTreeSet::from([SubscriptionKind::Codex]);
+
+    let merged = merge_quota_payload(&cached, BTreeMap::new(), &failed);
+
+    assert_eq!(
+        merged.get("openai").and_then(|m| m.get("gpt-5").copied()),
+        Some(Some(70)),
+        "stale-on-error must keep the cached gpt-5 quota"
+    );
+    assert!(
+        merged.failed_subscriptions.contains(&SubscriptionKind::Codex),
+        "failed Codex refresh must be recorded for the 50% assumption"
+    );
+}
+
+#[test]
+fn merge_clears_failure_marker_when_subscription_recovers() {
+    let mut cached = QuotaPayload::default();
+    cached
+        .failed_subscriptions
+        .insert(SubscriptionKind::Codex);
+    let mut fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
+    fresh.insert(
+        SubscriptionKind::Codex,
+        BTreeMap::from([("gpt-5".to_string(), Some(80))]),
+    );
+
+    let merged = merge_quota_payload(&cached, fresh, &BTreeSet::new());
+
+    assert!(
+        !merged
+            .failed_subscriptions
+            .contains(&SubscriptionKind::Codex),
+        "successful refresh must clear the prior failure marker"
+    );
+}
+
+#[test]
 fn merge_keeps_unknown_vendor_keys() {
     let mut cached = QuotaPayload::default();
     cached.insert(
@@ -909,7 +956,7 @@ fn merge_keeps_unknown_vendor_keys() {
         BTreeMap::from([("ufo-9000".to_string(), Some(33))]),
     );
 
-    let merged = merge_quota_payload(&cached, BTreeMap::new());
+    let merged = merge_quota_payload(&cached, BTreeMap::new(), &BTreeSet::new());
 
     assert_eq!(
         merged

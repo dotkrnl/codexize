@@ -436,9 +436,16 @@ fn parse_kimi_semver(name: &str) -> Option<(u64, u64)> {
 /// payload (keyed by subscription string). Successfully-refreshed subscriptions overwrite
 /// cached entries; cached entries for subscriptions that did not refresh
 /// successfully are carried forward (stale-on-error fallback).
+///
+/// `failed` is the set of subscriptions whose fresh fetch errored in this
+/// refresh round. They are recorded in `merged.failed_subscriptions` so
+/// the selection layer can apply the spec's 50% capacity assumption.
+/// Subscriptions that were refreshed successfully clear any prior failure
+/// marker; subscriptions not touched in this round preserve theirs.
 pub fn merge_quota_payload(
     cached: &QuotaPayload,
     fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
+    failed: &BTreeSet<SubscriptionKind>,
 ) -> QuotaPayload {
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged = QuotaPayload::default();
@@ -458,15 +465,20 @@ pub fn merge_quota_payload(
             .values
             .insert(vendor::vendor_kind_to_str(subscription).to_string(), models);
     }
-    // Subscriptions whose fresh fetch did not return a map are
-    // considered failed for this round; preserve any prior failure
-    // markers for subscriptions we did not refresh in this call.
-    merged.failed_subscriptions = cached
+    // Re-derive `failed_subscriptions` for this round: drop markers
+    // belonging to subscriptions that just refreshed cleanly, keep
+    // markers for subscriptions we did not touch, and add fresh markers
+    // for subscriptions that errored.
+    let mut failed_set: BTreeSet<SubscriptionKind> = cached
         .failed_subscriptions
         .iter()
         .copied()
         .filter(|kind| !succeeded.contains(kind))
         .collect();
+    for kind in failed {
+        failed_set.insert(*kind);
+    }
+    merged.failed_subscriptions = failed_set;
     merged
 }
 pub fn merge_reset_payload(

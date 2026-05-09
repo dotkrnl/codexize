@@ -119,8 +119,14 @@ async fn assemble_with_refresh(
     if quota_expired || resets_expired || reset_missing {
         let (fresh_quotas, fresh_resets, fresh_errors) =
             quota::load_quota_maps_for_async(available_vendors.iter().copied()).await;
+        // Capture the failed vendor set BEFORE consuming `fresh_errors`
+        // so the spec's 50% capacity assumption (per QuotaPayload.
+        // failed_subscriptions) can be applied even when a vendor's
+        // refresh exploded with no per-model entries to insert.
+        let failed_vendors: BTreeSet<SubscriptionKind> =
+            fresh_errors.iter().map(|err| err.vendor).collect();
         quota_errors.extend(fresh_errors);
-        quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas);
+        quota_payload = pure::merge_quota_payload(&cached_quota, fresh_quotas, &failed_vendors);
         reset_payload = pure::merge_reset_payload(&cached_resets, fresh_resets);
         let _ = cache::save_quotas(cache_dir, &quota_payload);
         let _ = cache::save_quota_resets(cache_dir, &reset_payload);

@@ -30,7 +30,7 @@ pub use super::acp_events::{
 };
 use crate::{
     adapters::EffortLevel, logic::memory::memory_glob_from_session_path,
-    selection::SubscriptionKind, state::LaunchModes,
+    selection::CliKind, selection::SubscriptionKind, state::LaunchModes,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -156,6 +156,14 @@ pub struct AcpLaunchRequest {
     /// `opencode-go`). The launch boundary uses this to qualify a bare
     /// `model` with the right tier prefix; `None` for direct vendors.
     pub route_provider: Option<String>,
+    /// The CLI to spawn for this request. Determines which acp.agents
+    /// entry supplies the program/args and whether to prefix the model
+    /// with an opencode tier qualifier.
+    pub cli: CliKind,
+    /// The model string to pass to the CLI verbatim. For Free candidates
+    /// launched via the Opencode CLI this is exactly the config's
+    /// `model_name` — no provider prefixing.
+    pub launch_name: String,
     pub requested_effort: EffortLevel, pub effective_effort: EffortLevel,
     pub interactive: bool, pub modes: LaunchModes, pub policy: AcpLaunchPolicy,
 }

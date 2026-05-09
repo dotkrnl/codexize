@@ -115,6 +115,8 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             route_provider: route_provider.clone(),
+            cli: vendor_kind.direct_cli().unwrap_or(crate::selection::CliKind::Opencode),
+            launch_name: model.clone(),
             prompt_path: prompt_path.clone(),
             effort,
             modes,

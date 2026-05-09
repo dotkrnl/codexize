@@ -4,7 +4,7 @@ use crate::acp::{
 };
 use crate::data::config::schema::AcpAgentSection;
 use crate::data::config::view::{AcpAgentView, AcpInstallView};
-use crate::selection::{SubscriptionKind, vendor::vendor_kind_to_str};
+use crate::selection::{CliKind, SubscriptionKind, vendor::vendor_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 const CLAUDE_CLI: &str = "claude";
@@ -33,7 +33,17 @@ impl AcpConfig {
             .map(|(v, _)| *v).collect()
     }
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
-        let agent = self.agents.get(&request.vendor).ok_or_else(|| AcpError::human_block(
+        // For Free and OpencodeGo candidates, the CLI determines which
+        // agent entry to use; for direct vendors the subscription IS the
+        // agent key. Free candidates always route through the CLI named in
+        // the config entry.
+        let agent_key = match request.vendor {
+            SubscriptionKind::Free => {
+                crate::selection::CliKind::to_subscription(request.cli)
+            }
+            _ => request.vendor,
+        };
+        let agent = self.agents.get(&agent_key).ok_or_else(|| AcpError::human_block(
             format!("ACP agent not configured for vendor {}", vendor_kind_to_str(request.vendor))
         ))?;
         if agent.program.trim().is_empty() {
@@ -59,6 +69,8 @@ impl AcpConfig {
             request.vendor,
             request.route_provider.as_deref(),
             &request.model,
+            request.cli,
+            &request.launch_name,
         );
         let entries = [
             ("vendor", vendor_kind_to_str(request.vendor).to_string()),
@@ -193,7 +205,14 @@ fn launch_model_for_vendor(
     vendor: SubscriptionKind,
     route_provider: Option<&str>,
     model: &str,
+    cli: CliKind,
+    launch_name: &str,
 ) -> String {
+    // Free candidates pass the operator-supplied model name verbatim
+    // to the chosen CLI — no provider prefixing or routing wrapper.
+    if vendor == SubscriptionKind::Free {
+        return launch_name.to_string();
+    }
     if vendor == SubscriptionKind::OpencodeGo && !model.contains('/') {
         // opencode's ACP `model` config advertises provider-qualified values
         // (`opencode/<id>` for the zen tier, `opencode-go/<id>` for the Go

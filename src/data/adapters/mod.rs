@@ -17,6 +17,13 @@ pub struct AgentRun {
     /// `None` for direct vendors and for opencode entries that originated
     /// before this field was wired.
     pub route_provider: Option<String>,
+    /// The CLI to spawn for this run. Different from `vendor` for Free
+    /// candidates: a Free model may launch through any CLI.
+    pub cli: crate::selection::CliKind,
+    /// The model string to pass to the CLI verbatim. For Free candidates
+    /// this is the operator-supplied `model_name` from config; for direct
+    /// and opencode-go candidates this equals `model`.
+    pub launch_name: String,
     pub prompt_path: PathBuf,
     pub effort: EffortLevel,
     pub modes: LaunchModes,

@@ -31,6 +31,19 @@ impl CliKind {
         }
     }
 
+    /// Map a `CliKind` to the `SubscriptionKind` that owns the ACP agent
+    /// entry for that CLI. `Opencode` maps to `OpencodeGo` because the
+    /// opencode agent is configured under the opencode-go subscription.
+    pub fn to_subscription(self) -> SubscriptionKind {
+        match self {
+            CliKind::Claude => SubscriptionKind::Claude,
+            CliKind::Codex => SubscriptionKind::Codex,
+            CliKind::Gemini => SubscriptionKind::Gemini,
+            CliKind::Kimi => SubscriptionKind::Kimi,
+            CliKind::Opencode => SubscriptionKind::OpencodeGo,
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "claude" => Some(CliKind::Claude),

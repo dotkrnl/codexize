@@ -1283,6 +1283,8 @@ fn launch_test_run(dir: &Path) -> AgentRun {
     AgentRun {
         model: "model-x".to_string(),
         route_provider: None,
+        cli: crate::selection::CliKind::Codex,
+        launch_name: "model-x".to_string(),
         prompt_path,
         effort: crate::adapters::EffortLevel::Normal,
         modes: crate::state::LaunchModes::default(),

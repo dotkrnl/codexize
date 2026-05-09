@@ -232,9 +232,21 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     }
 
     let models = outcome.expect("assemble_from_loaded should not panic");
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].vendor, SubscriptionKind::Codex);
-    assert_eq!(models[0].name, "gpt-5.5");
+    // Model-first assembly produces rows for all dashboard entries; the
+    // claude-sonnet row has zero candidates because Claude is not in the
+    // available set, while the gpt-5.5 row has a Codex candidate.
+    assert_eq!(models.len(), 2);
+    let gpt = models
+        .iter()
+        .find(|m| m.name == "gpt-5.5")
+        .expect("gpt-5.5 row must exist");
+    assert_eq!(gpt.vendor, SubscriptionKind::Codex);
+    assert_eq!(gpt.quota_percent, Some(70));
+    let claude = models
+        .iter()
+        .find(|m| m.name == "claude-sonnet-4-6")
+        .expect("claude-sonnet row must exist");
+    assert!(claude.candidates.is_empty(), "claude row has no available subscription");
 }
 
 fn with_temp_home_cache<T>(

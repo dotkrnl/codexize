@@ -27,6 +27,7 @@ use super::schema::{
     PathsSection, RunnerSection, SUPPORTED_VERSION, ShellPolicy, UiColonPalette, UiFooter,
     UiSection,
 };
+use crate::selection::FreeModelEntry;
 
 /// Structured loader error. The CLI/TUI render `to_string()`; tests match
 /// on the variant tag.
@@ -138,6 +139,7 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
         "ui",
         "diagnostics",
         "memory",
+        "free_models",
     ];
 
     for (key, item) in doc.iter() {
@@ -150,6 +152,7 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
             "ui" => decode_ui(item, &mut config.ui, key)?,
             "diagnostics" => decode_diagnostics(item, &mut config.diagnostics, key)?,
             "memory" => decode_memory(item, &mut config.memory, key)?,
+            "free_models" => decode_free_models(item, &mut config.free_models, key)?,
             unknown => {
                 let (line, column) = item_position(item);
                 return Err(LoadError::UnknownKey {
@@ -497,6 +500,73 @@ fn decode_memory(item: &Item, out: &mut MemorySection, parent: &str) -> Result<(
             other => return unknown(parent, other, v, known),
         }
     }
+    Ok(())
+}
+
+fn decode_free_models(
+    item: &Item,
+    out: &mut Override<Vec<FreeModelEntry>>,
+    parent: &str,
+) -> Result<(), LoadError> {
+    let aot = item
+        .as_array_of_tables()
+        .ok_or_else(|| LoadError::TypeMismatch {
+            path: parent.to_string(),
+            expected: "array of tables",
+            line: 1,
+            column: 1,
+        })?;
+    let mut entries = Vec::new();
+    for (i, table) in aot.iter().enumerate() {
+        let path = |key: &str| format!("{parent}[{i}].{key}");
+        let mut mapped_into = None;
+        let mut cli = None;
+        let mut model_name = None;
+        let known: &[&str] = &["mapped_into", "cli", "model_name"];
+        for (k, v) in table.iter() {
+            match k {
+                "mapped_into" => mapped_into = Some(require_string(v, &path(k))?),
+                "cli" => {
+                    let raw = require_string(v, &path(k))?;
+                    cli = Some(
+                        crate::selection::CliKind::parse(&raw).ok_or_else(|| {
+                            LoadError::Validation(format!(
+                                "{} = {:?} is not one of {:?}",
+                                path(k),
+                                raw,
+                                crate::selection::CliKind::variants()
+                            ))
+                        })?,
+                    );
+                }
+                "model_name" => model_name = Some(require_string(v, &path(k))?),
+                other => {
+                    let (line, column) = item_position(item);
+                    return Err(LoadError::UnknownKey {
+                        path: format!("{parent}[{i}].{other}"),
+                        line,
+                        column,
+                        suggestion: super::util::nearest(other, known, 3),
+                    });
+                }
+            }
+        }
+        let mapped_into = mapped_into.ok_or_else(|| LoadError::Validation(format!(
+            "{parent}[{i}]: missing required field \"mapped_into\""
+        )))?;
+        let cli = cli.ok_or_else(|| LoadError::Validation(format!(
+            "{parent}[{i}]: missing required field \"cli\""
+        )))?;
+        let model_name = model_name.ok_or_else(|| LoadError::Validation(format!(
+            "{parent}[{i}]: missing required field \"model_name\""
+        )))?;
+        entries.push(FreeModelEntry {
+            mapped_into,
+            cli,
+            model_name,
+        });
+    }
+    *out = Override::explicit(entries);
     Ok(())
 }
 
@@ -1000,6 +1070,16 @@ pub fn render_sparse(config: &Config) -> String {
     if !mem_block.is_empty() {
         out.push_str("\n[memory]\n");
         out.push_str(&mem_block);
+    }
+
+    // [[free_models]] — sparse-save: omit when empty/default.
+    if config.free_models.is_explicit() && !config.free_models.value().is_empty() {
+        for entry in config.free_models.value() {
+            out.push_str("\n[[free_models]]\n");
+            let _ = writeln!(out, "mapped_into = {}", toml_quote(&entry.mapped_into));
+            let _ = writeln!(out, "cli = \"{}\"", entry.cli.as_str());
+            let _ = writeln!(out, "model_name = {}", toml_quote(&entry.model_name));
+        }
     }
 
     out

@@ -7,6 +7,7 @@
 //! semantic value, not how the value got there.
 
 use chrono::{DateTime, Utc};
+use crate::selection::FreeModelEntry;
 use std::collections::BTreeMap;
 
 /// The supported on-disk schema version. The loader rejects any
@@ -439,6 +440,7 @@ pub struct Config {
     pub ui: UiSection,
     pub diagnostics: DiagnosticsSection,
     pub memory: MemorySection,
+    pub free_models: Override<Vec<FreeModelEntry>>,
 }
 
 impl Config {
@@ -541,6 +543,20 @@ impl Config {
         if *self.memory.journal_retention_months.value() < 1 {
             return Err("memory.journal_retention_months must be >= 1".into());
         }
+
+        for (i, entry) in self.free_models.value().iter().enumerate() {
+            if entry.mapped_into.trim().is_empty() {
+                return Err(format!(
+                    "free_models[{i}].mapped_into must be non-empty"
+                ));
+            }
+            if entry.model_name.trim().is_empty() {
+                return Err(format!(
+                    "free_models[{i}].model_name must be non-empty"
+                ));
+            }
+        }
+
         Ok(())
     }
 }

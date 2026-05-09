@@ -19,6 +19,33 @@ pub enum CliKind {
     Kimi,
     Opencode,
 }
+
+impl CliKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CliKind::Claude => "claude",
+            CliKind::Codex => "codex",
+            CliKind::Gemini => "gemini",
+            CliKind::Kimi => "kimi",
+            CliKind::Opencode => "opencode",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "claude" => Some(CliKind::Claude),
+            "codex" => Some(CliKind::Codex),
+            "gemini" => Some(CliKind::Gemini),
+            "kimi" => Some(CliKind::Kimi),
+            "opencode" => Some(CliKind::Opencode),
+            _ => None,
+        }
+    }
+
+    pub const fn variants() -> &'static [&'static str] {
+        &["claude", "codex", "gemini", "kimi", "opencode"]
+    }
+}
 #[derive(Debug, Clone)]
 pub struct QuotaError {
     pub vendor: SubscriptionKind,

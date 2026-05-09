@@ -180,6 +180,13 @@ pub fn emit_annotated(config: &Config) -> String {
     )
     .ok();
 
+    for entry in config.free_models.value() {
+        out.push_str("\n[[free_models]]\n");
+        writeln!(out, "mapped_into = {}", quote(&entry.mapped_into)).ok();
+        writeln!(out, "cli = \"{}\"", entry.cli.as_str()).ok();
+        writeln!(out, "model_name = {}", quote(&entry.model_name)).ok();
+    }
+
     out
 }
 
@@ -224,5 +231,9 @@ mod tests {
         ] {
             assert!(out.contains(header), "missing {header} in dump");
         }
+        assert!(
+            !out.contains("[[free_models]]"),
+            "baked defaults must not emit free_models"
+        );
     }
 }

@@ -29,7 +29,7 @@ use crate::{
     adapters::EffortLevel,
     app::App,
     selection::{
-        CachedModel, SubscriptionKind,
+        CachedModel, CliKind, SubscriptionKind,
         config::SelectionPhase,
         selection::{pick_for_phase_with_effort, select_for_review_with_effort},
     },
@@ -37,6 +37,32 @@ use crate::{
         self as session_state, LaunchModes, Message, MessageKind, MessageSender, SessionState,
     },
 };
+
+/// Tuple returned by every model-pick helper so the launch boundary always
+/// sees the selected `Candidate`'s CLI and launch_name (not just the row's
+/// canonical identity). Free candidates require this so a row named
+/// `deepseek-v4-flash` can launch via opencode with `dsk-4-flash`.
+pub(crate) type StagePick = (
+    String,            // model row name
+    SubscriptionKind,  // row subscription (compat mirror of selected candidate)
+    String,            // vendor tag string
+    Option<String>,    // route_provider for opencode tier resolution
+    CliKind,           // CLI to spawn
+    String,            // verbatim launch_name passed to the CLI
+);
+
+/// Pull `(cli, launch_name)` from the row's selected candidate when arbitration
+/// has chosen one; otherwise fall back to the direct-vendor CLI and the row's
+/// canonical name. The fallback only fires for rows with no candidates (e.g.
+/// override_model paths constructed before assembly seeded candidates), which
+/// preserves pre-task-2 behavior.
+pub(crate) fn pick_cli_and_launch_name(row: &CachedModel) -> (CliKind, String) {
+    if let Some(candidate) = row.selected_candidate() {
+        return (candidate.cli, candidate.launch_name.clone());
+    }
+    let cli = row.vendor.direct_cli().unwrap_or(CliKind::Opencode);
+    (cli, row.name.clone())
+}
 impl App {
     pub(crate) fn try_test_launch(
         &mut self,
@@ -93,21 +119,27 @@ impl App {
         phase: SelectionPhase,
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
+    ) -> Option<StagePick> {
         if let Some(model) = override_model {
+            let (cli, launch_name) = pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
                 model.route_provider.clone(),
+                cli,
+                launch_name,
             ));
         }
         let outcome = pick_for_phase_with_effort(&self.models, phase, None, effort, cheap)?;
+        let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
             outcome.model.route_provider.clone(),
+            cli,
+            launch_name,
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -119,22 +151,28 @@ impl App {
         used_models: &[(SubscriptionKind, String)],
         effort: EffortLevel,
         cheap: bool,
-    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
+    ) -> Option<StagePick> {
         if let Some(model) = override_model {
+            let (cli, launch_name) = pick_cli_and_launch_name(model);
             return Some((
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
                 model.route_provider.clone(),
+                cli,
+                launch_name,
             ));
         }
         let outcome =
             select_for_review_with_effort(&self.models, used_vendors, used_models, effort, cheap)?;
+        let (cli, launch_name) = pick_cli_and_launch_name(outcome.model);
         let picked = (
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
             outcome.model.route_provider.clone(),
+            cli,
+            launch_name,
         );
         self.emit_selection_warning(outcome.warning);
         Some(picked)
@@ -265,16 +303,17 @@ impl App {
             _ => false,
         }
     }
-    fn session_selected_model_for_validator(
-        &mut self,
-    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
+    fn session_selected_model_for_validator(&mut self) -> Option<StagePick> {
         let name = self.state.selected_model.as_ref()?.clone();
         let model = self.models.iter().find(|m| m.name == name)?;
+        let (cli, launch_name) = pick_cli_and_launch_name(model);
         Some((
             model.name.clone(),
             model.vendor,
             vendor_tag(model.vendor).to_string(),
             model.route_provider.clone(),
+            cli,
+            launch_name,
         ))
     }
     /// Look up the most-recent run on a stage for the given round and
@@ -287,11 +326,7 @@ impl App {
     /// task's attempt=1 is newer than an earlier task's attempt=2, and
     /// the simplifier should follow the model the round most recently
     /// settled on.
-    fn round_stage_model(
-        &self,
-        stage: &str,
-        round: u32,
-    ) -> Option<(String, SubscriptionKind, String, Option<String>)> {
+    fn round_stage_model(&self, stage: &str, round: u32) -> Option<StagePick> {
         let last = self
             .state
             .agent_runs
@@ -299,11 +334,24 @@ impl App {
             .filter(|run| run.stage == stage && run.round == round)
             .max_by_key(|run| run.id)?;
         let vendor_kind = crate::selection::vendor::str_to_vendor(&last.vendor)?;
+        // RunRecord doesn't persist the candidate's cli/launch_name, so when
+        // resuming we look the row up in the current universe and reuse its
+        // selected candidate (preserves Free-tier launch_name on resume); if
+        // the row no longer exists, fall back to direct-CLI defaults.
+        let (cli, launch_name) = match self.models.iter().find(|m| m.name == last.model) {
+            Some(row) => pick_cli_and_launch_name(row),
+            None => (
+                vendor_kind.direct_cli().unwrap_or(CliKind::Opencode),
+                last.model.clone(),
+            ),
+        };
         Some((
             last.model.clone(),
             vendor_kind,
             vendor_tag(vendor_kind).to_string(),
             last.route_provider.clone(),
+            cli,
+            launch_name,
         ))
     }
 }

@@ -47,7 +47,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor, route_provider) = chosen;
+        let (model, vendor_kind, vendor, route_provider, cli, launch_name) = chosen;
         let completed = self.state.builder.done_task_ids();
         let id_floor = self.state.builder.max_task_id();
         let prompt = recovery_sharding_prompt(
@@ -72,8 +72,8 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             route_provider: route_provider.clone(),
-            cli: vendor_kind.direct_cli().unwrap_or(crate::selection::CliKind::Opencode),
-            launch_name: model.clone(),
+            cli,
+            launch_name,
             prompt_path: prompt_path.clone(),
             effort,
             modes,

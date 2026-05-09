@@ -52,7 +52,7 @@ impl App {
             effort,
             modes.cheap,
         );
-        let Some((model, vendor_kind, vendor, route_provider)) = chosen else {
+        let Some((model, vendor_kind, vendor, route_provider, cli, launch_name)) = chosen else {
             self.record_agent_error("no model available for dreaming".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -83,8 +83,8 @@ impl App {
         let run = AgentRun {
             model: model.clone(),
             route_provider: route_provider.clone(),
-            cli: vendor_kind.direct_cli().unwrap_or(crate::selection::CliKind::Opencode),
-            launch_name: model.clone(),
+            cli,
+            launch_name,
             prompt_path: prompt_path.clone(),
             effort,
             modes,

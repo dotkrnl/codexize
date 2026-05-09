@@ -116,22 +116,11 @@ fn is_cheap_eligible_reads_selected_candidate_flag() {
 
 #[test]
 fn is_tough_eligible_reads_selected_candidate_flag() {
-    let tough = model_with_candidate_flags(
-        SubscriptionKind::Kimi,
-        "kimi-k2",
-        false,
-        true,
-        false,
-    );
+    let tough = model_with_candidate_flags(SubscriptionKind::Kimi, "kimi-k2", false, true, false);
     assert!(is_tough_eligible(&tough));
 
-    let not_tough = model_with_candidate_flags(
-        SubscriptionKind::Codex,
-        "gpt-5",
-        false,
-        false,
-        false,
-    );
+    let not_tough =
+        model_with_candidate_flags(SubscriptionKind::Codex, "gpt-5", false, false, false);
     assert!(!is_tough_eligible(&not_tough));
 }
 

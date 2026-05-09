@@ -13,8 +13,8 @@ use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, Candidate, CliKind, FreeModelEntry, QuotaError, SubscriptionKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
-use crate::data::config::schema::{EffortMapping, ProviderEntry};
 use crate::dashboard::DashboardModel;
+use crate::data::config::schema::{EffortMapping, ProviderEntry};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -148,8 +148,12 @@ pub fn assemble_universe(
             // launch_name)` (rare, but keeps eligibility consistent
             // when the operator points a free provider at a known
             // tuple).
-            let baked_props =
-                baked::baked_for(&free.mapped_into, &free.mapped_into, free.cli, &free.model_name);
+            let baked_props = baked::baked_for(
+                &free.mapped_into,
+                &free.mapped_into,
+                free.cli,
+                &free.model_name,
+            );
             row.candidates.push(Candidate {
                 subscription: SubscriptionKind::Free,
                 cli: free.cli,
@@ -414,9 +418,7 @@ fn make_candidate(
         .or_else(|| {
             dashboard_name
                 .filter(|name| *name != launch_name)
-                .and_then(|name| {
-                    quota::find_quota_by_heuristic(name, subscription, parsed_quotas)
-                })
+                .and_then(|name| quota::find_quota_by_heuristic(name, subscription, parsed_quotas))
         });
     let quota_resets_at = parsed_resets
         .get(&subscription)
@@ -464,7 +466,8 @@ fn append_provider_additions(
     available_subscriptions: &BTreeSet<SubscriptionKind>,
     consumed: &mut BTreeSet<(SubscriptionKind, String, CliKind, String)>,
 ) {
-    let Some(entries) = providers_by_row.get(&(dashboard_subscription, dashboard_model.to_string()))
+    let Some(entries) =
+        providers_by_row.get(&(dashboard_subscription, dashboard_model.to_string()))
     else {
         return;
     };
@@ -567,9 +570,7 @@ pub(crate) fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> 
     }
     if !official_pool.is_empty() {
         let best_official = min_by_compare(&official_pool, candidates).expect("non-empty pool");
-        let best_quota = candidates[best_official]
-            .effective_quota()
-            .unwrap_or(0);
+        let best_quota = candidates[best_official].effective_quota().unwrap_or(0);
         if best_quota >= OFFICIAL_QUOTA_FLOOR {
             return Some(best_official);
         }

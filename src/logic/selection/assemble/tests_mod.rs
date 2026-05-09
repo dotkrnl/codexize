@@ -202,8 +202,14 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
     }];
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
 
-    let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
+    let (models, _warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+        &[],
+    );
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
@@ -924,7 +930,9 @@ fn merge_records_freshly_failed_subscriptions() {
         "stale-on-error must keep the cached gpt-5 quota"
     );
     assert!(
-        merged.failed_subscriptions.contains(&SubscriptionKind::Codex),
+        merged
+            .failed_subscriptions
+            .contains(&SubscriptionKind::Codex),
         "failed Codex refresh must be recorded for the 50% assumption"
     );
 }
@@ -932,9 +940,7 @@ fn merge_records_freshly_failed_subscriptions() {
 #[test]
 fn merge_clears_failure_marker_when_subscription_recovers() {
     let mut cached = QuotaPayload::default();
-    cached
-        .failed_subscriptions
-        .insert(SubscriptionKind::Codex);
+    cached.failed_subscriptions.insert(SubscriptionKind::Codex);
     let mut fresh: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = BTreeMap::new();
     fresh.insert(
         SubscriptionKind::Codex,
@@ -1214,8 +1220,14 @@ fn free_candidate_wins_arbitration_over_direct_below_quota() {
     }];
     let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
 
-    let (models, warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
+    let (models, warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+        &[],
+    );
 
     assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
     assert_eq!(models.len(), 1);
@@ -1252,8 +1264,14 @@ fn unmatched_mapped_into_produces_soft_warning() {
     }];
     let available = BTreeSet::from([SubscriptionKind::Claude]);
 
-    let (models, warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
+    let (models, warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+        &[],
+    );
 
     assert_eq!(warnings.len(), 1);
     assert!(
@@ -1458,9 +1476,7 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     // the candidate's `effective_quota()`.
     let dashboard = vec![make_ipbr_entry("gpt-5", "codex", "gpt-5")];
     let mut quotas = QuotaPayload::default();
-    quotas
-        .failed_subscriptions
-        .insert(SubscriptionKind::Codex);
+    quotas.failed_subscriptions.insert(SubscriptionKind::Codex);
     let available = BTreeSet::from([SubscriptionKind::Codex]);
     let (models, _warnings) =
         assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[], &[]);
@@ -1487,8 +1503,14 @@ fn free_candidate_launch_name_is_verbatim_in_acp_request() {
     }];
     let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
 
-    let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models, &[]);
+    let (models, _warnings) = assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+        &[],
+    );
 
     assert_eq!(models.len(), 1);
     let selected = models[0].selected_candidate().unwrap();

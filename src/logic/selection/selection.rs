@@ -47,6 +47,15 @@ impl Deref for SelectionOutcome<'_> {
 /// drops `quota_percent == Some(0)` and rows missing the ipbr phase score
 /// for `phase`; if every candidate is dropped this returns `None`, which
 /// callers surface as the existing no-eligible-model condition.
+///
+/// Per spec §"Selection algorithm" (operator decision, 2026-05-09): step
+/// 1 is a *weighted sampler*, not a deterministic max-by. The dashboard
+/// phase score and the row's max `effective_quota_for_tiebreak` across
+/// enabled providers feed `candidate_pool_weights` together — free /
+/// quota_disabled providers therefore dominate the sampler probability
+/// at full headroom, while a low-quota row keeps a small but non-zero
+/// chance of being explored. See `ranking::effective_row_quota` for the
+/// quota lookup that backs this.
 fn pool_pick<'a>(
     candidates: &[&'a CachedModel],
     phase: SelectionPhase,

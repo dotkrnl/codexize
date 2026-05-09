@@ -147,6 +147,11 @@ fn pick_for_phase_unknown_quota_remains_selectable() {
     // candidate the effective-30 baseline still produces a non-zero weight.
     let mut model = sample_model(SubscriptionKind::Claude, "unknown-quota", 0);
     model.quota_percent = None;
+    // Mirror the row's "unknown" state on the per-tuple Candidate — the
+    // sampler now reads the row's max effective quota across enabled
+    // providers, so a stale `Some(0)` on the candidate would wrongly
+    // mark this row as exhausted instead of unknown.
+    model.candidates[0].quota_percent = None;
     let models = vec![model];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = pick_for_phase(&models, SelectionPhase::Build, None)
@@ -296,6 +301,68 @@ fn weighted_sample_uses_weights_for_random() {
 
     assert!(high_count > 90);
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+}
+
+#[test]
+fn pool_pick_sampler_dominates_for_free_row_over_lower_fetched_quota() {
+    // Spec §"Selection algorithm" (operator decision, 2026-05-09): the
+    // sampler's quota input is the row's max
+    // `effective_quota_for_tiebreak` across enabled providers. With
+    // dashboard scores tied at 80.0, the free row's effective quota of
+    // 100 vastly outweighs the fetched row's 40 — the sampler should
+    // pick the free row in nearly every seed.
+    let mut free_row = sample_model_with_score(SubscriptionKind::Free, "free-row", 0, 80.0);
+    free_row.candidates[0].free = true;
+    free_row.candidates[0].official = false;
+    free_row.candidates[0].quota_percent = None;
+    free_row.quota_percent = Some(100);
+    let fetched_row = sample_model_with_score(SubscriptionKind::Codex, "fetched-row", 40, 80.0);
+
+    let models = vec![free_row, fetched_row];
+    let mut free_count = 0;
+    for seed in 1..200_u64 {
+        TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+        let chosen = pick_for_phase(&models, SelectionPhase::Build, None).expect("non-empty pool");
+        if chosen.name == "free-row" {
+            free_count += 1;
+        }
+    }
+    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+
+    assert!(
+        free_count > 180,
+        "free row should dominate the sampler when its row-level effective_quota=100 \
+         vs fetched-row's 40 (got {free_count}/199)"
+    );
+}
+
+#[test]
+fn pool_pick_sampler_dominates_for_quota_disabled_row_over_lower_fetched_quota() {
+    // `quota_disabled = true` forces 100%; same sampler-dominance
+    // contract as the free-row test above.
+    let mut disabled_row =
+        sample_model_with_score(SubscriptionKind::Codex, "disabled-row", 0, 80.0);
+    disabled_row.candidates[0].quota_disabled = true;
+    disabled_row.candidates[0].quota_percent = None;
+    disabled_row.quota_percent = Some(100);
+    let fetched_row = sample_model_with_score(SubscriptionKind::Claude, "fetched-row", 30, 80.0);
+
+    let models = vec![disabled_row, fetched_row];
+    let mut disabled_count = 0;
+    for seed in 1..200_u64 {
+        TEST_SAMPLE_SEED.store(seed, AtomicOrdering::Relaxed);
+        let chosen = pick_for_phase(&models, SelectionPhase::Build, None).expect("non-empty pool");
+        if chosen.name == "disabled-row" {
+            disabled_count += 1;
+        }
+    }
+    TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
+
+    assert!(
+        disabled_count > 180,
+        "quota_disabled row should dominate the sampler at 100% headroom \
+         (got {disabled_count}/199)"
+    );
 }
 
 fn opus_sonnet_codex_kimi() -> Vec<CachedModel> {

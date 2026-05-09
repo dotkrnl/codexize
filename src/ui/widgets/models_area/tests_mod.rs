@@ -1323,6 +1323,11 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
     // sampling cell should render at 0%.
     let mut zero_quota = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-zero", 90.0, 0);
     zero_quota.quota_percent = Some(0);
+    // Mirror the row's exhausted state on the per-tuple Candidate —
+    // the sampler reads the row's max effective quota across enabled
+    // providers, so a stale `Some(100)` on the candidate would
+    // disagree with the row-level `Some(0)` and re-enable the row.
+    zero_quota.candidates[0].quota_percent = Some(0);
     let healthy = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-ok", 90.0, 0);
     let models = vec![zero_quota, healthy];
 

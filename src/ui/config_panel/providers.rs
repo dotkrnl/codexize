@@ -37,8 +37,7 @@ impl ProvidersEditor {
         if trimmed_launch.is_empty() || self.vendor.is_empty() || self.model.is_empty() {
             return false;
         }
-        let subscription =
-            parse_subscription_str(&self.vendor).unwrap_or(SubscriptionKind::Direct);
+        let subscription = parse_subscription_str(&self.vendor).unwrap_or(SubscriptionKind::Direct);
 
         let new_entry = ProviderEntry {
             cli: self.cli,

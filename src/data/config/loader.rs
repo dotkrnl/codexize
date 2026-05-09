@@ -554,11 +554,7 @@ fn decode_providers(
                 "launch" => {
                     let raw = require_string(v, &path(k))?;
                     let (cli_str, launch_str) = raw.split_once('/').ok_or_else(|| {
-                        LoadError::Validation(format!(
-                            "{} = {:?} must contain '/'",
-                            path(k),
-                            raw
-                        ))
+                        LoadError::Validation(format!("{} = {:?} must contain '/'", path(k), raw))
                     })?;
                     if cli_str.is_empty() {
                         return Err(LoadError::Validation(format!(
@@ -630,18 +626,14 @@ fn decode_providers(
             }
         }
         let cli = cli.ok_or_else(|| {
-            LoadError::Validation(format!(
-                "{parent}[{i}]: missing required \"launch\""
-            ))
+            LoadError::Validation(format!("{parent}[{i}]: missing required \"launch\""))
         })?;
         let launch_name = launch_name.expect("set together with cli");
         let model = model.ok_or_else(|| {
             LoadError::Validation(format!("{parent}[{i}]: missing required \"model\""))
         })?;
         let subscription = subscription.ok_or_else(|| {
-            LoadError::Validation(format!(
-                "{parent}[{i}]: missing required \"subscription\""
-            ))
+            LoadError::Validation(format!("{parent}[{i}]: missing required \"subscription\""))
         })?;
         entries.push(ProviderEntry {
             cli,
@@ -1465,7 +1457,10 @@ mod tests {
         assert_eq!(p.cli, crate::selection::CliKind::Opencode);
         assert_eq!(p.launch_name, "opencode-go/deepseek-v4-flash");
         assert_eq!(p.model, "deepseek-v4-flash");
-        assert_eq!(p.subscription, crate::selection::SubscriptionKind::OpencodeGo);
+        assert_eq!(
+            p.subscription,
+            crate::selection::SubscriptionKind::OpencodeGo
+        );
     }
 
     #[test]

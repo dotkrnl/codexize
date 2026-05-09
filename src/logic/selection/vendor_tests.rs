@@ -128,9 +128,6 @@ fn subscription_kind_to_str_round_trips_known_values() {
         subscription_kind_to_str(SubscriptionKind::OpencodeGo),
         "opencode-go"
     );
-    assert_eq!(
-        subscription_kind_to_str(SubscriptionKind::Direct),
-        "direct"
-    );
+    assert_eq!(subscription_kind_to_str(SubscriptionKind::Direct), "direct");
     assert_eq!(subscription_kind_to_str(SubscriptionKind::Claude), "claude");
 }

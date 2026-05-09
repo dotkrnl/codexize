@@ -20,7 +20,9 @@ impl App {
             {
                 continue;
             }
-            let Some(vendor) = crate::logic::selection::assemble::parse_subscription_str(&run.vendor) else {
+            let Some(vendor) =
+                crate::logic::selection::assemble::parse_subscription_str(&run.vendor)
+            else {
                 continue;
             };
             failed_models

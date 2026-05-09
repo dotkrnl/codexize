@@ -486,9 +486,10 @@ pub fn merge_quota_payload(
         }
     }
     for (subscription, models) in fresh {
-        merged
-            .values
-            .insert(vendor::subscription_kind_to_str(subscription).to_string(), models);
+        merged.values.insert(
+            vendor::subscription_kind_to_str(subscription).to_string(),
+            models,
+        );
     }
     // Re-derive `failed_subscriptions` for this round: drop markers
     // belonging to subscriptions that just refreshed cleanly, keep
@@ -524,7 +525,10 @@ pub fn merge_reset_payload(
         }
     }
     for (subscription, models) in fresh {
-        merged.insert(vendor::subscription_kind_to_str(subscription).to_string(), models);
+        merged.insert(
+            vendor::subscription_kind_to_str(subscription).to_string(),
+            models,
+        );
     }
     merged
 }

@@ -1354,13 +1354,7 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
             Some("/definitely/missing/codex-acp".to_string()),
         )],
         || {
-            let result = launch_interactive(
-                "[Coder]",
-                &run,
-                                "run-1",
-                &artifacts_dir,
-                None,
-            );
+            let result = launch_interactive("[Coder]", &run, "run-1", &artifacts_dir, None);
             let err = result.expect_err("missing CLI must bail before launch");
             let msg = format!("{:#}", err);
             assert!(
@@ -1385,13 +1379,7 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
             Some("/definitely/missing/codex-acp".to_string()),
         )],
         || {
-            let result = launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "run-2",
-                &artifacts_dir,
-                None,
-            );
+            let result = launch_noninteractive("[Coder]", &run, "run-2", &artifacts_dir, None);
             let err = result.expect_err("missing CLI must bail before launch");
             let msg = format!("{:#}", err);
             assert!(
@@ -1435,7 +1423,7 @@ fn acp_launch_with_final_validation_policy_rejects_workspace_mutation() {
             launch_noninteractive_with_policy(
                 "[FinalValidation]",
                 &run,
-                                "final-validation-run",
+                "final-validation-run",
                 &artifacts_dir,
                 Some(&verdict_path),
                 crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
@@ -1485,7 +1473,7 @@ fn acp_launch_writes_finish_stamp_on_success() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                                "coder-run",
+                "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -1536,7 +1524,7 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                                "interactive-run",
+                "interactive-run",
                 &artifacts_dir,
                 None,
             )
@@ -1601,7 +1589,7 @@ fn interactive_acp_input_is_sent_as_followup_prompt() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                                "interactive-input-run",
+                "interactive-input-run",
                 &artifacts_dir,
                 None,
             )
@@ -1654,7 +1642,7 @@ fn interactive_acp_input_is_rejected_until_prompt_turn_finishes() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                                "interactive-not-ready-run",
+                "interactive-not-ready-run",
                 &artifacts_dir,
                 None,
             )
@@ -1715,14 +1703,8 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
         || {
             state.save().expect("save session");
 
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             wait_for_run_label_to_finish("[Coder]");
 
@@ -1781,14 +1763,8 @@ fn acp_launch_persists_thought_chunks_as_agent_thought() {
         || {
             state.save().expect("save session");
 
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             wait_for_run_label_to_finish("[Coder]");
 
@@ -1846,14 +1822,8 @@ fn acp_launch_concatenates_thought_chunks_per_turn() {
         || {
             state.save().expect("save session");
 
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             wait_for_run_label_to_finish("[Coder]");
 
@@ -1894,7 +1864,7 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                                "coder-run",
+                "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -1927,14 +1897,8 @@ fn acp_launch_marks_early_process_exit_as_failed() {
             ("ACP_TEST_MODE", Some("early_exit".to_string())),
         ],
         || {
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
@@ -1963,14 +1927,8 @@ fn acp_launch_records_cause_when_transport_init_fails() {
             ("ACP_TEST_MODE", Some("invalid_initialize_json".to_string())),
         ],
         || {
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             wait_for_run_label_to_finish("[Coder]");
             let stamp = read_finish_stamp(&stamp_path).expect("read finish stamp");
@@ -2002,23 +1960,11 @@ fn acp_launch_enforces_single_active_run() {
             ("ACP_TEST_MODE", Some("sleep_forever".to_string())),
         ],
         || {
-            launch_noninteractive(
-                "[Coder 1]",
-                &run,
-                                "coder-one",
-                &artifacts_dir,
-                None,
-            )
-            .expect("first launch");
+            launch_noninteractive("[Coder 1]", &run, "coder-one", &artifacts_dir, None)
+                .expect("first launch");
 
-            let err = launch_noninteractive(
-                "[Coder 2]",
-                &run,
-                                "coder-two",
-                &artifacts_dir,
-                None,
-            )
-            .expect_err("second active run must be rejected");
+            let err = launch_noninteractive("[Coder 2]", &run, "coder-two", &artifacts_dir, None)
+                .expect_err("second active run must be rejected");
             let msg = format!("{:#}", err);
             assert!(
                 msg.contains("one active ACP run"),
@@ -2050,14 +1996,8 @@ fn acp_launch_cleans_up_child_on_cancel() {
             ("ACP_TEST_MODE", Some("sleep_forever".to_string())),
         ],
         || {
-            launch_noninteractive(
-                "[Coder]",
-                &run,
-                                "coder-run",
-                &artifacts_dir,
-                None,
-            )
-            .expect("launch ACP run");
+            launch_noninteractive("[Coder]", &run, "coder-run", &artifacts_dir, None)
+                .expect("launch ACP run");
 
             cancel_run_labels_matching("[Coder]");
             wait_for_run_label_to_finish("[Coder]");
@@ -2096,7 +2036,7 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
             launch_noninteractive(
                 "[Stage 1]",
                 &run,
-                                "stage-one",
+                "stage-one",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -2106,7 +2046,7 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
             launch_noninteractive(
                 "[Stage 2]",
                 &run,
-                                "stage-two",
+                "stage-two",
                 &artifacts_dir,
                 Some(&artifact_path),
             )

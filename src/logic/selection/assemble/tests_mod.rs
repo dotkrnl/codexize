@@ -737,8 +737,7 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let resets = empty_resets_for_quotas(&quotas);
 
-    let (models, _warnings) =
-        assemble_universe(dashboard, quotas, resets, &all_clis(), &[]);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, &all_clis(), &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
@@ -1348,13 +1347,8 @@ fn provider_override_disables_baked_candidate_in_universe() {
     }];
     let available = BTreeSet::from([CliKind::Claude]);
 
-    let (models, _warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &providers,
-    );
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &providers);
 
     assert_eq!(models.len(), 1, "row must remain even when disabled");
     let row = &models[0];
@@ -1403,13 +1397,8 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
     }];
     let available = BTreeSet::from([CliKind::Claude, CliKind::Opencode]);
 
-    let (models, _warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &providers,
-    );
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &providers);
 
     assert_eq!(models.len(), 1);
     let row = &models[0];

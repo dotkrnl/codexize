@@ -23,13 +23,17 @@ const DIRECT_QUOTA_FLOOR: u8 = 20;
 /// Pure: callers (the data-layer adapter) are responsible for any cache
 /// reads, refresh fetches, and writes that produced these inputs. This
 /// function only merges, groups, and ranks those snapshots.
+///
+/// Returns `(models, free_model_warnings)` where `free_model_warnings`
+/// lists `mapped_into` values from `free_models` entries that did not
+/// match any ipbr canonical row name.
 pub fn assemble_universe(
     dashboard_entries: Vec<DashboardEntry>,
     quota_payload: QuotaPayload,
     reset_payload: ResetPayload,
     available_subscriptions: &BTreeSet<SubscriptionKind>,
     free_models: &[FreeModelEntry],
-) -> Vec<CachedModel> {
+) -> (Vec<CachedModel>, Vec<String>) {
     let parsed_quotas: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = quota_payload
         .into_iter()
         .filter_map(|(subscription_name, models)| {
@@ -73,18 +77,30 @@ pub fn assemble_universe(
     }
 
     for free in free_models {
-        let Some(row) = rows.get_mut(&free.mapped_into) else {
-            continue;
-        };
-        row.candidates.push(Candidate {
-            subscription: SubscriptionKind::Free,
-            cli: free.cli,
-            launch_name: free.model_name.clone(),
-            quota_percent: Some(100),
-            quota_resets_at: None,
-            display_order: row.display_order,
-        });
+        if let Some(row) = rows.get_mut(&free.mapped_into) {
+            row.candidates.push(Candidate {
+                subscription: SubscriptionKind::Free,
+                cli: free.cli,
+                launch_name: free.model_name.clone(),
+                quota_percent: Some(100),
+                quota_resets_at: None,
+                display_order: row.display_order,
+            });
+        }
+        // Unmatched mapped_into entries are excluded from candidates
+        // and surfaced as soft warnings below.
     }
+
+    let free_model_warnings: Vec<String> = free_models
+        .iter()
+        .filter(|free| !rows.contains_key(&free.mapped_into))
+        .map(|free| {
+            format!(
+                "free_models entry mapped_into {:?} does not match any ipbr row",
+                free.mapped_into
+            )
+        })
+        .collect();
 
     let mut models: Vec<CachedModel> = rows
         .into_values()
@@ -99,7 +115,7 @@ pub fn assemble_universe(
             .cmp(&b.display_order)
             .then_with(|| a.name.cmp(&b.name))
     });
-    models
+    (models, free_model_warnings)
 }
 
 fn row_name_for_entry(entry: &DashboardEntry) -> Option<String> {

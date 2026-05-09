@@ -179,7 +179,7 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
     }];
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
 
-    let models = assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &free_models);
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
@@ -209,7 +209,7 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
     ]);
     let available = BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo]);
 
-    let models = assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "kimi-k2.6");
@@ -378,7 +378,8 @@ fn assemble_from_cache_with_available(
         .quota_resets
         .map(|section| section.data)
         .unwrap_or_default();
-    assemble_universe(dashboard, quotas, resets, available, &[])
+    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, available, &[]);
+    models
 }
 
 #[test]
@@ -693,7 +694,7 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let resets = empty_resets_for_quotas(&quotas);
 
-    let models = assemble_universe(dashboard, quotas, resets, &all_vendors(), &[]);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, &all_vendors(), &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
@@ -777,7 +778,7 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
         ("claude", "claude-opus-4-7", direct_quota),
         ("opencode", "opencode/claude-opus-4-7", opencode_quota),
     ]);
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![direct, routed],
         quotas,
         BTreeMap::new(),
@@ -792,7 +793,7 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
 fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
     let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4-7");
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![routed],
         BTreeMap::new(),
         BTreeMap::new(),
@@ -985,7 +986,7 @@ fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
         ("opencode", "kimi-k2.6", Some(90)),
     ]);
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![routed],
         quotas,
         BTreeMap::new(),
@@ -1014,7 +1015,7 @@ fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher
         ("opencode", "kimi-k2.6", Some(80)),
     ]);
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![routed],
         quotas,
         BTreeMap::new(),
@@ -1042,7 +1043,7 @@ fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
     let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
     let quotas = make_quota_payload(&[]);
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![routed],
         quotas,
         BTreeMap::new(),
@@ -1067,7 +1068,7 @@ fn synth_kimi_latest_skipped_when_no_kimi_semver() {
         ("opencode", "kimi-k2-thinking", Some(40)),
     ]);
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![routed],
         quotas,
         BTreeMap::new(),
@@ -1094,7 +1095,7 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
         ("opencode", "kimi-k2.6", Some(70)),
     ]);
 
-    let models = assemble_universe(
+    let (models, _warnings) = assemble_universe(
         vec![older, latest],
         quotas,
         BTreeMap::new(),
@@ -1128,7 +1129,7 @@ fn synth_kimi_latest_skipped_when_kimi_unavailable() {
     let quotas = make_quota_payload(&[("opencode", "kimi-k2.6", Some(90))]);
     let available = BTreeSet::from([SubscriptionKind::OpencodeGo]);
 
-    let models = assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
+    let (models, _warnings) = assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);

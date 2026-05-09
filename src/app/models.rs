@@ -13,6 +13,7 @@ const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn spawn_refresh(
     cache_dir: PathBuf,
     available_vendors: BTreeSet<SubscriptionKind>,
+    free_models: Vec<crate::selection::FreeModelEntry>,
 ) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -21,6 +22,7 @@ pub(crate) fn spawn_refresh(
                 crate::data::selection_assembly::assemble_models_async(
                     &cache_dir,
                     &available_vendors,
+                    &free_models,
                 )
                 .await,
             );
@@ -31,6 +33,7 @@ pub(crate) fn spawn_refresh(
             crate::data::selection_assembly::assemble_models_async(
                 &cache_dir_owned,
                 &available_vendors,
+                &free_models,
             )
             .await
         }));
@@ -132,7 +135,7 @@ impl App {
                 };
                 if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching {
-                        rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors()),
+                        rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors(), self.config.free_models.value().clone()),
                         started_at: Instant::now(),
                     };
                 }
@@ -141,7 +144,7 @@ impl App {
     }
     pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
-            rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors()),
+            rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors(), self.config.free_models.value().clone()),
             started_at: Instant::now(),
         };
     }

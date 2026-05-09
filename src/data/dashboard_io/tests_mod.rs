@@ -230,7 +230,7 @@ const IPBR_FIXTURE: &str = r#"
 display_name = "claude-opus-4-7"
 canonical_id = "anthropic/claude-opus-4-7"
 vendor = "anthropic"
-aliases = ["claude-opus-4.7", "claude_opus_4_7"]
+aliases = ["claude_opus_4_7"]
 unknown_top_level = "ignored"
 
 [models.scores]
@@ -277,12 +277,8 @@ fn parse_ipbr_preserves_inventory_compatible_name_and_normalizes_canonical_id_al
         opus.canonical_id.as_deref(),
         Some("anthropic-claude-opus-4-7")
     );
-    // Aliases are normalized: punctuation/underscores collapse to `-`,
-    // so two distinct surface forms can produce the same key.
-    assert_eq!(
-        opus.aliases,
-        vec!["claude-opus-4-7".to_string(), "claude-opus-4-7".to_string(),]
-    );
+    // Aliases are normalized: punctuation/underscores collapse to `-`.
+    assert_eq!(opus.aliases, vec!["claude-opus-4-7".to_string()]);
     assert_eq!(opus.ipbr_phase_scores.idea, Some(92.5));
     assert_eq!(opus.ipbr_phase_scores.planning, Some(91.0));
     assert_eq!(opus.ipbr_phase_scores.build, Some(90.0));

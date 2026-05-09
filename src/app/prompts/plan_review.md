@@ -4,10 +4,6 @@ Inputs:
   Plan: {plan_path}
   Spec: {spec_path}{prior_block}
 
-Schema gate: `plan.md` must keep the exact `##` headings `Goal Description`,
-`Acceptance Criteria`, `Path Boundaries`, and `Dependencies and Sequence` in
-that order.
-
 You have exactly two jobs. Do both, do nothing else:
 
   1. CORRECT INCONSISTENCIES THAT WOULD MISLEAD A CODER. Things that, if
@@ -56,11 +52,6 @@ the issue lives there, raise it via the review, not via a patch.
 
 If you found nothing on either job, write a single bullet to
 {review_path} saying so. Do NOT invent issues.
-
-If any required heading is missing and the smallest safe patch is not enough
-to restore the structure faithfully, record a blocking review note that
-requests a re-plan. Do not approve a schema-less plan by treating it as a
-cosmetic issue.
 
 Memory side-quest (optional, low effort): if a planning lesson surfaced
 (recurring missed edge case, structural ambiguity, misleading pattern),

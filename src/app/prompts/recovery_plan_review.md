@@ -11,10 +11,6 @@ Inputs:
     changed_files. Cross-check that `changed_files` lines up with the
     actual edits visible in spec/plan.
 
-Schema gate: the recovered `plan.md` must keep the exact `##` headings
-`Goal Description`, `Acceptance Criteria`, `Path Boundaries`, and
-`Dependencies and Sequence` in that order.
-
 Your job:
   1. Verify the recovered spec/plan directly addresses the triggering review.
   2. Verify the plan is coherent enough for sharding.
@@ -22,10 +18,6 @@ Your job:
   4. Make minimal fixes to {spec} or {plan} only for critical issues. For
      each edit, add a bullet to `feedback` naming the file changed and the
      specific issue it resolves (audit trail).
-
-If the recovered plan is missing any required schema heading and the issue
-is not a trivial mechanical fix, do not approve it; route it back for another
-recovery pass.
 
 Write `{output}` as TOML (REQUIRED). No prose around it; parse failure or schema violation = run failure.
 

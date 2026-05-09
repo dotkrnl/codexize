@@ -47,9 +47,64 @@ pub struct BakedProvider {
 /// Sentinel display order for user-additions with no baked counterpart.
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
-/// Static baked-defaults table. The 5-row stub here mirrors the legacy
-/// shape; Task 5 expands it to the full 30-row hand-curated set.
+/// Static baked-defaults table — 30 hand-curated rows mirroring the
+/// ipbr scoreboard: 17 direct-subscription rows (Claude opus/sonnet,
+/// Codex gpt-5.x, Gemini variants, Kimi k2-6) plus 13 opencode-go rows
+/// (deepseek, glm, grok, mimo, minimax, qwen) sharing the
+/// `"opencode-shared"` quota pool.
 pub const BAKED_TABLE: &[BakedRow] = &[
+    // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
+    BakedRow {
+        model: "claude-opus-4-1",
+        providers: &[BakedProvider {
+            cli: CliKind::Claude,
+            launch_name: "claude-opus-4-1",
+            subscription: SubscriptionKind::Claude,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "max",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "claude-opus-4-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Claude,
+            launch_name: "claude-opus-4-5",
+            subscription: SubscriptionKind::Claude,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "max",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "claude-opus-4-6",
+        providers: &[BakedProvider {
+            cli: CliKind::Claude,
+            launch_name: "claude-opus-4-6",
+            subscription: SubscriptionKind::Claude,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "max",
+            quota_lookup_key: None,
+        }],
+    },
     BakedRow {
         model: "claude-opus-4-7",
         providers: &[BakedProvider {
@@ -59,6 +114,41 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "max",
+            quota_lookup_key: None,
+        }],
+    },
+    // --- Claude sonnet (3 rows): both cheap_eligible and tough_eligible, effort_tough="max" ---
+    BakedRow {
+        model: "claude-sonnet-4",
+        providers: &[BakedProvider {
+            cli: CliKind::Claude,
+            launch_name: "claude-sonnet-4",
+            subscription: SubscriptionKind::Claude,
+            free: false,
+            official: true,
+            cheap_eligible: true,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "max",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "claude-sonnet-4-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Claude,
+            launch_name: "claude-sonnet-4-5",
+            subscription: SubscriptionKind::Claude,
+            free: false,
+            official: true,
+            cheap_eligible: true,
             tough_eligible: true,
             effort_eligible: true,
             effort_cheap: "low",
@@ -84,11 +174,12 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: None,
         }],
     },
+    // --- Codex gpt-5.x (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="xhigh" ---
     BakedRow {
-        model: "gpt-5",
+        model: "gpt-5-2",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
-            launch_name: "gpt-5",
+            launch_name: "gpt-5-2",
             subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
@@ -98,6 +189,75 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "xhigh",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "gpt-5-3-codex",
+        providers: &[BakedProvider {
+            cli: CliKind::Codex,
+            launch_name: "gpt-5-3-codex",
+            subscription: SubscriptionKind::Codex,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "xhigh",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "gpt-5-4",
+        providers: &[BakedProvider {
+            cli: CliKind::Codex,
+            launch_name: "gpt-5-4",
+            subscription: SubscriptionKind::Codex,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "xhigh",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "gpt-5-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Codex,
+            launch_name: "gpt-5-5",
+            subscription: SubscriptionKind::Codex,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "xhigh",
+            quota_lookup_key: None,
+        }],
+    },
+    // --- Gemini (5 rows): effort_eligible=false, effort_tough="high" ---
+    BakedRow {
+        model: "gemini-2-5-flash",
+        providers: &[BakedProvider {
+            cli: CliKind::Gemini,
+            launch_name: "gemini-2-5-flash",
+            subscription: SubscriptionKind::Gemini,
+            free: false,
+            official: true,
+            cheap_eligible: true,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
             quota_lookup_key: None,
         }],
     },
@@ -119,7 +279,59 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "kimi-latest",
+        model: "gemini-3-flash",
+        providers: &[BakedProvider {
+            cli: CliKind::Gemini,
+            launch_name: "gemini-3-flash",
+            subscription: SubscriptionKind::Gemini,
+            free: false,
+            official: true,
+            cheap_eligible: true,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "gemini-3-pro",
+        providers: &[BakedProvider {
+            cli: CliKind::Gemini,
+            launch_name: "gemini-3-pro",
+            subscription: SubscriptionKind::Gemini,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: None,
+        }],
+    },
+    BakedRow {
+        model: "gemini-3-1-pro-preview",
+        providers: &[BakedProvider {
+            cli: CliKind::Gemini,
+            launch_name: "gemini-3-1-pro-preview",
+            subscription: SubscriptionKind::Gemini,
+            free: false,
+            official: true,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: None,
+        }],
+    },
+    // --- Kimi (1 row): model=kimi-k2-6, launch_name=kimi-latest ---
+    BakedRow {
+        model: "kimi-k2-6",
         providers: &[BakedProvider {
             cli: CliKind::Kimi,
             launch_name: "kimi-latest",
@@ -133,6 +345,228 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_normal: "medium",
             effort_tough: "high",
             quota_lookup_key: None,
+        }],
+    },
+    // --- Opencode-go (13 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
+    BakedRow {
+        model: "deepseek-v4-flash",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/deepseek-v4-flash",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "deepseek-v4-pro",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/deepseek-v4-pro",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "minimax-m2-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/minimax-m2-5",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "minimax-m2-7",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/minimax-m2-7",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "qwen3-6-plus",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/qwen3-6-plus",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "grok-4-latest",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/grok-4-latest",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "grok-code-fast-1",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/grok-code-fast-1",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "mimo-v2-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/mimo-v2-5",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "mimo-v2-5-pro",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/mimo-v2-5-pro",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "glm-4-6",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/glm-4-6",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "glm-4-7",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/glm-4-7",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "glm-5",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/glm-5",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
+        }],
+    },
+    BakedRow {
+        model: "glm-5-1",
+        providers: &[BakedProvider {
+            cli: CliKind::Opencode,
+            launch_name: "opencode-go/glm-5-1",
+            subscription: SubscriptionKind::OpencodeGo,
+            free: false,
+            official: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_cheap: "low",
+            effort_normal: "medium",
+            effort_tough: "high",
+            quota_lookup_key: Some("opencode-shared"),
         }],
     },
 ];
@@ -245,8 +679,36 @@ mod tests {
 
     #[test]
     fn baked_table_seeds_codex_with_xhigh_tough_effort() {
-        let entry = baked_for("gpt-5", CliKind::Codex, "gpt-5").unwrap();
+        let entry = baked_for("gpt-5-4", CliKind::Codex, "gpt-5-4").unwrap();
         assert_eq!(entry.effort_mapping.tough, "xhigh");
+    }
+
+    #[test]
+    fn baked_table_seeds_kimi_with_launch_name_kimi_latest() {
+        let entry = baked_for("kimi-k2-6", CliKind::Kimi, "kimi-latest").unwrap();
+        assert_eq!(entry.model, "kimi-k2-6");
+        assert_eq!(entry.launch_name, "kimi-latest");
+        assert!(entry.cheap_eligible);
+        assert!(!entry.tough_eligible);
+        assert!(!entry.effort_eligible);
+    }
+
+    #[test]
+    fn baked_table_seeds_opencode_go_with_shared_quota_key() {
+        let entry = baked_for(
+            "deepseek-v4-flash",
+            CliKind::Opencode,
+            "opencode-go/deepseek-v4-flash",
+        )
+        .unwrap();
+        assert!(!entry.official);
+        assert_eq!(entry.quota_lookup_key.as_deref(), Some("opencode-shared"));
+        assert_eq!(entry.subscription, SubscriptionKind::OpencodeGo);
+    }
+
+    #[test]
+    fn baked_table_has_thirty_rows() {
+        assert_eq!(BAKED_TABLE.len(), 30);
     }
 
     #[test]

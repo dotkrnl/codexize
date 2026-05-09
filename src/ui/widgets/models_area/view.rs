@@ -446,14 +446,11 @@ fn render_compact_quota(
     }
     let expanded_width: usize = vendors_to_render
         .iter()
-        .map(|(vendor, model)| {
-            let vendor_failed = quota_errors.iter().any(|err| err.subscription == *vendor);
+        .map(|(_vendor, model)| {
             let label = display_vendor_tag(model);
-            let quota_str_len = if vendor_failed {
-                2
-            } else {
-                model.quota_percent.map_or(2, |v| format!("{v}%").width())
-            };
+            // Both failed and known/unknown quota render as 4 chars now
+            // (" --%" or "{v:>3}%"), so the budget is uniform.
+            let quota_str_len = 4;
             label.width() + 1 + 6 + quota_str_len
         })
         .sum::<usize>()
@@ -477,15 +474,21 @@ fn render_compact_quota(
             spans.push(Span::styled("Quota ", Style::default().fg(Color::DarkGray)));
         }
         if vendor_failed {
-            spans.push(Span::styled("--", Style::default().fg(Color::Red)));
+            spans.push(Span::styled(
+                " --%".to_string(),
+                Style::default().fg(Color::Red),
+            ));
         } else {
             match model.quota_percent {
                 Some(v) => {
                     let style = Style::default().fg(probability_color(v, 100));
-                    spans.push(Span::styled(format!("{v}%"), style));
+                    spans.push(Span::styled(format!("{v:>3}%"), style));
                 }
                 None => {
-                    spans.push(Span::styled("--", Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled(
+                        " --%".to_string(),
+                        Style::default().fg(Color::DarkGray),
+                    ));
                 }
             }
         }

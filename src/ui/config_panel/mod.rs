@@ -23,6 +23,8 @@ use std::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+pub(crate) mod free_models;
+
 const MIN_WIDTH: u16 = 50;
 const TAB_SEPARATOR: &str = "  ";
 const TAG_WIDTH: usize = 9;
@@ -323,6 +325,7 @@ const SECTIONS: &[&str] = &[
     "acp.policy",
     "acp.install",
     "acp.agents.claude",
+    "free_models",
     "runner",
     "paths",
     "ui",
@@ -331,6 +334,12 @@ const SECTIONS: &[&str] = &[
     "diagnostics",
     "memory",
 ];
+
+/// True when the section name owns the free-models sub-panel rendering path
+/// (a list-of-entries layout) rather than the default key/value field grid.
+fn is_free_models_section(section: &str) -> bool {
+    section == "free_models"
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchState {
@@ -383,6 +392,12 @@ pub(crate) struct ConfigPanelState {
     save_error: Option<String>,
     pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
+    /// Snapshot of ipbr canonical names known at panel-open time. Used by
+    /// the free-models sub-panel to flag entries whose `mapped_into` no
+    /// longer matches any row with `(no matching ipbr row)`. The list is
+    /// frozen on open — refreshing the universe mid-edit must not silently
+    /// retag entries the operator is currently editing.
+    pub(crate) known_models: Vec<String>,
 }
 
 impl ConfigPanelState {
@@ -394,6 +409,21 @@ impl ConfigPanelState {
         path: PathBuf,
         read_only: bool,
         initial_section: Option<&str>,
+    ) -> Self {
+        Self::open_at_with_models(config, path, read_only, initial_section, Vec::new())
+    }
+
+    /// Same as `open_at` but seeds the panel with the current model universe
+    /// so the free-models sub-panel can render the soft-warning suffix
+    /// without re-querying the assemble pipeline. Production callers pass
+    /// the canonical names from `App::models`; tests can pass an empty
+    /// vector to exercise the all-unmatched path.
+    pub(crate) fn open_at_with_models(
+        config: &Config,
+        path: PathBuf,
+        read_only: bool,
+        initial_section: Option<&str>,
+        known_models: Vec<String>,
     ) -> Self {
         let opened_mtime = mtime(&path);
         let selected_section = initial_section
@@ -418,6 +448,7 @@ impl ConfigPanelState {
             save_error: None,
             read_only,
             searching: None,
+            known_models,
         };
         state.select_first_field_in_current_section();
         state
@@ -1395,16 +1426,25 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     }
     lines.push(Line::from("─".repeat(w)));
     let used = lines.len();
-    let body_h = height.saturating_sub(used as u16 + 2) as usize;
-    let fields = visible_fields(state);
-    for (pos, idx) in fields.into_iter().take(body_h).enumerate() {
-        let row = field_row(state, idx, w);
-        let row = if pos > 0 && state.value_for(&FIELDS[idx]).width() > value_width(w) {
-            format!("  {row}")
-        } else {
-            row
-        };
-        lines.push(Line::from(row));
+    // Reserve 3 lines for the trailing separator + help + footer so the
+    // footer is never sacrificed when the tab bar wraps onto a third line
+    // (sub-panels with longer section names hit this case at width 80).
+    let body_h = height.saturating_sub(used as u16 + 3) as usize;
+    if is_free_models_section(state.current_section()) {
+        for body_line in free_models_body_lines(state, w).into_iter().take(body_h) {
+            lines.push(Line::from(body_line));
+        }
+    } else {
+        let fields = visible_fields(state);
+        for (pos, idx) in fields.into_iter().take(body_h).enumerate() {
+            let row = field_row(state, idx, w);
+            let row = if pos > 0 && state.value_for(&FIELDS[idx]).width() > value_width(w) {
+                format!("  {row}")
+            } else {
+                row
+            };
+            lines.push(Line::from(row));
+        }
     }
     lines.push(Line::from("─".repeat(w)));
     lines.push(Line::from(help_text(state, w)));
@@ -1716,6 +1756,27 @@ fn source_copy<T>(value: &Override<T>) -> &'static str {
     } else {
         "(def)"
     }
+}
+
+/// Body lines for the `free_models` section. Each existing entry renders on
+/// one line; entries whose `mapped_into` does not match the loaded universe
+/// pick up the `(no matching ipbr row)` suffix in dim grey-equivalent text.
+/// An empty section shows a single hint line so operators see where to add
+/// entries from.
+fn free_models_body_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
+    let rows = free_models::entry_rows(&state.config, &state.known_models);
+    if rows.is_empty() {
+        return vec![fit_cell(
+            "  no free_models entries · operator-funded providers go here",
+            width,
+        )];
+    }
+    rows.iter()
+        .map(|row| {
+            let line = free_models::format_entry_line(row);
+            fit_cell(&format!("  {line}"), width)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -2121,6 +2182,79 @@ mod tests {
         // Esc unwinds the forced-edit state defensively.
         state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(state.editing.is_none());
+    }
+
+    #[test]
+    fn free_models_section_renders_entries_with_unmatched_warning() {
+        // Two entries: one matched against the known universe, one that
+        // points at a row no provider serves yet. The matched entry renders
+        // bare; the unmatched entry trails the soft-warning suffix.
+        let mut config = Config::baked_defaults();
+        config.free_models = crate::data::config::schema::Override::explicit(vec![
+            crate::selection::FreeModelEntry {
+                mapped_into: "claude-opus-4-7".to_string(),
+                cli: crate::selection::CliKind::Claude,
+                model_name: "my-opus".to_string(),
+            },
+            crate::selection::FreeModelEntry {
+                mapped_into: "ghost-model".to_string(),
+                cli: crate::selection::CliKind::Codex,
+                model_name: "missing".to_string(),
+            },
+        ]);
+        let mut state = ConfigPanelState::open_at_with_models(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("free_models"),
+            vec!["claude-opus-4-7".to_string()],
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "free_models").unwrap();
+
+        let text = render_to_text(&state, 120, 18);
+        assert!(
+            text.contains("claude-opus-4-7"),
+            "free_models section must list mapped_into: {text}"
+        );
+        assert!(
+            text.contains("[claude]"),
+            "free_models section must show CLI tag: {text}"
+        );
+        assert!(
+            text.contains("my-opus"),
+            "free_models section must show model_name: {text}"
+        );
+        assert!(
+            text.contains("(no matching ipbr row)"),
+            "unmatched entry must surface soft warning: {text}"
+        );
+        // The matched entry must NOT pick up the warning suffix even when
+        // rendered alongside an unmatched sibling. Confirm by counting the
+        // suffix occurrences — exactly one entry is unmatched in the fixture.
+        assert_eq!(
+            text.matches("(no matching ipbr row)").count(),
+            1,
+            "soft warning must attach only to the unmatched entry: {text}"
+        );
+    }
+
+    #[test]
+    fn free_models_empty_section_renders_hint_line() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at_with_models(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("free_models"),
+            Vec::new(),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "free_models").unwrap();
+
+        let text = render_to_text(&state, 120, 18);
+        assert!(
+            text.contains("no free_models entries"),
+            "empty free_models section must show a hint: {text}"
+        );
     }
 
     #[test]

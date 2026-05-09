@@ -46,17 +46,19 @@ pub fn assemble_universe(
     dashboard_entries: Vec<DashboardEntry>,
     quota_payload: QuotaPayload,
     reset_payload: ResetPayload,
-    available_subscriptions: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<String>) {
     let failed_subscriptions = quota_payload.failed_subscriptions.clone();
+    // Keep all parseable subscriptions in the parsed quota/reset maps;
+    // selection's per-candidate filter (`available_clis`) handles
+    // availability now, so we don't drop subscription rows here.
     let parsed_quotas: BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>> = quota_payload
         .values
         .into_iter()
         .filter_map(|(subscription_name, models)| {
             parse_subscription_str(&subscription_name).map(|subscription| (subscription, models))
         })
-        .filter(|(subscription, _)| available_subscriptions.contains(subscription))
         .collect();
     let parsed_resets: BTreeMap<
         SubscriptionKind,
@@ -66,7 +68,6 @@ pub fn assemble_universe(
         .filter_map(|(subscription_name, models)| {
             parse_subscription_str(&subscription_name).map(|subscription| (subscription, models))
         })
-        .filter(|(subscription, _)| available_subscriptions.contains(subscription))
         .collect();
 
     // Resolve baked + user `[[providers]]` and index by the dashboard's
@@ -93,7 +94,7 @@ pub fn assemble_universe(
                 &parsed_quotas,
                 &parsed_resets,
                 &failed_subscriptions,
-                available_subscriptions,
+                available_clis,
                 &providers_by_row,
             )
         });
@@ -129,7 +130,7 @@ pub fn assemble_universe(
             &parsed_quotas,
             &parsed_resets,
             &failed_subscriptions,
-            available_subscriptions,
+            available_clis,
             &mut consumed_providers,
         );
     }
@@ -225,17 +226,17 @@ fn build_candidate(
         BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
     >,
     failed_subscriptions: &BTreeSet<SubscriptionKind>,
-    available_subscriptions: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers_by_row: &ProvidersByRow<'_>,
 ) -> Option<Candidate> {
-    if !available_subscriptions.contains(&subscription) {
-        return None;
-    }
     let cli = match subscription {
         SubscriptionKind::OpencodeGo => CliKind::Opencode,
         SubscriptionKind::Direct => return None,
         direct => direct.direct_cli()?,
     };
+    if !available_clis.contains(&cli) {
+        return None;
+    }
     let dashboard_name = dashboard_entry.name.as_str();
     let launch_name = dashboard_name;
     // Strict baked-only path: a dashboard row produces no candidate
@@ -328,7 +329,7 @@ fn append_provider_additions(
         BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
     >,
     failed_subscriptions: &BTreeSet<SubscriptionKind>,
-    available_subscriptions: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     consumed: &mut BTreeSet<(SubscriptionKind, String, CliKind, String)>,
 ) {
     let Some(entries) = providers_by_row.get(dashboard_model) else {
@@ -345,7 +346,7 @@ fn append_provider_additions(
         if !consumed.insert(key) {
             continue;
         }
-        if !available_subscriptions.contains(&candidate_subscription) {
+        if !available_clis.contains(&entry.cli) {
             continue;
         }
         row.candidates.push(make_candidate(

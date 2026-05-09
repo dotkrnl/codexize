@@ -112,7 +112,7 @@ pub fn emit_annotated(config: &Config) -> String {
 
     out.push_str("# Per-vendor ACP launch knobs. `program` is the literal fallback used\n");
     out.push_str("# when no local install is detected. `enabled = false` removes the vendor\n");
-    out.push_str("# from `available_vendors()`. Keys under `env` populate the spawn\n");
+    out.push_str("# from `available_clis()`. Keys under `env` populate the spawn\n");
     out.push_str("# environment as a base; system `CODEXIZE_ACP_*` keys overwrite collisions.\n");
     for (vendor, agent) in [
         ("claude", &config.acp.agents.claude),

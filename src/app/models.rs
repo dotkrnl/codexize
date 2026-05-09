@@ -2,7 +2,7 @@ use super::{App, state::ModelRefreshState, status_line::Severity};
 use crate::{
     cache,
     data::config::schema::ProviderEntry,
-    selection::{CachedModel, QuotaError, SubscriptionKind},
+    selection::{CachedModel, CliKind, QuotaError, SubscriptionKind},
 };
 use ratatui::style::Color;
 use std::collections::BTreeSet;
@@ -13,7 +13,7 @@ const REFRESH_STATUS_TTL: Duration = Duration::from_secs(6);
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn spawn_refresh(
     cache_dir: PathBuf,
-    available_vendors: BTreeSet<SubscriptionKind>,
+    available_clis: BTreeSet<CliKind>,
     providers: Vec<ProviderEntry>,
 ) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -22,7 +22,7 @@ pub(crate) fn spawn_refresh(
             let _ = tx.send(
                 crate::data::selection_assembly::assemble_models_async(
                     &cache_dir,
-                    &available_vendors,
+                    &available_clis,
                     &providers,
                 )
                 .await,
@@ -33,7 +33,7 @@ pub(crate) fn spawn_refresh(
         let _ = tx.send(crate::data::async_bridge::block_on_io(async move {
             crate::data::selection_assembly::assemble_models_async(
                 &cache_dir_owned,
-                &available_vendors,
+                &available_clis,
                 &providers,
             )
             .await
@@ -80,12 +80,12 @@ fn quota_error_summary(errors: &[QuotaError]) -> String {
     }
 }
 impl App {
-    fn available_vendors(&self) -> BTreeSet<SubscriptionKind> {
+    fn available_clis(&self) -> BTreeSet<CliKind> {
         crate::acp::AcpConfig::from_config_views(
             &self.config.acp.agents,
             &self.config.acp_install_view(),
         )
-        .available_vendors()
+        .available_clis()
     }
     pub(crate) fn set_models(&mut self, models: Vec<CachedModel>) {
         self.models = models;
@@ -138,7 +138,7 @@ impl App {
                     self.model_refresh = ModelRefreshState::Fetching {
                         rx: spawn_refresh(
                             self.paths.cache_root.clone(),
-                            self.available_vendors(),
+                            self.available_clis(),
                             self.config.providers.value().clone(),
                         ),
                         started_at: Instant::now(),
@@ -151,7 +151,7 @@ impl App {
         self.model_refresh = ModelRefreshState::Fetching {
             rx: spawn_refresh(
                 self.paths.cache_root.clone(),
-                self.available_vendors(),
+                self.available_clis(),
                 self.config.providers.value().clone(),
             ),
             started_at: Instant::now(),

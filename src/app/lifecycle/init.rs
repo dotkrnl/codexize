@@ -77,7 +77,7 @@ impl App {
             model_refresh: ModelRefreshState::Fetching {
                 rx: spawn_refresh(
                     paths_view.cache_root.clone(),
-                    acp_config.available_vendors(),
+                    acp_config.available_clis(),
                     providers.clone(),
                 ),
                 started_at: Instant::now(),
@@ -170,7 +170,7 @@ impl App {
         let loaded = cache::load(&app.paths.cache_root);
         let cached = crate::data::selection_assembly::assemble_from_loaded(
             &loaded,
-            &acp_config.available_vendors(),
+            &acp_config.available_clis(),
             &providers,
         );
         if !cached.is_empty() {

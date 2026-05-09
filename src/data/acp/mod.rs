@@ -30,7 +30,7 @@ pub use super::acp_events::{
 };
 use crate::{
     adapters::EffortLevel, logic::memory::memory_glob_from_session_path, selection::CliKind,
-    selection::SubscriptionKind, state::LaunchModes,
+    state::LaunchModes,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -151,14 +151,13 @@ impl AcpLaunchPolicy {
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpLaunchRequest {
-    pub vendor: SubscriptionKind, pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
+    pub cwd: PathBuf, pub prompt: PromptPayload, pub model: String,
     /// The CLI to spawn for this request. Determines which acp.agents
-    /// entry supplies the program/args and whether to prefix the model
-    /// with the OpencodeGo tier qualifier.
+    /// entry supplies the program/args.
     pub cli: CliKind,
-    /// The model string to pass to the CLI verbatim. For Free candidates
-    /// launched via the Opencode CLI this is exactly the config's
-    /// `model_name` — no provider prefixing.
+    /// The model string to pass to the CLI verbatim. The launch boundary
+    /// applies no provider prefixing — any tier qualifiers (e.g.
+    /// `opencode-go/`) must already be present in `launch_name`.
     pub launch_name: String,
     pub requested_effort: EffortLevel, pub effective_effort: EffortLevel,
     pub interactive: bool, pub modes: LaunchModes, pub policy: AcpLaunchPolicy,
@@ -176,5 +175,5 @@ pub struct AcpSessionSpec {
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpResolvedLaunch {
-    pub vendor: SubscriptionKind, pub interactive: bool, pub spawn: AcpSpawnSpec, pub session: AcpSessionSpec,
+    pub cli: CliKind, pub interactive: bool, pub spawn: AcpSpawnSpec, pub session: AcpSessionSpec,
 }

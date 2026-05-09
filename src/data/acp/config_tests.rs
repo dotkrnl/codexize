@@ -1,19 +1,18 @@
 use super::*;
 use crate::{acp, adapters::EffortLevel, state::LaunchModes};
 
-// Driving the production launch path end-to-end for a Free candidate.
-// `assemble_universe` produces the row + selected candidate; the
-// `pick_cli_and_launch_name` helper (used by every stage) picks the
-// candidate's `cli` / `launch_name`; an `AcpLaunchRequest` built from
-// those values must resolve to the verbatim free model name passed to
-// the operator-chosen CLI — no provider prefixing, no row-name leak.
-fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
+// Driving the production launch path end-to-end. `assemble_universe`
+// produces the row + selected candidate; the `pick_cli_and_launch_name`
+// helper (used by every stage) picks the candidate's `cli` /
+// `launch_name`; an `AcpLaunchRequest` built from those values must
+// resolve to the launch_name verbatim — the launch boundary applies no
+// provider prefixing or row-name leak.
+fn sample_request(cli: CliKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
-        vendor,
         cwd: PathBuf::from("workspace"),
         prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: "gpt-5.5".to_string(),
-        cli: crate::selection::CliKind::Codex,
+        cli,
         launch_name: "gpt-5.5".to_string(),
         requested_effort: EffortLevel::Normal,
         effective_effort: EffortLevel::Low,
@@ -27,24 +26,24 @@ fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
     }
 }
 
-fn non_yolo_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
+fn non_yolo_request(cli: CliKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
         modes: LaunchModes {
             yolo: false,
             cheap: false,
             interactive: false,
         },
-        ..sample_request(vendor)
+        ..sample_request(cli)
     }
 }
 
 #[test]
-fn resolves_vendor_keyed_definitions_with_launch_metadata() {
+fn resolves_cli_keyed_definitions_with_launch_metadata() {
     let resolved = AcpConfig::default()
-        .resolve(&sample_request(SubscriptionKind::Gemini))
+        .resolve(&sample_request(CliKind::Gemini))
         .expect("resolve gemini");
 
-    assert_eq!(resolved.vendor, SubscriptionKind::Gemini);
+    assert_eq!(resolved.cli, CliKind::Gemini);
     assert_eq!(resolved.spawn.program, "gemini");
     assert_eq!(
         resolved.spawn.args,
@@ -56,16 +55,16 @@ fn resolves_vendor_keyed_definitions_with_launch_metadata() {
         resolved
             .session
             .metadata
-            .get("codexize.vendor")
+            .get("codexize.cli")
             .map(String::as_str),
-        Some("google")
+        Some("gemini")
     );
 }
 
 #[test]
-fn missing_vendor_configuration_is_reported_as_human_block() {
+fn missing_cli_configuration_is_reported_as_human_block() {
     let err = AcpConfig::empty()
-        .resolve(&sample_request(SubscriptionKind::Claude))
+        .resolve(&sample_request(CliKind::Claude))
         .expect_err("missing config");
     assert!(matches!(err, AcpError::HumanBlock(_)));
 }
@@ -73,7 +72,7 @@ fn missing_vendor_configuration_is_reported_as_human_block() {
 #[test]
 fn launch_translation_preserves_model_and_cheap_derived_effort() {
     let resolved = AcpConfig::default()
-        .resolve(&sample_request(SubscriptionKind::Codex))
+        .resolve(&sample_request(CliKind::Codex))
         .expect("resolve codex");
 
     assert_eq!(
@@ -106,10 +105,11 @@ fn launch_translation_preserves_model_and_cheap_derived_effort() {
 }
 
 #[test]
-fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
+fn opencode_launch_passes_qualified_launch_name_through_verbatim() {
     let request = AcpLaunchRequest {
         model: "gpt-5-nano".to_string(),
-        ..sample_request(SubscriptionKind::OpencodeGo)
+        launch_name: "opencode-go/gpt-5-nano".to_string(),
+        ..sample_request(CliKind::Opencode)
     };
 
     let resolved = AcpConfig::default()
@@ -141,7 +141,8 @@ fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
 fn opencode_launch_preserves_provider_qualified_model() {
     let request = AcpLaunchRequest {
         model: "opencode/big-pickle".to_string(),
-        ..sample_request(SubscriptionKind::OpencodeGo)
+        launch_name: "opencode/big-pickle".to_string(),
+        ..sample_request(CliKind::Opencode)
     };
 
     let resolved = AcpConfig::default()
@@ -160,18 +161,28 @@ fn opencode_launch_preserves_provider_qualified_model() {
 }
 
 #[test]
-fn opencode_go_subscription_drives_launch_qualifier() {
-    // OpencodeGo subscription must reach the spawn as `opencode-go/<id>` so
-    // the Go-tier API URL is hit. Bare ipbr-canonical ids like deepseek-v4-flash
-    // are qualified by the launch boundary based on the subscription alone.
+fn opencode_go_launch_name_passes_through_verbatim() {
+    // The launch boundary no longer prepends `opencode-go/` to bare ipbr-
+    // canonical ids — the qualifier now lives in baked launch_name strings.
+    // `request.launch_name` reaches the spawn byte-for-byte.
     let request = AcpLaunchRequest {
         model: "deepseek-v4-flash".to_string(),
-        ..sample_request(SubscriptionKind::OpencodeGo)
+        cli: CliKind::Opencode,
+        launch_name: "opencode-go/deepseek-v4-flash".to_string(),
+        cwd: PathBuf::from("workspace"),
+        prompt: acp::PromptPayload::Text("prompt".to_string()),
+        requested_effort: EffortLevel::Normal,
+        effective_effort: EffortLevel::Normal,
+        interactive: false,
+        modes: LaunchModes {
+            yolo: true,
+            cheap: false,
+            interactive: false,
+        },
+        policy: acp::AcpLaunchPolicy::default(),
     };
 
-    let resolved = AcpConfig::default()
-        .resolve(&request)
-        .expect("resolve opencode-go");
+    let resolved = AcpConfig::default().resolve(&request).expect("resolve");
 
     assert_eq!(resolved.session.model, "opencode-go/deepseek-v4-flash");
     assert_eq!(
@@ -185,9 +196,34 @@ fn opencode_go_subscription_drives_launch_qualifier() {
 }
 
 #[test]
+fn opencode_launch_does_not_prefix_bare_inventory_model() {
+    // Inverse of `opencode_go_launch_name_passes_through_verbatim`: a
+    // bare model id with no qualifier reaches the spawn unmodified.
+    let request = AcpLaunchRequest {
+        model: "deepseek-v4-flash".to_string(),
+        launch_name: "deepseek-v4-flash".to_string(),
+        ..sample_request(CliKind::Opencode)
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve opencode");
+
+    assert_eq!(resolved.session.model, "deepseek-v4-flash");
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_MODEL")
+            .map(String::as_str),
+        Some("deepseek-v4-flash")
+    );
+}
+
+#[test]
 fn acp_launches_use_code_permission_mode_even_without_codexize_yolo() {
     let resolved = AcpConfig::default()
-        .resolve(&non_yolo_request(SubscriptionKind::Kimi))
+        .resolve(&non_yolo_request(CliKind::Kimi))
         .expect("resolve kimi");
 
     assert_eq!(
@@ -227,7 +263,7 @@ fn final_validation_policy_is_exported_to_session_env_and_metadata() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
-        ..sample_request(SubscriptionKind::Codex)
+        ..sample_request(CliKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -312,7 +348,7 @@ fn dreaming_policy_allows_only_memory_report_and_live_summary_writes() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::dreaming(&report_path, &live_summary_path),
-        ..sample_request(SubscriptionKind::Codex)
+        ..sample_request(CliKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -366,7 +402,7 @@ fn simplifier_policy_keeps_workspace_writable_with_full_shell_access() {
     let request = AcpLaunchRequest {
         cwd: temp.path().to_path_buf(),
         policy: acp::AcpLaunchPolicy::simplifier(&simplification_path, &live_summary_path),
-        ..sample_request(SubscriptionKind::Codex)
+        ..sample_request(CliKind::Codex)
     };
 
     let resolved = AcpConfig::default()
@@ -514,50 +550,50 @@ fn codex_acp_install_prompt_requires_codex_cli_and_missing_acp() {
 }
 
 #[test]
-fn available_vendors_follow_configured_programs() {
+fn available_clis_follow_configured_programs() {
     let config = AcpConfig::from_agents([
         AcpAgentDefinition {
-            vendor: SubscriptionKind::Claude,
+            cli: CliKind::Claude,
             program: "/definitely/missing/claude-acp".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
         AcpAgentDefinition {
-            vendor: SubscriptionKind::Codex,
+            cli: CliKind::Codex,
             program: "/bin/sh".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
     ]);
 
-    let available = config.available_vendors();
+    let available = config.available_clis();
 
     assert_eq!(available.len(), 1);
-    assert!(available.contains(&SubscriptionKind::Codex));
-    assert!(!available.contains(&SubscriptionKind::Claude));
+    assert!(available.contains(&CliKind::Codex));
+    assert!(!available.contains(&CliKind::Claude));
 }
 
 #[test]
-fn available_vendors_include_opencode_only_when_program_is_executable() {
+fn available_clis_include_opencode_only_when_program_is_executable() {
     let config = AcpConfig::from_agents([
         AcpAgentDefinition {
-            vendor: SubscriptionKind::OpencodeGo,
+            cli: CliKind::Opencode,
             program: "/definitely/missing/opencode".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
         AcpAgentDefinition {
-            vendor: SubscriptionKind::Codex,
+            cli: CliKind::Codex,
             program: "/bin/sh".to_string(),
             args: Vec::new(),
             env: BTreeMap::new(),
         },
     ]);
 
-    let available = config.available_vendors();
+    let available = config.available_clis();
 
-    assert!(available.contains(&SubscriptionKind::Codex));
-    assert!(!available.contains(&SubscriptionKind::OpencodeGo));
+    assert!(available.contains(&CliKind::Codex));
+    assert!(!available.contains(&CliKind::Opencode));
 }
 
 fn write_fake_executable(path: &Path) {

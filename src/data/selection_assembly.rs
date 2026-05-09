@@ -8,38 +8,38 @@ use crate::dashboard::{self, LoadOutcome};
 use crate::data::config::schema::ProviderEntry;
 use crate::data::selection_quota as quota;
 use crate::logic::selection::assemble as pure;
-use crate::logic::selection::types::{CachedModel, QuotaError, SubscriptionKind};
+use crate::logic::selection::types::{CachedModel, CliKind, QuotaError, SubscriptionKind};
 use std::collections::BTreeSet;
 use std::path::Path;
 
 pub async fn assemble_models_async(
     cache_dir: &Path,
-    available_vendors: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let loaded = cache::load(cache_dir);
-    assemble_with_refresh(cache_dir, loaded, available_vendors, providers).await
+    assemble_with_refresh(cache_dir, loaded, available_clis, providers).await
 }
 
 pub fn assemble_from_cached_only(
     cache_dir: &Path,
-    available_vendors: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
     let loaded = cache::load(cache_dir);
-    assemble_from_loaded_with_available(&loaded, available_vendors, providers)
+    assemble_from_loaded_with_available(&loaded, available_clis, providers)
 }
 
 pub fn assemble_from_loaded(
     loaded: &LoadedCache,
-    available_vendors: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
-    assemble_from_loaded_with_available(loaded, available_vendors, providers)
+    assemble_from_loaded_with_available(loaded, available_clis, providers)
 }
 fn assemble_from_loaded_with_available(
     loaded: &LoadedCache,
-    available_vendors: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> Vec<CachedModel> {
     if loaded.dashboard.is_none() {
@@ -61,13 +61,32 @@ fn assemble_from_loaded_with_available(
         .map(|section| section.data.clone())
         .unwrap_or_default();
     let (models, _free_model_warnings) =
-        pure::assemble_universe(dashboard, quotas, resets, available_vendors, providers);
+        pure::assemble_universe(dashboard, quotas, resets, available_clis, providers);
     models
 }
+
+/// Map an `available_clis` set to the subscription set that the quota
+/// fetcher consults. Each CLI has a canonical subscription it queries:
+/// Claude → Claude, Codex → Codex, Gemini → Gemini, Kimi → Kimi,
+/// Opencode → OpencodeGo. Task 11 will replace this with a tracked-subs
+/// fetcher; for now the launch boundary still exposes only CLIs and the
+/// quota IO layer expects subscriptions, so we cross the boundary here.
+fn subscriptions_for_clis(clis: &BTreeSet<CliKind>) -> BTreeSet<SubscriptionKind> {
+    clis.iter()
+        .map(|cli| match cli {
+            CliKind::Claude => SubscriptionKind::Claude,
+            CliKind::Codex => SubscriptionKind::Codex,
+            CliKind::Gemini => SubscriptionKind::Gemini,
+            CliKind::Kimi => SubscriptionKind::Kimi,
+            CliKind::Opencode => SubscriptionKind::OpencodeGo,
+        })
+        .collect()
+}
+
 async fn assemble_with_refresh(
     cache_dir: &Path,
     loaded: LoadedCache,
-    available_vendors: &BTreeSet<SubscriptionKind>,
+    available_clis: &BTreeSet<CliKind>,
     providers: &[ProviderEntry],
 ) -> (Vec<CachedModel>, Vec<QuotaError>) {
     let (cached_dashboard, dashboard_expired) = match loaded.dashboard {
@@ -118,8 +137,9 @@ async fn assemble_with_refresh(
     let quota_payload;
     let reset_payload;
     if quota_expired || resets_expired || reset_missing {
+        let target_subscriptions = subscriptions_for_clis(available_clis);
         let (fresh_quotas, fresh_resets, fresh_errors) =
-            quota::load_quota_maps_for_async(available_vendors.iter().copied()).await;
+            quota::load_quota_maps_for_async(target_subscriptions.iter().copied()).await;
         // Capture the failed vendor set BEFORE consuming `fresh_errors`
         // so the spec's 50% capacity assumption (per QuotaPayload.
         // failed_subscriptions) can be applied even when a vendor's
@@ -139,7 +159,7 @@ async fn assemble_with_refresh(
         dashboard_entries,
         quota_payload,
         reset_payload,
-        available_vendors,
+        available_clis,
         providers,
     );
     (models, quota_errors)

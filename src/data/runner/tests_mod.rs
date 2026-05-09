@@ -293,7 +293,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
         resolved: crate::acp::AcpResolvedLaunch {
-            vendor: SubscriptionKind::Codex,
+            cli: crate::selection::CliKind::Codex,
             interactive: true,
             spawn: crate::acp::AcpSpawnSpec {
                 program: "true".to_string(),
@@ -341,7 +341,7 @@ fn acp_text_stream_updates_partial_message_and_splits_paragraphs() {
 fn make_acp_test_launch(session_id: &str, window_name: &str, temp: &Path) -> ManagedAcpLaunch {
     ManagedAcpLaunch {
         resolved: crate::acp::AcpResolvedLaunch {
-            vendor: SubscriptionKind::Codex,
+            cli: crate::selection::CliKind::Codex,
             interactive: true,
             spawn: crate::acp::AcpSpawnSpec {
                 program: "true".to_string(),
@@ -997,7 +997,7 @@ fn acp_text_stream_trims_outer_whitespace_and_skips_empty_blocks() {
     state.save().unwrap();
     let launch = ManagedAcpLaunch {
         resolved: crate::acp::AcpResolvedLaunch {
-            vendor: SubscriptionKind::Codex,
+            cli: crate::selection::CliKind::Codex,
             interactive: true,
             spawn: crate::acp::AcpSpawnSpec {
                 program: "true".to_string(),
@@ -1357,8 +1357,7 @@ fn launch_interactive_bails_when_acp_cli_is_missing() {
             let result = launch_interactive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "run-1",
+                                "run-1",
                 &artifacts_dir,
                 None,
             );
@@ -1389,8 +1388,7 @@ fn launch_noninteractive_bails_when_acp_cli_is_missing() {
             let result = launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "run-2",
+                                "run-2",
                 &artifacts_dir,
                 None,
             );
@@ -1437,8 +1435,7 @@ fn acp_launch_with_final_validation_policy_rejects_workspace_mutation() {
             launch_noninteractive_with_policy(
                 "[FinalValidation]",
                 &run,
-                SubscriptionKind::Codex,
-                "final-validation-run",
+                                "final-validation-run",
                 &artifacts_dir,
                 Some(&verdict_path),
                 crate::acp::AcpLaunchPolicy::final_validation(&verdict_path, &live_summary_path),
@@ -1488,8 +1485,7 @@ fn acp_launch_writes_finish_stamp_on_success() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -1540,8 +1536,7 @@ fn interactive_acp_end_turn_keeps_run_alive_until_local_exit() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                SubscriptionKind::Codex,
-                "interactive-run",
+                                "interactive-run",
                 &artifacts_dir,
                 None,
             )
@@ -1606,8 +1601,7 @@ fn interactive_acp_input_is_sent_as_followup_prompt() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                SubscriptionKind::Codex,
-                "interactive-input-run",
+                                "interactive-input-run",
                 &artifacts_dir,
                 None,
             )
@@ -1660,8 +1654,7 @@ fn interactive_acp_input_is_rejected_until_prompt_turn_finishes() {
             launch_interactive(
                 "[Brainstorm]",
                 &run,
-                SubscriptionKind::Codex,
-                "interactive-not-ready-run",
+                                "interactive-not-ready-run",
                 &artifacts_dir,
                 None,
             )
@@ -1725,8 +1718,7 @@ fn acp_launch_persists_agent_message_chunks_as_agent_text() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -1792,8 +1784,7 @@ fn acp_launch_persists_thought_chunks_as_agent_thought() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -1858,8 +1849,7 @@ fn acp_launch_concatenates_thought_chunks_per_turn() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -1904,8 +1894,7 @@ fn acp_launch_fails_when_required_artifact_is_missing() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -1941,8 +1930,7 @@ fn acp_launch_marks_early_process_exit_as_failed() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -1978,8 +1966,7 @@ fn acp_launch_records_cause_when_transport_init_fails() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -2018,8 +2005,7 @@ fn acp_launch_enforces_single_active_run() {
             launch_noninteractive(
                 "[Coder 1]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-one",
+                                "coder-one",
                 &artifacts_dir,
                 None,
             )
@@ -2028,8 +2014,7 @@ fn acp_launch_enforces_single_active_run() {
             let err = launch_noninteractive(
                 "[Coder 2]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-two",
+                                "coder-two",
                 &artifacts_dir,
                 None,
             )
@@ -2068,8 +2053,7 @@ fn acp_launch_cleans_up_child_on_cancel() {
             launch_noninteractive(
                 "[Coder]",
                 &run,
-                SubscriptionKind::Codex,
-                "coder-run",
+                                "coder-run",
                 &artifacts_dir,
                 None,
             )
@@ -2112,8 +2096,7 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
             launch_noninteractive(
                 "[Stage 1]",
                 &run,
-                SubscriptionKind::Codex,
-                "stage-one",
+                                "stage-one",
                 &artifacts_dir,
                 Some(&artifact_path),
             )
@@ -2123,8 +2106,7 @@ fn acp_launch_starts_fresh_process_for_each_stage() {
             launch_noninteractive(
                 "[Stage 2]",
                 &run,
-                SubscriptionKind::Codex,
-                "stage-two",
+                                "stage-two",
                 &artifacts_dir,
                 Some(&artifact_path),
             )

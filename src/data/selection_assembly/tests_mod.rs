@@ -114,7 +114,7 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
         ("claude", "claude-opus-4-1", Some(80)),
     ]);
     let resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
-    let available = BTreeSet::from([SubscriptionKind::Claude]);
+    let available = BTreeSet::from([crate::selection::CliKind::Claude]);
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -203,7 +203,7 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let outcome = std::panic::catch_unwind(|| {
         assemble_from_loaded(
             &loaded,
-            &crate::acp::AcpConfig::default().available_vendors(),
+            &crate::acp::AcpConfig::default().available_clis(),
             &[],
         )
     });
@@ -314,7 +314,7 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
         // network refresh.
         let (models, errors) = crate::data::async_bridge::block_on_io(assemble_models_async(
             cache_dir,
-            &crate::acp::AcpConfig::default().available_vendors(),
+            &crate::acp::AcpConfig::default().available_clis(),
             &[],
         ));
         assert!(
@@ -333,7 +333,7 @@ fn assemble_from_cached_only_returns_empty_when_no_cache() {
     let cache_dir = temp.path().join(".codexize").join("cache");
     let models = assemble_from_cached_only(
         &cache_dir,
-        &crate::acp::AcpConfig::default().available_vendors(),
+        &crate::acp::AcpConfig::default().available_clis(),
         &[],
     );
     assert!(models.is_empty(), "no cache should yield empty model list");
@@ -346,7 +346,7 @@ fn assemble_from_cached_only_yields_models_when_cache_is_present() {
     with_temp_home_cache(dashboard, quotas, |cache_dir| {
         let models = assemble_from_cached_only(
             cache_dir,
-            &crate::acp::AcpConfig::default().available_vendors(),
+            &crate::acp::AcpConfig::default().available_clis(),
             &[],
         );
         assert_eq!(models.len(), 1);

@@ -217,7 +217,7 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
         quota_lookup_key: None,
         display_order: 1,
     }];
-    let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
+    let available = BTreeSet::from([CliKind::Claude, CliKind::Opencode]);
 
     let (models, _warnings) =
         assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &providers);
@@ -249,7 +249,7 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
         ("moonshotai", "kimi-latest", Some(80)),
         ("opencode-go", "kimi-k2.6", Some(70)),
     ]);
-    let available = BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo]);
+    let available = BTreeSet::from([CliKind::Kimi, CliKind::Opencode]);
 
     let (models, _warnings) =
         assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
@@ -265,12 +265,12 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
     assert!(!models.iter().any(|model| model.name == "kimi-latest"));
 }
 
-fn all_vendors() -> BTreeSet<SubscriptionKind> {
+fn all_clis() -> BTreeSet<CliKind> {
     [
-        SubscriptionKind::Codex,
-        SubscriptionKind::Claude,
-        SubscriptionKind::Gemini,
-        SubscriptionKind::Kimi,
+        CliKind::Codex,
+        CliKind::Claude,
+        CliKind::Gemini,
+        CliKind::Kimi,
     ]
     .into_iter()
     .collect()
@@ -317,8 +317,8 @@ fn make_ipbr_entry(name: &str, vendor: &str, match_key: &str) -> DashboardEntry 
     entry
 }
 
-fn opencode_available() -> BTreeSet<SubscriptionKind> {
-    BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo])
+fn opencode_available() -> BTreeSet<CliKind> {
+    BTreeSet::from([CliKind::Claude, CliKind::Opencode])
 }
 
 fn make_quota_payload(entries: &[(&str, &str, Option<u8>)]) -> QuotaPayload {
@@ -402,12 +402,12 @@ fn loaded_cache_with_resets(
 /// and feeds them to `assemble_universe` for the all-vendors policy used by
 /// most fixture tests.
 fn assemble_from_cache(loaded: LoadedCache) -> Vec<CachedModel> {
-    assemble_from_cache_with_available(loaded, &all_vendors())
+    assemble_from_cache_with_available(loaded, &all_clis())
 }
 
 fn assemble_from_cache_with_available(
     loaded: LoadedCache,
-    available: &BTreeSet<SubscriptionKind>,
+    available: &BTreeSet<CliKind>,
 ) -> Vec<CachedModel> {
     let dashboard = loaded
         .dashboard
@@ -647,7 +647,7 @@ fn assemble_synthesizes_missing_sibling() {
 
 #[test]
 #[ignore = "legacy synthesized inventory rows are retired by model-first rows"]
-fn unavailable_vendors_are_omitted_before_models_are_returned() {
+fn unavailable_clis_are_omitted_before_models_are_returned() {
     let dashboard = vec![
         make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
         make_entry("gpt-5.5", "openai", 80.0, 78.0),
@@ -658,7 +658,7 @@ fn unavailable_vendors_are_omitted_before_models_are_returned() {
         ("openai", "gpt-5.5", Some(70)),
         ("google", "gemini-2.5-pro", Some(60)),
     ]);
-    let available = BTreeSet::from([SubscriptionKind::Codex]);
+    let available = BTreeSet::from([CliKind::Codex]);
 
     let models =
         assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
@@ -673,7 +673,7 @@ fn unavailable_vendors_are_omitted_before_models_are_returned() {
 fn available_claude_keeps_anthropic_dashboard_entries() {
     let dashboard = vec![make_entry("claude-sonnet-4-6", "anthropic", 85.0, 82.0)];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
-    let available = BTreeSet::from([SubscriptionKind::Claude]);
+    let available = BTreeSet::from([CliKind::Claude]);
 
     let models =
         assemble_from_cache_with_available(loaded_cache_with(dashboard, quotas), &available);
@@ -738,7 +738,7 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
     let resets = empty_resets_for_quotas(&quotas);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, resets, &all_vendors(), &[]);
+        assemble_universe(dashboard, quotas, resets, &all_clis(), &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
@@ -1070,8 +1070,8 @@ fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
     );
 }
 
-fn kimi_opencode_available() -> BTreeSet<SubscriptionKind> {
-    BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo])
+fn kimi_opencode_available() -> BTreeSet<CliKind> {
+    BTreeSet::from([CliKind::Kimi, CliKind::Opencode])
 }
 
 fn make_opencode_kimi_entry(name: &str, match_key: &str) -> DashboardEntry {
@@ -1223,11 +1223,11 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
 #[test]
 #[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
 fn synth_kimi_latest_skipped_when_kimi_unavailable() {
-    // Without Kimi in available_vendors the synth must not emit a kimi-vendor
+    // Without Kimi in available_clis the synth must not emit a kimi-vendor
     // row, even when an opencode-routed kimi-2.6 is present.
     let routed = make_opencode_kimi_entry("kimi-k2.6", "kimi-k2-6");
     let quotas = make_quota_payload(&[("opencode", "kimi-k2.6", Some(90))]);
-    let available = BTreeSet::from([SubscriptionKind::OpencodeGo]);
+    let available = BTreeSet::from([CliKind::Opencode]);
 
     let (models, _warnings) =
         assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
@@ -1346,7 +1346,7 @@ fn provider_override_disables_baked_candidate_in_universe() {
         quota_lookup_key: None,
         display_order: 0,
     }];
-    let available = BTreeSet::from([SubscriptionKind::Claude]);
+    let available = BTreeSet::from([CliKind::Claude]);
 
     let (models, _warnings) = assemble_universe(
         dashboard,
@@ -1401,7 +1401,7 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
         quota_lookup_key: None,
         display_order: 1,
     }];
-    let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
+    let available = BTreeSet::from([CliKind::Claude, CliKind::Opencode]);
 
     let (models, _warnings) = assemble_universe(
         dashboard,
@@ -1434,7 +1434,7 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     let dashboard = vec![make_ipbr_entry("gpt-5-5", "codex", "gpt-5-5")];
     let mut quotas = QuotaPayload::default();
     quotas.failed_subscriptions.insert(SubscriptionKind::Codex);
-    let available = BTreeSet::from([SubscriptionKind::Codex]);
+    let available = BTreeSet::from([CliKind::Codex]);
     let (models, _warnings) =
         assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
     assert_eq!(models.len(), 1);
@@ -1447,3 +1447,46 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     assert_eq!(models[0].quota_percent, Some(50));
 }
 
+#[test]
+fn available_clis_filters_by_cli_not_subscription() {
+    // A claude-keyed dashboard row produces a Candidate iff the Claude
+    // CLI is in `available_clis`. Swapping the available set to
+    // {Codex} hides the candidate even though the row's subscription
+    // (Claude) is unchanged — confirming that availability now keys on
+    // CLI presence rather than subscription presence.
+    let dashboard = vec![make_ipbr_entry(
+        "claude-opus-4-7",
+        "anthropic",
+        "claude-opus-4-7",
+    )];
+    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
+
+    // Claude CLI present → row's natural Claude candidate surfaces.
+    let with_claude = BTreeSet::from([CliKind::Claude]);
+    let (models, _warnings) = assemble_universe(
+        dashboard.clone(),
+        quotas.clone(),
+        BTreeMap::new(),
+        &with_claude,
+        &[],
+    );
+    assert_eq!(models.len(), 1);
+    let row = &models[0];
+    assert!(
+        row.candidates
+            .iter()
+            .any(|c| c.cli == CliKind::Claude && c.subscription == SubscriptionKind::Claude),
+        "Claude CLI must surface the natural Claude candidate"
+    );
+
+    // Same dashboard with Codex CLI only → no Claude candidate; the row
+    // still exists (model-first invariant) but has zero candidates.
+    let with_codex = BTreeSet::from([CliKind::Codex]);
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &with_codex, &[]);
+    assert_eq!(models.len(), 1);
+    assert!(
+        models[0].candidates.is_empty(),
+        "filtering by CLI must hide the Claude candidate when Claude CLI is absent"
+    );
+}

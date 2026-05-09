@@ -117,7 +117,6 @@ impl App {
                     run_id,
                     &window_name,
                     &run,
-                    vendor_kind,
                     &run_key,
                     &artifacts_dir,
                     None,

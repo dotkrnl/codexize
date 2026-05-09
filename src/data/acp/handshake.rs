@@ -2,7 +2,6 @@
 //! options, and start the first prompt turn.
 use super::actor::RpcClient;
 use super::{AcpError, AcpResolvedLaunch, AcpResult, AcpSessionSpec, PromptPayload};
-use crate::selection::vendor::subscription_kind_to_str;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -25,8 +24,8 @@ pub(super) async fn spawn_actor(runtime: &Arc<Runtime>, launch: &AcpResolvedLaun
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null()).kill_on_drop(true).spawn()
         .map_err(|err| AcpError::human_block(format!(
-            "ACP agent for vendor {} failed to start ({}): {err}",
-            subscription_kind_to_str(launch.vendor), launch.spawn.program
+            "ACP agent for cli {} failed to start ({}): {err}",
+            launch.cli.as_str(), launch.spawn.program
         )))?;
     let stdout = child.stdout.take().ok_or_else(|| AcpError::protocol("ACP child stdout was not captured"))?;
     let stdin = child.stdin.take().ok_or_else(|| AcpError::protocol("ACP child stdin was not captured"))?;

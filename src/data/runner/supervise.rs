@@ -14,7 +14,6 @@ mod test_support;
 use super::transport::{AcpCancelReason, AcpInput, ManagedAcpLaunch};
 use crate::acp::AcpLaunchPolicy;
 use crate::adapters::AgentRun;
-use crate::selection::SubscriptionKind;
 use anyhow::{Result, bail};
 use dashmap::DashMap;
 pub(in crate::data::runner) use launch::append_launch_cause;
@@ -263,7 +262,7 @@ fn launch_managed_acp_window(
             run_id,
             window_name = %launch.window_name,
             interactive = launch.resolved.interactive,
-            vendor = ?launch.resolved.vendor
+            cli = ?launch.resolved.cli
         );
         async move {
             tracing::debug!("managed ACP run started");
@@ -398,7 +397,6 @@ impl Supervisor {
         run_id: RunId,
         window_name: &str,
         run: &AgentRun,
-        vendor: SubscriptionKind,
         run_key: &str,
         artifacts_dir: &Path,
         required_artifact: Option<&Path>,
@@ -412,7 +410,6 @@ impl Supervisor {
         let launch = build_managed_acp_launch(
             &acp_config,
             window_name,
-            vendor,
             run,
             run_key,
             artifacts_dir,

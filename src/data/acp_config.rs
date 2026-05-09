@@ -4,7 +4,7 @@ use crate::acp::{
 };
 use crate::data::config::schema::AcpAgentSection;
 use crate::data::config::view::{AcpAgentView, AcpInstallView};
-use crate::selection::{SubscriptionKind, vendor::subscription_kind_to_str};
+use crate::selection::CliKind;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 const CLAUDE_CLI: &str = "claude";
@@ -12,34 +12,33 @@ const CODEX_CLI: &str = "codex";
 const CODEX_ACP_CLI: &str = "codex-acp";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpAgentDefinition {
-    pub vendor: SubscriptionKind,
+    pub cli: CliKind,
     pub program: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpConfig {
-    agents: BTreeMap<SubscriptionKind, AcpAgentDefinition>,
+    agents: BTreeMap<CliKind, AcpAgentDefinition>,
 }
 #[rustfmt::skip]
 impl AcpConfig {
     pub fn empty() -> Self { Self { agents: BTreeMap::new() } }
     pub fn from_agents(agents: impl IntoIterator<Item = AcpAgentDefinition>) -> Self {
-        Self { agents: agents.into_iter().map(|a| (a.vendor, a)).collect() }
+        Self { agents: agents.into_iter().map(|a| (a.cli, a)).collect() }
     }
-    pub fn available_vendors(&self) -> std::collections::BTreeSet<SubscriptionKind> {
+    pub fn available_clis(&self) -> std::collections::BTreeSet<CliKind> {
         self.agents.iter()
             .filter(|(_, a)| !a.program.trim().is_empty() && program_is_executable(&a.program))
-            .map(|(v, _)| *v).collect()
+            .map(|(c, _)| *c).collect()
     }
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
-        let agent_key = request.vendor;
-        let agent = self.agents.get(&agent_key).ok_or_else(|| AcpError::human_block(
-            format!("ACP agent not configured for vendor {}", subscription_kind_to_str(request.vendor))
+        let agent = self.agents.get(&request.cli).ok_or_else(|| AcpError::human_block(
+            format!("ACP agent not configured for cli {}", request.cli.as_str())
         ))?;
         if agent.program.trim().is_empty() {
             return Err(AcpError::human_block(format!(
-                "ACP agent for vendor {} has no executable configured", subscription_kind_to_str(request.vendor)
+                "ACP agent for cli {} has no executable configured", request.cli.as_str()
             )));
         }
         let cwd = absolutize(&request.cwd)?;
@@ -56,14 +55,10 @@ impl AcpConfig {
             AcpShellCommandPolicy::FullAccess => ("full-access", Vec::new()),
             AcpShellCommandPolicy::Allowlist(c) => ("allowlist", c.clone()),
         };
-        let launch_model = launch_model_for_vendor(
-            request.vendor,
-            &request.model,
-            &request.launch_name,
-        );
+        let session_model = request.launch_name.clone();
         let entries = [
-            ("vendor", subscription_kind_to_str(request.vendor).to_string()),
-            ("model", launch_model.clone()),
+            ("cli", request.cli.as_str().to_string()),
+            ("model", session_model.clone()),
             ("requested_effort", effort_str(request.requested_effort).to_string()),
             ("effective_effort", reasoning_effort.to_string()),
             ("permission_mode", permission_mode.to_string()),
@@ -82,11 +77,11 @@ impl AcpConfig {
             metadata.insert(format!("codexize.{suffix}"), value.clone());
         }
         Ok(AcpResolvedLaunch {
-            vendor: request.vendor,
+            cli: request.cli,
             interactive: request.interactive,
             spawn: AcpSpawnSpec { program: agent.program.clone(), args: agent.args.clone(), env },
             session: AcpSessionSpec {
-                cwd, prompt: request.prompt.clone(), model: launch_model,
+                cwd, prompt: request.prompt.clone(), model: session_model,
                 reasoning_effort, permission_mode, policy, metadata,
             },
         })
@@ -95,7 +90,7 @@ impl AcpConfig {
         agents: &crate::data::config::schema::AcpAgents,
         install: &AcpInstallView,
     ) -> Self {
-        let view_for = |vendor: SubscriptionKind, section: &AcpAgentSection| -> Option<AcpAgentDefinition> {
+        let view_for = |cli: CliKind, section: &AcpAgentSection| -> Option<AcpAgentDefinition> {
             let v = AcpAgentView {
                 enabled: *section.enabled.value(),
                 program: section.program.value().clone(),
@@ -103,35 +98,34 @@ impl AcpConfig {
                 env: section.env.value().clone(),
             };
             if !v.enabled { return None }
-            let program = if vendor == SubscriptionKind::Claude && install.prefer_local_claude_acp {
+            let program = if cli == CliKind::Claude && install.prefer_local_claude_acp {
                 let local = &install.claude_acp_root.join("node_modules").join(".bin").join("claude-agent-acp");
                 if path_is_executable(local) { local.display().to_string() } else { v.program.clone() }
             } else {
                 v.program.clone()
             };
-            let def = AcpAgentDefinition { vendor, program, args: v.args, env: v.env };
+            let def = AcpAgentDefinition { cli, program, args: v.args, env: v.env };
             #[cfg(test)]
             {
-                let key = match vendor {
-                    SubscriptionKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
-                    SubscriptionKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
-                    SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
-                    SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
-                    SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
-                    SubscriptionKind::Direct => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+                let key = match cli {
+                    CliKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+                    CliKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+                    CliKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+                    CliKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+                    CliKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
                 };
                 if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
-                    return Some(AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() });
+                    return Some(AcpAgentDefinition { cli, program: p, args: Vec::new(), env: BTreeMap::new() });
                 }
             }
             Some(def)
         };
         let mut defs = Vec::new();
-        if let Some(d) = view_for(SubscriptionKind::Claude, &agents.claude) { defs.push(d) }
-        if let Some(d) = view_for(SubscriptionKind::Codex, &agents.codex) { defs.push(d) }
-        if let Some(d) = view_for(SubscriptionKind::Gemini, &agents.gemini) { defs.push(d) }
-        if let Some(d) = view_for(SubscriptionKind::Kimi, &agents.kimi) { defs.push(d) }
-        if let Some(d) = view_for(SubscriptionKind::OpencodeGo, &agents.opencode) { defs.push(d) }
+        if let Some(d) = view_for(CliKind::Claude, &agents.claude) { defs.push(d) }
+        if let Some(d) = view_for(CliKind::Codex, &agents.codex) { defs.push(d) }
+        if let Some(d) = view_for(CliKind::Gemini, &agents.gemini) { defs.push(d) }
+        if let Some(d) = view_for(CliKind::Kimi, &agents.kimi) { defs.push(d) }
+        if let Some(d) = view_for(CliKind::Opencode, &agents.opencode) { defs.push(d) }
         Self::from_agents(defs)
     }
 }
@@ -143,12 +137,12 @@ impl Default for AcpConfig {
         let local = claude_acp_local_program_for(&claude_acp_install_root());
         let claude = if path_is_executable(&local) { local.display().to_string() } else { "claude-agent-acp".into() };
         Self::from_agents([
-            agent_def(SubscriptionKind::Claude, &claude, Vec::new()),
-            agent_def(SubscriptionKind::Codex, "codex-acp",
+            agent_def(CliKind::Claude, &claude, Vec::new()),
+            agent_def(CliKind::Codex, "codex-acp",
                 argv(&["-c", "sandbox_mode=\"danger-full-access\"", "-c", "approval_policy=\"never\""])),
-            agent_def(SubscriptionKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
-            agent_def(SubscriptionKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
-            agent_def(SubscriptionKind::OpencodeGo, "opencode", argv(&["acp"])),
+            agent_def(CliKind::Gemini, "gemini", argv(&["--yolo", "--acp"])),
+            agent_def(CliKind::Kimi, "kimi", argv(&["--yolo", "--thinking", "acp"])),
+            agent_def(CliKind::Opencode, "opencode", argv(&["acp"])),
         ])
     }
 }
@@ -172,37 +166,21 @@ pub fn should_offer_codex_acp_install() -> bool {
     program_is_executable(CODEX_CLI) && !program_is_executable(CODEX_ACP_CLI)
 }
 #[rustfmt::skip]
-fn agent_def(vendor: SubscriptionKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
+fn agent_def(cli: CliKind, program: &str, args: Vec<String>) -> AcpAgentDefinition {
     #[cfg(test)]
     {
-        let key = match vendor {
-            SubscriptionKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
-            SubscriptionKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
-            SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
-            SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
-            SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
-            SubscriptionKind::Direct => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+        let key = match cli {
+            CliKind::Claude => "CODEXIZE_TEST_ACP_CLAUDE_PROGRAM",
+            CliKind::Codex => "CODEXIZE_TEST_ACP_CODEX_PROGRAM",
+            CliKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
+            CliKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
+            CliKind::Opencode => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
         };
         if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
-            return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };
+            return AcpAgentDefinition { cli, program: p, args: Vec::new(), env: BTreeMap::new() };
         }
     }
-    AcpAgentDefinition { vendor, program: program.to_string(), args, env: BTreeMap::new() }
-}
-#[rustfmt::skip]
-fn launch_model_for_vendor(
-    vendor: SubscriptionKind,
-    model: &str,
-    _launch_name: &str,
-) -> String {
-    // OpencodeGo rides through the `opencode-go` tier qualifier; inventory
-    // stores bare ipbr-canonical ids, so the launch boundary prepends the
-    // tier prefix unless the caller already qualified the value.
-    if vendor == SubscriptionKind::OpencodeGo && !model.contains('/') {
-        format!("opencode-go/{model}")
-    } else {
-        model.to_string()
-    }
+    AcpAgentDefinition { cli, program: program.to_string(), args, env: BTreeMap::new() }
 }
 #[rustfmt::skip]
 fn absolutize(path: &Path) -> AcpResult<PathBuf> {

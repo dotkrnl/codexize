@@ -142,7 +142,7 @@ impl App {
                         rx: spawn_refresh(
                             self.paths.cache_root.clone(),
                             self.available_vendors(),
-                            self.config.free_models.value().clone(),
+                            Vec::new(),
                             self.config.providers.value().clone(),
                         ),
                         started_at: Instant::now(),
@@ -156,7 +156,7 @@ impl App {
             rx: spawn_refresh(
                 self.paths.cache_root.clone(),
                 self.available_vendors(),
-                self.config.free_models.value().clone(),
+                Vec::new(),
                 self.config.providers.value().clone(),
             ),
             started_at: Instant::now(),

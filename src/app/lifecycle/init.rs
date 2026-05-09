@@ -65,7 +65,10 @@ impl App {
             }
         }
         let nodes = build_tree(&state);
-        let free_models = config.free_models.value().clone();
+        // The loader has already migrated any legacy `[[free_models]]`
+        // entries into `providers` and cleared the legacy section. Pass
+        // an empty slice so assembly cannot replay migrated rows on top
+        // of the unified provider list.
         let providers = config.providers.value().clone();
         let current = current_node_index(&nodes);
         let selected_key = node_key_at_path(&nodes, &[current]);
@@ -79,7 +82,7 @@ impl App {
                 rx: spawn_refresh(
                     paths_view.cache_root.clone(),
                     acp_config.available_vendors(),
-                    free_models.clone(),
+                    Vec::new(),
                     providers.clone(),
                 ),
                 started_at: Instant::now(),
@@ -173,7 +176,7 @@ impl App {
         let cached = crate::data::selection_assembly::assemble_from_loaded(
             &loaded,
             &acp_config.available_vendors(),
-            &free_models,
+            &[],
             &providers,
         );
         if !cached.is_empty() {

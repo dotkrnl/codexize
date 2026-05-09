@@ -533,8 +533,8 @@ fn refresh_selected_candidate(row: &mut CachedModel) {
 /// Step 2 of the spec's two-step selection: with the row already chosen
 /// (step 1 happens at the model-pool level via dashboard score in
 /// `super::selection`), pick the best provider inside the row using the
-/// priority ladder `free > official(>=21) > no-quota > non-official`.
-pub(crate) fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> {
+/// Priority ladder `free > official(>=21) > no-quota > non-official`.
+pub fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> {
     let enabled: Vec<usize> = candidates
         .iter()
         .enumerate()
@@ -574,17 +574,13 @@ pub(crate) fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> 
         if best_quota >= OFFICIAL_QUOTA_FLOOR {
             return Some(best_official);
         }
-        // Step 2(b): merge official (≤20) with the non-official pool
-        // and re-compare so a healthier non-official can take over
-        // when the official channel is throttled.
-        let mut merged = official_pool;
-        merged.extend(non_official_pool.iter().copied());
-        return min_by_compare(&merged, candidates);
     }
     if !no_quota_pool.is_empty() {
         return min_by_compare(&no_quota_pool, candidates);
     }
-    min_by_compare(&non_official_pool, candidates)
+    let mut merged = official_pool;
+    merged.extend(non_official_pool.iter().copied());
+    min_by_compare(&merged, candidates)
 }
 
 fn min_by_compare(indices: &[usize], candidates: &[Candidate]) -> Option<usize> {

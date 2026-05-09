@@ -156,6 +156,37 @@ fn kimi_quota_returns_none_when_all_missing() {
 }
 
 #[test]
+fn live_map_normalizes_dotted_canonical_to_dashed_keys() {
+    // Live providers return dotted canonical names (e.g. claude-opus-4.7,
+    // gemini-2.5-pro) while baked launch_names are dashed
+    // (claude-opus-4-7, gemini-2-5-pro). The live-map builders must
+    // normalize keys via `normalize_ipbr_key` so the assemble-side lookup
+    // by launch_name finds the entry.
+    let models = vec![
+        LiveModel {
+            name: "claude-opus-4.7".to_string(),
+            quota_percent: Some(80),
+            quota_resets_at: None,
+        },
+        LiveModel {
+            name: "gemini-2.5-pro".to_string(),
+            quota_percent: Some(50),
+            quota_resets_at: None,
+        },
+    ];
+
+    let (claude_map, _) = live_map_claude(models.clone());
+    assert_eq!(
+        claude_map.get("claude-opus-4-7"),
+        Some(&Some(80)),
+        "dotted canonical must normalize to dashed lookup key"
+    );
+
+    let (gemini_map, _) = live_map_direct(models);
+    assert_eq!(gemini_map.get("gemini-2-5-pro"), Some(&Some(50)));
+}
+
+#[test]
 fn live_map_direct_passthrough_per_model() {
     // After dropping the GEMINI_KNOWN_QUOTA_MODELS injection, the map only
     // contains entries for the models the provider's live API actually

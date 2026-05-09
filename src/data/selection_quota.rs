@@ -1,6 +1,7 @@
 //! Backend probes that resolve per-vendor quota and reset maps from the
 //! provider adapters.
 use crate::data::config::schema::ProviderEntry;
+use crate::data::dashboard_model::normalize_ipbr_key;
 use crate::data::providers::{self, LiveModel};
 use crate::logic::selection::types::{CliKind, QuotaError, SubscriptionKind};
 use chrono::{DateTime, Utc};
@@ -139,7 +140,7 @@ async fn load_quota_map_for_subscription(
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let mapped: BTreeMap<String, Option<u8>> = models
         .into_iter()
-        .map(|m| (m.name.to_ascii_lowercase(), m.quota_percent))
+        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
         .collect();
     let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
     (mapped, resets)
@@ -147,18 +148,18 @@ fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
 fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let mapped: BTreeMap<String, Option<u8>> = models
         .iter()
-        .map(|m| (m.name.to_ascii_lowercase(), m.quota_percent))
+        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
         .collect();
     let resets: BTreeMap<String, Option<DateTime<Utc>>> = models
         .into_iter()
-        .map(|m| (m.name.to_ascii_lowercase(), m.quota_resets_at))
+        .map(|m| (normalize_ipbr_key(&m.name), m.quota_resets_at))
         .collect();
     (mapped, resets)
 }
 fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let mapped: BTreeMap<String, Option<u8>> = models
         .into_iter()
-        .map(|m| (m.name.to_ascii_lowercase(), m.quota_percent))
+        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
         .collect();
     let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
     (mapped, resets)

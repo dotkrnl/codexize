@@ -1,10 +1,11 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 2260
 expression: "render_to_text(&state, 80, 18)"
 ---
 "codexize · config · /tmp/example/config.toml                                    "
 "▸meta  ▾ntfy*  ▸ntfy.events  ▸acp.policy  ▸acp.install  ▸acp.agents.claude      "
-"▸free_models  ▸runner  ▸paths*  ▸ui  ▸ui.colon_palette  ▸ui.footer  ▸diagnostics"
+"▸providers  ▸runner  ▸paths*  ▸ui  ▸ui.colon_palette  ▸ui.footer  ▸diagnostics  "
 "▸memory                                                                         "
 "────────────────────────────────────────────────────────────────────────────────"
 "> enabled              │ true                                              (def)"

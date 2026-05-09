@@ -32,14 +32,12 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
                 provider_id: "opencode".to_string(),
                 display_name: None,
                 api_npm: None,
-                underlying_vendor: Some(SubscriptionKind::Codex),
             },
             crate::data::providers::opencode::OpencodeModelMeta {
                 id: "opencode-only-model".to_string(),
                 provider_id: "opencode".to_string(),
                 display_name: None,
                 api_npm: None,
-                underlying_vendor: None,
             },
         ],
     );
@@ -81,7 +79,6 @@ fn opencode_go_inventory_surfaces_when_ipbr_matches() {
             provider_id: "opencode-go".to_string(),
             display_name: None,
             api_npm: Some("@ai-sdk/openai-compatible".to_string()),
-            underlying_vendor: None,
         }],
     );
     let scores = parse_ipbr_scoreboard(

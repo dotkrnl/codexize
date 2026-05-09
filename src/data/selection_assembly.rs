@@ -65,24 +65,6 @@ fn assemble_from_loaded_with_available(
     models
 }
 
-/// Map an `available_clis` set to the subscription set that the quota
-/// fetcher consults. Each CLI has a canonical subscription it queries:
-/// Claude → Claude, Codex → Codex, Gemini → Gemini, Kimi → Kimi,
-/// Opencode → OpencodeGo. Task 11 will replace this with a tracked-subs
-/// fetcher; for now the launch boundary still exposes only CLIs and the
-/// quota IO layer expects subscriptions, so we cross the boundary here.
-fn subscriptions_for_clis(clis: &BTreeSet<CliKind>) -> BTreeSet<SubscriptionKind> {
-    clis.iter()
-        .map(|cli| match cli {
-            CliKind::Claude => SubscriptionKind::Claude,
-            CliKind::Codex => SubscriptionKind::Codex,
-            CliKind::Gemini => SubscriptionKind::Gemini,
-            CliKind::Kimi => SubscriptionKind::Kimi,
-            CliKind::Opencode => SubscriptionKind::OpencodeGo,
-        })
-        .collect()
-}
-
 async fn assemble_with_refresh(
     cache_dir: &Path,
     loaded: LoadedCache,
@@ -137,7 +119,12 @@ async fn assemble_with_refresh(
     let quota_payload;
     let reset_payload;
     if quota_expired || resets_expired || reset_missing {
-        let target_subscriptions = subscriptions_for_clis(available_clis);
+        // The fetch set is the intersection of "subscriptions reachable
+        // from the launch CLIs" and "subscriptions actually present in
+        // the resolved providers list". Direct providers do not appear
+        // in this set — `tracked_subscriptions_for_clis` never emits
+        // `SubscriptionKind::Direct` — so no API call is made for them.
+        let target_subscriptions = quota::fetch_set_for(available_clis.iter().copied(), providers);
         let (fresh_quotas, fresh_resets, fresh_errors) =
             quota::load_quota_maps_for_async(target_subscriptions.iter().copied()).await;
         // Capture the failed vendor set BEFORE consuming `fresh_errors`

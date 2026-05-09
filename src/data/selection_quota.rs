@@ -1,20 +1,82 @@
 //! Backend probes that resolve per-vendor quota and reset maps from the
 //! provider adapters.
+use crate::data::config::schema::ProviderEntry;
 use crate::data::providers::{self, LiveModel};
-use crate::logic::selection::types::{QuotaError, SubscriptionKind};
+use crate::logic::selection::types::{CliKind, QuotaError, SubscriptionKind};
 use crate::model_names;
 use chrono::{DateTime, Utc};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 type VendorQuotaMap = BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>;
 type VendorResetMap = BTreeMap<SubscriptionKind, BTreeMap<String, Option<DateTime<Utc>>>>;
 type ModelQuotaMap = BTreeMap<String, Option<u8>>;
 type ModelResetMap = BTreeMap<String, Option<DateTime<Utc>>>;
 type ModelQuotaAndResetMaps = (ModelQuotaMap, ModelResetMap);
 type QuotaLoadResult = (VendorQuotaMap, VendorResetMap, Vec<QuotaError>);
+/// Quota probes are subscription-keyed, but the launch boundary now exposes
+/// only `CliKind`. Cross the boundary HERE — keep the mapper next to the
+/// consumer that cares about it — and filter to the five tracked
+/// subscriptions in the same step. `SubscriptionKind::Direct` is implicitly
+/// excluded because no `CliKind` value maps to it: direct-billed providers
+/// route through whichever real CLI the operator configured, not a "Direct"
+/// CLI of their own. The provider-set caller still needs to be honest about
+/// which CLIs actually have a tracked subscription pool to query — that
+/// honesty is what this function enforces.
+pub fn tracked_subscriptions_for_clis<I: IntoIterator<Item = CliKind>>(
+    clis: I,
+) -> BTreeSet<SubscriptionKind> {
+    clis.into_iter()
+        .map(|cli| match cli {
+            CliKind::Claude => SubscriptionKind::Claude,
+            CliKind::Codex => SubscriptionKind::Codex,
+            CliKind::Gemini => SubscriptionKind::Gemini,
+            CliKind::Kimi => SubscriptionKind::Kimi,
+            CliKind::Opencode => SubscriptionKind::OpencodeGo,
+        })
+        .collect()
+}
+/// Compute the set of subscriptions actually worth probing for the given
+/// `available_clis` and resolved `providers`. The caller passes both the
+/// CLI set (which subscriptions could be queried at all) and the provider
+/// list (which subscriptions the operator's universe currently includes).
+/// The intersection is the fetch set; `SubscriptionKind::Direct` rows in
+/// `providers` are skipped automatically because `tracked_subscriptions_for_clis`
+/// never emits `Direct`.
+pub fn fetch_set_for(
+    available_clis: impl IntoIterator<Item = CliKind>,
+    providers: &[ProviderEntry],
+) -> BTreeSet<SubscriptionKind> {
+    let from_clis = tracked_subscriptions_for_clis(available_clis);
+    if providers.is_empty() {
+        return from_clis;
+    }
+    let from_providers: BTreeSet<SubscriptionKind> = providers
+        .iter()
+        .map(|p| p.subscription)
+        .filter(|s| {
+            matches!(
+                s,
+                SubscriptionKind::Claude
+                    | SubscriptionKind::Codex
+                    | SubscriptionKind::Gemini
+                    | SubscriptionKind::Kimi
+                    | SubscriptionKind::OpencodeGo
+            )
+        })
+        .collect();
+    from_clis.intersection(&from_providers).copied().collect()
+}
 pub async fn load_quota_maps_for_async(
     vendors: impl IntoIterator<Item = SubscriptionKind>,
 ) -> QuotaLoadResult {
-    let vendors = vendors.into_iter().collect::<Vec<_>>();
+    // Defense-in-depth: the public API still accepts a `SubscriptionKind`
+    // iterator for direct test use, but `Direct` is never a meaningful
+    // probe target — `load_quota_map_for_vendor` would just return empty
+    // maps for it. Drop it up front so callers cannot accidentally fan
+    // out a no-op task into the worker pool.
+    let vendors = vendors
+        .into_iter()
+        .filter(|v| !matches!(v, SubscriptionKind::Direct))
+        .collect::<Vec<_>>();
     let tasks = vendors
         .into_iter()
         .map(|vendor| {

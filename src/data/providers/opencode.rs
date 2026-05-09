@@ -6,12 +6,13 @@
 //! the CLI itself computed) against the documented $60 Go API allowance.
 //! Any cookie/login-based path is intentionally absent — operator override.
 //!
-//! Enumeration cascade: prefer `opencode models opencode --verbose`, fall
-//! back to a small hardcoded snapshot when the local CLI is unavailable. No
-//! HTTP catalog endpoint is hit because opencode.ai exposes no documented
-//! unauthenticated catalog and authenticated cookie flows are out of scope.
+//! Enumeration cascade: prefer `opencode models opencode --verbose`. There
+//! is no hardcoded fallback — the per-tier model catalogue lives in
+//! `crate::logic::selection::baked::BAKED_TABLE` and CLI-failure simply
+//! yields an empty inventory contribution from this layer. No HTTP catalog
+//! endpoint is hit because opencode.ai exposes no documented unauthenticated
+//! catalog and authenticated cookie flows are out of scope.
 use super::LiveModel;
-use crate::logic::selection::types::SubscriptionKind;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::process::Command;
@@ -35,11 +36,10 @@ pub struct OpencodeModelMeta {
     pub provider_id: String,
     /// Pretty display name when the CLI provides one.
     pub display_name: Option<String>,
-    /// `api.npm` field — used to infer the underlying vendor without
-    /// relying on display-name heuristics.
+    /// `api.npm` field — preserved for diagnostics; underlying-vendor
+    /// inference is no longer performed here, since the per-tier catalogue
+    /// in `BAKED_TABLE` carries the authoritative subscription mapping.
     pub api_npm: Option<String>,
-    /// Underlying provider this model is resold from, when inferable.
-    pub underlying_vendor: Option<SubscriptionKind>,
 }
 /// Live quota fetch entry point used by the data-side selection plumbing.
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
@@ -113,18 +113,19 @@ pub fn extract_go_tier_spend(stats_text: &str) -> Result<f64> {
     Ok(total)
 }
 /// Enumerate models advertised by opencode across both the `opencode` and
-/// `opencode-go` providers. Cascades local CLI → hardcoded fallback per
-/// provider so a transient failure on one branch does not erase the other.
+/// `opencode-go` providers. CLI-failure on either branch yields an empty
+/// contribution from that branch — the per-tier catalogue lives in
+/// `BAKED_TABLE`, not here.
 pub fn enumerate_models() -> Vec<OpencodeModelMeta> {
     enumerate_with_cli_texts(
         run_models_command(OPENCODE_PROVIDER).ok().as_deref(),
         run_models_command(OPENCODE_GO_PROVIDER).ok().as_deref(),
     )
 }
-/// Enumeration with the CLI invocations factored out so cascade behavior is
-/// fixture-testable per provider. Each `Option<&str>` may carry the CLI
-/// output for that provider; passing `None` simulates CLI failure for that
-/// branch and triggers the hardcoded fallback for the same provider.
+/// Enumeration with the CLI invocations factored out so per-branch behavior
+/// is fixture-testable. Each `Option<&str>` may carry the CLI output for
+/// that provider; passing `None` simulates CLI failure for that branch,
+/// which contributes no rows (the empty `hardcoded_fallback_for`).
 pub fn enumerate_with_cli_texts(
     opencode_text: Option<&str>,
     opencode_go_text: Option<&str>,
@@ -171,48 +172,14 @@ pub fn parse_verbose_models(text: &str) -> Vec<OpencodeModelMeta> {
     }
     models
 }
-/// Static snapshot used when the local CLI cannot be reached. Refresh as
-/// opencode adds models. Underlying vendors are best-effort: leave `None`
-/// when the resale provenance is not obvious from the model id. Only the
-/// `opencode-go` rows that ipbr actually scores are listed; opencode-only
-/// resale ids without an ipbr counterpart are still merge-dropped, but
-/// keeping them visible here lets the fallback path round-trip parity with
-/// the live CLI for tests and for any future ipbr coverage.
+/// CLI-failure fallback. Returns an empty list — the per-tier model
+/// catalogue now lives in `crate::logic::selection::baked::BAKED_TABLE`,
+/// so an unreachable opencode CLI simply contributes nothing to the
+/// dashboard inventory and downstream selection falls through to the
+/// baked rows directly.
 fn hardcoded_fallback_for(provider: &str) -> Vec<OpencodeModelMeta> {
-    let entries: &[(&str, Option<SubscriptionKind>)] = match provider {
-        OPENCODE_PROVIDER => &[
-            ("big-pickle", None),
-            ("gpt-5-nano", Some(SubscriptionKind::Codex)),
-            ("hy3-preview-free", None),
-            ("minimax-m2.5-free", Some(SubscriptionKind::Kimi)),
-            ("nemotron-3-super-free", None),
-        ],
-        OPENCODE_GO_PROVIDER => &[
-            ("deepseek-v4-flash", None),
-            ("deepseek-v4-pro", None),
-            ("glm-5", None),
-            ("glm-5.1", None),
-            ("kimi-k2.5", Some(SubscriptionKind::Kimi)),
-            ("kimi-k2.6", Some(SubscriptionKind::Kimi)),
-            ("mimo-v2.5", None),
-            ("mimo-v2.5-pro", None),
-            ("minimax-m2.5", None),
-            ("minimax-m2.7", None),
-            ("qwen3.5-plus", None),
-            ("qwen3.6-plus", None),
-        ],
-        _ => &[],
-    };
-    entries
-        .iter()
-        .map(|(id, underlying)| OpencodeModelMeta {
-            id: (*id).to_string(),
-            provider_id: provider.to_string(),
-            display_name: None,
-            api_npm: None,
-            underlying_vendor: *underlying,
-        })
-        .collect()
+    let _ = provider;
+    Vec::new()
 }
 fn run_models_command(provider: &str) -> Result<String> {
     let label = format!("opencode models {provider} --verbose");
@@ -258,23 +225,12 @@ fn model_meta_from_value(value: &Value) -> Option<OpencodeModelMeta> {
         .and_then(|api| api.get("npm"))
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
-    let underlying_vendor = api_npm.as_deref().and_then(underlying_vendor_from_npm);
     Some(OpencodeModelMeta {
         id,
         provider_id,
         display_name,
         api_npm,
-        underlying_vendor,
     })
-}
-fn underlying_vendor_from_npm(npm: &str) -> Option<SubscriptionKind> {
-    match npm {
-        "@ai-sdk/anthropic" => Some(SubscriptionKind::Claude),
-        "@ai-sdk/openai" => Some(SubscriptionKind::Codex),
-        "@ai-sdk/google" => Some(SubscriptionKind::Gemini),
-        "@ai-sdk/moonshotai" | "@ai-sdk/moonshot" => Some(SubscriptionKind::Kimi),
-        _ => None,
-    }
 }
 fn find_matching_brace(bytes: &[u8], start: usize) -> Option<usize> {
     debug_assert_eq!(bytes.get(start), Some(&b'{'));

@@ -320,7 +320,7 @@ pub fn merge_quota_payload(
     }
     for (subscription, models) in fresh {
         merged.insert(
-            vendor::subscription_kind_to_str(subscription).to_string(),
+            vendor::vendor_kind_to_str(subscription).to_string(),
             models,
         );
     }
@@ -343,7 +343,7 @@ pub fn merge_reset_payload(
     }
     for (subscription, models) in fresh {
         merged.insert(
-            vendor::subscription_kind_to_str(subscription).to_string(),
+            vendor::vendor_kind_to_str(subscription).to_string(),
             models,
         );
     }
@@ -400,6 +400,5 @@ pub fn parse_subscription_str(s: &str) -> Option<SubscriptionKind> {
         _ => None,
     }
 }
-pub use parse_subscription_str as parse_vendor_str;
 #[cfg(test)]
 mod tests_mod;

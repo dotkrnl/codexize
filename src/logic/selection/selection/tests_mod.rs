@@ -61,16 +61,6 @@ fn sample_model_with_score(
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        overall_score: 85.0,
-        current_score: 85.0,
-        standard_error: 2.0,
-        axes: vec![
-            ("codequality".to_string(), 0.85),
-            ("correctness".to_string(), 0.85),
-            ("debugging".to_string(), 0.85),
-            ("safety".to_string(), 0.85),
-        ],
-        axis_provenance: std::collections::BTreeMap::new(),
         ipbr_phase_scores: IpbrPhaseScores {
             idea: Some(score),
             planning: Some(score),
@@ -85,7 +75,6 @@ fn sample_model_with_score(
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,
-        fallback_from: None,
     }
 }
 

@@ -1,20 +1,9 @@
 use super::*;
-use std::collections::BTreeMap;
 
 fn sample_cached_model() -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
-        overall_score: 88.0,
-        current_score: 86.0,
-        standard_error: 2.0,
-        axes: vec![
-            ("correctness".to_string(), 0.9),
-            ("debugging".to_string(), 0.85),
-            ("codequality".to_string(), 0.88),
-            ("safety".to_string(), 0.87),
-        ],
-        axis_provenance: BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
@@ -24,7 +13,6 @@ fn sample_cached_model() -> CachedModel {
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 1,
-        fallback_from: None,
     }
 }
 
@@ -78,12 +66,12 @@ fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
         ipbr_row_matched: true,
         ..sample_cached_model()
     };
-    let cosmetic_only = CachedModel {
+    let unranked = CachedModel {
         ipbr_phase_scores: crate::selection::IpbrPhaseScores {
             build: Some(99.0),
             ..crate::selection::IpbrPhaseScores::default()
         },
-        score_source: crate::selection::ScoreSource::Aistupidlevel,
+        score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ..sample_cached_model()
     };
@@ -92,10 +80,7 @@ fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
         phase_rank_score(&missing_phase, SelectionPhase::Build),
         None
     );
-    assert_eq!(
-        phase_rank_score(&cosmetic_only, SelectionPhase::Build),
-        None
-    );
+    assert_eq!(phase_rank_score(&unranked, SelectionPhase::Build), None);
 }
 
 #[test]
@@ -156,11 +141,9 @@ fn candidate_pool_weights_all_unknown_quota_has_uniform_quota_factor() {
 fn phase_score_for_legacy_callers_returns_ipbr_phase_score() {
     let mut high_variance_old_flash = ipbr_model("gemini-2.5-flash", 90.0, Some(80));
     high_variance_old_flash.subscription = SubscriptionKind::Gemini;
-    high_variance_old_flash.standard_error = 99.0;
     let low_variance_pro = CachedModel {
         subscription: SubscriptionKind::Gemini,
         name: "gemini-2.5-pro".to_string(),
-        standard_error: 0.0,
         ..ipbr_model("gemini-2.5-pro", 80.0, Some(80))
     };
 
@@ -184,111 +167,5 @@ fn phase_score_for_legacy_callers_excludes_zero_quota_and_unranked_models() {
     assert_eq!(
         phase_score_for_legacy_callers(&unranked, SelectionPhase::Build),
         0.0
-    );
-}
-
-fn selection_counter_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-}
-
-#[test]
-fn zero_as_missing_fires_counter_and_rewrites_provenance() {
-    let _guard = selection_counter_lock();
-    clear_selection_events();
-    let mut model = CachedModel {
-        axes: vec![
-            ("codequality".to_string(), 0.85),
-            ("correctness".to_string(), 0.0),
-            ("debugging".to_string(), 0.85),
-            ("safety".to_string(), 0.85),
-        ],
-        axis_provenance: BTreeMap::from([
-            ("codequality".to_string(), "suite:deep".to_string()),
-            ("correctness".to_string(), "suite:deep".to_string()),
-            ("debugging".to_string(), "suite:deep".to_string()),
-            ("safety".to_string(), "suite:deep".to_string()),
-        ]),
-        ..sample_cached_model()
-    };
-    stamp_selection_provenance(&mut model);
-    let events = selection_events_snapshot();
-
-    // correctness=0.0 appears in Planning, Build, Review → 3 events
-    let correctness_events: Vec<_> = events
-        .iter()
-        .filter(
-            |e| matches!(e, SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness"),
-        )
-        .collect();
-    assert_eq!(
-        correctness_events.len(),
-        3,
-        "expected 3 events (Planning, Build, Review), got {correctness_events:?}"
-    );
-
-    // Each (axis, phase) combo fires exactly once
-    assert!(events.iter().any(|e| matches!(
-        e,
-        SelectionEvent::ZeroAsMissing { axis, phase }
-            if axis == "correctness" && phase == "build"
-    )));
-    assert!(events.iter().any(|e| matches!(
-        e,
-        SelectionEvent::ZeroAsMissing { axis, phase }
-            if axis == "correctness" && phase == "planning"
-    )));
-    assert!(events.iter().any(|e| matches!(
-        e,
-        SelectionEvent::ZeroAsMissing { axis, phase }
-            if axis == "correctness" && phase == "review"
-    )));
-
-    // Provenance rewritten
-    assert_eq!(
-        model.axis_provenance.get("correctness").map(String::as_str),
-        Some("fallback:overall")
-    );
-    // Non-zero axes keep their original provenance
-    assert_eq!(
-        model.axis_provenance.get("codequality").map(String::as_str),
-        Some("suite:deep")
-    );
-}
-
-#[test]
-fn truly_missing_axis_gets_fallback_overall_provenance() {
-    let _guard = selection_counter_lock();
-    clear_selection_events();
-    let mut model = CachedModel {
-        axes: vec![
-            ("codequality".to_string(), 0.85),
-            ("debugging".to_string(), 0.85),
-            ("safety".to_string(), 0.85),
-            // correctness entirely absent
-        ],
-        axis_provenance: BTreeMap::from([
-            ("codequality".to_string(), "suite:deep".to_string()),
-            ("debugging".to_string(), "suite:deep".to_string()),
-            ("safety".to_string(), "suite:deep".to_string()),
-        ]),
-        ..sample_cached_model()
-    };
-    stamp_selection_provenance(&mut model);
-
-    assert_eq!(
-        model.axis_provenance.get("correctness").map(String::as_str),
-        Some("fallback:overall")
-    );
-    // Truly-missing does NOT fire zero_as_missing counter
-    let events = selection_events_snapshot();
-    assert!(
-        !events.iter().any(|e| matches!(
-            e,
-            SelectionEvent::ZeroAsMissing { axis, .. } if axis == "correctness"
-        )),
-        "truly-missing axis should not fire zero_as_missing"
     );
 }

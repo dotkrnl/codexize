@@ -122,11 +122,7 @@ fn render_full_table(
         .filter(|m| visible_set.contains(&m.name))
         .map(|model| {
             let short_name = model_names::display_short(&model.name);
-            let mut w = short_name.width();
-            if model.fallback_from.is_some() {
-                w += 6; // " (new)"
-            }
-            w
+            short_name.width()
         })
         .max()
         .unwrap_or(0);
@@ -250,11 +246,7 @@ fn render_full_table(
             quota_span,
             Span::raw(" "),
         ];
-        spans.extend(format_name_with_freshness(
-            &short_name,
-            model.fallback_from.is_some(),
-            name_width,
-        ));
+        spans.extend(format_name_with_freshness(&short_name, name_width));
         let phase_data = [
             (
                 "Idea ",
@@ -439,9 +431,9 @@ fn render_compact_quota(
         SubscriptionKind::Direct,
     ];
     // Pick each vendor's representative by `build_rank_order` so the
-    // compact strip mirrors the full table's ranking. Cosmetic
-    // `current_score` cannot drive visibility — ipbr Build phase rank is
-    // the authoritative signal, with name as the alphabetical tiebreaker.
+    // compact strip mirrors the full table's ranking. ipbr Build phase
+    // rank is the authoritative signal, with name as the alphabetical
+    // tiebreaker.
     let mut vendors_to_render = Vec::new();
     for vendor in order {
         if let Some(model) = models

@@ -9,13 +9,14 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bumped to 7 because the quota section's payload shape changed: it
-/// now carries the set of subscriptions whose quota fetch failed so the
-/// selection layer can apply the 50% capacity assumption. Older quota
-/// payloads decode as a bare `BTreeMap` and would silently lose the
-/// failure set, so they're dropped on version mismatch alongside the
-/// dashboard payload.
-pub const CACHE_VERSION: u32 = 7;
+/// Bumped to 8 because the dashboard entry shape lost its legacy
+/// aistupidlevel fields (`overall_score`, `current_score`, `standard_error`,
+/// `axes`, `axis_provenance`) and the sibling-synthesis `fallback_from`.
+/// v7 caches still carry those fields and would deserialize fine via
+/// `#[serde(deny_unknown_fields)]`-free serde, but the version bump
+/// invalidates them so we never silently load stale aistupidlevel data
+/// alongside fresh ipbr scores.
+pub const CACHE_VERSION: u32 = 8;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
@@ -55,25 +56,12 @@ pub struct DashboardEntry {
     /// Renamed from `vendor` in-source to `dashboard_vendor` for symmetry
     /// with `DashboardModel.dashboard_vendor`. The on-disk JSON field is
     /// kept as `"vendor"` via `#[serde(rename)]` so existing cache files
-    /// continue to load without a `CACHE_VERSION` bump.
+    /// continue to load without churning the JSON shape unnecessarily.
     #[serde(rename = "vendor")]
     pub dashboard_vendor: String,
     pub name: String,
-    /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
-    /// auto-selection eligibility, or vendor backfill ordering.
-    pub overall_score: f64,
-    /// Cosmetic display-only summary score. Same constraint as
-    /// `overall_score`.
-    pub current_score: f64,
-    pub standard_error: f64,
-    /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
-    /// lowercased camelCase. Backfill semantics are owned by the selection layer.
-    pub axes: Vec<(String, f64)>,
-    #[serde(default)]
-    pub axis_provenance: BTreeMap<String, String>,
-    /// Per-phase ipbr rank scores. `#[serde(default)]` so a v4 entry
-    /// written before ipbr ingestion lands deserializes with all phases
-    /// `None`, preserving the unscored-vs-known distinction.
+    /// Per-phase ipbr rank scores. `None` per phase means the matched
+    /// ipbr row did not provide that phase score.
     #[serde(default)]
     pub ipbr_phase_scores: IpbrPhaseScores,
     /// Provenance marker for the per-phase scores. Defaults to
@@ -89,8 +77,6 @@ pub struct DashboardEntry {
     #[serde(default)]
     pub ipbr_match_key: Option<String>,
     pub display_order: usize,
-    #[serde(default)]
-    pub fallback_from: Option<String>,
 }
 /// Per-vendor map of model name → optional quota percentage, paired
 /// with the set of subscriptions whose most recent quota fetch failed.

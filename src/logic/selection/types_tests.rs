@@ -4,39 +4,16 @@ fn sample_cached_model() -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
-        overall_score: 88.4,
-        current_score: 86.2,
-        standard_error: 2.9,
-        axes: vec![
-            ("correctness".to_string(), 90.0),
-            ("debugging".to_string(), 82.0),
-        ],
-        axis_provenance: BTreeMap::new(),
         ipbr_phase_scores: IpbrPhaseScores::default(),
         score_source: ScoreSource::None,
         ipbr_row_matched: false,
         quota_percent: Some(73),
         quota_resets_at: None,
         display_order: 2,
-        fallback_from: Some("gpt-5".to_string()),
         ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
     }
-}
-
-#[test]
-fn cached_model_axis_returns_matching_value() {
-    let model = sample_cached_model();
-
-    assert_eq!(model.axis("correctness"), Some(90.0));
-}
-
-#[test]
-fn cached_model_axis_returns_none_for_missing_key() {
-    let model = sample_cached_model();
-
-    assert_eq!(model.axis("safety"), None);
 }
 
 #[test]
@@ -47,12 +24,8 @@ fn cached_model_clone_and_fields_remain_accessible() {
     assert_eq!(cloned, model);
     assert_eq!(cloned.subscription, SubscriptionKind::Codex);
     assert_eq!(cloned.name, "gpt-5.5");
-    assert_eq!(cloned.overall_score, 88.4);
-    assert_eq!(cloned.current_score, 86.2);
-    assert_eq!(cloned.standard_error, 2.9);
     assert_eq!(cloned.quota_percent, Some(73));
     assert_eq!(cloned.display_order, 2);
-    assert_eq!(cloned.fallback_from.as_deref(), Some("gpt-5"));
 }
 
 #[test]

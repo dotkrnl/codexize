@@ -2,45 +2,6 @@ use super::config::SelectionPhase;
 #[cfg(test)]
 use super::types::SubscriptionKind;
 use super::types::{CachedModel, ScoreSource};
-use std::sync::{Mutex, OnceLock};
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SelectionEvent {
-    ZeroAsMissing { axis: String, phase: String },
-}
-fn selection_events() -> &'static Mutex<Vec<SelectionEvent>> {
-    static EVENTS: OnceLock<Mutex<Vec<SelectionEvent>>> = OnceLock::new();
-    EVENTS.get_or_init(|| Mutex::new(Vec::new()))
-}
-pub fn selection_events_snapshot() -> Vec<SelectionEvent> {
-    // SAFETY: `selection_events()` guards a `Vec<SelectionEvent>` whose
-    // only mutators are `push`/`clear` — neither can panic — so the mutex
-    // poison branch is only defensive for future mutators.
-    selection_events()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .clone()
-}
-#[cfg(test)]
-fn clear_selection_events() {
-    // SAFETY: see `selection_events_snapshot` — the guarded `Vec` has no
-    // panicking mutators, so the mutex cannot be poisoned here.
-    selection_events()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .clear();
-}
-fn record_zero_as_missing(axis: &str, phase: &str) {
-    // SAFETY: see `selection_events_snapshot` — the guarded `Vec` has no
-    // panicking mutators, so the mutex cannot be poisoned here.
-    selection_events()
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .push(SelectionEvent::ZeroAsMissing {
-            axis: axis.to_string(),
-            phase: phase.to_string(),
-        });
-}
-const ZERO_THRESHOLD: f64 = 1e-9;
 const RANK_SOFTMAX_TEMPERATURE: f64 = 5.5;
 const UNKNOWN_QUOTA_PERCENT: u8 = 30;
 pub type CandidateRef<'a> = &'a CachedModel;
@@ -158,35 +119,6 @@ pub fn phase_score_for_legacy_callers(model: &CachedModel, phase: SelectionPhase
         return 0.0;
     }
     phase_rank_score(model, phase).unwrap_or(0.0)
-}
-/// Stamp `fallback:overall` provenance on missing or zero-as-missing legacy
-/// axes, and emit counter events for zero-as-missing substitutions.
-pub fn stamp_selection_provenance(model: &mut CachedModel) {
-    let mut seen = std::collections::HashSet::new();
-    for phase in SelectionPhase::ALL {
-        for &axis in phase.axes() {
-            match model.axis(axis) {
-                Some(v) if v <= ZERO_THRESHOLD => {
-                    if seen.insert(axis) {
-                        model
-                            .axis_provenance
-                            .insert(axis.to_string(), "fallback:overall".to_string());
-                    }
-                    record_zero_as_missing(axis, phase.name());
-                }
-                None => {
-                    if seen.insert(axis) {
-                        model
-                            .axis_provenance
-                            .insert(axis.to_string(), "fallback:overall".to_string());
-                    }
-                }
-                _ => {
-                    seen.insert(axis);
-                }
-            }
-        }
-    }
 }
 #[cfg(test)]
 #[path = "ranking_tests.rs"]

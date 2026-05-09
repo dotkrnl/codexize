@@ -32,8 +32,7 @@ pub fn build_rank_order(a: &CachedModel, b: &CachedModel) -> Ordering {
 /// rows squeezed below the threshold by softmax + quota factors. The
 /// per-vendor floor still admits one row per vendor (chosen by the global
 /// `build_rank_order`) so a vendor can never disappear when its scores
-/// stay below the threshold. Cosmetic `current_score` / `overall_score`
-/// MUST NOT influence visibility.
+/// stay below the threshold.
 pub fn visible_models(models: &[CachedModel]) -> BTreeSet<String> {
     let mut visible = BTreeSet::new();
     let candidates: Vec<&CachedModel> = models.iter().collect();

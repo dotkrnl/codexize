@@ -1,23 +1,5 @@
 use super::*;
 
-fn score(name: &str, value: f64, order: usize) -> ScoreEntry {
-    ScoreEntry {
-        name: name.to_string(),
-        vendor: "vendor".to_string(),
-        overall_score: value,
-        current_score: value,
-        standard_error: 0.0,
-        axes: vec![("correctness".to_string(), value)],
-        axis_provenance: BTreeMap::new(),
-        display_order: order,
-        canonical_id: None,
-        aliases: Vec::new(),
-        ipbr_phase_scores: IpbrPhaseScores::default(),
-        score_source: ScoreSource::None,
-        ipbr_row_matched: false,
-    }
-}
-
 fn ipbr_score(
     name: &str,
     canonical_id: Option<&str>,
@@ -26,6 +8,9 @@ fn ipbr_score(
     order: usize,
 ) -> ScoreEntry {
     ScoreEntry {
+        name: name.to_string(),
+        vendor: "vendor".to_string(),
+        display_order: order,
         canonical_id: canonical_id.map(normalize_ipbr_key),
         aliases: aliases
             .iter()
@@ -39,7 +24,6 @@ fn ipbr_score(
         },
         score_source: ScoreSource::Ipbr,
         ipbr_row_matched: true,
-        ..score(name, value, order)
     }
 }
 
@@ -101,7 +85,6 @@ fn merge_matches_inventory_by_normalized_ipbr_aliases() {
 
     assert_eq!(model.score_source, ScoreSource::Ipbr);
     assert_eq!(model.ipbr_phase_scores.build, Some(93.0));
-    assert_eq!(model.fallback_from, None);
 }
 
 #[test]
@@ -163,7 +146,6 @@ fn merge_matches_inventory_by_normalized_provider_path_aliases() {
 
     assert_eq!(model.score_source, ScoreSource::Ipbr);
     assert_eq!(model.ipbr_phase_scores.review, Some(91.0));
-    assert_eq!(model.fallback_from, None);
 }
 
 #[test]
@@ -221,60 +203,6 @@ fn merge_drops_inventory_without_ipbr_match() {
     assert!(!models.iter().any(|m| m.name == "gpt-5.5"));
 }
 
-#[test]
-fn scores_only_converts_scores_without_fallback() {
-    let models = scores_only(vec![score("gpt-5.4", 0.8, 2)]);
-
-    assert_eq!(models[0].name, "gpt-5.4");
-    assert_eq!(models[0].fallback_from, None);
-}
-
-#[test]
-fn merged_axes_returns_axes_provenance_and_events() {
-    let val = serde_json::json!([
-        {
-            "suite": "deep",
-            "axes": {
-                "contextWindow": 1.0,
-                "correctness": "bad"
-            }
-        },
-        {
-            "suite": "tooling",
-            "axes": { "efficiency": "0.42" }
-        }
-    ]);
-    let (axes, provenance, events) = merged_axes(&val).unwrap();
-
-    assert_eq!(axes, vec![("efficiency".to_string(), 0.42)]);
-    assert_eq!(
-        provenance.get("contextwindow").map(String::as_str),
-        Some("dropped:contextwindow")
-    );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        IngestEvent::AxisDropped { reason } if reason == "contextwindow"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        IngestEvent::AxisParseFail { suite, axis }
-            if suite == "deep" && axis == "correctness"
-    )));
-}
-
-#[test]
-fn value_to_f64_accepts_numbers_strings_and_bools() {
-    assert_eq!(value_to_f64(Some(&serde_json::json!(0.25))), Some(0.25));
-    assert_eq!(value_to_f64(Some(&serde_json::json!("0.5"))), Some(0.5));
-    assert_eq!(value_to_f64(Some(&serde_json::json!(true))), Some(1.0));
-}
-
-#[test]
-fn value_to_string_preserves_strings_and_serializes_other_values() {
-    assert_eq!(value_to_string(&serde_json::json!("abc")), "abc");
-    assert_eq!(value_to_string(&serde_json::json!(7)), "7");
-}
-
 fn render_dashboard_models(models: &[DashboardModel]) -> String {
     // Hand-rolled rendering keeps the snapshot stable across Rust
     // versions that may format Debug-derived floats differently. We
@@ -286,20 +214,9 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
     for model in sorted {
         out.push_str(&format!("- name: {}\n", model.name));
         out.push_str(&format!("  vendor: {}\n", model.dashboard_vendor));
-        out.push_str(&format!("  overall_score: {:.4}\n", model.overall_score));
-        out.push_str(&format!("  current_score: {:.4}\n", model.current_score));
-        out.push_str(&format!("  standard_error: {:.4}\n", model.standard_error));
         out.push_str(&format!("  display_order: {}\n", model.display_order));
         out.push_str(&format!("  score_source: {:?}\n", model.score_source));
         out.push_str(&format!("  ipbr_row_matched: {}\n", model.ipbr_row_matched));
-        out.push_str(&format!(
-            "  fallback_from: {}\n",
-            model.fallback_from.as_deref().unwrap_or("-")
-        ));
-        out.push_str("  axes:\n");
-        for (axis, value) in &model.axes {
-            out.push_str(&format!("    - {}: {:.4}\n", axis, value));
-        }
         out.push_str(&format!(
             "  ipbr_phase_scores: idea={:?} planning={:?} build={:?} review={:?}\n",
             model.ipbr_phase_scores.idea,
@@ -315,24 +232,20 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
 fn dashboard_model_after_representative_merge_snapshot() {
     // Mirrors a typical refresh: a couple of inventory rows joined against
     // a small set of scores. Inventory rows without an ipbr match are
-    // dropped; ipbr-sourced rows survive with phase scores; legacy
-    // non-ipbr scores still surface (only test fixtures produce these).
+    // dropped; ipbr-sourced rows survive with phase scores.
     let models = merge(
         vec![
             inventory("anthropic/claude-opus-4", 0),
             inventory("gpt-5.5", 1),
             inventory("claude-sonnet-4.5", 2),
         ],
-        vec![
-            ipbr_score(
-                "Claude Opus 4",
-                Some("anthropic/claude-opus-4"),
-                &[],
-                88.0,
-                2,
-            ),
-            score("gpt-5.4", 0.8, 5),
-        ],
+        vec![ipbr_score(
+            "Claude Opus 4",
+            Some("anthropic/claude-opus-4"),
+            &[],
+            88.0,
+            2,
+        )],
     );
     insta::assert_snapshot!(
         "dashboard_model_after_representative_merge",

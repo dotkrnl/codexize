@@ -379,7 +379,7 @@ mod tests {
     use crate::state::{
         self as session_state, BuilderState, Phase, PipelineItem, PipelineItemStatus, SessionState,
     };
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -408,11 +408,6 @@ mod tests {
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "review-model".to_string(),
-            overall_score: 0.0,
-            current_score: 0.0,
-            standard_error: 0.0,
-            axes: Vec::new(),
-            axis_provenance: BTreeMap::new(),
             ipbr_phase_scores: IpbrPhaseScores {
                 review: Some(1.0),
                 ..IpbrPhaseScores::default()
@@ -425,7 +420,6 @@ mod tests {
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,
-            fallback_from: None,
         }
     }
 

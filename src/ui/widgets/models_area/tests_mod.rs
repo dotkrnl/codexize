@@ -7,29 +7,13 @@ use ratatui::widgets::{Paragraph, Widget};
 // ----- fixtures -----
 
 fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> CachedModel {
-    // Test fixtures used to feed scoring through legacy aistupidlevel
-    // axes; the spec now restricts ranking and sampling weights to
-    // authoritative ipbr phase scores. Mirror the same numeric value into
-    // every ipbr phase so existing tests that vary only `axis_score` keep
-    // their relative ordering and percentage shape under the new pipeline.
+    // Tests used to vary a single `axis_score` knob; the spec restricts
+    // ranking and sampling weights to authoritative ipbr phase scores, so
+    // mirror the value into every ipbr phase to keep their relative
+    // ordering and percentage shape.
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: name.to_string(),
-        overall_score: axis_score,
-        current_score: 99.0,
-        standard_error: 0.0,
-        axes: vec![
-            ("codequality".to_string(), axis_score),
-            ("correctness".to_string(), axis_score),
-            ("debugging".to_string(), axis_score),
-            ("safety".to_string(), axis_score),
-            ("complexity".to_string(), axis_score),
-            ("edgecases".to_string(), axis_score),
-            ("contextawareness".to_string(), axis_score),
-            ("taskcompletion".to_string(), axis_score),
-            ("stability".to_string(), axis_score),
-        ],
-        axis_provenance: std::collections::BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores {
             idea: Some(axis_score),
             planning: Some(axis_score),
@@ -60,7 +44,6 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
         quota_percent: Some(100),
         quota_resets_at: None,
         display_order,
-        fallback_from: None,
     }
 }
 
@@ -436,30 +419,6 @@ fn full_table_collapses_to_top_rank_only_between_60_and_80() {
 }
 
 #[test]
-fn full_table_truncates_fallback_marker_text_on_narrow_width() {
-    // Migrated from model_strip_truncates_fallback_marker_text_on_narrow_width.
-    // Under the new spec, the freshness marker DEGRADES rather than
-    // truncating: " (new)" → "*" → omitted before the name itself starts
-    // ellipsis-truncating. So at narrow widths we expect either "*" or no
-    // marker, not "name (...".
-    let mut model = model_with_axis_score("gpt-opus-4-1", 1.0, 0);
-    model.fallback_from = Some("gpt-4-1".to_string());
-    let models = vec![model];
-
-    let (lines, _) = responsive_models_area(&models, &[], 48, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 48);
-
-    assert!(
-        !row.contains("(...") && !row.contains("(n..."),
-        "freshness marker must degrade, not partially truncate: {row:?}"
-    );
-    assert!(
-        row.contains("opus-4-1"),
-        "name itself should still appear when budget allows it: {row:?}"
-    );
-}
-
-#[test]
 fn full_table_shows_full_name_on_wide_width() {
     let models = vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)];
 
@@ -498,74 +457,17 @@ fn full_table_uses_gemini_preview_display_label() {
     );
 }
 
-#[test]
-fn full_table_shows_new_suffix_for_fallback_models_on_wide_width() {
-    let mut model = model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0);
-    model.fallback_from = Some("gpt-4-5".to_string());
-    let models = vec![model];
-
-    let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 120);
-
-    assert!(
-        row.contains("opus-4-5-20251101 (new)"),
-        "fallback model should show (new) suffix on wide width: {row:?}"
-    );
-}
+// ----- name exact-width contract -----
 
 #[test]
-fn full_table_omits_provenance_labels() {
-    let mut model = model_with_axis_score("gpt-alpha", 1.0, 0);
-    model.axis_provenance = std::collections::BTreeMap::from([
-        ("correctness".to_string(), "suite:hourly".to_string()),
-        ("contextawareness".to_string(), "suite:tooling".to_string()),
-    ]);
-    let models = vec![model];
-
-    let (lines, _) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
-    let combined = render_to_text(&lines, 200).join("\n");
-
-    assert!(
-        !combined.contains("suite:hourly") && !combined.contains("suite:tooling"),
-        "provenance labels must not render: {combined:?}"
-    );
-}
-
-// ----- name + freshness exact-width contract -----
-
-#[test]
-fn format_name_with_freshness_exact_width() {
+fn format_name_exact_width() {
     // Full name fits — padded to target width.
-    let spans = format_name_with_freshness("short", false, 10);
+    let spans = format_name_with_freshness("short", 10);
     let width: usize = spans.iter().map(|s| s.content.width()).sum();
     assert_eq!(width, 10);
 
-    // Name + " (new)" fits.
-    let spans = format_name_with_freshness("short", true, 15);
-    let width: usize = spans.iter().map(|s| s.content.width()).sum();
-    assert_eq!(width, 15);
-    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(text, "short (new)    ");
-
-    // Freshness degrades to "*" when " (new)" no longer fits.
-    let spans = format_name_with_freshness("gpt-4-turbo", true, 13);
-    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-    let width: usize = spans.iter().map(|s| s.content.width()).sum();
-    assert_eq!(width, 13);
-    assert!(
-        text.starts_with("gpt-4-turbo*"),
-        "freshness should degrade to *: {text:?}"
-    );
-
-    // Freshness omitted entirely when even "*" no longer fits.
-    let spans = format_name_with_freshness("gpt-4-turbo", true, 11);
-    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-    let width: usize = spans.iter().map(|s| s.content.width()).sum();
-    assert_eq!(width, 11);
-    assert_eq!(text, "gpt-4-turbo", "freshness omitted, name fits exactly");
-
-    // Name truncated with ellipsis (no marker since we are in plain mode).
-    let spans = format_name_with_freshness("verylongname", false, 10);
+    // Name truncated with ellipsis when budget is too small.
+    let spans = format_name_with_freshness("verylongname", 10);
     let width: usize = spans.iter().map(|s| s.content.width()).sum();
     assert_eq!(width, 10);
     assert!(spans.iter().any(|s| s.content.contains("...")));
@@ -573,22 +475,22 @@ fn format_name_with_freshness_exact_width() {
     assert_eq!(text, "verylon...");
 
     // Very narrow — only ellipsis fits.
-    let spans = format_name_with_freshness("x", false, 2);
+    let spans = format_name_with_freshness("x", 2);
     let width: usize = spans.iter().map(|s| s.content.width()).sum();
     assert_eq!(width, 2);
 }
 
 #[test]
-fn format_name_with_freshness_wide_display() {
+fn format_name_wide_display() {
     // "あ" is 2 wide.
-    let spans = format_name_with_freshness("あああ", false, 5); // Total width 6, needs truncation.
+    let spans = format_name_with_freshness("あああ", 5); // Total width 6, needs truncation.
     let width: usize = spans.iter().map(|s| s.content.width()).sum();
     assert_eq!(width, 5);
     let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
     assert_eq!(text, "あ...");
 
     // Budget 4: visible width 1. "あ" cannot fit, so truncated string is empty. Total width is 3 (just ellipsis).
-    let spans = format_name_with_freshness("あああ", false, 4);
+    let spans = format_name_with_freshness("あああ", 4);
     let width: usize = spans.iter().map(|s| s.content.width()).sum();
     assert!(width <= 4);
     let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
@@ -752,11 +654,9 @@ fn full_table_dot_color_tracks_quota_not_score() {
     // pool weight to 0 under the >10% visibility rule).
     let mut high_score_no_quota =
         vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-4", 1.0, 0);
-    high_score_no_quota.current_score = 99.0;
     high_score_no_quota.quota_percent = Some(0);
     let mut low_score_full_quota =
         vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 1.0, 1);
-    low_score_full_quota.current_score = 1.0;
     low_score_full_quota.quota_percent = Some(100);
     let models = vec![high_score_no_quota, low_score_full_quota];
 
@@ -1253,11 +1153,6 @@ fn unscored_inventory_model(
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        overall_score: 99.0,
-        current_score: 99.0,
-        standard_error: 0.0,
-        axes: Vec::new(),
-        axis_provenance: std::collections::BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
@@ -1267,7 +1162,6 @@ fn unscored_inventory_model(
         quota_percent: quota,
         quota_resets_at: None,
         display_order,
-        fallback_from: None,
     }
 }
 

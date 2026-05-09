@@ -276,41 +276,24 @@ fn all_clis() -> BTreeSet<CliKind> {
     .collect()
 }
 
-fn make_entry(name: &str, vendor: &str, overall: f64, current: f64) -> DashboardEntry {
-    make_entry_with_order(name, vendor, overall, current, 0)
+fn make_entry(name: &str, vendor: &str) -> DashboardEntry {
+    make_entry_with_order(name, vendor, 0)
 }
 
-fn make_entry_with_order(
-    name: &str,
-    vendor: &str,
-    overall: f64,
-    current: f64,
-    display_order: usize,
-) -> DashboardEntry {
+fn make_entry_with_order(name: &str, vendor: &str, display_order: usize) -> DashboardEntry {
     DashboardEntry {
         dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
-        overall_score: overall,
-        current_score: current,
-        standard_error: 2.0,
-        axes: vec![
-            ("codequality".to_string(), 0.85),
-            ("correctness".to_string(), 0.85),
-            ("debugging".to_string(), 0.85),
-            ("safety".to_string(), 0.85),
-        ],
-        axis_provenance: BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
         display_order,
-        fallback_from: None,
     }
 }
 
 fn make_ipbr_entry(name: &str, vendor: &str, match_key: &str) -> DashboardEntry {
-    let mut entry = make_entry(name, vendor, 80.0, 78.0);
+    let mut entry = make_entry(name, vendor);
     entry.score_source = ScoreSource::Ipbr;
     entry.ipbr_row_matched = true;
     entry.ipbr_match_key = Some(match_key.to_string());
@@ -427,11 +410,8 @@ fn assemble_from_cache_with_available(
 
 #[test]
 fn assemble_merges_dashboard_and_quotas() {
-    let mut claude_entry = make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0);
-    claude_entry
-        .axis_provenance
-        .insert("correctness".to_string(), "suite:hourly".to_string());
-    let dashboard = vec![claude_entry, make_entry("gpt-5-5", "openai", 80.0, 78.0)];
+    let claude_entry = make_entry("claude-sonnet-4-6", "claude");
+    let dashboard = vec![claude_entry, make_entry("gpt-5-5", "openai")];
     let quotas = make_quota_payload(&[
         ("claude", "claude-sonnet-4-6", Some(80)),
         ("openai", "gpt-5-5", Some(70)),
@@ -446,13 +426,6 @@ fn assemble_merges_dashboard_and_quotas() {
         .unwrap();
     assert_eq!(claude.subscription, SubscriptionKind::Claude);
     assert_eq!(claude.quota_percent, Some(80));
-    assert_eq!(
-        claude
-            .axis_provenance
-            .get("correctness")
-            .map(String::as_str),
-        Some("suite:hourly")
-    );
     let codex = models.iter().find(|m| m.name == "gpt-5-5").unwrap();
     assert_eq!(codex.subscription, SubscriptionKind::Codex);
     assert_eq!(codex.quota_percent, Some(70));
@@ -460,7 +433,7 @@ fn assemble_merges_dashboard_and_quotas() {
 
 #[test]
 fn assemble_merges_cached_quota_resets() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let resets =
         make_reset_payload(&[("claude", "claude-sonnet-4-6", Some("2026-04-30T12:00:00Z"))]);
@@ -480,7 +453,7 @@ fn assemble_merges_cached_quota_resets() {
 
 #[test]
 fn assemble_omits_models_with_unknown_vendor() {
-    let dashboard = vec![make_entry("unknown-model", "aliens", 90.0, 90.0)];
+    let dashboard = vec![make_entry("unknown-model", "aliens")];
     let quotas = make_quota_payload(&[]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
@@ -492,12 +465,10 @@ fn assemble_omits_models_with_unknown_vendor() {
 #[ignore = "legacy provider-first Kimi collapse is retired by model-first rows"]
 fn assemble_collapses_kimi_models() {
     // Stable inventory order (display_order) decides the canonical
-    // representative, not cosmetic overall_score.
+    // representative.
     let dashboard = vec![
-        // Lower display_order (1) but lower overall_score — should win.
-        make_entry_with_order("kimi-k2", "moonshotai", 70.0, 68.0, 1),
-        // Higher display_order (5) but higher overall_score — should lose.
-        make_entry_with_order("kimi-k1.5", "moonshotai", 75.0, 73.0, 5),
+        make_entry_with_order("kimi-k2", "moonshotai", 1),
+        make_entry_with_order("kimi-k1.5", "moonshotai", 5),
     ];
     let quotas = make_quota_payload(&[
         ("moonshotai", "kimi-k2", Some(90)),
@@ -511,9 +482,6 @@ fn assemble_collapses_kimi_models() {
     // row), not a synthesized "kimi-latest" placeholder.
     assert_eq!(models[0].name, "kimi-k2");
     assert_eq!(models[0].subscription, SubscriptionKind::Kimi);
-    // Retains the lower-display-order model's cosmetic score (70.0),
-    // proving overall_score did not drive the collapse.
-    assert_eq!(models[0].overall_score, 70.0);
 }
 
 #[test]
@@ -524,8 +492,7 @@ fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
     // (lower display_order) but ipbr's phase scores show the latter is the
     // canonical pick. The collapse MUST keep the better ipbr scores so
     // downstream phase-rank / pool-weight cells reflect the canonical kimi.
-    let mut weaker_low_order =
-        make_entry_with_order("kimi-k2-0905-preview", "moonshotai", 38.0, 38.0, 14);
+    let mut weaker_low_order = make_entry_with_order("kimi-k2-0905-preview", "moonshotai", 14);
     weaker_low_order.score_source = crate::selection::ScoreSource::Ipbr;
     weaker_low_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         idea: Some(22.8),
@@ -534,7 +501,7 @@ fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
         review: Some(48.6),
     };
 
-    let mut stronger_high_order = make_entry_with_order("kimi-real", "moonshotai", 73.0, 73.0, 15);
+    let mut stronger_high_order = make_entry_with_order("kimi-real", "moonshotai", 15);
     stronger_high_order.score_source = crate::selection::ScoreSource::Ipbr;
     stronger_high_order.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         idea: Some(69.0),
@@ -561,41 +528,33 @@ fn assemble_collapses_kimi_prefers_higher_ipbr_score_over_display_order() {
 
 #[test]
 #[ignore = "legacy provider-first Kimi collapse is retired by model-first rows"]
-fn assemble_collapses_kimi_ignores_cosmetic_overall_score() {
-    // overall_score / current_score are display-only summaries — they MUST
-    // NOT win against another sibling whose ipbr phase scores are stronger.
-    // Here the higher-overall-score kimi has *lower* ipbr scores, so the
-    // ipbr-favored row must be retained.
-    let mut weak_ipbr_high_overall =
-        make_entry_with_order("kimi-k1.5", "moonshotai", 95.0, 93.0, 0);
-    weak_ipbr_high_overall.score_source = crate::selection::ScoreSource::Ipbr;
-    weak_ipbr_high_overall.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+fn assemble_collapses_kimi_uses_stronger_ipbr_phase_scores() {
+    // The collapse must keep the row whose ipbr phase scores are stronger
+    // even when display_order would prefer the weaker sibling.
+    let mut weak = make_entry_with_order("kimi-k1.5", "moonshotai", 0);
+    weak.score_source = crate::selection::ScoreSource::Ipbr;
+    weak.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(50.0),
         review: Some(48.0),
         ..Default::default()
     };
 
-    let mut strong_ipbr_low_overall = make_entry_with_order("kimi-k2", "moonshotai", 60.0, 58.0, 5);
-    strong_ipbr_low_overall.score_source = crate::selection::ScoreSource::Ipbr;
-    strong_ipbr_low_overall.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
+    let mut strong = make_entry_with_order("kimi-k2", "moonshotai", 5);
+    strong.score_source = crate::selection::ScoreSource::Ipbr;
+    strong.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(80.0),
         review: Some(78.0),
         ..Default::default()
     };
 
-    let dashboard = vec![weak_ipbr_high_overall, strong_ipbr_low_overall];
+    let dashboard = vec![weak, strong];
     let quotas = make_quota_payload(&[("moonshotai", "kimi-k2", Some(90))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
     assert_eq!(models.len(), 1);
     let kimi = &models[0];
-    // Auto-inferred name: the strong-ipbr kimi-k2 row wins and surfaces
-    // under its own name.
     assert_eq!(kimi.name, "kimi-k2");
-    // overall_score 95 lost to overall_score 60 because ipbr phase scores
-    // were stronger on the kimi-k2 row.
-    assert_eq!(kimi.overall_score, 60.0);
     assert_eq!(kimi.ipbr_phase_scores.build, Some(80.0));
     assert_eq!(kimi.ipbr_phase_scores.review, Some(78.0));
 }
@@ -605,7 +564,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     use crate::selection::config::SelectionPhase;
     use crate::selection::ranking::phase_rank_score;
 
-    let mut entry = make_entry_with_order("kimi-k2", "moonshotai", 70.0, 68.0, 0);
+    let mut entry = make_entry_with_order("kimi-k2", "moonshotai", 0);
     entry.score_source = crate::selection::ScoreSource::Ipbr;
     entry.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
         build: Some(82.0),
@@ -622,7 +581,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
     let kimi = &models[0];
     assert_eq!(kimi.name, "kimi-k2");
     // Build and Review auto-selection must see the ipbr phase scores
-    // from the collapsed model, not fall back to overall_score.
+    // from the collapsed model.
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Build), Some(82.0));
     assert_eq!(phase_rank_score(kimi, SelectionPhase::Review), Some(79.0));
 }
@@ -630,7 +589,7 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
 #[test]
 #[ignore = "legacy sibling synthesis is retired by model-first rows"]
 fn assemble_synthesizes_missing_sibling() {
-    let dashboard = vec![make_entry("gpt-5.4", "openai", 80.0, 78.0)];
+    let dashboard = vec![make_entry("gpt-5.4", "openai")];
     // Quota has gpt-5.5 which is missing from dashboard
     let quotas = make_quota_payload(&[
         ("openai", "gpt-5.4", Some(80)),
@@ -641,7 +600,6 @@ fn assemble_synthesizes_missing_sibling() {
 
     assert_eq!(models.len(), 2);
     let synthesized = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
-    assert_eq!(synthesized.fallback_from.as_deref(), Some("gpt-5.4"));
     assert_eq!(synthesized.quota_percent, Some(70));
 }
 
@@ -649,9 +607,9 @@ fn assemble_synthesizes_missing_sibling() {
 #[ignore = "legacy synthesized inventory rows are retired by model-first rows"]
 fn unavailable_clis_are_omitted_before_models_are_returned() {
     let dashboard = vec![
-        make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
-        make_entry("gpt-5.5", "openai", 80.0, 78.0),
-        make_entry("gemini-2.5-pro", "google", 75.0, 73.0),
+        make_entry("claude-sonnet-4-6", "claude"),
+        make_entry("gpt-5.5", "openai"),
+        make_entry("gemini-2.5-pro", "google"),
     ];
     let quotas = make_quota_payload(&[
         ("claude", "claude-sonnet-4-6", Some(80)),
@@ -671,7 +629,7 @@ fn unavailable_clis_are_omitted_before_models_are_returned() {
 
 #[test]
 fn available_claude_keeps_anthropic_dashboard_entries() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "anthropic", 85.0, 82.0)];
+    let dashboard = vec![make_entry("claude-sonnet-4-6", "anthropic")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let available = BTreeSet::from([CliKind::Claude]);
 
@@ -689,7 +647,7 @@ fn stale_on_error_fallback_uses_expired_dashboard() {
     // Fresh (non-expired) dashboard should be used directly without fetching
     let loaded = LoadedCache {
         dashboard: Some(LoadedSection {
-            data: vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)],
+            data: vec![make_entry("claude-sonnet-4-6", "claude")],
             expired: false,
         }),
         quotas: Some(LoadedSection {
@@ -733,7 +691,7 @@ fn fresh_cache_with_empty_dashboard_returns_empty() {
 
 #[test]
 fn assemble_universe_uses_provided_snapshot_without_reloading() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     let resets = empty_resets_for_quotas(&quotas);
 
@@ -750,7 +708,7 @@ fn quota_strict_lookup_returns_none_when_no_exact_match() {
     // quotas across Claude models. The candidate's quota_lookup_key
     // (or its launch_name fallback) must hit a real entry — otherwise
     // the row reports an unknown quota.
-    let dashboard = vec![make_entry("claude-opus-4-7", "claude", 90.0, 88.0)];
+    let dashboard = vec![make_entry("claude-opus-4-7", "claude")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(75))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
@@ -1031,7 +989,7 @@ fn merge_quota_payload_drops_unparseable_subscription() {
 
 #[test]
 fn missing_quota_results_in_none() {
-    let dashboard = vec![make_entry("gemini-2.5-pro", "google", 85.0, 83.0)];
+    let dashboard = vec![make_entry("gemini-2.5-pro", "google")];
     let quotas = make_quota_payload(&[]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));

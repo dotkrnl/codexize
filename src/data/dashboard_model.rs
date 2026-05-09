@@ -1,32 +1,20 @@
 use crate::dashboard::DashboardModel;
-#[cfg(test)]
-use crate::dashboard::IngestEvent;
 use crate::selection::{IpbrPhaseScores, ScoreSource};
-#[cfg(test)]
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[derive(Debug, Clone)]
 pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
 }
-/// Canonicalized score record produced by score ingestion. The `name`
+/// Canonicalized score record produced by ipbr ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
 /// the opencode-inventory merge keys join cleanly; richer normalization is
 /// exposed via `canonical_id` / `aliases` for the alias matcher.
-/// All production rows are `score_source = Ipbr` and `ipbr_row_matched = true`;
-/// the legacy aistupidlevel parser still appears in tests only and leaves
-/// `score_source = None` so its cosmetic `axes` cannot masquerade as
-/// ipbr authority.
+/// All production rows are `score_source = Ipbr` and `ipbr_row_matched = true`.
 #[derive(Debug, Clone)]
 pub(crate) struct ScoreEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
-    pub(crate) overall_score: f64,
-    pub(crate) current_score: f64,
-    pub(crate) standard_error: f64,
-    pub(crate) axes: Vec<(String, f64)>,
-    pub(crate) axis_provenance: BTreeMap<String, String>,
     pub(crate) display_order: usize,
     /// Normalized canonical id from the ipbr feed, when present. Carried
     /// through ingestion for the upcoming normalized-exact matching
@@ -127,12 +115,7 @@ pub(crate) fn merge_with_warnings(
         models.iter().map(|m| m.name.clone()).collect();
     for (score_index, sc) in scores.iter().enumerate() {
         if !consumed_ipbr_scores.contains(&score_index) && !inv_names.contains(&sc.name) {
-            models.push(dashboard_model_from_score(
-                sc.name.clone(),
-                &sc.vendor,
-                sc,
-                None,
-            ));
+            models.push(dashboard_model_from_score(sc.name.clone(), &sc.vendor, sc));
         }
     }
     models.sort_by_key(|m| m.display_order);
@@ -141,106 +124,11 @@ pub(crate) fn merge_with_warnings(
         warnings: ipbr_lookup.warnings,
     }
 }
-#[cfg(test)]
-pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
-    scores
-        .into_iter()
-        .map(|sc| DashboardModel {
-            name: sc.name.clone(),
-            dashboard_vendor: sc.vendor,
-            overall_score: sc.overall_score,
-            current_score: sc.current_score,
-            standard_error: sc.standard_error,
-            axes: sc.axes,
-            axis_provenance: sc.axis_provenance,
-            ipbr_phase_scores: sc.ipbr_phase_scores,
-            score_source: sc.score_source,
-            ipbr_row_matched: sc.ipbr_row_matched,
-            ipbr_match_key: if sc.ipbr_row_matched {
-                Some(normalize_ipbr_key(&sc.name))
-            } else {
-                None
-            },
-            display_order: sc.display_order,
-            fallback_from: None,
-        })
-        .collect()
-}
-#[cfg(test)]
-#[allow(clippy::type_complexity)]
-pub(crate) fn merged_axes(
-    value: &Value,
-) -> Option<(
-    Vec<(String, f64)>,
-    BTreeMap<String, String>,
-    Vec<IngestEvent>,
-)> {
-    let entries = value.as_array()?;
-    let mut axes: BTreeMap<String, f64> = BTreeMap::new();
-    let mut provenance: BTreeMap<String, String> = BTreeMap::new();
-    let mut events = Vec::new();
-    for entry in entries.iter().rev() {
-        let suite = entry
-            .get("suite")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let Some(entry_axes) = entry.get("axes").and_then(Value::as_object) else {
-            continue;
-        };
-        for (k, v) in entry_axes {
-            let key = k.to_ascii_lowercase();
-            if key == "contextwindow" {
-                provenance
-                    .entry(key)
-                    .or_insert_with(|| "dropped:contextwindow".to_string());
-                events.push(IngestEvent::AxisDropped {
-                    reason: "contextwindow".to_string(),
-                });
-                continue;
-            }
-            if axes.contains_key(&key) {
-                continue;
-            }
-            match value_to_f64(Some(v)) {
-                Some(num) => {
-                    axes.insert(key.clone(), num);
-                    provenance.insert(key, format!("suite:{suite}"));
-                }
-                None => {
-                    events.push(IngestEvent::AxisParseFail {
-                        suite: suite.clone(),
-                        axis: key,
-                    });
-                }
-            }
-        }
-    }
-    Some((axes.into_iter().collect(), provenance, events))
-}
-#[cfg(test)]
-pub(crate) fn value_to_f64(value: Option<&Value>) -> Option<f64> {
-    match value {
-        Some(Value::Number(n)) => n.as_f64(),
-        Some(Value::String(s)) => s.parse().ok(),
-        Some(Value::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
-        _ => None,
-    }
-}
-#[cfg(test)]
-pub(crate) fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
 fn dashboard_model_from_score(
     name: String,
     inventory_vendor: &str,
     sc: &ScoreEntry,
-    fallback_from: Option<String>,
 ) -> DashboardModel {
-    let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
         name,
         dashboard_vendor: if !inventory_vendor.is_empty() {
@@ -248,32 +136,15 @@ fn dashboard_model_from_score(
         } else {
             sc.vendor.clone()
         },
-        overall_score: sc.overall_score,
-        current_score: sc.current_score,
-        standard_error: sc.standard_error,
-        axes: sc.axes.clone(),
-        axis_provenance: sc.axis_provenance.clone(),
-        // ipbr-sourced rows propagate phase scores and `Ipbr` provenance;
-        // legacy aistupidlevel-sourced rows leave `score_source = None`
-        // so cosmetic `axes` cannot masquerade as ipbr authority.
-        ipbr_phase_scores: if is_sibling_fallback {
-            IpbrPhaseScores::default()
-        } else {
-            sc.ipbr_phase_scores
-        },
-        score_source: if is_sibling_fallback {
-            ScoreSource::None
-        } else {
-            sc.score_source
-        },
-        ipbr_row_matched: !is_sibling_fallback && sc.ipbr_row_matched,
-        ipbr_match_key: if !is_sibling_fallback && sc.ipbr_row_matched {
+        ipbr_phase_scores: sc.ipbr_phase_scores,
+        score_source: sc.score_source,
+        ipbr_row_matched: sc.ipbr_row_matched,
+        ipbr_match_key: if sc.ipbr_row_matched {
             Some(normalize_ipbr_key(&sc.name))
         } else {
             None
         },
         display_order: sc.display_order,
-        fallback_from,
     }
 }
 struct IpbrLookup {
@@ -403,7 +274,6 @@ fn push_merged_inventory(
         inv.name,
         &inv.vendor,
         &scores[score_index],
-        None,
     ));
 }
 #[cfg(test)]

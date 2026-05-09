@@ -186,7 +186,7 @@ mod tests {
         RunRecord, RunStatus, SessionState,
     };
     use crossterm::event::KeyCode;
-    use std::collections::{BTreeMap, VecDeque};
+    use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 
     fn with_temp_session<T>(label: &str, f: impl FnOnce(String) -> T) -> T {
@@ -206,11 +206,6 @@ mod tests {
         CachedModel {
             subscription: SubscriptionKind::Codex,
             name: "dream-model".to_string(),
-            overall_score: 0.0,
-            current_score: 0.0,
-            standard_error: 0.0,
-            axes: Vec::new(),
-            axis_provenance: BTreeMap::new(),
             ipbr_phase_scores: IpbrPhaseScores {
                 review: Some(1.0),
                 ..IpbrPhaseScores::default()
@@ -223,7 +218,6 @@ mod tests {
             quota_percent: Some(100),
             quota_resets_at: None,
             display_order: 0,
-            fallback_from: None,
         }
     }
 

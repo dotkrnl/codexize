@@ -8,7 +8,6 @@
 //! the snapshots have been resolved. The merge / coverage-gap helpers are
 //! exposed because that orchestrator needs them between IO calls.
 use super::baked;
-use super::ranking::stamp_selection_provenance;
 use super::subscription;
 use super::types::{CachedModel, Candidate, CliKind, QuotaError, SubscriptionKind};
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
@@ -141,7 +140,6 @@ pub fn assemble_universe(
         .into_values()
         .map(|mut row| {
             refresh_selected_candidate(&mut row);
-            stamp_selection_provenance(&mut row);
             row
         })
         .collect();
@@ -170,11 +168,6 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Direct,
         name,
-        overall_score: entry.overall_score,
-        current_score: entry.current_score,
-        standard_error: entry.standard_error,
-        axes: entry.axes.clone(),
-        axis_provenance: entry.axis_provenance.clone(),
         ipbr_phase_scores: entry.ipbr_phase_scores,
         score_source: entry.score_source,
         ipbr_row_matched: entry.ipbr_row_matched,
@@ -184,7 +177,6 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
         quota_percent: None,
         quota_resets_at: None,
         display_order: entry.display_order,
-        fallback_from: entry.fallback_from.clone(),
     }
 }
 
@@ -546,17 +538,11 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
         .map(|m| DashboardEntry {
             dashboard_vendor: m.dashboard_vendor.clone(),
             name: m.name.clone(),
-            overall_score: m.overall_score,
-            current_score: m.current_score,
-            standard_error: m.standard_error,
-            axes: m.axes.clone(),
-            axis_provenance: m.axis_provenance.clone(),
             ipbr_phase_scores: m.ipbr_phase_scores,
             score_source: m.score_source,
             ipbr_row_matched: m.ipbr_row_matched,
             ipbr_match_key: m.ipbr_match_key.clone(),
             display_order: m.display_order,
-            fallback_from: m.fallback_from.clone(),
         })
         .collect()
 }

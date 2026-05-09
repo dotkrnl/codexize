@@ -1,7 +1,6 @@
 use super::*;
 use crate::data::config::schema::EffortMapping;
 use crate::selection::types::{Candidate, CliKind};
-use std::collections::BTreeMap;
 
 /// Build a single-candidate `CachedModel` with the given per-tuple
 /// flags. The `is_*_eligible` helpers under test are flag-driven now,
@@ -42,18 +41,12 @@ fn sample_cached_model() -> CachedModel {
     CachedModel {
         subscription: SubscriptionKind::Codex,
         name: "gpt-5.5".to_string(),
-        overall_score: 85.0,
-        current_score: 85.0,
-        standard_error: 2.0,
-        axes: Vec::new(),
-        axis_provenance: BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 0,
-        fallback_from: None,
         ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,

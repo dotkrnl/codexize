@@ -48,17 +48,6 @@ fn probability_helpers_clamp_and_dim_zero() {
 }
 
 #[test]
-fn format_name_with_freshness_degrades_before_truncating() {
-    let spans = format_name_with_freshness("short", true, 15);
-    let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
-    assert_eq!(text, "short (new)    ");
-
-    let spans = format_name_with_freshness("gpt-4-turbo", true, 13);
-    let degraded: String = spans.iter().map(|span| span.content.as_ref()).collect();
-    assert!(degraded.starts_with("gpt-4-turbo*"));
-}
-
-#[test]
 fn name_width_min_matches_layout_floor() {
     assert_eq!(name_width_min(), 8);
 }

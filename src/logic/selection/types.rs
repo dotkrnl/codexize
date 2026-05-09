@@ -51,27 +51,19 @@ pub struct QuotaError {
     pub subscription: SubscriptionKind,
     pub message: String,
 }
-use std::collections::BTreeMap;
 /// Origin of the per-phase rank scores carried on a model.
 ///
 /// `Ipbr` is the only value that authorizes automatic phase selection or
-/// any selection-affecting ordering. `Aistupidlevel` and `None` mark
-/// non-authoritative state: cosmetic display only. Cosmetic
-/// `overall_score` / `current_score` and legacy aistupidlevel `axes` MUST
-/// NOT be backfilled into ipbr phase scores.
+/// any selection-affecting ordering. `None` marks the unranked state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScoreSource {
-    /// No score data is associated with this model. This is the default
-    /// for new fields until task 2 lands ipbr ingestion.
+    /// No score data is associated with this model.
     #[default]
     None,
     /// Per-phase ipbr rank scores are authoritative for ranking and
     /// selection.
     Ipbr,
-    /// Cosmetic aistupidlevel summary scores only — never an ipbr phase
-    /// fallback.
-    Aistupidlevel,
 }
 /// Per-phase ipbr rank scores. Each field corresponds to one ipbr
 /// scoreboard column: Idea = `i_adj`, Planning = `p_adj`, Build = `b_adj`,
@@ -79,8 +71,7 @@ pub enum ScoreSource {
 ///
 /// `None` means the matched ipbr row did not provide that phase score, in
 /// which case selection MUST exclude the model from auto-selection for
-/// that phase rather than backfilling from `overall_score`, the legacy
-/// aistupidlevel axes, or any sibling synthesis.
+/// that phase rather than backfilling from any other source.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct IpbrPhaseScores {
     pub idea: Option<f64>,
@@ -144,19 +135,8 @@ pub struct ModelRow {
     /// legacy picker and stage code. Candidate data is authoritative.
     pub subscription: SubscriptionKind,
     pub name: String,
-    /// Cosmetic display-only summary score. MUST NOT drive phase ranking,
-    /// auto-selection eligibility, or subscription backfill ordering.
-    pub overall_score: f64,
-    /// Cosmetic display-only summary score. Same constraint as
-    /// `overall_score`.
-    pub current_score: f64,
-    pub standard_error: f64,
-    /// Values are 0.0..=1.0 floats from the aistupidlevel API; keys are
-    /// lowercased camelCase. Backfill semantics are owned by the selection layer.
-    pub axes: Vec<(String, f64)>,
-    pub axis_provenance: BTreeMap<String, String>,
-    /// Per-phase ipbr rank scores. Defaults to all-`None` until ipbr
-    /// ingestion lands.
+    /// Per-phase ipbr rank scores. `None` per phase means the matched
+    /// ipbr row did not provide that phase score.
     pub ipbr_phase_scores: IpbrPhaseScores,
     /// Where the per-phase rank scores came from. Defaults to
     /// `ScoreSource::None`. Selection MUST treat anything other than
@@ -176,18 +156,9 @@ pub struct ModelRow {
     pub quota_percent: Option<u8>,
     pub quota_resets_at: Option<chrono::DateTime<chrono::Utc>>,
     pub display_order: usize,
-    /// Sibling whose ranking-API score was borrowed because this model
-    /// has no entry yet. `None` for normal models.
-    pub fallback_from: Option<String>,
 }
 pub type CachedModel = ModelRow;
 impl ModelRow {
-    pub fn axis(&self, key: &str) -> Option<f64> {
-        self.axes
-            .iter()
-            .find(|(axis_key, _)| axis_key == key)
-            .map(|(_, value)| *value)
-    }
     pub fn selected_candidate(&self) -> Option<&Candidate> {
         self.selected_candidate
             .and_then(|index| self.candidates.get(index))

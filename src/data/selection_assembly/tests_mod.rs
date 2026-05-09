@@ -2,26 +2,15 @@ use super::*;
 use crate::cache::{self, DashboardEntry, LoadedCache, LoadedSection, QuotaPayload, ResetPayload};
 use std::collections::BTreeMap;
 
-fn make_entry(name: &str, vendor: &str, overall: f64, current: f64) -> DashboardEntry {
+fn make_entry(name: &str, vendor: &str) -> DashboardEntry {
     DashboardEntry {
         dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
-        overall_score: overall,
-        current_score: current,
-        standard_error: 2.0,
-        axes: vec![
-            ("codequality".to_string(), 0.85),
-            ("correctness".to_string(), 0.85),
-            ("debugging".to_string(), 0.85),
-            ("safety".to_string(), 0.85),
-        ],
-        axis_provenance: BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
         display_order: 0,
-        fallback_from: None,
     }
 }
 
@@ -106,8 +95,8 @@ fn loaded_cache_with_resets(
 #[serial_test::serial]
 async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     let dashboard = vec![
-        make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
-        make_entry("claude-opus-4-1", "claude", 84.0, 81.0),
+        make_entry("claude-sonnet-4-6", "claude"),
+        make_entry("claude-opus-4-1", "claude"),
     ];
     let quotas = make_quota_payload(&[
         ("claude", "claude-sonnet-4-6", Some(80)),
@@ -169,8 +158,8 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
 fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let loaded = loaded_cache_with(
         vec![
-            make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
-            make_entry("gpt-5-5", "openai", 80.0, 78.0),
+            make_entry("claude-sonnet-4-6", "claude"),
+            make_entry("gpt-5-5", "openai"),
         ],
         make_quota_payload(&[
             ("claude", "claude-sonnet-4-6", Some(80)),
@@ -306,7 +295,7 @@ fn with_temp_home_cache<T>(
 
 #[test]
 fn assemble_models_uses_supplied_cache_dir_when_fresh() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     with_temp_home_cache(dashboard, quotas, |cache_dir| {
         // Cache was just written under the supplied dir, so dashboard +
@@ -341,7 +330,7 @@ fn assemble_from_cached_only_returns_empty_when_no_cache() {
 
 #[test]
 fn assemble_from_cached_only_yields_models_when_cache_is_present() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0)];
+    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
     with_temp_home_cache(dashboard, quotas, |cache_dir| {
         let models = assemble_from_cached_only(

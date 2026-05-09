@@ -2,26 +2,14 @@ use super::*;
 use tempfile::TempDir;
 
 fn sample_entries() -> Vec<DashboardEntry> {
-    sample_entries_with_provenance(BTreeMap::new())
-}
-
-fn sample_entries_with_provenance(
-    axis_provenance: BTreeMap<String, String>,
-) -> Vec<DashboardEntry> {
     vec![DashboardEntry {
         dashboard_vendor: "claude".to_string(),
         name: "claude-sonnet".to_string(),
-        overall_score: 85.0,
-        current_score: 82.0,
-        standard_error: 1.5,
-        axes: vec![("coding".to_string(), 90.0)],
-        axis_provenance,
         ipbr_phase_scores: IpbrPhaseScores::default(),
         score_source: ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
         display_order: 0,
-        fallback_from: None,
     }]
 }
 
@@ -57,7 +45,6 @@ fn save_and_load_dashboard() {
     assert!(!dash.expired);
     assert_eq!(dash.data.len(), 1);
     assert_eq!(dash.data[0].name, "claude-sonnet");
-    assert_eq!(dash.data[0].overall_score, 85.0);
 }
 
 #[test]
@@ -119,17 +106,16 @@ fn current_version_cache_without_quota_resets_loads() {
     assert!(loaded.quota_resets.is_none());
 }
 
-/// A v4 cache file (which stores ipbr fields but lacks the
-/// model-first candidates shape) MUST NOT be readable as a current
-/// dashboard. v7 also reshapes the quota payload to carry
-/// `failed_subscriptions`, so the quota section in an older file is
-/// dropped on load — losing the previous "quota survives across a
-/// dashboard-only bump" property.
+/// An older cache file (which stores legacy aistupidlevel-shaped fields)
+/// MUST NOT be readable as a current dashboard. The v8 bump invalidates
+/// pre-v8 dashboard payloads (now lacking `axes` / `axis_provenance` /
+/// `overall_score` etc.) and the v7 quota-payload reshape kept the
+/// quota section dropped on version mismatch as well.
 #[test]
-fn old_v4_cache_cannot_masquerade_as_current_cache() {
+fn old_v7_cache_cannot_masquerade_as_current_cache() {
     let dir = TempDir::new().unwrap();
     let old_payload = serde_json::json!({
-        "version": 4,
+        "version": 7,
         "dashboard": {
             "fetched_at": now_secs(),
             "data": [{
@@ -160,11 +146,11 @@ fn old_v4_cache_cannot_masquerade_as_current_cache() {
 
     assert!(
         loaded.dashboard.is_none(),
-        "v4 dashboard must not be readable under v{CACHE_VERSION}"
+        "v7 dashboard must not be readable under v{CACHE_VERSION}"
     );
     assert!(
         loaded.quotas.is_none(),
-        "v4 quota payload must be dropped at v{CACHE_VERSION} because the schema changed shape"
+        "v7 quota payload must also be dropped on a version mismatch"
     );
 }
 
@@ -175,7 +161,7 @@ fn old_v4_cache_cannot_masquerade_as_current_cache() {
 fn save_after_version_mismatch_rewrites_at_current_version() {
     let dir = TempDir::new().unwrap();
     let old_payload = serde_json::json!({
-        "version": 4,
+        "version": 7,
         "dashboard": {
             "fetched_at": now_secs(),
             "data": []
@@ -218,13 +204,12 @@ fn save_after_version_mismatch_rewrites_at_current_version() {
     );
 }
 
-/// A v4 dashboard entry written before ipbr ingestion lands omits the
-/// new ipbr fields. Loading must default the per-phase scores to
-/// `None` and the provenance to a non-`Ipbr` value so cached
-/// aistupidlevel `axes` / `overall_score` cannot pretend to be ipbr
-/// phase authority.
+/// A current-version dashboard entry that omits ipbr fields (e.g.
+/// from a fresh save before ipbr scores are attached) loads with
+/// per-phase scores defaulting to `None` and the provenance to a
+/// non-`Ipbr` value, so missing data cannot masquerade as ipbr authority.
 #[test]
-fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
+fn entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
     let dir = TempDir::new().unwrap();
     let payload = serde_json::json!({
         "version": CACHE_VERSION,
@@ -233,13 +218,7 @@ fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
             "data": [{
                 "vendor": "claude",
                 "name": "claude-sonnet",
-                "overall_score": 85.0,
-                "current_score": 82.0,
-                "standard_error": 1.5,
-                "axes": [["coding", 90.0]],
-                "axis_provenance": {},
-                "display_order": 0,
-                "fallback_from": null
+                "display_order": 0
             }]
         }
     });
@@ -272,7 +251,7 @@ fn v4_entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
     assert_eq!(entry.score_source, ScoreSource::None);
     assert!(
         !entry.ipbr_row_matched,
-        "no ipbr row matched until task 2 runs the ipbr lookup"
+        "no ipbr row should appear matched without explicit data"
     );
     assert_eq!(entry.ipbr_match_key, None);
 }
@@ -313,7 +292,7 @@ fn version_mismatch_drops_dashboard_only() {
 }
 
 #[test]
-fn v3_cache_file_drops_all_versioned_sections() {
+fn older_cache_file_drops_all_versioned_sections() {
     let dir = TempDir::new().unwrap();
     save_dashboard(dir.path(), &sample_entries()).unwrap();
     save_quotas(dir.path(), &sample_quotas()).unwrap();
@@ -326,32 +305,8 @@ fn v3_cache_file_drops_all_versioned_sections() {
     assert!(loaded.dashboard.is_none());
     assert!(
         loaded.quotas.is_none(),
-        "v3 quota payload is dropped because the v7 quota schema differs"
+        "old quota payload is dropped because the v7 quota schema differs"
     );
-}
-
-#[test]
-fn v3_cache_preserves_axis_provenance() {
-    let dir = TempDir::new().unwrap();
-    let provenance = BTreeMap::from([
-        ("correctness".to_string(), "suite:hourly".to_string()),
-        ("debugging".to_string(), "suite:deep".to_string()),
-        ("taskcompletion".to_string(), "suite:tooling".to_string()),
-        (
-            "contextwindow".to_string(),
-            "dropped:contextwindow".to_string(),
-        ),
-        ("edgecases".to_string(), "fallback:overall".to_string()),
-    ]);
-    save_dashboard(
-        dir.path(),
-        &sample_entries_with_provenance(provenance.clone()),
-    )
-    .unwrap();
-
-    let loaded = load(dir.path());
-    let dashboard = loaded.dashboard.unwrap();
-    assert_eq!(dashboard.data[0].axis_provenance, provenance);
 }
 
 #[test]
@@ -394,13 +349,12 @@ fn atomic_write_produces_valid_json() {
 }
 
 #[test]
-fn cache_file_omits_legacy_rank_and_weight_fields() {
+fn cache_file_omits_legacy_rank_weight_and_aistupidlevel_fields() {
     let dir = TempDir::new().unwrap();
     save_dashboard(dir.path(), &sample_entries()).unwrap();
     save_quotas(dir.path(), &sample_quotas()).unwrap();
 
     let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
-    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
 
     for forbidden in [
         "idea_rank",
@@ -412,21 +366,19 @@ fn cache_file_omits_legacy_rank_and_weight_fields() {
         "build_weight",
         "review_weight",
         "stupid_level",
+        // v8 dropped these legacy aistupidlevel-shaped fields.
+        "axes",
+        "axis_provenance",
+        "overall_score",
+        "current_score",
+        "standard_error",
+        "fallback_from",
     ] {
         assert!(
             !text.contains(forbidden),
             "cache file unexpectedly contained legacy field {forbidden}"
         );
     }
-
-    assert!(
-        text.contains("axis_provenance"),
-        "cache file should contain the axis_provenance field"
-    );
-    assert!(
-        json.pointer("/dashboard/data/0/axis_provenance").is_some(),
-        "axis_provenance is a present cache field, not a legacy omission"
-    );
 }
 
 #[test]

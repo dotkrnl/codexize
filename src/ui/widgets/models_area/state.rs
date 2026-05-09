@@ -84,35 +84,11 @@ pub(super) fn probability_color(pct: u8, max_pct: u8) -> Color {
     };
     Color::Rgb(r, g, 60)
 }
-pub(super) fn format_name_with_freshness(
-    short_name: &str,
-    is_new: bool,
-    budget: usize,
-) -> Vec<Span<'static>> {
+pub(super) fn format_name_with_freshness(short_name: &str, budget: usize) -> Vec<Span<'static>> {
     if budget == 0 {
         return Vec::new();
     }
     let name_len = short_name.width();
-    if is_new {
-        if name_len + " (new)".width() <= budget {
-            let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
-            spans.push(Span::styled(" (new)", freshness_style()));
-            let pad = budget - name_len - " (new)".width();
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
-            }
-            return spans;
-        }
-        if name_len < budget {
-            let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
-            spans.push(Span::styled("*", freshness_style()));
-            let pad = budget - name_len - 1;
-            if pad > 0 {
-                spans.push(Span::raw(" ".repeat(pad)));
-            }
-            return spans;
-        }
-    }
     if name_len <= budget {
         let pad = budget - name_len;
         let mut spans = vec![Span::styled(short_name.to_string(), name_style())];
@@ -179,9 +155,6 @@ pub(super) fn full_row_fixed_width(
 }
 fn name_style() -> Style {
     Style::default().fg(Color::Cyan)
-}
-fn freshness_style() -> Style {
-    Style::default().fg(Color::DarkGray)
 }
 fn ellipsis_style() -> Style {
     Style::default().fg(Color::DarkGray)

@@ -4,11 +4,6 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        overall_score: 85.0,
-        current_score: 85.0,
-        standard_error: 2.0,
-        axes: Vec::new(),
-        axis_provenance: std::collections::BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores {
             idea: Some(score),
             planning: Some(score),
@@ -23,7 +18,6 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
         quota_percent: quota,
         quota_resets_at: None,
         display_order: 0,
-        fallback_from: None,
     }
 }
 
@@ -31,11 +25,6 @@ fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) ->
     CachedModel {
         subscription: vendor,
         name: name.to_string(),
-        overall_score: 85.0,
-        current_score: 85.0,
-        standard_error: 2.0,
-        axes: Vec::new(),
-        axis_provenance: std::collections::BTreeMap::new(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
@@ -45,7 +34,6 @@ fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) ->
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order,
-        fallback_from: None,
     }
 }
 
@@ -79,8 +67,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
         ipbr_model(SubscriptionKind::Codex, "codex-top", 95.0, Some(80)),
         ipbr_model(SubscriptionKind::Gemini, "gemini-top", 95.0, Some(80)),
         // Two Kimi models — the per-vendor floor must pick the higher
-        // ipbr Build score, not the lower `display_order` or any
-        // cosmetic summary score.
+        // ipbr Build score, not the lower `display_order`.
         CachedModel {
             ipbr_phase_scores: crate::selection::IpbrPhaseScores {
                 idea: Some(40.0),
@@ -88,7 +75,6 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
                 build: Some(40.0),
                 review: Some(40.0),
             },
-            current_score: 99.0,
             display_order: 0,
             ..ipbr_model(SubscriptionKind::Kimi, "kimi-weak", 40.0, Some(80))
         },
@@ -99,7 +85,6 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
                 build: Some(60.0),
                 review: Some(60.0),
             },
-            current_score: 50.0,
             display_order: 5,
             ..ipbr_model(SubscriptionKind::Kimi, "kimi-strong", 60.0, Some(80))
         },
@@ -112,7 +97,7 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
     );
     assert!(
         !visible.contains("kimi-weak"),
-        "neither display_order nor cosmetic current_score should promote the weaker peer"
+        "display_order should not promote the weaker peer"
     );
 }
 
@@ -165,28 +150,18 @@ fn phase_rank_orders_by_ipbr_phase_score_descending() {
 }
 
 #[test]
-fn phase_rank_omits_unscored_and_non_ipbr_models() {
-    // Unscored / cosmetic-only models render as unranked: they must
-    // not appear in the rank map at all (callers treat absence as
-    // "no rank for this phase").
-    let mut cosmetic_only = unscored_model(SubscriptionKind::Claude, "cosmetic", 0);
-    cosmetic_only.score_source = crate::selection::ScoreSource::Aistupidlevel;
-    cosmetic_only.ipbr_phase_scores = crate::selection::IpbrPhaseScores {
-        build: Some(99.0),
-        ..crate::selection::IpbrPhaseScores::default()
-    };
-
+fn phase_rank_omits_unscored_models() {
+    // Unscored models render as unranked: they must not appear in the
+    // rank map at all (callers treat absence as "no rank for this phase").
     let models = vec![
         ipbr_model(SubscriptionKind::Codex, "ranked", 80.0, Some(80)),
         unscored_model(SubscriptionKind::Gemini, "inventory-only", 0),
-        cosmetic_only,
     ];
     let ranks = phase_rank(&models, SelectionPhase::Build);
 
     assert_eq!(ranks.len(), 1);
     assert_eq!(ranks["ranked"], 1);
     assert!(!ranks.contains_key("inventory-only"));
-    assert!(!ranks.contains_key("cosmetic"));
 }
 
 #[test]

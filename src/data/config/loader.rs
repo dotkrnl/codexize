@@ -230,6 +230,12 @@ fn migrate_free_models_into_providers(config: &mut Config) {
     if providers_explicit || merged != *config.providers.value() {
         config.providers = Override::explicit(merged);
     }
+    // Drop the legacy section once it has been folded into `providers`.
+    // Downstream consumers (assembly, refresh, the TUI) read the unified
+    // `providers` list; leaving the migrated rows in `free_models` would
+    // let assembly replay them on top of `providers` and resurrect
+    // entries that an explicit `[[providers]]` row was meant to disable.
+    config.free_models = Override::default();
 }
 
 fn decode_meta(item: &Item, out: &mut MetaSection, parent: &str) -> Result<(), LoadError> {
@@ -1512,23 +1518,31 @@ mod tests {
     }
 
     #[test]
-    fn free_models_single_entry_round_trips() {
+    fn legacy_free_models_single_entry_decodes_into_providers() {
         let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
         let cfg = load_str(toml).unwrap();
-        assert_eq!(cfg.free_models.value().len(), 1);
-        let entry = &cfg.free_models.value()[0];
-        assert_eq!(entry.mapped_into, "deepseek-v4-flash");
-        assert_eq!(entry.cli, crate::selection::CliKind::Opencode);
-        assert_eq!(entry.model_name, "dsk-4-flash");
+        assert!(
+            cfg.free_models.value().is_empty(),
+            "legacy section must be cleared after migration: {:?}",
+            cfg.free_models.value()
+        );
+        assert_eq!(cfg.providers.value().len(), 1);
+        let provider = &cfg.providers.value()[0];
+        assert_eq!(provider.vendor, "deepseek-v4-flash");
+        assert_eq!(provider.model, "deepseek-v4-flash");
+        assert_eq!(provider.cli, crate::selection::CliKind::Opencode);
+        assert_eq!(provider.launch_name, "dsk-4-flash");
+        assert!(provider.free);
     }
 
     #[test]
-    fn free_models_multiple_entries_round_trip() {
+    fn legacy_free_models_multiple_entries_migrate_into_providers() {
         let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n\n[[free_models]]\nmapped_into = \"claude-opus-4-7\"\ncli = \"claude\"\nmodel_name = \"my-opus\"\n";
         let cfg = load_str(toml).unwrap();
-        assert_eq!(cfg.free_models.value().len(), 2);
-        assert_eq!(cfg.free_models.value()[0].mapped_into, "deepseek-v4-flash");
-        assert_eq!(cfg.free_models.value()[1].mapped_into, "claude-opus-4-7");
+        assert!(cfg.free_models.value().is_empty());
+        assert_eq!(cfg.providers.value().len(), 2);
+        assert_eq!(cfg.providers.value()[0].vendor, "deepseek-v4-flash");
+        assert_eq!(cfg.providers.value()[1].vendor, "claude-opus-4-7");
     }
 
     #[test]

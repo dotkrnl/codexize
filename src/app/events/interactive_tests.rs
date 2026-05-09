@@ -11,7 +11,6 @@ fn running_recovery_run(id: u64) -> RunRecord {
         attempt: 1,
         model: "kimi-k2.6".to_string(),
         vendor: "moonshotai".to_string(),
-        route_provider: None,
         window_name: "[Recovery]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

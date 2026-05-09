@@ -135,7 +135,11 @@ impl App {
                 };
                 if refreshed_at.elapsed() >= due_after {
                     self.model_refresh = ModelRefreshState::Fetching {
-                        rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors(), self.config.free_models.value().clone()),
+                        rx: spawn_refresh(
+                            self.paths.cache_root.clone(),
+                            self.available_vendors(),
+                            self.config.free_models.value().clone(),
+                        ),
                         started_at: Instant::now(),
                     };
                 }
@@ -144,7 +148,11 @@ impl App {
     }
     pub(crate) fn force_refresh_models(&mut self) {
         self.model_refresh = ModelRefreshState::Fetching {
-            rx: spawn_refresh(self.paths.cache_root.clone(), self.available_vendors(), self.config.free_models.value().clone()),
+            rx: spawn_refresh(
+                self.paths.cache_root.clone(),
+                self.available_vendors(),
+                self.config.free_models.value().clone(),
+            ),
             started_at: Instant::now(),
         };
     }

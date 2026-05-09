@@ -67,7 +67,6 @@ impl AcpConfig {
         };
         let launch_model = launch_model_for_vendor(
             request.vendor,
-            request.route_provider.as_deref(),
             &request.model,
             &request.launch_name,
         );
@@ -202,23 +201,19 @@ fn agent_def(vendor: SubscriptionKind, program: &str, args: Vec<String>) -> AcpA
 #[rustfmt::skip]
 fn launch_model_for_vendor(
     vendor: SubscriptionKind,
-    route_provider: Option<&str>,
     model: &str,
     launch_name: &str,
 ) -> String {
-    // Free candidates pass the operator-supplied model name verbatim
-    // to the chosen CLI — no provider prefixing or routing wrapper.
+    // Free candidates pass the operator-supplied model name verbatim to
+    // the chosen CLI — no provider prefixing or routing wrapper.
     if vendor == SubscriptionKind::Free {
         return launch_name.to_string();
     }
+    // OpencodeGo rides through the `opencode-go` tier qualifier; inventory
+    // stores bare ipbr-canonical ids, so the launch boundary prepends the
+    // tier prefix unless the caller already qualified the value.
     if vendor == SubscriptionKind::OpencodeGo && !model.contains('/') {
-        // opencode's ACP `model` config advertises provider-qualified values
-        // (`opencode/<id>` for the zen tier, `opencode-go/<id>` for the Go
-        // tier), while inventory stores bare ids for ipbr matching. Default
-        // to the legacy `opencode` qualifier when route_provider is unset
-        // so cached entries written before this field landed still launch.
-        let qualifier = route_provider.unwrap_or("opencode");
-        format!("{qualifier}/{model}")
+        format!("opencode-go/{model}")
     } else {
         model.to_string()
     }

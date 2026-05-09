@@ -22,7 +22,6 @@ pub(super) fn build_managed_acp_launch(
         cwd,
         prompt: PromptPayload::File(run.prompt_path.clone()),
         model: run.model.clone(),
-        route_provider: run.route_provider.clone(),
         cli: run.cli,
         launch_name: run.launch_name.clone(),
         // The current launch sites already pass the codexize-computed effective

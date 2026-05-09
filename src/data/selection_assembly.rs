@@ -135,14 +135,10 @@ async fn assemble_with_refresh(
         available_vendors,
         free_models,
     );
-    quota_errors.extend(
-        free_model_warnings
-            .into_iter()
-            .map(|msg| QuotaError {
-                vendor: SubscriptionKind::Free,
-                message: msg,
-            }),
-    );
+    quota_errors.extend(free_model_warnings.into_iter().map(|msg| QuotaError {
+        vendor: SubscriptionKind::Free,
+        message: msg,
+    }));
     (models, quota_errors)
 }
 #[cfg(test)]

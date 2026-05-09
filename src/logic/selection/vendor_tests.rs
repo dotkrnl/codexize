@@ -16,8 +16,6 @@ fn dashboard_model(name: &str, vendor: &str) -> dashboard::DashboardModel {
         display_order: 0,
         fallback_from: None,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
-        route_provider: None,
     }
 }
 
@@ -38,8 +36,6 @@ fn sample_cached_model() -> CachedModel {
         display_order: 0,
         fallback_from: None,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
-        route_provider: None,
         candidates: Vec::new(),
         selected_candidate: None,
     }
@@ -88,7 +84,6 @@ fn opencode_tough_eligibility_uses_underlying_model_identity() {
     let mut opus = sample_cached_model();
     opus.vendor = SubscriptionKind::OpencodeGo;
     opus.name = "opencode/claude-opus-4.7".to_string();
-    opus.route_underlying_vendor = Some(SubscriptionKind::Claude);
     assert!(is_tough_eligible(&opus));
 
     let mut sonnet = opus.clone();
@@ -101,7 +96,6 @@ fn opencode_cheap_eligibility_uses_underlying_model_identity() {
     let mut flash = sample_cached_model();
     flash.vendor = SubscriptionKind::OpencodeGo;
     flash.name = "opencode/gemini-2.5-flash".to_string();
-    flash.route_underlying_vendor = Some(SubscriptionKind::Gemini);
     assert!(is_cheap_eligible(&flash));
 
     let mut pro = flash.clone();

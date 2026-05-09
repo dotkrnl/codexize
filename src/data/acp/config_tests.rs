@@ -20,8 +20,6 @@ fn make_dashboard_entry(name: &str, vendor: &str) -> crate::cache::DashboardEntr
         score_source: crate::selection::ScoreSource::Ipbr,
         ipbr_row_matched: true,
         ipbr_match_key: Some(name.to_string()),
-        route_underlying_vendor: None,
-        route_provider: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -72,7 +70,6 @@ fn free_model_entry_resolves_to_verbatim_launch_name_through_acp_path() {
         cwd: PathBuf::from("workspace"),
         prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: row.name.clone(),
-        route_provider: row.route_provider.clone(),
         cli,
         launch_name,
         requested_effort: EffortLevel::Normal,
@@ -120,7 +117,6 @@ fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
         cwd: PathBuf::from("workspace"),
         prompt: acp::PromptPayload::Text("prompt".to_string()),
         model: "gpt-5.5".to_string(),
-        route_provider: None,
         cli: crate::selection::CliKind::Codex,
         launch_name: "gpt-5.5".to_string(),
         requested_effort: EffortLevel::Normal,
@@ -226,14 +222,14 @@ fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
 
     assert_eq!(resolved.spawn.program, "opencode");
     assert_eq!(resolved.spawn.args, vec!["acp".to_string()]);
-    assert_eq!(resolved.session.model, "opencode/gpt-5-nano");
+    assert_eq!(resolved.session.model, "opencode-go/gpt-5-nano");
     assert_eq!(
         resolved
             .spawn
             .env
             .get("CODEXIZE_ACP_MODEL")
             .map(String::as_str),
-        Some("opencode/gpt-5-nano")
+        Some("opencode-go/gpt-5-nano")
     );
     assert_eq!(
         resolved
@@ -241,7 +237,7 @@ fn opencode_launch_prefixes_bare_inventory_model_for_acp() {
             .metadata
             .get("codexize.model")
             .map(String::as_str),
-        Some("opencode/gpt-5-nano")
+        Some("opencode-go/gpt-5-nano")
     );
 }
 
@@ -268,14 +264,12 @@ fn opencode_launch_preserves_provider_qualified_model() {
 }
 
 #[test]
-fn opencode_go_route_provider_drives_launch_qualifier() {
-    // route_provider = "opencode-go" must reach the spawn as
-    // `opencode-go/<id>` so the Go-tier API URL is hit, not the zen tier.
-    // Without route_provider the launch would default to `opencode/<id>`,
-    // which would 404 against opencode-go-only models like deepseek.
+fn opencode_go_subscription_drives_launch_qualifier() {
+    // OpencodeGo subscription must reach the spawn as `opencode-go/<id>` so
+    // the Go-tier API URL is hit. Bare ipbr-canonical ids like deepseek-v4-flash
+    // are qualified by the launch boundary based on the subscription alone.
     let request = AcpLaunchRequest {
         model: "deepseek-v4-flash".to_string(),
-        route_provider: Some("opencode-go".to_string()),
         ..sample_request(SubscriptionKind::OpencodeGo)
     };
 

@@ -20,7 +20,6 @@ fn make_run(status: RunStatus) -> RunRecord {
         attempt: 1,
         model: "claude-sonnet-4".to_string(),
         vendor: "claude".to_string(),
-        route_provider: None,
         window_name: "test".to_string(),
         started_at: Utc::now(),
         ended_at: None,

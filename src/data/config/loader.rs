@@ -528,16 +528,14 @@ fn decode_free_models(
                 "mapped_into" => mapped_into = Some(require_string(v, &path(k))?),
                 "cli" => {
                     let raw = require_string(v, &path(k))?;
-                    cli = Some(
-                        crate::selection::CliKind::parse(&raw).ok_or_else(|| {
-                            LoadError::Validation(format!(
-                                "{} = {:?} is not one of {:?}",
-                                path(k),
-                                raw,
-                                crate::selection::CliKind::variants()
-                            ))
-                        })?,
-                    );
+                    cli = Some(crate::selection::CliKind::parse(&raw).ok_or_else(|| {
+                        LoadError::Validation(format!(
+                            "{} = {:?} is not one of {:?}",
+                            path(k),
+                            raw,
+                            crate::selection::CliKind::variants()
+                        ))
+                    })?);
                 }
                 "model_name" => model_name = Some(require_string(v, &path(k))?),
                 other => {
@@ -551,15 +549,19 @@ fn decode_free_models(
                 }
             }
         }
-        let mapped_into = mapped_into.ok_or_else(|| LoadError::Validation(format!(
-            "{parent}[{i}]: missing required field \"mapped_into\""
-        )))?;
-        let cli = cli.ok_or_else(|| LoadError::Validation(format!(
-            "{parent}[{i}]: missing required field \"cli\""
-        )))?;
-        let model_name = model_name.ok_or_else(|| LoadError::Validation(format!(
-            "{parent}[{i}]: missing required field \"model_name\""
-        )))?;
+        let mapped_into = mapped_into.ok_or_else(|| {
+            LoadError::Validation(format!(
+                "{parent}[{i}]: missing required field \"mapped_into\""
+            ))
+        })?;
+        let cli = cli.ok_or_else(|| {
+            LoadError::Validation(format!("{parent}[{i}]: missing required field \"cli\""))
+        })?;
+        let model_name = model_name.ok_or_else(|| {
+            LoadError::Validation(format!(
+                "{parent}[{i}]: missing required field \"model_name\""
+            ))
+        })?;
         entries.push(FreeModelEntry {
             mapped_into,
             cli,
@@ -1337,13 +1339,11 @@ mod tests {
     #[test]
     fn free_models_sparse_render_round_trips() {
         let mut cfg = Config::baked_defaults();
-        cfg.free_models = Override::explicit(vec![
-            FreeModelEntry {
-                mapped_into: "deepseek-v4-flash".to_string(),
-                cli: crate::selection::CliKind::Opencode,
-                model_name: "dsk-4-flash".to_string(),
-            },
-        ]);
+        cfg.free_models = Override::explicit(vec![FreeModelEntry {
+            mapped_into: "deepseek-v4-flash".to_string(),
+            cli: crate::selection::CliKind::Opencode,
+            model_name: "dsk-4-flash".to_string(),
+        }]);
         let out = render_sparse(&cfg);
         assert!(out.contains("[[free_models]]"), "{out}");
         assert!(out.contains("mapped_into = \"deepseek-v4-flash\""), "{out}");
@@ -1351,13 +1351,19 @@ mod tests {
         assert!(out.contains("model_name = \"dsk-4-flash\""), "{out}");
         let parsed = load_str(&out).unwrap();
         assert_eq!(parsed.free_models.value().len(), 1);
-        assert_eq!(parsed.free_models.value()[0].mapped_into, "deepseek-v4-flash");
+        assert_eq!(
+            parsed.free_models.value()[0].mapped_into,
+            "deepseek-v4-flash"
+        );
     }
 
     #[test]
     fn free_models_sparse_render_drops_when_empty() {
         let cfg = Config::baked_defaults();
         let out = render_sparse(&cfg);
-        assert!(!out.contains("free_models"), "empty default must not emit free_models: {out}");
+        assert!(
+            !out.contains("free_models"),
+            "empty default must not emit free_models: {out}"
+        );
     }
 }

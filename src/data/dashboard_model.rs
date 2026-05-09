@@ -2,7 +2,7 @@ use crate::dashboard::DashboardModel;
 #[cfg(test)]
 use crate::dashboard::IngestEvent;
 use crate::model_names;
-use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
+use crate::selection::{IpbrPhaseScores, ScoreSource};
 #[cfg(test)]
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -10,12 +10,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 pub(crate) struct InventoryEntry {
     pub(crate) name: String,
     pub(crate) vendor: String,
-    pub(crate) route_underlying_vendor: Option<SubscriptionKind>,
-    /// Opencode sub-provider this row was advertised under (`opencode` or
-    /// `opencode-go`). The bare `name` stays ipbr-compatible; route_provider
-    /// is what the launch boundary qualifies the model with so the spawn
-    /// reaches the right opencode tier. `None` for non-opencode entries.
-    pub(crate) route_provider: Option<String>,
 }
 /// Canonicalized score record produced by score ingestion. The `name`
 /// field uses inventory-compatible `trim().to_ascii_lowercase()` shape so
@@ -139,8 +133,6 @@ pub(crate) fn merge_with_warnings(
                 &sc.vendor,
                 sc,
                 None,
-                None,
-                None,
             ));
         }
     }
@@ -170,8 +162,6 @@ pub(crate) fn scores_only(scores: Vec<ScoreEntry>) -> Vec<DashboardModel> {
             } else {
                 None
             },
-            route_underlying_vendor: None,
-            route_provider: None,
             display_order: sc.display_order,
             fallback_from: None,
         })
@@ -212,8 +202,6 @@ pub fn synthesize_sibling(
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
-        route_provider: None,
         display_order: sibling.display_order,
         fallback_from: Some(sibling.name.clone()),
     })
@@ -291,8 +279,6 @@ fn dashboard_model_from_score(
     inventory_vendor: &str,
     sc: &ScoreEntry,
     fallback_from: Option<String>,
-    route_underlying_vendor: Option<SubscriptionKind>,
-    route_provider: Option<String>,
 ) -> DashboardModel {
     let is_sibling_fallback = fallback_from.is_some();
     DashboardModel {
@@ -326,20 +312,8 @@ fn dashboard_model_from_score(
         } else {
             None
         },
-        route_underlying_vendor,
-        route_provider,
         display_order: sc.display_order,
         fallback_from,
-    }
-}
-fn vendor_kind_from_score_vendor(vendor: &str) -> Option<SubscriptionKind> {
-    match vendor {
-        "anthropic" | "claude" => Some(SubscriptionKind::Claude),
-        "codex" | "openai" => Some(SubscriptionKind::Codex),
-        "gemini" | "google" => Some(SubscriptionKind::Gemini),
-        "kimi" | "moonshotai" => Some(SubscriptionKind::Kimi),
-        "opencode" => Some(SubscriptionKind::OpencodeGo),
-        _ => None,
     }
 }
 fn version_stem(name: &str) -> Option<&str> {
@@ -473,22 +447,11 @@ fn push_merged_inventory(
     scores: &[ScoreEntry],
     score_index: usize,
 ) {
-    let route_underlying_vendor = if inv.vendor == "opencode" {
-        // Opencode CLI metadata may omit resale provenance; the matched
-        // ipbr row is the next-stable source for route eligibility
-        // without falling back to model-name guessing.
-        inv.route_underlying_vendor
-            .or_else(|| vendor_kind_from_score_vendor(&scores[score_index].vendor))
-    } else {
-        inv.route_underlying_vendor
-    };
     models.push(dashboard_model_from_score(
         inv.name,
         &inv.vendor,
         &scores[score_index],
         None,
-        route_underlying_vendor,
-        inv.route_provider,
     ));
 }
 fn explicit_fallback<'a>(name: &str, existing: &'a [DashboardModel]) -> Option<&'a DashboardModel> {

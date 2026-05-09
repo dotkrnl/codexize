@@ -11,12 +11,6 @@ pub enum EffortLevel {
 }
 pub struct AgentRun {
     pub model: String,
-    /// Opencode sub-provider for the chosen model (`opencode` or
-    /// `opencode-go`). Threaded through to the ACP launch so a bare model
-    /// id like `deepseek-v4-flash` reaches the right opencode tier.
-    /// `None` for direct vendors and for opencode entries that originated
-    /// before this field was wired.
-    pub route_provider: Option<String>,
     /// The CLI to spawn for this run. Different from `vendor` for Free
     /// candidates: a Free model may launch through any CLI.
     pub cli: crate::selection::CliKind,
@@ -62,13 +56,11 @@ pub fn effort_suffix(vendor: SubscriptionKind, effort: EffortLevel) -> &'static 
 }
 pub fn effort_suffix_for_model(
     vendor: SubscriptionKind,
-    route_underlying_vendor: Option<SubscriptionKind>,
     model: &str,
     effort: EffortLevel,
 ) -> &'static str {
     let suffix_vendor = if vendor == SubscriptionKind::OpencodeGo {
-        route_underlying_vendor
-            .unwrap_or_else(|| crate::selection::vendor::infer_underlying_vendor_from_name(model))
+        crate::selection::vendor::infer_underlying_vendor_from_name(model)
     } else {
         vendor
     };
@@ -87,7 +79,7 @@ pub fn run_label_with_model(
     effort: EffortLevel,
 ) -> String {
     let short = short_model(model);
-    let suffix = effort_suffix_for_model(vendor, None, model, effort);
+    let suffix = effort_suffix_for_model(vendor, model, effort);
     if suffix.is_empty() {
         format!("{base} {short}")
     } else {

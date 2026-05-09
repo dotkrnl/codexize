@@ -149,8 +149,6 @@ pub struct ModelRow {
     /// different model labels for the same ipbr row, so later dedup must use
     /// this stable key instead of recomputing from display names.
     pub ipbr_match_key: Option<String>,
-    pub route_underlying_vendor: Option<SubscriptionKind>,
-    pub route_provider: Option<String>,
     pub candidates: Vec<Candidate>,
     pub selected_candidate: Option<usize>,
     pub quota_percent: Option<u8>,

@@ -144,8 +144,6 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
         score_source: entry.score_source,
         ipbr_row_matched: entry.ipbr_row_matched,
         ipbr_match_key: entry.ipbr_match_key.clone(),
-        route_underlying_vendor: entry.route_underlying_vendor,
-        route_provider: entry.route_provider.clone(),
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: None,
@@ -227,10 +225,6 @@ fn refresh_selected_candidate(row: &mut CachedModel) {
         row.vendor = candidate.subscription;
         row.quota_percent = candidate.quota_percent;
         row.quota_resets_at = candidate.quota_resets_at;
-        row.route_provider = (candidate.subscription == SubscriptionKind::OpencodeGo)
-            .then(|| "opencode-go".to_string());
-        row.route_underlying_vendor = (candidate.subscription == SubscriptionKind::OpencodeGo)
-            .then(|| vendor::infer_underlying_vendor_from_name(&row.name));
     }
 }
 
@@ -378,8 +372,6 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
             score_source: m.score_source,
             ipbr_row_matched: m.ipbr_row_matched,
             ipbr_match_key: m.ipbr_match_key.clone(),
-            route_underlying_vendor: m.route_underlying_vendor,
-            route_provider: m.route_provider.clone(),
             display_order: m.display_order,
             fallback_from: m.fallback_from.clone(),
         })

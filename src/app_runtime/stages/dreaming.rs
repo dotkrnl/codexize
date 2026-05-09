@@ -52,7 +52,7 @@ impl App {
             effort,
             modes.cheap,
         );
-        let Some((model, vendor_kind, vendor, route_provider, cli, launch_name)) = chosen else {
+        let Some((model, vendor_kind, vendor, cli, launch_name)) = chosen else {
             self.record_agent_error("no model available for dreaming".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -82,7 +82,6 @@ impl App {
 
         let run = AgentRun {
             model: model.clone(),
-            route_provider: route_provider.clone(),
             cli,
             launch_name,
             prompt_path: prompt_path.clone(),
@@ -125,7 +124,6 @@ impl App {
                     round,
                     model,
                     vendor,
-                    route_provider,
                     window_name,
                     effort,
                     modes,
@@ -209,8 +207,6 @@ mod tests {
             score_source: ScoreSource::Ipbr,
             ipbr_row_matched: true,
             ipbr_match_key: Some("dream-model".to_string()),
-            route_underlying_vendor: None,
-            route_provider: None,
             candidates: Vec::new(),
             selected_candidate: None,
             quota_percent: Some(100),
@@ -258,7 +254,6 @@ reason = "Captured durable session guidance."
             attempt: 1,
             model: "dream-model".to_string(),
             vendor: "codex".to_string(),
-            route_provider: None,
             window_name: "[Dreaming] dream-model".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,

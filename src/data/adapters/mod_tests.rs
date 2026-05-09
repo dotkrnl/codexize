@@ -74,11 +74,10 @@ fn effort_suffix_low_maps_provider_suffix() {
 }
 
 #[test]
-fn opencode_effort_suffix_uses_underlying_vendor_when_known() {
+fn opencode_effort_suffix_infers_underlying_vendor_from_model_name() {
     assert_eq!(
         effort_suffix_for_model(
             SubscriptionKind::OpencodeGo,
-            Some(SubscriptionKind::Claude),
             "opencode/claude-opus-4.7",
             EffortLevel::Tough,
         ),
@@ -87,20 +86,14 @@ fn opencode_effort_suffix_uses_underlying_vendor_when_known() {
     assert_eq!(
         effort_suffix_for_model(
             SubscriptionKind::OpencodeGo,
-            Some(SubscriptionKind::Codex),
             "opencode/gpt-5.5",
             EffortLevel::Tough,
         ),
         ":xhigh"
     );
-}
-
-#[test]
-fn opencode_effort_suffix_falls_back_to_model_name_heuristics() {
     assert_eq!(
         effort_suffix_for_model(
             SubscriptionKind::OpencodeGo,
-            None,
             "opencode/claude-sonnet-4.6",
             EffortLevel::Low,
         ),
@@ -109,7 +102,6 @@ fn opencode_effort_suffix_falls_back_to_model_name_heuristics() {
     assert_eq!(
         effort_suffix_for_model(
             SubscriptionKind::OpencodeGo,
-            None,
             "opencode/gemini-2.5-flash",
             EffortLevel::Tough,
         ),

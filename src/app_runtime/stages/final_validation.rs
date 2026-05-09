@@ -54,7 +54,6 @@ impl App {
                     model.name.clone(),
                     model.vendor,
                     vendor_tag(model.vendor).to_string(),
-                    model.route_provider.clone(),
                     cli,
                     launch_name,
                 )
@@ -63,7 +62,7 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Review, effort, modes.cheap)
             });
-        let Some((model, vendor_kind, vendor, route_provider, cli, launch_name)) = chosen else {
+        let Some((model, vendor_kind, vendor, cli, launch_name)) = chosen else {
             self.record_agent_error("no model available for final validation".to_string());
             let _ = self.state.save();
             self.rebuild_tree_view(None);
@@ -96,7 +95,6 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
-            route_provider: route_provider.clone(),
             cli,
             launch_name,
             prompt_path: prompt_path.clone(),
@@ -139,7 +137,6 @@ impl App {
                     round,
                     model,
                     vendor,
-                    route_provider,
                     window_name,
                     effort,
                     modes,
@@ -251,7 +248,6 @@ mod tests {
             attempt: 1,
             model: "test-model".to_string(),
             vendor: "test-vendor".to_string(),
-            route_provider: None,
             window_name: "[FinalValidation] test-model".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,

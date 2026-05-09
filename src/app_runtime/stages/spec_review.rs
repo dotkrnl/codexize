@@ -59,7 +59,7 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, vendor_kind, vendor, route_provider, cli, launch_name) = chosen;
+        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
         let attempt = self.attempt_for("spec-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("spec-review", None, round, attempt);
         let prompt = spec_review_prompt(
@@ -77,7 +77,6 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
-            route_provider: route_provider.clone(),
             cli,
             launch_name,
             prompt_path: prompt_path.clone(),
@@ -125,7 +124,6 @@ impl App {
                     round,
                     model,
                     vendor,
-                    route_provider,
                     window_name,
                     effort,
                     modes,

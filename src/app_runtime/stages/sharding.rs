@@ -38,7 +38,7 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, vendor_kind, vendor, route_provider, cli, launch_name) = chosen;
+        let (model, vendor_kind, vendor, cli, launch_name) = chosen;
         let _ = std::fs::remove_file(&tasks_path);
         let prompt_path = session_dir.join("prompts").join("sharding.md");
         if let Some(parent) = prompt_path.parent() {
@@ -59,7 +59,6 @@ impl App {
         }
         let run = AgentRun {
             model: model.clone(),
-            route_provider: route_provider.clone(),
             cli,
             launch_name,
             prompt_path: prompt_path.clone(),
@@ -97,7 +96,6 @@ impl App {
                     1,
                     model,
                     vendor,
-                    route_provider,
                     window_name,
                     effort,
                     modes,

@@ -21,7 +21,6 @@ fn run_record(interactive: bool) -> RunRecord {
         attempt: 1,
         model: "model".to_string(),
         vendor: "vendor".to_string(),
-        route_provider: None,
         window_name: "window".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

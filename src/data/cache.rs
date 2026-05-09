@@ -1,5 +1,5 @@
 use crate::data::cache_lock;
-use crate::selection::{IpbrPhaseScores, ScoreSource, SubscriptionKind};
+use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ pub const TTL: Duration = Duration::from_secs(30 * 60);
 /// reset sections are loaded independently under their own TTL, because
 /// their schema is unchanged across this bump and the task requires
 /// provider quota cache behavior to stay intact.
-pub const CACHE_VERSION: u32 = 5;
+pub const CACHE_VERSION: u32 = 6;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
@@ -85,13 +85,6 @@ pub struct DashboardEntry {
     pub ipbr_row_matched: bool,
     #[serde(default)]
     pub ipbr_match_key: Option<String>,
-    #[serde(default)]
-    pub route_underlying_vendor: Option<SubscriptionKind>,
-    /// Opencode sub-provider (`opencode` or `opencode-go`). Persisted so a
-    /// cached entry survives a restart and the launch boundary can still
-    /// pick the right tier qualifier without re-querying the CLI.
-    #[serde(default)]
-    pub route_provider: Option<String>,
     pub display_order: usize,
     #[serde(default)]
     pub fallback_from: Option<String>,

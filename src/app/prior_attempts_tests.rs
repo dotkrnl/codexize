@@ -12,7 +12,6 @@ fn sample_run(id: u64, stage: &str, round: u32, attempt: u32, error: Option<&str
         attempt,
         model: format!("model-{id}"),
         vendor: "openai".to_string(),
-        route_provider: None,
         window_name: format!("[{stage} a{attempt}]"),
         started_at: Utc.with_ymd_and_hms(2026, 5, 8, 0, 0, 0).unwrap(),
         ended_at: None,

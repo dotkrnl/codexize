@@ -36,8 +36,6 @@ fn sample_model_with_score(
         score_source: ScoreSource::Ipbr,
         ipbr_row_matched: true,
         ipbr_match_key: Some(name.to_string()),
-        route_underlying_vendor: None,
-        route_provider: None,
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: Some(quota),

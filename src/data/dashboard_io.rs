@@ -95,11 +95,6 @@ pub struct DashboardModel {
     /// key. Inventory-/CLI-only visible models keep this `false`.
     pub ipbr_row_matched: bool,
     pub ipbr_match_key: Option<String>,
-    pub route_underlying_vendor: Option<crate::selection::SubscriptionKind>,
-    /// Opencode sub-provider this row was advertised under (`opencode` or
-    /// `opencode-go`). Carried so the ACP launch boundary can qualify the
-    /// bare `name` with the right tier prefix. `None` for direct vendors.
-    pub route_provider: Option<String>,
     pub display_order: usize,
     /// Set when this model's score was borrowed from a same-stem sibling
     /// because the ranking API has no entry for it yet. Holds the sibling's
@@ -133,10 +128,9 @@ pub(crate) fn append_opencode_inventory(
     models: Vec<opencode::OpencodeModelMeta>,
 ) {
     inventory.extend(models.into_iter().filter_map(|meta| {
-        // Both `opencode` (zen tier) and `opencode-go` (Go tier) ride the
-        // same shared quota and surface as `vendor = "opencode"` in the UI;
-        // they only diverge at ACP launch time, where route_provider picks
-        // the qualifier. Other provider ids (openrouter, etc.) stay out.
+        // Both opencode and opencode-go advertise as `vendor = "opencode"` in
+        // the UI and ride the shared OpencodeGo subscription quota; the
+        // launch boundary applies the tier qualifier from the subscription.
         if meta.provider_id != "opencode" && meta.provider_id != "opencode-go" {
             return None;
         }
@@ -147,8 +141,6 @@ pub(crate) fn append_opencode_inventory(
         Some(InventoryEntry {
             name,
             vendor: "opencode".to_string(),
-            route_underlying_vendor: meta.underlying_vendor,
-            route_provider: Some(meta.provider_id),
         })
     }));
 }

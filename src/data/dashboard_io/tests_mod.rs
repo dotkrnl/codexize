@@ -16,8 +16,6 @@ fn model(name: &str, score: f64) -> DashboardModel {
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
-        route_provider: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -66,20 +64,15 @@ fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() 
     assert_eq!(merged[0].name, "gpt-5-nano");
     assert_eq!(merged[0].vendor, "opencode");
     assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
-    assert_eq!(
-        merged[0].route_underlying_vendor,
-        Some(SubscriptionKind::Codex)
-    );
-    assert_eq!(merged[0].route_provider.as_deref(), Some("opencode"));
 }
 
 #[test]
-fn opencode_go_inventory_surfaces_with_route_provider_when_ipbr_matches() {
+fn opencode_go_inventory_surfaces_when_ipbr_matches() {
     // Drives the headline use case: deepseek lives only under
     // `opencode-go`, has an ipbr scoreboard row by `display_name =
-    // "deepseek-v4-flash"`, and must reach the universe with
-    // route_provider = "opencode-go" so the launch path qualifies it
-    // correctly rather than falling back to the zen-tier `opencode/`.
+    // "deepseek-v4-flash"`, and must reach the universe so the launch
+    // path can qualify it via the OpencodeGo subscription rather than
+    // falling back to the zen-tier `opencode/`.
     let mut inventory = Vec::new();
     append_opencode_inventory(
         &mut inventory,
@@ -115,11 +108,6 @@ fn opencode_go_inventory_surfaces_with_route_provider_when_ipbr_matches() {
     assert_eq!(
         merged[0].ipbr_match_key.as_deref(),
         Some("deepseek-v4-flash")
-    );
-    assert_eq!(
-        merged[0].route_provider.as_deref(),
-        Some("opencode-go"),
-        "opencode-go inventory must propagate the sub-provider so the launch boundary qualifies it correctly",
     );
 }
 
@@ -164,8 +152,6 @@ fn fixture_cached_models() -> Vec<CachedModel> {
             score_source: crate::selection::ScoreSource::Ipbr,
             ipbr_row_matched: true,
             ipbr_match_key: Some(entry.name.clone()),
-            route_underlying_vendor: None,
-            route_provider: None,
             candidates: Vec::new(),
             selected_candidate: None,
             quota_percent: Some(80),

@@ -20,8 +20,6 @@ fn make_entry(name: &str, vendor: &str, overall: f64, current: f64) -> Dashboard
         score_source: crate::selection::ScoreSource::None,
         ipbr_row_matched: false,
         ipbr_match_key: None,
-        route_underlying_vendor: None,
-        route_provider: None,
         display_order: 0,
         fallback_from: None,
     }
@@ -248,7 +246,10 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         .iter()
         .find(|m| m.name == "claude-sonnet-4-6")
         .expect("claude-sonnet row must exist");
-    assert!(claude.candidates.is_empty(), "claude row has no available subscription");
+    assert!(
+        claude.candidates.is_empty(),
+        "claude row has no available subscription"
+    );
 }
 
 fn with_temp_home_cache<T>(

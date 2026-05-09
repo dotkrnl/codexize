@@ -6,8 +6,8 @@
 //! `Override<T>` ignores the explicit flag — round-trip tests compare the
 //! semantic value, not how the value got there.
 
-use chrono::{DateTime, Utc};
 use crate::selection::FreeModelEntry;
+use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
 /// The supported on-disk schema version. The loader rejects any
@@ -546,14 +546,10 @@ impl Config {
 
         for (i, entry) in self.free_models.value().iter().enumerate() {
             if entry.mapped_into.trim().is_empty() {
-                return Err(format!(
-                    "free_models[{i}].mapped_into must be non-empty"
-                ));
+                return Err(format!("free_models[{i}].mapped_into must be non-empty"));
             }
             if entry.model_name.trim().is_empty() {
-                return Err(format!(
-                    "free_models[{i}].model_name must be non-empty"
-                ));
+                return Err(format!("free_models[{i}].model_name must be non-empty"));
             }
         }
 

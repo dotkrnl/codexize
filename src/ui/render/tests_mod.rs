@@ -116,7 +116,6 @@ fn run_record(id: u64, status: RunStatus) -> RunRecord {
         attempt: 1,
         model: "model".to_string(),
         vendor: "vendor".to_string(),
-        route_provider: None,
         window_name: format!("[Run {id}]"),
         started_at: chrono::Utc::now(),
         ended_at: if status == RunStatus::Running {

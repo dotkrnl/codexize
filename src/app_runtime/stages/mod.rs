@@ -43,12 +43,11 @@ use crate::{
 /// canonical identity). Free candidates require this so a row named
 /// `deepseek-v4-flash` can launch via opencode with `dsk-4-flash`.
 pub(crate) type StagePick = (
-    String,            // model row name
-    SubscriptionKind,  // row subscription (compat mirror of selected candidate)
-    String,            // vendor tag string
-    Option<String>,    // route_provider for opencode tier resolution
-    CliKind,           // CLI to spawn
-    String,            // verbatim launch_name passed to the CLI
+    String,           // model row name
+    SubscriptionKind, // row subscription (compat mirror of selected candidate)
+    String,           // vendor tag string
+    CliKind,          // CLI to spawn
+    String,           // verbatim launch_name passed to the CLI
 );
 
 /// Pull `(cli, launch_name)` from the row's selected candidate when arbitration
@@ -126,7 +125,6 @@ impl App {
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
-                model.route_provider.clone(),
                 cli,
                 launch_name,
             ));
@@ -137,7 +135,6 @@ impl App {
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
-            outcome.model.route_provider.clone(),
             cli,
             launch_name,
         );
@@ -158,7 +155,6 @@ impl App {
                 model.name.clone(),
                 model.vendor,
                 vendor_tag(model.vendor).to_string(),
-                model.route_provider.clone(),
                 cli,
                 launch_name,
             ));
@@ -170,7 +166,6 @@ impl App {
             outcome.model.name.clone(),
             outcome.model.vendor,
             vendor_tag(outcome.model.vendor).to_string(),
-            outcome.model.route_provider.clone(),
             cli,
             launch_name,
         );
@@ -188,7 +183,6 @@ impl App {
         round: u32,
         model: String,
         vendor: String,
-        route_provider: Option<String>,
         window_name: String,
         effort: EffortLevel,
         mut modes: LaunchModes,
@@ -214,7 +208,6 @@ impl App {
             attempt,
             model,
             vendor,
-            route_provider,
             window_name,
             effort,
             modes,
@@ -311,7 +304,6 @@ impl App {
             model.name.clone(),
             model.vendor,
             vendor_tag(model.vendor).to_string(),
-            model.route_provider.clone(),
             cli,
             launch_name,
         ))
@@ -349,7 +341,6 @@ impl App {
             last.model.clone(),
             vendor_kind,
             vendor_tag(vendor_kind).to_string(),
-            last.route_provider.clone(),
             cli,
             launch_name,
         ))

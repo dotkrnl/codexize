@@ -2,13 +2,18 @@ use super::*;
 
 #[test]
 fn short_model_preserves_claude_prefix_behavior() {
-    assert_eq!(short_model("claude-sonnet-4.6"), "sonnet-4.6");
-    assert_eq!(short_model("gpt-5.2"), "gpt-5.2");
+    assert_eq!(short_model("claude-sonnet-4-6"), "sonnet-4-6");
+    assert_eq!(short_model("gpt-5-2"), "gpt-5-2");
 }
 
 #[test]
-fn short_model_uses_gemini_preview_display_label() {
-    assert_eq!(short_model("gemini-3.1-pro-preview"), "3.1-pro");
+fn short_model_passes_gemini_preview_canonical_through_unchanged() {
+    // run_label_name only strips a `claude-` prefix; non-claude canonicals
+    // pass through verbatim.
+    assert_eq!(
+        short_model("gemini-3-1-pro-preview"),
+        "gemini-3-1-pro-preview"
+    );
 }
 
 #[test]

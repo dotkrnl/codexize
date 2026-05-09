@@ -13,7 +13,7 @@ use super::state::{
     format_name_with_freshness, name_budget_for, name_width_min, probability_color,
     probability_percent,
 };
-use crate::app::models::{vendor_color, vendor_prefix};
+use crate::app::models::subscription_color;
 use crate::model_names;
 use crate::selection::{
     CachedModel, QuotaError, SubscriptionKind,
@@ -121,8 +121,7 @@ fn render_full_table(
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .map(|model| {
-            let prefix = vendor_prefix(model.subscription);
-            let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+            let short_name = model_names::display_short(&model.name);
             let mut w = short_name.width();
             if model.fallback_from.is_some() {
                 w += 6; // " (new)"
@@ -198,13 +197,12 @@ fn render_full_table(
         // already declines to pick them, so the picker cannot drive a launch
         // through one — the dim tag mirrors that "informational only" state.
         let selected_subscription = model.selected_candidate().map(|c| c.subscription);
-        let label = vendor_label(selected_subscription);
+        let label = display_vendor_tag(model);
         let color = match selected_subscription {
-            Some(sub) => vendor_color(sub),
+            Some(sub) => subscription_color(sub),
             None => Color::DarkGray,
         };
-        let prefix = vendor_prefix(model.subscription);
-        let short_name = model_names::display_name_for_vendor(&model.name, prefix);
+        let short_name = model_names::display_short(&model.name);
         let vendor_failed = quota_errors
             .iter()
             .any(|err| err.vendor == model.subscription);
@@ -389,25 +387,22 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 // Full table mode
 // ---------------------------------------------------------------------------
 const STATUS_DOT: &str = "●";
-/// Bracketed subscription tag drawn in the vendor column. `selected` is the
-/// row's selected candidate's subscription; `None` renders the dim `[—]` mark
-/// for zero-candidate rows so the operator can see the row exists without
-/// being able to select it.
-fn vendor_label(selected: Option<SubscriptionKind>) -> &'static str {
-    match selected {
-        Some(SubscriptionKind::Claude) => "[claude]",
-        Some(SubscriptionKind::Codex) => "[codex]",
-        Some(SubscriptionKind::Gemini) => "[gemini]",
-        Some(SubscriptionKind::Kimi) => "[kimi]",
-        Some(SubscriptionKind::OpencodeGo) => "[opencode-go]",
-        Some(SubscriptionKind::Direct) => "[direct]",
-        None => "[—]",
+/// Bracketed brand tag drawn in the vendor column. The tag text is the
+/// model's curated `display_vendor` (e.g. `[deepseek]`, `[claude]`). Models
+/// without a curated brand (and therefore not in the baked table) render the
+/// dim `[—]` placeholder.
+fn display_vendor_tag(model: &CachedModel) -> String {
+    let dv = crate::model_names::display_vendor(&model.name);
+    if dv.is_empty() {
+        "[—]".to_string()
+    } else {
+        format!("[{dv}]")
     }
 }
-/// Width of the vendor-tag column (padded). Sized for the widest tag,
-/// `[opencode-go]`.
+/// Width of the vendor-tag column (padded). Sized for the widest curated
+/// brand-tag, `[deepseek]` / `[opencode]` (10 chars).
 fn vendor_column_width() -> usize {
-    13
+    10
 }
 fn top_rank_prob_span(vendor_failed: bool, candidates: &[(bool, &str, u8, u8)]) -> Span<'static> {
     if vendor_failed {
@@ -441,6 +436,7 @@ fn render_compact_quota(
         SubscriptionKind::Codex,
         SubscriptionKind::Gemini,
         SubscriptionKind::OpencodeGo,
+        SubscriptionKind::Direct,
     ];
     // Pick each vendor's representative by `build_rank_order` so the
     // compact strip mirrors the full table's ranking. Cosmetic
@@ -460,7 +456,7 @@ fn render_compact_quota(
         .iter()
         .map(|(vendor, model)| {
             let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
-            let label = vendor_label(Some(*vendor));
+            let label = display_vendor_tag(model);
             let quota_str_len = if vendor_failed {
                 2
             } else {
@@ -479,10 +475,10 @@ fn render_compact_quota(
             spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
         }
         first = false;
-        let label = vendor_label(Some(vendor));
+        let label = display_vendor_tag(model);
         spans.push(Span::styled(
-            label.to_string(),
-            Style::default().fg(vendor_color(vendor)),
+            label,
+            Style::default().fg(subscription_color(vendor)),
         ));
         spans.push(Span::raw(" "));
         if use_expanded_quota {

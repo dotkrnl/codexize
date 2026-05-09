@@ -1,5 +1,5 @@
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::models::vendor_tag;
+use crate::app::models::subscription_tag;
 use crate::app::prompts::{read_review_scope, simplifier_prompt};
 use crate::app::{App, guard};
 use crate::selection::CachedModel;
@@ -69,7 +69,7 @@ impl App {
                 (
                     model.name.clone(),
                     model.subscription,
-                    vendor_tag(model.subscription).to_string(),
+                    subscription_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
                     effort_mapping,

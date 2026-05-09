@@ -172,20 +172,9 @@ fn synthesize_gemini_3_1_pro_preview_falls_back_to_3_pro_preview() {
         model("gemini-3-pro-preview", 80.0),
         model("gemini-2.5-pro", 70.0),
     ];
-    let synth = synthesize_sibling("gemini-3.1-pro-preview", "google", &existing).unwrap();
+    let synth = synthesize_sibling("gemini-3-1-pro-preview", "google", &existing).unwrap();
     assert_eq!(synth.fallback_from.as_deref(), Some("gemini-3-pro-preview"));
     assert_eq!(synth.overall_score, 80.0);
-}
-
-#[test]
-fn synthesize_gemini_3_flash_preview_falls_back_to_2_5_flash() {
-    let existing = vec![
-        model("gemini-2.5-flash", 60.0),
-        model("gemini-2.5-pro", 75.0),
-    ];
-    let synth = synthesize_sibling("gemini-3-flash-preview", "google", &existing).unwrap();
-    assert_eq!(synth.fallback_from.as_deref(), Some("gemini-2.5-flash"));
-    assert_eq!(synth.overall_score, 60.0);
 }
 
 #[test]

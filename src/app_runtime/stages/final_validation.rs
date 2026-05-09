@@ -1,5 +1,5 @@
 use crate::adapters::{AgentRun, EffortLevel, run_label_with_model};
-use crate::app::models::vendor_tag;
+use crate::app::models::subscription_tag;
 use crate::app::prompts::final_validation_prompt;
 use crate::app::{App, guard};
 use crate::final_validation::{self, DreamRecommendation, ValidationStatus};
@@ -54,7 +54,7 @@ impl App {
                 (
                     model.name.clone(),
                     model.subscription,
-                    vendor_tag(model.subscription).to_string(),
+                    subscription_tag(model.subscription).to_string(),
                     cli,
                     launch_name,
                     effort_mapping,

@@ -33,13 +33,14 @@ pub struct AgentRun {
     pub effort_eligible: bool,
     pub modes: LaunchModes,
 }
-pub fn all_vendors() -> [SubscriptionKind; 5] {
+pub fn all_vendors() -> [SubscriptionKind; 6] {
     [
         SubscriptionKind::Codex,
         SubscriptionKind::Claude,
         SubscriptionKind::Gemini,
         SubscriptionKind::Kimi,
         SubscriptionKind::OpencodeGo,
+        SubscriptionKind::Direct,
     ]
 }
 pub fn short_model(model: &str) -> String {

@@ -41,8 +41,8 @@ pub(crate) fn spawn_refresh(
     }
     rx
 }
-pub(crate) fn vendor_tag(vendor: SubscriptionKind) -> &'static str {
-    match vendor {
+pub(crate) fn subscription_tag(subscription: SubscriptionKind) -> &'static str {
+    match subscription {
         SubscriptionKind::Claude => "claude",
         SubscriptionKind::Codex => "codex",
         SubscriptionKind::Gemini => "gemini",
@@ -51,8 +51,8 @@ pub(crate) fn vendor_tag(vendor: SubscriptionKind) -> &'static str {
         SubscriptionKind::Direct => "direct",
     }
 }
-pub(crate) fn vendor_color(vendor: SubscriptionKind) -> Color {
-    match vendor {
+pub(crate) fn subscription_color(subscription: SubscriptionKind) -> Color {
+    match subscription {
         SubscriptionKind::Claude => Color::Magenta,
         SubscriptionKind::Codex => Color::Green,
         SubscriptionKind::Gemini => Color::Blue,
@@ -61,18 +61,8 @@ pub(crate) fn vendor_color(vendor: SubscriptionKind) -> Color {
         SubscriptionKind::Direct => Color::White,
     }
 }
-pub(crate) fn vendor_prefix(vendor: SubscriptionKind) -> &'static str {
-    match vendor {
-        SubscriptionKind::Claude => "claude-",
-        SubscriptionKind::Codex => "gpt-",
-        SubscriptionKind::Gemini => "gemini-",
-        SubscriptionKind::Kimi => "kimi-",
-        SubscriptionKind::OpencodeGo => "",
-        SubscriptionKind::Direct => "",
-    }
-}
 fn quota_error_summary(errors: &[QuotaError]) -> String {
-    let names: Vec<&str> = errors.iter().map(|e| vendor_tag(e.vendor)).collect();
+    let names: Vec<&str> = errors.iter().map(|e| subscription_tag(e.vendor)).collect();
     match names.as_slice() {
         [] => "model refresh failed".to_string(),
         [single] => format!("model refresh: {single} quota unavailable"),

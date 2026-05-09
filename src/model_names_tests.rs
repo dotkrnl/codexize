@@ -1,32 +1,43 @@
 use super::*;
 
 #[test]
-fn display_name_uses_explicit_short_labels() {
-    assert_eq!(display_name("gemini-3.1-pro-preview"), "3.1-pro");
-    assert_eq!(display_name("gemini-3-pro-preview"), "3-pro");
-    assert_eq!(display_name("gemini-3-flash-preview"), "3-flash");
+fn display_vendor_returns_curated_brand_for_known_canonical() {
+    assert_eq!(display_vendor("claude-opus-4-7"), "claude");
+    assert_eq!(display_vendor("gpt-5-4"), "gpt");
+    assert_eq!(display_vendor("gemini-3-1-pro-preview"), "gemini");
+    assert_eq!(display_vendor("deepseek-v4-flash"), "deepseek");
+    assert_eq!(display_vendor("grok-code-fast-1"), "grok");
+    assert_eq!(display_vendor("kimi-k2-6"), "kimi");
 }
 
 #[test]
-fn display_name_preserves_unknown_canonical_names() {
+fn display_vendor_returns_empty_for_unknown_canonical() {
+    assert_eq!(display_vendor("totally-unknown-model"), "");
+}
+
+#[test]
+fn display_short_returns_curated_short_for_known_canonical() {
+    assert_eq!(display_short("claude-opus-4-7"), "opus 4.7");
+    assert_eq!(display_short("gpt-5-3-codex"), "5.3 codex");
+    assert_eq!(display_short("gemini-3-1-pro-preview"), "3.1 preview");
+    assert_eq!(display_short("grok-4-latest"), "4");
+    assert_eq!(display_short("glm-5-1"), "5.1");
+}
+
+#[test]
+fn display_short_falls_back_to_canonical_for_unknown_model() {
     assert_eq!(
-        display_name("gemini-custom-preview"),
-        "gemini-custom-preview"
+        display_short("totally-unknown-model"),
+        "totally-unknown-model"
     );
 }
 
 #[test]
-fn display_name_for_vendor_strips_prefix_only_without_explicit_label() {
+fn run_label_name_strips_claude_prefix_and_passes_through_others() {
+    assert_eq!(run_label_name("claude-sonnet-4-6"), "sonnet-4-6");
+    assert_eq!(run_label_name("gpt-5-4"), "gpt-5-4");
     assert_eq!(
-        display_name_for_vendor("gemini-2.5-pro", "gemini-"),
-        "2.5-pro"
+        run_label_name("gemini-3-1-pro-preview"),
+        "gemini-3-1-pro-preview"
     );
-    assert_eq!(display_name_for_vendor("gpt-5.2", "gpt-"), "5.2");
-}
-
-#[test]
-fn run_label_name_keeps_existing_claude_behavior_and_shortens_known_gemini() {
-    assert_eq!(run_label_name("claude-sonnet-4.6"), "sonnet-4.6");
-    assert_eq!(run_label_name("gemini-3.1-pro-preview"), "3.1-pro");
-    assert_eq!(run_label_name("gpt-5.2"), "gpt-5.2");
 }

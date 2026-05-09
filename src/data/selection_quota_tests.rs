@@ -51,17 +51,17 @@ fn kimi_quota_returns_none_when_all_missing() {
 #[test]
 fn live_map_direct_injects_known_gemini_quota_names() {
     let mapped = live_map_direct(vec![LiveModel {
-        name: "gemini-3-pro-preview".to_string(),
+        name: "gemini-3-pro".to_string(),
         quota_percent: Some(42),
         quota_resets_at: None,
     }]);
 
     for name in [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
+        "gemini-3-1-pro-preview",
+        "gemini-3-pro",
+        "gemini-3-flash",
+        "gemini-2-5-pro",
+        "gemini-2-5-flash",
     ] {
         assert_eq!(mapped.0.get(name), Some(&Some(42)), "{name} missing");
         assert_eq!(mapped.1.get(name), Some(&None), "{name} reset missing");

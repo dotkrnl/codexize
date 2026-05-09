@@ -173,7 +173,7 @@ fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
         .map(|model| (model.name.to_ascii_lowercase(), model.quota_percent))
         .collect();
     // Google's retrieveUserQuota only returns buckets it knows about, which
-    // can lag new model names (e.g. gemini-3-flash-preview). Inject known
+    // can lag new model names (e.g. gemini-3-flash). Inject known
     // names so dashboard::synthesize_sibling has something to extend a
     // sibling fallback onto.
     let shared = mapped.values().find_map(|q| *q);

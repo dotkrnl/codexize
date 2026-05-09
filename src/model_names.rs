@@ -1,50 +1,71 @@
-pub const EXPLICIT_SCORE_FALLBACKS: &[(&str, &str)] = &[
-    ("gemini-3.1-pro-preview", "gemini-3-pro-preview"),
-    ("gemini-3-flash-preview", "gemini-2.5-flash"),
-];
+pub const EXPLICIT_SCORE_FALLBACKS: &[(&str, &str)] =
+    &[("gemini-3-1-pro-preview", "gemini-3-pro-preview")];
+
 pub const GEMINI_KNOWN_QUOTA_MODELS: &[&str] = &[
-    "gemini-3.1-pro-preview",
-    "gemini-3-pro-preview",
-    "gemini-3-flash-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
+    "gemini-3-1-pro-preview",
+    "gemini-3-pro",
+    "gemini-3-flash",
+    "gemini-2-5-pro",
+    "gemini-2-5-flash",
 ];
-const EXPLICIT_DISPLAY_NAMES: &[(&str, &str)] = &[
-    ("gemini-3.1-pro-preview", "3.1-pro"),
-    ("gemini-3-pro-preview", "3-pro"),
-    ("gemini-3-flash-preview", "3-flash"),
+
+const DISPLAY: &[(&str, &str, &str)] = &[
+    // (canonical, display_vendor, display_short)
+    ("claude-opus-4-1", "claude", "opus 4.1"),
+    ("claude-opus-4-5", "claude", "opus 4.5"),
+    ("claude-opus-4-6", "claude", "opus 4.6"),
+    ("claude-opus-4-7", "claude", "opus 4.7"),
+    ("claude-sonnet-4", "claude", "sonnet 4"),
+    ("claude-sonnet-4-5", "claude", "sonnet 4.5"),
+    ("claude-sonnet-4-6", "claude", "sonnet 4.6"),
+    ("gpt-5-2", "gpt", "5.2"),
+    ("gpt-5-3-codex", "gpt", "5.3 codex"),
+    ("gpt-5-4", "gpt", "5.4"),
+    ("gpt-5-5", "gpt", "5.5"),
+    ("gemini-2-5-flash", "gemini", "2.5 flash"),
+    ("gemini-2-5-pro", "gemini", "2.5 pro"),
+    ("gemini-3-flash", "gemini", "3 flash"),
+    ("gemini-3-pro", "gemini", "3 pro"),
+    ("gemini-3-1-pro-preview", "gemini", "3.1 preview"),
+    ("kimi-k2-6", "kimi", "2.6"),
+    ("deepseek-v4-flash", "deepseek", "v4 flash"),
+    ("deepseek-v4-pro", "deepseek", "v4 pro"),
+    ("minimax-m2-5", "minimax", "m2.5"),
+    ("minimax-m2-7", "minimax", "m2.7"),
+    ("qwen3-6-plus", "qwen", "3.6 plus"),
+    ("grok-4-latest", "grok", "4"),
+    ("grok-code-fast-1", "grok", "code fast"),
+    ("mimo-v2-5", "mimo", "v2.5"),
+    ("mimo-v2-5-pro", "mimo", "v2.5 pro"),
+    ("glm-4-6", "glm", "4.6"),
+    ("glm-4-7", "glm", "4.7"),
+    ("glm-5", "glm", "5"),
+    ("glm-5-1", "glm", "5.1"),
 ];
-pub fn display_name(canonical: &str) -> String {
-    explicit_display_name(canonical)
+
+pub fn display_vendor(canonical: &str) -> &'static str {
+    DISPLAY
+        .iter()
+        .find(|(c, _, _)| *c == canonical)
+        .map(|(_, v, _)| *v)
+        .unwrap_or("")
+}
+
+pub fn display_short(canonical: &str) -> String {
+    DISPLAY
+        .iter()
+        .find(|(c, _, _)| *c == canonical)
+        .map(|(_, _, s)| s.to_string())
+        .unwrap_or_else(|| canonical.to_string())
+}
+
+pub fn run_label_name(canonical: &str) -> String {
+    canonical
+        .strip_prefix("claude-")
         .unwrap_or(canonical)
         .to_string()
 }
-pub fn display_name_for_vendor(canonical: &str, vendor_prefix: &str) -> String {
-    if let Some(display) = explicit_display_name(canonical) {
-        display.to_string()
-    } else {
-        canonical
-            .strip_prefix(vendor_prefix)
-            .unwrap_or(canonical)
-            .to_string()
-    }
-}
-pub fn run_label_name(canonical: &str) -> String {
-    if let Some(display) = explicit_display_name(canonical) {
-        display.to_string()
-    } else {
-        canonical
-            .strip_prefix("claude-")
-            .unwrap_or(canonical)
-            .to_string()
-    }
-}
-fn explicit_display_name(canonical: &str) -> Option<&'static str> {
-    EXPLICIT_DISPLAY_NAMES
-        .iter()
-        .find(|(name, _)| *name == canonical)
-        .map(|(_, display)| *display)
-}
+
 #[cfg(test)]
 #[path = "model_names_tests.rs"]
 mod tests;

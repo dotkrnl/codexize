@@ -24,7 +24,7 @@ mod reviewer;
 mod sharding;
 mod simplification;
 mod spec_review;
-use crate::app::models::vendor_tag;
+use crate::app::models::subscription_tag;
 use crate::{
     adapters::EffortLevel,
     app::App,
@@ -137,7 +137,7 @@ impl App {
             return Some((
                 model.name.clone(),
                 model.subscription,
-                vendor_tag(model.subscription).to_string(),
+                subscription_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
                 effort_mapping,
@@ -150,7 +150,7 @@ impl App {
         let picked = (
             outcome.model.name.clone(),
             outcome.model.subscription,
-            vendor_tag(outcome.model.subscription).to_string(),
+            subscription_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
             effort_mapping,
@@ -173,7 +173,7 @@ impl App {
             return Some((
                 model.name.clone(),
                 model.subscription,
-                vendor_tag(model.subscription).to_string(),
+                subscription_tag(model.subscription).to_string(),
                 cli,
                 launch_name,
                 effort_mapping,
@@ -187,7 +187,7 @@ impl App {
         let picked = (
             outcome.model.name.clone(),
             outcome.model.subscription,
-            vendor_tag(outcome.model.subscription).to_string(),
+            subscription_tag(outcome.model.subscription).to_string(),
             cli,
             launch_name,
             effort_mapping,
@@ -335,7 +335,7 @@ impl App {
         Some((
             model.name.clone(),
             model.subscription,
-            vendor_tag(model.subscription).to_string(),
+            subscription_tag(model.subscription).to_string(),
             cli,
             launch_name,
             effort_mapping,
@@ -343,7 +343,7 @@ impl App {
         ))
     }
     /// Look up the most-recent run on a stage for the given round and
-    /// resolve its `(model, vendor_kind, vendor_tag)` triple. Returns
+    /// resolve its `(model, vendor_kind, subscription_tag)` triple. Returns
     /// `None` when no matching run exists or its persisted vendor string
     /// no longer parses (e.g. after a vendor rename).
     ///
@@ -377,7 +377,7 @@ impl App {
         Some((
             last.model.clone(),
             vendor_kind,
-            vendor_tag(vendor_kind).to_string(),
+            subscription_tag(vendor_kind).to_string(),
             cli,
             launch_name,
             effort_mapping,

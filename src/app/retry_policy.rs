@@ -1,4 +1,4 @@
-use super::models::vendor_tag;
+use super::models::subscription_tag;
 use super::{App, FailedModelSet, RetryKey};
 use crate::selection::{SubscriptionKind, selection::select_excluding};
 use crate::state::{MessageKind, RunStatus, SessionState};
@@ -139,7 +139,7 @@ impl App {
                 MessageKind::Started,
                 format!(
                     "retrying with {}/{}",
-                    vendor_tag(next_model.subscription),
+                    subscription_tag(next_model.subscription),
                     next_model.name
                 ),
             );

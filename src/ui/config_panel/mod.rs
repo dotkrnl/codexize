@@ -2426,7 +2426,9 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
 
-        let text = render_to_text(&state, 120, 18);
+        // Height tall enough to render every baked row + the Add Provider
+        // footer; the section now has 30 baked rows and grows over time.
+        let text = render_to_text(&state, 120, 80);
         assert!(
             text.contains("claude / claude-opus-4-7"),
             "should show baked models: {text}"

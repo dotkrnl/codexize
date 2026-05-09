@@ -6,9 +6,78 @@
 //! `Override<T>` ignores the explicit flag — round-trip tests compare the
 //! semantic value, not how the value got there.
 
-use crate::selection::FreeModelEntry;
+use crate::selection::{CliKind, FreeModelEntry};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
+
+/// Per-CLI mapping from a logical effort tier (`cheap` / `normal` /
+/// `tough`) to the literal CLI flag/argument string. Stored as an
+/// atomic block on disk: sparse-save emits the whole `[providers.
+/// effort_mapping]` table when any field diverges from the baked
+/// default, never just one sub-key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffortMapping {
+    pub cheap: String,
+    pub normal: String,
+    pub tough: String,
+}
+
+impl EffortMapping {
+    pub fn new(cheap: &str, normal: &str, tough: &str) -> Self {
+        Self {
+            cheap: cheap.to_string(),
+            normal: normal.to_string(),
+            tough: tough.to_string(),
+        }
+    }
+}
+
+impl Default for EffortMapping {
+    fn default() -> Self {
+        // Generic baseline; baked.rs supplies CLI-specific defaults
+        // (Claude → "max", Codex → "xhigh") that override these.
+        Self::new("low", "medium", "high")
+    }
+}
+
+/// One unified provider entry. Identity is the four-tuple
+/// `(vendor, model, cli, launch_name)`. The remaining fields are
+/// per-tuple knobs the operator can flip from the TUI or TOML.
+///
+/// Baked defaults live in [`crate::logic::selection::baked`]. The
+/// loader migrates legacy `[[free_models]]` entries to this shape with
+/// `free = true`, so downstream selection code can stop treating the
+/// "free" path as a separate channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderEntry {
+    pub vendor: String,
+    pub model: String,
+    pub cli: CliKind,
+    pub launch_name: String,
+    pub enabled: bool,
+    pub free: bool,
+    pub official: bool,
+    pub quota_disabled: bool,
+    pub cheap_eligible: bool,
+    pub tough_eligible: bool,
+    pub effort_eligible: bool,
+    pub effort_mapping: EffortMapping,
+    pub display_order: u16,
+}
+
+impl ProviderEntry {
+    /// Stable identity used for override-vs-addition matching across
+    /// baked and user-supplied lists. Matches the spec's "matched-by-
+    /// (cli, launch_name)" rule under a (vendor, model) row.
+    pub fn identity(&self) -> (String, String, CliKind, String) {
+        (
+            self.vendor.clone(),
+            self.model.clone(),
+            self.cli,
+            self.launch_name.clone(),
+        )
+    }
+}
 
 /// The supported on-disk schema version. The loader rejects any
 /// `[meta] version` outside this set.
@@ -440,7 +509,17 @@ pub struct Config {
     pub ui: UiSection,
     pub diagnostics: DiagnosticsSection,
     pub memory: MemorySection,
+    /// Legacy free-tier provider list. The loader still parses
+    /// `[[free_models]]` blocks into this field for backward compat,
+    /// but on save it is dropped entirely — every entry is migrated
+    /// in-memory into [`Config::providers`] with `free = true`. New
+    /// code should read [`Config::providers`] instead.
     pub free_models: Override<Vec<FreeModelEntry>>,
+    /// Unified per-tuple provider list. Populated from the new
+    /// `[[providers]]` TOML block plus the in-memory migration of any
+    /// legacy `[[free_models]]` entries; explicit `[[providers]]`
+    /// always wins on a `(vendor, model, cli, launch_name)` clash.
+    pub providers: Override<Vec<ProviderEntry>>,
 }
 
 impl Config {
@@ -553,6 +632,30 @@ impl Config {
             }
         }
 
+        let mut seen: std::collections::HashSet<(String, String, CliKind, String)> =
+            std::collections::HashSet::new();
+        for (i, entry) in self.providers.value().iter().enumerate() {
+            if entry.vendor.trim().is_empty() {
+                return Err(format!("providers[{i}].vendor must be non-empty"));
+            }
+            if entry.model.trim().is_empty() {
+                return Err(format!("providers[{i}].model must be non-empty"));
+            }
+            if entry.launch_name.trim().is_empty() {
+                return Err(format!("providers[{i}].launch_name must be non-empty"));
+            }
+            if !seen.insert(entry.identity()) {
+                return Err(format!(
+                    "providers[{i}]: duplicate tuple \
+                     (vendor={:?}, model={:?}, cli={:?}, launch_name={:?})",
+                    entry.vendor,
+                    entry.model,
+                    entry.cli.as_str(),
+                    entry.launch_name,
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -612,5 +715,66 @@ mod tests {
         let mut c = Config::baked_defaults();
         c.ntfy.server = Override::explicit("ftp://nope".into());
         assert!(c.validate().is_err());
+    }
+
+    fn provider_for(vendor: &str, model: &str, cli: CliKind, launch: &str) -> ProviderEntry {
+        ProviderEntry {
+            vendor: vendor.to_string(),
+            model: model.to_string(),
+            cli,
+            launch_name: launch.to_string(),
+            enabled: true,
+            free: false,
+            official: false,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_mapping: EffortMapping::default(),
+            display_order: 0,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_provider_tuple() {
+        let mut c = Config::baked_defaults();
+        c.providers = Override::explicit(vec![
+            provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7"),
+            provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7"),
+        ]);
+        let err = c.validate().unwrap_err();
+        assert!(err.contains("duplicate tuple"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_empty_provider_identity_field() {
+        let mut c = Config::baked_defaults();
+        c.providers = Override::explicit(vec![provider_for(
+            "",
+            "claude-opus-4-7",
+            CliKind::Claude,
+            "claude-opus-4-7",
+        )]);
+        let err = c.validate().unwrap_err();
+        assert!(err.contains("vendor"), "{err}");
+    }
+
+    #[test]
+    fn provider_identity_disambiguates_by_cli_and_launch_name() {
+        let a = provider_for("claude", "claude-opus-4-7", CliKind::Claude, "claude-opus-4-7");
+        let b = provider_for(
+            "claude",
+            "claude-opus-4-7",
+            CliKind::Opencode,
+            "claude-opus-4-7",
+        );
+        let c = provider_for(
+            "claude",
+            "claude-opus-4-7",
+            CliKind::Claude,
+            "claude-opus-4-7-thinking",
+        );
+        assert_ne!(a.identity(), b.identity());
+        assert_ne!(a.identity(), c.identity());
     }
 }

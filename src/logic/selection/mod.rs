@@ -1,4 +1,5 @@
 pub mod assemble;
+pub mod baked;
 pub mod config;
 pub mod display;
 pub mod quota;

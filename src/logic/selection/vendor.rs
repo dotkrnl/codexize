@@ -1,44 +1,51 @@
-use super::types::{CachedModel, CliKind, SubscriptionKind};
+use super::types::{CachedModel, SubscriptionKind};
 use crate::dashboard;
 /// Vendors that expose a high-reasoning ("tough") mode.
+///
+/// Per spec §provider properties, effort-eligibility is intrinsically a
+/// per-tuple toggle (see [`is_effort_eligible`]). This vendor-level
+/// helper survives only as a coarse fallback for call sites that do not
+/// have a `CachedModel` in scope — typically when the row's selected
+/// candidate has been computed but the consumer wants a vendor-level
+/// "could this subscription ever be effort-capable" answer.
 pub fn is_effort_capable(vendor: SubscriptionKind) -> bool {
     matches!(
         vendor,
         SubscriptionKind::Claude | SubscriptionKind::Codex | SubscriptionKind::OpencodeGo
     )
 }
-/// Models eligible for tough tasks. Combines the selected CLI capability filter
-/// with the Claude-tier filter: only opus Claude variants qualify; all
-/// Codex models qualify; Kimi and Gemini do not.
-///
-/// The Claude check is `to_lowercase().contains("opus")` so future opus
-/// names (`claude-opus-4-7`, `claude-opus-5`, …) are admitted automatically.
+/// True when the row's *selected* provider tuple is flagged as
+/// tough-eligible in the baked defaults table (or by a user
+/// `[[providers]]` override). Returns `false` for rows with no selected
+/// candidate, mirroring the legacy "no candidate ⇒ not eligible"
+/// behavior.
 pub fn is_tough_eligible(model: &CachedModel) -> bool {
-    if model.selected_cli() == Some(CliKind::Opencode) {
-        return false;
-    }
-    match infer_underlying_vendor_from_name(&model.name) {
-        SubscriptionKind::Claude => model.name.to_lowercase().contains("opus"),
-        SubscriptionKind::Codex => true,
-        SubscriptionKind::Kimi
-        | SubscriptionKind::Gemini
-        | SubscriptionKind::OpencodeGo
-        | SubscriptionKind::Free => false,
-    }
+    model
+        .selected_candidate()
+        .is_some_and(|candidate| candidate.tough_eligible)
 }
-/// Models eligible for Cheap mode. This stays parallel to
-/// [`is_tough_eligible`] so budget-tier policy is centralized with vendor
-/// model-name matching.
+/// True when the row's *selected* provider tuple is flagged as
+/// cheap-eligible. Same `selected_candidate`-driven semantics as
+/// [`is_tough_eligible`].
 pub fn is_cheap_eligible(model: &CachedModel) -> bool {
-    let name = model.name.to_lowercase();
-    match infer_underlying_vendor_from_name(&model.name) {
-        SubscriptionKind::Claude => !name.contains("opus"),
-        SubscriptionKind::Kimi | SubscriptionKind::Codex => true,
-        SubscriptionKind::Gemini => name.contains("flash") || name.contains("nano"),
-        SubscriptionKind::OpencodeGo | SubscriptionKind::Free => true,
-    }
+    model
+        .selected_candidate()
+        .is_some_and(|candidate| candidate.cheap_eligible)
+}
+/// True when the row's *selected* provider tuple is flagged as
+/// effort-eligible (so the run can hand it a high-reasoning effort
+/// flag). Prefer this over [`is_effort_capable`] when a `CachedModel`
+/// is in scope — it honors per-tuple operator overrides.
+pub fn is_effort_eligible(model: &CachedModel) -> bool {
+    model
+        .selected_candidate()
+        .is_some_and(|candidate| candidate.effort_eligible)
 }
 
+/// Heuristic vendor inference from a model-name substring. Selection
+/// eligibility no longer reads this — `Candidate` flags drive it now —
+/// but `data::adapters` still uses it to route OpencodeGo-routed models
+/// back to their underlying vendor's effort-suffix table.
 pub fn infer_underlying_vendor_from_name(name: &str) -> SubscriptionKind {
     let name = name.to_lowercase();
     if name.contains("claude")

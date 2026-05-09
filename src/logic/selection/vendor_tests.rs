@@ -1,5 +1,42 @@
 use super::*;
+use crate::data::config::schema::EffortMapping;
+use crate::selection::types::{Candidate, CliKind};
 use std::collections::BTreeMap;
+
+/// Build a single-candidate `CachedModel` with the given per-tuple
+/// flags. The `is_*_eligible` helpers under test are flag-driven now,
+/// so each test sets just the bits it cares about.
+fn model_with_candidate_flags(
+    vendor: SubscriptionKind,
+    name: &str,
+    cheap: bool,
+    tough: bool,
+    effort: bool,
+) -> CachedModel {
+    let mut model = sample_cached_model();
+    model.vendor = vendor;
+    model.name = name.to_string();
+    let cli = vendor.direct_cli().unwrap_or(CliKind::Opencode);
+    model.candidates = vec![Candidate {
+        subscription: vendor,
+        cli,
+        launch_name: name.to_string(),
+        quota_percent: Some(80),
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: vendor == SubscriptionKind::Free,
+        official: cli.to_subscription() == vendor && vendor != SubscriptionKind::Free,
+        quota_disabled: false,
+        cheap_eligible: cheap,
+        tough_eligible: tough,
+        effort_eligible: effort,
+        effort_mapping: EffortMapping::default(),
+        quota_failed: false,
+    }];
+    model.selected_candidate = Some(0);
+    model
+}
 
 fn dashboard_model(name: &str, vendor: &str) -> dashboard::DashboardModel {
     dashboard::DashboardModel {
@@ -55,52 +92,78 @@ fn is_effort_capable_includes_opencode_route_vendor() {
 }
 
 #[test]
-fn is_cheap_eligible_matches_budget_subset() {
-    let cases = [
-        (SubscriptionKind::Claude, "claude-opus-4-7", false),
-        (SubscriptionKind::Claude, "claude-sonnet-4-6", true),
-        (SubscriptionKind::Claude, "claude-haiku-4-5", true),
-        (SubscriptionKind::Codex, "gpt-5.5", true),
-        (SubscriptionKind::Kimi, "kimi-k2", true),
-        (SubscriptionKind::Gemini, "gemini-2.5-pro", false),
-        (SubscriptionKind::Gemini, "gemini-2.5-flash", true),
-        (SubscriptionKind::Gemini, "gemini-nano", true),
-    ];
+fn is_cheap_eligible_reads_selected_candidate_flag() {
+    // The per-tuple `cheap_eligible` flag drives the answer; the
+    // model's name and vendor are irrelevant.
+    let cheap = model_with_candidate_flags(
+        SubscriptionKind::Claude,
+        "claude-opus-4-7",
+        true,
+        false,
+        false,
+    );
+    assert!(is_cheap_eligible(&cheap));
 
-    for (vendor, name, expected) in cases {
-        let mut model = sample_cached_model();
-        model.vendor = vendor;
-        model.name = name.to_string();
-        assert_eq!(
-            is_cheap_eligible(&model),
-            expected,
-            "{vendor:?} {name} eligibility"
-        );
-    }
+    let not_cheap = model_with_candidate_flags(
+        SubscriptionKind::Gemini,
+        "gemini-2.5-flash",
+        false,
+        false,
+        false,
+    );
+    assert!(!is_cheap_eligible(&not_cheap));
 }
 
 #[test]
-fn opencode_tough_eligibility_uses_underlying_model_identity() {
-    let mut opus = sample_cached_model();
-    opus.vendor = SubscriptionKind::OpencodeGo;
-    opus.name = "opencode/claude-opus-4.7".to_string();
-    assert!(is_tough_eligible(&opus));
+fn is_tough_eligible_reads_selected_candidate_flag() {
+    let tough = model_with_candidate_flags(
+        SubscriptionKind::Kimi,
+        "kimi-k2",
+        false,
+        true,
+        false,
+    );
+    assert!(is_tough_eligible(&tough));
 
-    let mut sonnet = opus.clone();
-    sonnet.name = "opencode/claude-sonnet-4.6".to_string();
-    assert!(!is_tough_eligible(&sonnet));
+    let not_tough = model_with_candidate_flags(
+        SubscriptionKind::Codex,
+        "gpt-5",
+        false,
+        false,
+        false,
+    );
+    assert!(!is_tough_eligible(&not_tough));
 }
 
 #[test]
-fn opencode_cheap_eligibility_uses_underlying_model_identity() {
-    let mut flash = sample_cached_model();
-    flash.vendor = SubscriptionKind::OpencodeGo;
-    flash.name = "opencode/gemini-2.5-flash".to_string();
-    assert!(is_cheap_eligible(&flash));
+fn is_effort_eligible_reads_selected_candidate_flag() {
+    let yes = model_with_candidate_flags(
+        SubscriptionKind::Gemini,
+        "gemini-2.5-pro",
+        false,
+        false,
+        true,
+    );
+    assert!(is_effort_eligible(&yes));
 
-    let mut pro = flash.clone();
-    pro.name = "opencode/gemini-2.5-pro".to_string();
-    assert!(!is_cheap_eligible(&pro));
+    let no = model_with_candidate_flags(
+        SubscriptionKind::Claude,
+        "claude-sonnet-4-6",
+        false,
+        false,
+        false,
+    );
+    assert!(!is_effort_eligible(&no));
+}
+
+#[test]
+fn eligibility_helpers_return_false_when_no_selected_candidate() {
+    let mut model = sample_cached_model();
+    model.candidates.clear();
+    model.selected_candidate = None;
+    assert!(!is_cheap_eligible(&model));
+    assert!(!is_tough_eligible(&model));
+    assert!(!is_effort_eligible(&model));
 }
 
 #[test]

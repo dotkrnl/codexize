@@ -1,5 +1,30 @@
 use super::*;
-use crate::selection::types::{IpbrPhaseScores, ScoreSource};
+use crate::selection::types::{Candidate, CliKind, IpbrPhaseScores, ScoreSource};
+
+/// Derive cheap/tough/effort eligibility flags from a model name, used
+/// by the `sample_model` fixture to seed a single Candidate that
+/// `is_cheap_eligible` / `is_tough_eligible` can read. Mirrors the
+/// pre-task-2 vendor.rs heuristics so the existing test contract keeps
+/// asserting the same eligibility outcomes — the heuristic now lives in
+/// fixture code instead of production selection logic.
+fn eligibility_for_name(vendor: SubscriptionKind, name: &str) -> (bool, bool) {
+    let lower = name.to_lowercase();
+    let cheap = match vendor {
+        SubscriptionKind::Claude => !lower.contains("opus"),
+        SubscriptionKind::Codex | SubscriptionKind::Kimi => true,
+        SubscriptionKind::Gemini => lower.contains("flash") || lower.contains("nano"),
+        SubscriptionKind::OpencodeGo | SubscriptionKind::Free => true,
+    };
+    let tough = match vendor {
+        SubscriptionKind::Claude => lower.contains("opus"),
+        SubscriptionKind::Codex => true,
+        SubscriptionKind::Kimi
+        | SubscriptionKind::Gemini
+        | SubscriptionKind::OpencodeGo
+        | SubscriptionKind::Free => false,
+    };
+    (cheap, tough)
+}
 
 fn sample_model(vendor: SubscriptionKind, name: &str, quota: u8) -> CachedModel {
     sample_model_with_score(vendor, name, quota, 85.0)
@@ -14,6 +39,25 @@ fn sample_model_with_score(
     quota: u8,
     score: f64,
 ) -> CachedModel {
+    let (cheap_eligible, tough_eligible) = eligibility_for_name(vendor, name);
+    let cli = vendor.direct_cli().unwrap_or(CliKind::Opencode);
+    let candidate = Candidate {
+        subscription: vendor,
+        cli,
+        launch_name: name.to_string(),
+        quota_percent: Some(quota),
+        quota_resets_at: None,
+        display_order: 0,
+        enabled: true,
+        free: vendor == SubscriptionKind::Free,
+        official: cli.to_subscription() == vendor && vendor != SubscriptionKind::Free,
+        quota_disabled: false,
+        cheap_eligible,
+        tough_eligible,
+        effort_eligible: matches!(vendor, SubscriptionKind::Claude | SubscriptionKind::Codex),
+        effort_mapping: crate::data::config::schema::EffortMapping::default(),
+        quota_failed: false,
+    };
     CachedModel {
         vendor,
         name: name.to_string(),
@@ -36,8 +80,8 @@ fn sample_model_with_score(
         score_source: ScoreSource::Ipbr,
         ipbr_row_matched: true,
         ipbr_match_key: Some(name.to_string()),
-        candidates: Vec::new(),
-        selected_candidate: None,
+        candidates: vec![candidate],
+        selected_candidate: Some(0),
         quota_percent: Some(quota),
         quota_resets_at: None,
         display_order: 0,

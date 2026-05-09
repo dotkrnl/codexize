@@ -17,8 +17,7 @@ pub fn is_tough_eligible(model: &CachedModel) -> bool {
     if model.selected_cli() == Some(CliKind::Opencode) {
         return false;
     }
-    let vendor = route_identity_for_model(model);
-    match vendor {
+    match infer_underlying_vendor_from_name(&model.name) {
         SubscriptionKind::Claude => model.name.to_lowercase().contains("opus"),
         SubscriptionKind::Codex => true,
         SubscriptionKind::Kimi
@@ -32,16 +31,12 @@ pub fn is_tough_eligible(model: &CachedModel) -> bool {
 /// model-name matching.
 pub fn is_cheap_eligible(model: &CachedModel) -> bool {
     let name = model.name.to_lowercase();
-    match route_identity_for_model(model) {
+    match infer_underlying_vendor_from_name(&model.name) {
         SubscriptionKind::Claude => !name.contains("opus"),
         SubscriptionKind::Kimi | SubscriptionKind::Codex => true,
         SubscriptionKind::Gemini => name.contains("flash") || name.contains("nano"),
         SubscriptionKind::OpencodeGo | SubscriptionKind::Free => true,
     }
-}
-
-pub fn route_identity_for_model(model: &CachedModel) -> SubscriptionKind {
-    infer_underlying_vendor_from_name(&model.name)
 }
 
 pub fn infer_underlying_vendor_from_name(name: &str) -> SubscriptionKind {
@@ -60,7 +55,7 @@ pub fn infer_underlying_vendor_from_name(name: &str) -> SubscriptionKind {
         SubscriptionKind::Codex
     }
 }
-pub fn subscription_kind_to_str(v: SubscriptionKind) -> &'static str {
+pub fn vendor_kind_to_str(v: SubscriptionKind) -> &'static str {
     match v {
         SubscriptionKind::Claude => "claude",
         SubscriptionKind::Codex => "openai",
@@ -69,9 +64,6 @@ pub fn subscription_kind_to_str(v: SubscriptionKind) -> &'static str {
         SubscriptionKind::OpencodeGo => "opencode-go",
         SubscriptionKind::Free => "free",
     }
-}
-pub fn vendor_kind_to_str(v: SubscriptionKind) -> &'static str {
-    subscription_kind_to_str(v)
 }
 pub fn str_to_vendor(s: &str) -> Option<SubscriptionKind> {
     match s {

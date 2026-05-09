@@ -1,6 +1,119 @@
 use super::*;
 use crate::{acp, adapters::EffortLevel, state::LaunchModes};
 
+// Driving the production launch path end-to-end for a Free candidate.
+// `assemble_universe` produces the row + selected candidate; the
+// `pick_cli_and_launch_name` helper (used by every stage) picks the
+// candidate's `cli` / `launch_name`; an `AcpLaunchRequest` built from
+// those values must resolve to the verbatim free model name passed to
+// the operator-chosen CLI — no provider prefixing, no row-name leak.
+fn make_dashboard_entry(name: &str, vendor: &str) -> crate::cache::DashboardEntry {
+    crate::cache::DashboardEntry {
+        vendor: vendor.to_string(),
+        name: name.to_string(),
+        overall_score: 80.0,
+        current_score: 78.0,
+        standard_error: 1.0,
+        axes: Vec::new(),
+        axis_provenance: std::collections::BTreeMap::new(),
+        ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
+        score_source: crate::selection::ScoreSource::Ipbr,
+        ipbr_row_matched: true,
+        ipbr_match_key: Some(name.to_string()),
+        route_underlying_vendor: None,
+        route_provider: None,
+        display_order: 0,
+        fallback_from: None,
+    }
+}
+
+#[test]
+fn free_model_entry_resolves_to_verbatim_launch_name_through_acp_path() {
+    use crate::selection::{CliKind, FreeModelEntry, SubscriptionKind};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    // Direct candidate at 50% — Free at 100% must beat it.
+    let dashboard = vec![make_dashboard_entry("deepseek-v4-flash", "codex")];
+    let mut quotas: crate::cache::QuotaPayload = BTreeMap::new();
+    quotas
+        .entry("codex".to_string())
+        .or_default()
+        .insert("deepseek-v4-flash".to_string(), Some(50));
+    let free_models = vec![FreeModelEntry {
+        mapped_into: "deepseek-v4-flash".to_string(),
+        cli: CliKind::Opencode,
+        model_name: "dsk-4-flash".to_string(),
+    }];
+    let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
+
+    let (models, warnings) = crate::logic::selection::assemble::assemble_universe(
+        dashboard,
+        quotas,
+        BTreeMap::new(),
+        &available,
+        &free_models,
+    );
+    assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
+    let row = models
+        .iter()
+        .find(|m| m.name == "deepseek-v4-flash")
+        .expect("deepseek-v4-flash row");
+
+    // Stage launch sites flow through this helper to derive cli/launch_name.
+    let (cli, launch_name) = crate::app_runtime::stages::pick_cli_and_launch_name(row);
+    assert_eq!(cli, CliKind::Opencode);
+    assert_eq!(launch_name, "dsk-4-flash");
+
+    let request = AcpLaunchRequest {
+        // Subscription on the AgentRun (and hence the request) is the
+        // selected candidate's subscription, not the row's compatibility
+        // mirror — Free is what routes through the chosen CLI in resolve().
+        vendor: SubscriptionKind::Free,
+        cwd: PathBuf::from("workspace"),
+        prompt: acp::PromptPayload::Text("prompt".to_string()),
+        model: row.name.clone(),
+        route_provider: row.route_provider.clone(),
+        cli,
+        launch_name,
+        requested_effort: EffortLevel::Normal,
+        effective_effort: EffortLevel::Normal,
+        interactive: false,
+        modes: LaunchModes {
+            yolo: true,
+            cheap: false,
+            interactive: false,
+        },
+        policy: acp::AcpLaunchPolicy::default(),
+    };
+
+    let resolved = AcpConfig::default()
+        .resolve(&request)
+        .expect("resolve free candidate via opencode");
+
+    // The launch model is the operator's verbatim string: no `opencode/`
+    // prefix even though we are launching through the opencode CLI, and
+    // the row's canonical ipbr name (`deepseek-v4-flash`) never leaks
+    // into the spawn metadata.
+    assert_eq!(resolved.spawn.program, "opencode");
+    assert_eq!(resolved.session.model, "dsk-4-flash");
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_MODEL")
+            .map(String::as_str),
+        Some("dsk-4-flash")
+    );
+    assert_eq!(
+        resolved
+            .spawn
+            .env
+            .get("CODEXIZE_ACP_VENDOR")
+            .map(String::as_str),
+        Some("free")
+    );
+}
+
 fn sample_request(vendor: SubscriptionKind) -> AcpLaunchRequest {
     AcpLaunchRequest {
         vendor,

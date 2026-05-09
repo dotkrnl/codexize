@@ -42,7 +42,7 @@ pub fn effort_suffix(vendor: SubscriptionKind, effort: EffortLevel) -> &'static 
             SubscriptionKind::Gemini
             | SubscriptionKind::Kimi
             | SubscriptionKind::OpencodeGo
-            | SubscriptionKind::Free => "",
+            | SubscriptionKind::Direct => "",
         },
         EffortLevel::Tough => match vendor {
             SubscriptionKind::Codex => ":xhigh",
@@ -50,24 +50,23 @@ pub fn effort_suffix(vendor: SubscriptionKind, effort: EffortLevel) -> &'static 
             SubscriptionKind::Gemini
             | SubscriptionKind::Kimi
             | SubscriptionKind::OpencodeGo
-            | SubscriptionKind::Free => "",
+            | SubscriptionKind::Direct => "",
         },
     }
 }
 pub fn effort_suffix_for_model(
     vendor: SubscriptionKind,
-    model: &str,
+    _model: &str,
     effort: EffortLevel,
 ) -> &'static str {
-    let suffix_vendor = if vendor == SubscriptionKind::OpencodeGo {
-        crate::selection::vendor::infer_underlying_vendor_from_name(model)
-    } else {
-        vendor
-    };
-    effort_suffix(suffix_vendor, effort)
+    // OpencodeGo routing originally inferred an "underlying" vendor from
+    // the model name to pick a suffix; with the heuristic gone, fall back
+    // to the routing vendor directly. Per-tuple effort flags will land in
+    // a later task.
+    effort_suffix(vendor, effort)
 }
 pub fn effort_suffix_from_str(vendor_str: &str, effort: EffortLevel) -> &'static str {
-    match crate::selection::vendor::str_to_vendor(vendor_str) {
+    match crate::logic::selection::assemble::parse_subscription_str(vendor_str) {
         Some(vendor) => effort_suffix(vendor, effort),
         None => "",
     }

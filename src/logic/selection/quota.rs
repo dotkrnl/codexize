@@ -43,7 +43,7 @@ pub fn find_quota_by_heuristic(
         SubscriptionKind::Kimi | SubscriptionKind::OpencodeGo => {
             vendor_quotas.values().find_map(|q| *q)
         }
-        SubscriptionKind::Free => Some(100),
+        SubscriptionKind::Direct => None,
     }
 }
 pub fn find_reset_by_heuristic(

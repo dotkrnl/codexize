@@ -28,7 +28,7 @@ use super::schema::{
     UiColonPalette, UiFooter, UiSection,
 };
 use crate::logic::selection::baked;
-use crate::selection::{CliKind, FreeModelEntry};
+use crate::selection::{CliKind, SubscriptionKind};
 
 /// Structured loader error. The CLI/TUI render `to_string()`; tests match
 /// on the variant tag.
@@ -140,7 +140,6 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
         "ui",
         "diagnostics",
         "memory",
-        "free_models",
         "providers",
     ];
 
@@ -154,7 +153,6 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
             "ui" => decode_ui(item, &mut config.ui, key)?,
             "diagnostics" => decode_diagnostics(item, &mut config.diagnostics, key)?,
             "memory" => decode_memory(item, &mut config.memory, key)?,
-            "free_models" => decode_free_models(item, &mut config.free_models, key)?,
             "providers" => decode_providers(item, &mut config.providers, key)?,
             unknown => {
                 let (line, column) = item_position(item);
@@ -168,69 +166,8 @@ pub fn load_str(text: &str) -> Result<Config, LoadError> {
         }
     }
 
-    migrate_free_models_into_providers(&mut config);
-
     config.validate().map_err(LoadError::Validation)?;
     Ok(config)
-}
-
-/// Fold any legacy `[[free_models]]` entries into the unified
-/// `providers` list. Explicit `[[providers]]` entries always win on a
-/// `(vendor, model, cli, launch_name)` clash; the legacy entries that
-/// survive the merge are appended with `free = true` and the rest of
-/// the per-tuple knobs seeded from the baked defaults table when one
-/// matches, or sane fallbacks when there is no baked counterpart.
-fn migrate_free_models_into_providers(config: &mut Config) {
-    let legacy = config.free_models.value();
-    if legacy.is_empty() {
-        return;
-    }
-    let providers_explicit = config.providers.is_explicit();
-    let mut merged = config.providers.value().clone();
-    for entry in legacy {
-        let vendor = entry.mapped_into.clone();
-        // Legacy `[[free_models]]` rows did not carry a launch_name
-        // distinct from `model_name`, and they always mapped to the
-        // dashboard row by `mapped_into`. Treat the dashboard row name
-        // as `model` and the operator-provided model_name as the
-        // launch handle so the new tuple identity is well-formed.
-        let model = entry.mapped_into.clone();
-        let cli = entry.cli;
-        let launch_name = entry.model_name.clone();
-        let already = merged.iter().any(|p| {
-            p.vendor == vendor && p.model == model && p.cli == cli && p.launch_name == launch_name
-        });
-        if already {
-            continue;
-        }
-        let mut provider = baked::baked_for(&vendor, &model, cli, &launch_name)
-            .unwrap_or_else(|| ProviderEntry {
-                vendor,
-                model,
-                cli,
-                launch_name,
-                enabled: true,
-                free: false,
-                official: false,
-                quota_disabled: false,
-                cheap_eligible: false,
-                tough_eligible: false,
-                effort_eligible: false,
-                effort_mapping: EffortMapping::default(),
-                display_order: baked::ADDITION_DISPLAY_ORDER,
-            });
-        provider.free = true;
-        merged.push(provider);
-    }
-    if providers_explicit || merged != *config.providers.value() {
-        config.providers = Override::explicit(merged);
-    }
-    // Drop the legacy section once it has been folded into `providers`.
-    // Downstream consumers (assembly, refresh, the TUI) read the unified
-    // `providers` list; leaving the migrated rows in `free_models` would
-    // let assembly replay them on top of `providers` and resurrect
-    // entries that an explicit `[[providers]]` row was meant to disable.
-    config.free_models = Override::default();
 }
 
 fn decode_meta(item: &Item, out: &mut MetaSection, parent: &str) -> Result<(), LoadError> {
@@ -567,75 +504,6 @@ fn decode_memory(item: &Item, out: &mut MemorySection, parent: &str) -> Result<(
     Ok(())
 }
 
-fn decode_free_models(
-    item: &Item,
-    out: &mut Override<Vec<FreeModelEntry>>,
-    parent: &str,
-) -> Result<(), LoadError> {
-    let aot = item
-        .as_array_of_tables()
-        .ok_or_else(|| LoadError::TypeMismatch {
-            path: parent.to_string(),
-            expected: "array of tables",
-            line: 1,
-            column: 1,
-        })?;
-    let mut entries = Vec::new();
-    for (i, table) in aot.iter().enumerate() {
-        let path = |key: &str| format!("{parent}[{i}].{key}");
-        let mut mapped_into = None;
-        let mut cli = None;
-        let mut model_name = None;
-        let known: &[&str] = &["mapped_into", "cli", "model_name"];
-        for (k, v) in table.iter() {
-            match k {
-                "mapped_into" => mapped_into = Some(require_string(v, &path(k))?),
-                "cli" => {
-                    let raw = require_string(v, &path(k))?;
-                    cli = Some(crate::selection::CliKind::parse(&raw).ok_or_else(|| {
-                        LoadError::Validation(format!(
-                            "{} = {:?} is not one of {:?}",
-                            path(k),
-                            raw,
-                            crate::selection::CliKind::variants()
-                        ))
-                    })?);
-                }
-                "model_name" => model_name = Some(require_string(v, &path(k))?),
-                other => {
-                    let (line, column) = item_position(item);
-                    return Err(LoadError::UnknownKey {
-                        path: format!("{parent}[{i}].{other}"),
-                        line,
-                        column,
-                        suggestion: super::util::nearest(other, known, 3),
-                    });
-                }
-            }
-        }
-        let mapped_into = mapped_into.ok_or_else(|| {
-            LoadError::Validation(format!(
-                "{parent}[{i}]: missing required field \"mapped_into\""
-            ))
-        })?;
-        let cli = cli.ok_or_else(|| {
-            LoadError::Validation(format!("{parent}[{i}]: missing required field \"cli\""))
-        })?;
-        let model_name = model_name.ok_or_else(|| {
-            LoadError::Validation(format!(
-                "{parent}[{i}]: missing required field \"model_name\""
-            ))
-        })?;
-        entries.push(FreeModelEntry {
-            mapped_into,
-            cli,
-            model_name,
-        });
-    }
-    *out = Override::explicit(entries);
-    Ok(())
-}
-
 fn decode_providers(
     item: &Item,
     out: &mut Override<Vec<ProviderEntry>>,
@@ -650,10 +518,9 @@ fn decode_providers(
             column: 1,
         })?;
     let known: &[&str] = &[
-        "vendor",
+        "launch",
         "model",
-        "cli",
-        "launch_name",
+        "subscription",
         "enabled",
         "free",
         "official",
@@ -662,15 +529,17 @@ fn decode_providers(
         "tough_eligible",
         "effort_eligible",
         "effort_mapping",
+        "quota_lookup_key",
         "display_order",
     ];
     let mut entries: Vec<ProviderEntry> = Vec::with_capacity(aot.len());
     for (i, table) in aot.iter().enumerate() {
         let path = |key: &str| format!("{parent}[{i}].{key}");
-        let mut vendor = None;
-        let mut model = None;
         let mut cli: Option<CliKind> = None;
-        let mut launch_name = None;
+        let mut launch_name: Option<String> = None;
+        let mut model: Option<String> = None;
+        let mut subscription: Option<SubscriptionKind> = None;
+        let mut quota_lookup_key: Option<String> = None;
         let mut enabled = true;
         let mut free = false;
         let mut official = false;
@@ -682,20 +551,55 @@ fn decode_providers(
         let mut display_order: u16 = 0;
         for (k, v) in table.iter() {
             match k {
-                "vendor" => vendor = Some(require_string(v, &path(k))?),
-                "model" => model = Some(require_string(v, &path(k))?),
-                "cli" => {
+                "launch" => {
                     let raw = require_string(v, &path(k))?;
-                    cli = Some(CliKind::parse(&raw).ok_or_else(|| {
+                    let (cli_str, launch_str) = raw.split_once('/').ok_or_else(|| {
                         LoadError::Validation(format!(
-                            "{} = {:?} is not one of {:?}",
+                            "{} = {:?} must contain '/'",
+                            path(k),
+                            raw
+                        ))
+                    })?;
+                    if cli_str.is_empty() {
+                        return Err(LoadError::Validation(format!(
+                            "{} prefix (cli) is empty",
+                            path(k)
+                        )));
+                    }
+                    if launch_str.is_empty() {
+                        return Err(LoadError::Validation(format!(
+                            "{} suffix (launch_name) is empty",
+                            path(k)
+                        )));
+                    }
+                    cli = Some(CliKind::parse(cli_str).ok_or_else(|| {
+                        LoadError::Validation(format!(
+                            "{} = {:?}: cli prefix {:?} not in {:?}",
                             path(k),
                             raw,
+                            cli_str,
                             CliKind::variants()
                         ))
                     })?);
+                    launch_name = Some(launch_str.to_string());
                 }
-                "launch_name" => launch_name = Some(require_string(v, &path(k))?),
+                "model" => model = Some(require_string(v, &path(k))?),
+                "subscription" => {
+                    let raw = require_string(v, &path(k))?;
+                    subscription = Some(
+                        crate::logic::selection::assemble::parse_subscription_str(&raw)
+                            .ok_or_else(|| {
+                                LoadError::Validation(format!(
+                                    "{} = {:?} not a recognized subscription",
+                                    path(k),
+                                    raw
+                                ))
+                            })?,
+                    );
+                }
+                "quota_lookup_key" => {
+                    quota_lookup_key = Some(require_string(v, &path(k))?);
+                }
                 "enabled" => enabled = require_bool(v, &path(k))?,
                 "free" => free = require_bool(v, &path(k))?,
                 "official" => official = require_bool(v, &path(k))?,
@@ -725,25 +629,25 @@ fn decode_providers(
                 }
             }
         }
-        let vendor = vendor.ok_or_else(|| {
-            LoadError::Validation(format!("{parent}[{i}]: missing required field \"vendor\""))
-        })?;
-        let model = model.ok_or_else(|| {
-            LoadError::Validation(format!("{parent}[{i}]: missing required field \"model\""))
-        })?;
         let cli = cli.ok_or_else(|| {
-            LoadError::Validation(format!("{parent}[{i}]: missing required field \"cli\""))
-        })?;
-        let launch_name = launch_name.ok_or_else(|| {
             LoadError::Validation(format!(
-                "{parent}[{i}]: missing required field \"launch_name\""
+                "{parent}[{i}]: missing required \"launch\""
+            ))
+        })?;
+        let launch_name = launch_name.expect("set together with cli");
+        let model = model.ok_or_else(|| {
+            LoadError::Validation(format!("{parent}[{i}]: missing required \"model\""))
+        })?;
+        let subscription = subscription.ok_or_else(|| {
+            LoadError::Validation(format!(
+                "{parent}[{i}]: missing required \"subscription\""
             ))
         })?;
         entries.push(ProviderEntry {
-            vendor,
-            model,
             cli,
             launch_name,
+            model,
+            subscription,
             enabled,
             free,
             official,
@@ -752,6 +656,7 @@ fn decode_providers(
             tough_eligible,
             effort_eligible,
             effort_mapping,
+            quota_lookup_key,
             display_order,
         });
     }
@@ -1280,18 +1185,24 @@ pub fn render_sparse(config: &Config) -> String {
         out.push_str(&mem_block);
     }
 
-    // [[providers]] — sparse-save: omit when empty/default. The
-    // legacy `[[free_models]]` block is intentionally never emitted —
-    // every legacy entry has been migrated into `providers` at load
-    // time, so saving forces the file forward to the new shape.
+    // [[providers]] — sparse-save: omit when empty/default.
     if config.providers.is_explicit() && !config.providers.value().is_empty() {
         let baked_default = EffortMapping::default();
         for entry in config.providers.value() {
             out.push_str("\n[[providers]]\n");
-            let _ = writeln!(out, "vendor = {}", toml_quote(&entry.vendor));
+            let _ = writeln!(
+                out,
+                "launch = {}",
+                toml_quote(&format!("{}/{}", entry.cli.as_str(), entry.launch_name))
+            );
             let _ = writeln!(out, "model = {}", toml_quote(&entry.model));
-            let _ = writeln!(out, "cli = \"{}\"", entry.cli.as_str());
-            let _ = writeln!(out, "launch_name = {}", toml_quote(&entry.launch_name));
+            let _ = writeln!(
+                out,
+                "subscription = {}",
+                toml_quote(crate::selection::vendor::subscription_kind_to_str(
+                    entry.subscription
+                ))
+            );
             let _ = writeln!(out, "enabled = {}", entry.enabled);
             let _ = writeln!(out, "free = {}", entry.free);
             let _ = writeln!(out, "official = {}", entry.official);
@@ -1299,18 +1210,17 @@ pub fn render_sparse(config: &Config) -> String {
             let _ = writeln!(out, "cheap_eligible = {}", entry.cheap_eligible);
             let _ = writeln!(out, "tough_eligible = {}", entry.tough_eligible);
             let _ = writeln!(out, "effort_eligible = {}", entry.effort_eligible);
+            if let Some(key) = entry.quota_lookup_key.as_deref() {
+                let _ = writeln!(out, "quota_lookup_key = {}", toml_quote(key));
+            }
             if entry.display_order != 0 {
                 let _ = writeln!(out, "display_order = {}", entry.display_order);
             }
             // Per spec: `effort_mapping` is saved as an atomic block
             // when any sub-field diverges from the baked default.
-            // For now the baked default is the generic
-            // (low/medium/high) tuple — per-CLI-baked overrides happen
-            // through the merge resolver, not at save time.
-            let resolved_baked =
-                baked::baked_for(&entry.vendor, &entry.model, entry.cli, &entry.launch_name)
-                    .map(|p| p.effort_mapping)
-                    .unwrap_or_else(|| baked_default.clone());
+            let resolved_baked = baked::baked_for(&entry.model, entry.cli, &entry.launch_name)
+                .map(|p| p.effort_mapping)
+                .unwrap_or_else(|| baked_default.clone());
             if entry.effort_mapping != resolved_baked {
                 out.push_str("\n[providers.effort_mapping]\n");
                 let _ = writeln!(out, "cheap = {}", toml_quote(&entry.effort_mapping.cheap));
@@ -1513,162 +1423,64 @@ mod tests {
     }
 
     #[test]
-    fn legacy_free_models_single_entry_decodes_into_providers() {
+    fn legacy_free_models_block_is_rejected() {
         let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
-        let cfg = load_str(toml).unwrap();
-        assert!(
-            cfg.free_models.value().is_empty(),
-            "legacy section must be cleared after migration: {:?}",
-            cfg.free_models.value()
-        );
-        assert_eq!(cfg.providers.value().len(), 1);
-        let provider = &cfg.providers.value()[0];
-        assert_eq!(provider.vendor, "deepseek-v4-flash");
-        assert_eq!(provider.model, "deepseek-v4-flash");
-        assert_eq!(provider.cli, crate::selection::CliKind::Opencode);
-        assert_eq!(provider.launch_name, "dsk-4-flash");
-        assert!(provider.free);
-    }
-
-    #[test]
-    fn legacy_free_models_multiple_entries_migrate_into_providers() {
-        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n\n[[free_models]]\nmapped_into = \"claude-opus-4-7\"\ncli = \"claude\"\nmodel_name = \"my-opus\"\n";
-        let cfg = load_str(toml).unwrap();
-        assert!(cfg.free_models.value().is_empty());
-        assert_eq!(cfg.providers.value().len(), 2);
-        assert_eq!(cfg.providers.value()[0].vendor, "deepseek-v4-flash");
-        assert_eq!(cfg.providers.value()[1].vendor, "claude-opus-4-7");
-    }
-
-    #[test]
-    fn free_models_absent_yields_empty() {
-        let cfg = load_str("[meta]\nversion = 1\n").unwrap();
-        assert!(cfg.free_models.value().is_empty());
-        assert!(!cfg.free_models.is_explicit());
-    }
-
-    #[test]
-    fn free_models_unknown_cli_rejected() {
-        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"unknown\"\nmodel_name = \"dsk-4-flash\"\n";
         let err = load_str(toml).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unknown"), "{msg}");
-        assert!(msg.contains("cli"), "{msg}");
-    }
-
-    #[test]
-    fn free_models_empty_model_name_rejected() {
-        let mut cfg = Config::baked_defaults();
-        cfg.free_models = Override::explicit(vec![FreeModelEntry {
-            mapped_into: "deepseek-v4-flash".to_string(),
-            cli: crate::selection::CliKind::Opencode,
-            model_name: "  ".to_string(),
-        }]);
-        let err = cfg.validate().unwrap_err();
-        assert!(err.contains("model_name"), "{err}");
-    }
-
-    #[test]
-    fn free_models_empty_mapped_into_rejected() {
-        let mut cfg = Config::baked_defaults();
-        cfg.free_models = Override::explicit(vec![FreeModelEntry {
-            mapped_into: "  ".to_string(),
-            cli: crate::selection::CliKind::Opencode,
-            model_name: "dsk-4-flash".to_string(),
-        }]);
-        let err = cfg.validate().unwrap_err();
-        assert!(err.contains("mapped_into"), "{err}");
-    }
-
-    #[test]
-    fn legacy_free_models_migrate_into_providers_on_load() {
-        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
-        let cfg = load_str(toml).unwrap();
-        assert_eq!(
-            cfg.providers.value().len(),
-            1,
-            "legacy free_models entry should migrate into providers: {:?}",
-            cfg.providers.value()
-        );
-        let provider = &cfg.providers.value()[0];
-        assert_eq!(provider.vendor, "deepseek-v4-flash");
-        assert_eq!(provider.model, "deepseek-v4-flash");
-        assert_eq!(provider.cli, crate::selection::CliKind::Opencode);
-        assert_eq!(provider.launch_name, "dsk-4-flash");
-        assert!(provider.free, "migrated entry must be marked free=true");
-    }
-
-    #[test]
-    fn explicit_providers_win_over_legacy_free_models_on_clash() {
-        let toml = "\
-[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n\
-\n[[providers]]\nvendor = \"deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\ncli = \"opencode\"\nlaunch_name = \"dsk-4-flash\"\nenabled = false\nfree = false\n";
-        let cfg = load_str(toml).unwrap();
-        assert_eq!(cfg.providers.value().len(), 1);
-        let provider = &cfg.providers.value()[0];
         assert!(
-            !provider.enabled,
-            "explicit [[providers]] entry must override the migrated legacy one"
+            msg.contains("free_models"),
+            "expected free_models in error, got: {msg}"
         );
         assert!(
-            !provider.free,
-            "explicit free=false must win over the migrated free=true"
+            msg.to_lowercase().contains("unknown"),
+            "expected UnknownKey, got: {msg}"
         );
     }
 
     #[test]
-    fn migrated_config_emits_only_providers_block_on_save() {
-        let toml = "[[free_models]]\nmapped_into = \"deepseek-v4-flash\"\ncli = \"opencode\"\nmodel_name = \"dsk-4-flash\"\n";
-        let cfg = load_str(toml).unwrap();
-        let out = render_sparse(&cfg);
-        assert!(
-            out.contains("[[providers]]"),
-            "migrated entry must serialize as [[providers]]: {out}"
-        );
-        assert!(
-            !out.contains("[[free_models]]"),
-            "sparse-save must drop the legacy [[free_models]] block: {out}"
-        );
-        assert!(out.contains("vendor = \"deepseek-v4-flash\""));
-        assert!(out.contains("launch_name = \"dsk-4-flash\""));
-        assert!(out.contains("free = true"));
+    fn providers_legacy_keys_rejected() {
+        for legacy in [
+            "vendor = \"claude\"",
+            "cli = \"claude\"",
+            "launch_name = \"x\"",
+        ] {
+            let toml = format!(
+                "[[providers]]\nlaunch = \"claude/claude-opus-4-7\"\nmodel = \"claude-opus-4-7\"\nsubscription = \"claude\"\n{legacy}\n"
+            );
+            let err = load_str(&toml).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.to_lowercase().contains("unknown"),
+                "expected UnknownKey for {legacy}, got: {msg}"
+            );
+        }
     }
 
     #[test]
-    fn providers_round_trip_preserves_effort_mapping_block() {
-        let toml = "\
-[[providers]]\nvendor = \"claude\"\nmodel = \"claude-opus-4-7\"\ncli = \"opencode\"\nlaunch_name = \"claude-opus-4-7\"\nenabled = true\ntough_eligible = true\neffort_eligible = true\n\
-\n[providers.effort_mapping]\ncheap = \"low\"\nnormal = \"medium\"\ntough = \"max\"\n";
+    fn providers_round_trip_minimal() {
+        let toml = "[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"opencode-go\"\n";
         let cfg = load_str(toml).unwrap();
         assert_eq!(cfg.providers.value().len(), 1);
         let p = &cfg.providers.value()[0];
-        assert_eq!(p.effort_mapping.tough, "max");
-        let out = render_sparse(&cfg);
-        let reparsed = load_str(&out).expect("reparse sparse output");
-        assert_eq!(reparsed.providers.value()[0].effort_mapping.tough, "max");
+        assert_eq!(p.cli, crate::selection::CliKind::Opencode);
+        assert_eq!(p.launch_name, "opencode-go/deepseek-v4-flash");
+        assert_eq!(p.model, "deepseek-v4-flash");
+        assert_eq!(p.subscription, crate::selection::SubscriptionKind::OpencodeGo);
     }
 
     #[test]
-    fn duplicate_provider_tuple_in_one_file_is_rejected() {
-        let toml = "\
-[[providers]]\nvendor = \"claude\"\nmodel = \"claude-opus-4-7\"\ncli = \"claude\"\nlaunch_name = \"claude-opus-4-7\"\n\
-\n[[providers]]\nvendor = \"claude\"\nmodel = \"claude-opus-4-7\"\ncli = \"claude\"\nlaunch_name = \"claude-opus-4-7\"\n";
-        let err = load_str(toml).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("duplicate tuple"), "{msg}");
+    fn providers_cli_subscription_independence() {
+        let toml = "[[providers]]\nlaunch = \"opencode/opencode-go/deepseek-v4-flash\"\nmodel = \"deepseek-v4-flash\"\nsubscription = \"codex\"\nquota_disabled = true\n";
+        let cfg = load_str(toml).unwrap();
+        let p = &cfg.providers.value()[0];
+        assert_eq!(p.cli, crate::selection::CliKind::Opencode);
+        assert_eq!(p.subscription, crate::selection::SubscriptionKind::Codex);
+        assert!(p.quota_disabled);
     }
 
     #[test]
-    fn baked_defaults_render_drops_legacy_and_unified_provider_blocks() {
-        let cfg = Config::baked_defaults();
-        let out = render_sparse(&cfg);
-        assert!(
-            !out.contains("free_models"),
-            "empty default must not emit free_models: {out}"
-        );
-        assert!(
-            !out.contains("[[providers]]"),
-            "empty default must not emit providers: {out}"
-        );
+    fn cli_kind_parse_rejects_slash() {
+        assert!(crate::selection::CliKind::parse("claude/foo").is_none());
+        assert!(crate::selection::CliKind::parse("opencode/").is_none());
     }
 }

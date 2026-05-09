@@ -74,42 +74,6 @@ fn effort_suffix_low_maps_provider_suffix() {
 }
 
 #[test]
-fn opencode_effort_suffix_infers_underlying_vendor_from_model_name() {
-    assert_eq!(
-        effort_suffix_for_model(
-            SubscriptionKind::OpencodeGo,
-            "opencode/claude-opus-4.7",
-            EffortLevel::Tough,
-        ),
-        ":max"
-    );
-    assert_eq!(
-        effort_suffix_for_model(
-            SubscriptionKind::OpencodeGo,
-            "opencode/gpt-5.5",
-            EffortLevel::Tough,
-        ),
-        ":xhigh"
-    );
-    assert_eq!(
-        effort_suffix_for_model(
-            SubscriptionKind::OpencodeGo,
-            "opencode/claude-sonnet-4.6",
-            EffortLevel::Low,
-        ),
-        ":low"
-    );
-    assert_eq!(
-        effort_suffix_for_model(
-            SubscriptionKind::OpencodeGo,
-            "opencode/gemini-2.5-flash",
-            EffortLevel::Tough,
-        ),
-        ""
-    );
-}
-
-#[test]
 fn run_label_with_model_appends_effort_suffix() {
     let name = run_label_with_model(
         "[Round 1 Coder]",
@@ -118,15 +82,4 @@ fn run_label_with_model_appends_effort_suffix() {
         EffortLevel::Tough,
     );
     assert_eq!(name, "[Round 1 Coder] gpt-5.5:xhigh");
-}
-
-#[test]
-fn run_label_with_opencode_model_uses_name_fallback_suffix() {
-    let name = run_label_with_model(
-        "[Round 1 Coder]",
-        "opencode/claude-opus-4.7",
-        SubscriptionKind::OpencodeGo,
-        EffortLevel::Tough,
-    );
-    assert_eq!(name, "[Round 1 Coder] opencode/claude-opus-4.7:max");
 }

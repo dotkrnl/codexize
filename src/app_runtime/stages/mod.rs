@@ -325,7 +325,8 @@ impl App {
             .iter()
             .filter(|run| run.stage == stage && run.round == round)
             .max_by_key(|run| run.id)?;
-        let vendor_kind = crate::selection::vendor::str_to_vendor(&last.vendor)?;
+        let vendor_kind =
+            crate::logic::selection::assemble::parse_subscription_str(&last.vendor)?;
         // RunRecord doesn't persist the candidate's cli/launch_name, so when
         // resuming we look the row up in the current universe and reuse its
         // selected candidate (preserves Free-tier launch_name on resume); if

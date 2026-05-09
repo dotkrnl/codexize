@@ -5,8 +5,9 @@
 
 use crate::data::config::Config;
 use crate::data::config::schema::{EffortMapping, Override, ProviderEntry};
+use crate::logic::selection::assemble::parse_subscription_str;
 use crate::logic::selection::baked;
-use crate::selection::CliKind;
+use crate::selection::{CliKind, SubscriptionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvidersEditor {
@@ -36,12 +37,14 @@ impl ProvidersEditor {
         if trimmed_launch.is_empty() || self.vendor.is_empty() || self.model.is_empty() {
             return false;
         }
+        let subscription =
+            parse_subscription_str(&self.vendor).unwrap_or(SubscriptionKind::Direct);
 
         let new_entry = ProviderEntry {
-            vendor: self.vendor.clone(),
-            model: self.model.clone(),
             cli: self.cli,
             launch_name: trimmed_launch.to_string(),
+            model: self.model.clone(),
+            subscription,
             enabled: true,
             free: false,
             official: false,
@@ -50,6 +53,7 @@ impl ProvidersEditor {
             tough_eligible: false,
             effort_eligible: false,
             effort_mapping: EffortMapping::default(),
+            quota_lookup_key: None,
             display_order: 0,
         };
 
@@ -88,7 +92,10 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
     let mut current_group: Option<(String, String)> = None;
 
     for entry in providers {
-        let group = (entry.vendor.clone(), entry.model.clone());
+        let vendor_label =
+            crate::logic::selection::vendor::subscription_kind_to_str(entry.subscription)
+                .to_string();
+        let group = (vendor_label, entry.model.clone());
         if current_group.as_ref() != Some(&group) {
             lines.push(ProvidersLine::GroupHeader {
                 vendor: group.0.clone(),
@@ -97,7 +104,7 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
             current_group = Some(group.clone());
         }
 
-        let baked = baked::baked_for(&group.0, &group.1, entry.cli, &entry.launch_name);
+        let baked = baked::baked_for(&group.1, entry.cli, &entry.launch_name);
         lines.push(ProvidersLine::Provider {
             is_baked: baked.is_some(),
             baked_free: baked.as_ref().is_some_and(|b| b.free),

@@ -71,7 +71,7 @@ async fn load_quota_map_for_vendor(
             .await
             .map(live_map_opencode)
             .map_err(|e| e.to_string()),
-        SubscriptionKind::Free => Ok((BTreeMap::new(), BTreeMap::new())),
+        SubscriptionKind::Direct => Ok((BTreeMap::new(), BTreeMap::new())),
     }
 }
 fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {

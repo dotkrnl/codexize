@@ -22,14 +22,10 @@ fn candidate(
         quota_resets_at: None,
         display_order,
         enabled: true,
-        free: subscription == SubscriptionKind::Free,
+        free: false,
         // Mirror the production fallback in `build_candidate`: anything
-        // routed through OpencodeGo is non-official; Free candidates are
-        // never official either.
-        official: !matches!(
-            subscription,
-            SubscriptionKind::OpencodeGo | SubscriptionKind::Free
-        ),
+        // routed through OpencodeGo is non-official.
+        official: !matches!(subscription, SubscriptionKind::OpencodeGo),
         quota_disabled: false,
         cheap_eligible: false,
         tough_eligible: false,
@@ -41,6 +37,15 @@ fn candidate(
 
 #[test]
 fn arbitration_prefers_free_at_full_quota_over_lower_direct() {
+    let mut free = candidate(
+        SubscriptionKind::OpencodeGo,
+        CliKind::Opencode,
+        "free-opus",
+        Some(100),
+        1,
+    );
+    free.free = true;
+    free.official = false;
     let candidates = vec![
         candidate(
             SubscriptionKind::Claude,
@@ -49,13 +54,7 @@ fn arbitration_prefers_free_at_full_quota_over_lower_direct() {
             Some(80),
             0,
         ),
-        candidate(
-            SubscriptionKind::Free,
-            CliKind::Opencode,
-            "free-opus",
-            Some(100),
-            1,
-        ),
+        free,
     ];
 
     let selected = select_candidate_index(&candidates).unwrap();
@@ -65,6 +64,15 @@ fn arbitration_prefers_free_at_full_quota_over_lower_direct() {
 
 #[test]
 fn arbitration_prefers_free_over_direct_tie_at_full_quota() {
+    let mut free = candidate(
+        SubscriptionKind::OpencodeGo,
+        CliKind::Codex,
+        "free-gpt",
+        Some(100),
+        1,
+    );
+    free.free = true;
+    free.official = false;
     let candidates = vec![
         candidate(
             SubscriptionKind::Codex,
@@ -73,13 +81,7 @@ fn arbitration_prefers_free_over_direct_tie_at_full_quota() {
             Some(100),
             0,
         ),
-        candidate(
-            SubscriptionKind::Free,
-            CliKind::Codex,
-            "free-gpt",
-            Some(100),
-            1,
-        ),
+        free,
     ];
 
     let selected = select_candidate_index(&candidates).unwrap();
@@ -195,35 +197,24 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
         ("claude", "claude-opus-4-7", Some(70)),
         ("opencode-go", "claude-opus-4-7", Some(95)),
     ]);
-    let free_models = vec![FreeModelEntry {
-        mapped_into: "claude-opus-4-7".to_string(),
-        cli: CliKind::Opencode,
-        model_name: "free-opus".to_string(),
-    }];
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
 
-    let (models, _warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &free_models,
-        &[],
-    );
+    let (models, _warnings) =
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
     assert_eq!(row.name, "claude-opus-4-7");
-    assert_eq!(row.candidates.len(), 3);
-    assert_eq!(
-        row.selected_candidate()
-            .map(|candidate| candidate.subscription),
-        Some(SubscriptionKind::Free)
-    );
+    assert_eq!(row.candidates.len(), 2);
     assert!(
         row.candidates
             .iter()
             .any(|candidate| candidate.subscription == SubscriptionKind::OpencodeGo)
+    );
+    assert!(
+        row.candidates
+            .iter()
+            .any(|candidate| candidate.subscription == SubscriptionKind::Claude)
     );
 }
 
@@ -240,13 +231,18 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
     let available = BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[], &[]);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "kimi-k2.6");
-    assert!(models[0].candidates.iter().any(|candidate| {
-        candidate.subscription == SubscriptionKind::Kimi && candidate.launch_name == "kimi-latest"
-    }));
+    // Kimi candidate is present (kimi-latest mapping is removed in Task 6;
+    // for now just verify the row groups properly).
+    assert!(
+        models[0]
+            .candidates
+            .iter()
+            .any(|candidate| candidate.subscription == SubscriptionKind::Kimi)
+    );
     assert!(!models.iter().any(|model| model.name == "kimi-latest"));
 }
 
@@ -406,7 +402,7 @@ fn assemble_from_cache_with_available(
         .quota_resets
         .map(|section| section.data)
         .unwrap_or_default();
-    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, available, &[], &[]);
+    let (models, _warnings) = assemble_universe(dashboard, quotas, resets, available, &[]);
     models
 }
 
@@ -723,7 +719,7 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
     let resets = empty_resets_for_quotas(&quotas);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, resets, &all_vendors(), &[], &[]);
+        assemble_universe(dashboard, quotas, resets, &all_vendors(), &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-sonnet-4-6");
@@ -813,7 +809,6 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
         BTreeMap::new(),
         &opencode_available(),
         &[],
-        &[],
     );
     assert_eq!(models.len(), 1);
     models.into_iter().next().unwrap()
@@ -828,7 +823,6 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
         QuotaPayload::default(),
         BTreeMap::new(),
         &opencode_available(),
-        &[],
         &[],
     );
 
@@ -886,7 +880,7 @@ fn merge_preserves_expired_vendor_on_error() {
 
 #[test]
 fn merge_overlays_when_cached_uses_alias_key() {
-    // Cached used the str_to_vendor alias ("codex") rather than vendor_kind_to_str ("openai").
+    // Cached used the parse_subscription_str alias ("codex") rather than subscription_kind_to_str ("openai").
     let mut cached = QuotaPayload::default();
     cached.insert(
         "codex".to_string(),
@@ -1015,28 +1009,6 @@ fn dashboard_warnings_are_exposed_as_refresh_diagnostics() {
     );
 }
 
-#[test]
-fn parse_kimi_semver_accepts_clean_versions() {
-    assert_eq!(parse_kimi_semver("kimi-k2.6"), Some((2, 6)));
-    assert_eq!(parse_kimi_semver("kimi-k2"), Some((2, 0)));
-    assert_eq!(parse_kimi_semver("kimi-k1.5"), Some((1, 5)));
-    assert_eq!(parse_kimi_semver("kimi-k10.20"), Some((10, 20)));
-    // Case-insensitive on the prefix.
-    assert_eq!(parse_kimi_semver("KIMI-K2.6"), Some((2, 6)));
-}
-
-#[test]
-fn parse_kimi_semver_rejects_non_version_trailers() {
-    // Dated / suffixed variants must not be picked as the latest kimi.
-    assert_eq!(parse_kimi_semver("kimi-k2-0905-preview"), None);
-    assert_eq!(parse_kimi_semver("kimi-k2-thinking"), None);
-    assert_eq!(parse_kimi_semver("kimi-shared"), None);
-    assert_eq!(parse_kimi_semver("kimi-latest"), None);
-    assert_eq!(parse_kimi_semver("claude-opus-4-7"), None);
-    // Multi-dot patch versions don't fit the (major, minor) shape.
-    assert_eq!(parse_kimi_semver("kimi-k2.6.1"), None);
-}
-
 fn kimi_opencode_available() -> BTreeSet<SubscriptionKind> {
     BTreeSet::from([SubscriptionKind::Kimi, SubscriptionKind::OpencodeGo])
 }
@@ -1062,7 +1034,6 @@ fn synth_kimi_latest_wins_when_kimi_quota_meets_floor() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
-        &[],
         &[],
     );
 
@@ -1091,7 +1062,6 @@ fn synth_kimi_latest_loses_to_opencode_when_kimi_below_floor_and_opencode_higher
         BTreeMap::new(),
         &kimi_opencode_available(),
         &[],
-        &[],
     );
 
     assert_eq!(models.len(), 1);
@@ -1115,7 +1085,6 @@ fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
-        &[],
         &[],
     );
 
@@ -1141,7 +1110,6 @@ fn synth_kimi_latest_skipped_when_no_kimi_semver() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
-        &[],
         &[],
     );
 
@@ -1169,7 +1137,6 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
         quotas,
         BTreeMap::new(),
         &kimi_opencode_available(),
-        &[],
         &[],
     );
 
@@ -1200,87 +1167,11 @@ fn synth_kimi_latest_skipped_when_kimi_unavailable() {
     let available = BTreeSet::from([SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[], &[]);
+        assemble_universe(vec![routed], quotas, BTreeMap::new(), &available, &[]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].vendor, SubscriptionKind::OpencodeGo);
     assert!(!models.iter().any(|m| m.name == "kimi-latest"));
-}
-
-#[test]
-fn free_candidate_wins_arbitration_over_direct_below_quota() {
-    let mut direct = make_ipbr_entry("deepseek-v4-flash", "codex", "deepseek-v4-flash");
-    direct.display_order = 0;
-    let dashboard = vec![direct];
-    let quotas = make_quota_payload(&[("codex", "deepseek-v4-flash", Some(50))]);
-    let free_models = vec![FreeModelEntry {
-        mapped_into: "deepseek-v4-flash".to_string(),
-        cli: CliKind::Opencode,
-        model_name: "dsk-4-flash".to_string(),
-    }];
-    let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
-
-    let (models, warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &free_models,
-        &[],
-    );
-
-    assert!(warnings.is_empty(), "expected no warnings: {warnings:?}");
-    assert_eq!(models.len(), 1);
-    let row = &models[0];
-    assert_eq!(row.candidates.len(), 2);
-    assert_eq!(
-        row.selected_candidate().map(|c| c.subscription),
-        Some(SubscriptionKind::Free),
-        "Free at 100% must beat Codex at 50%"
-    );
-    assert_eq!(
-        row.selected_candidate().map(|c| c.launch_name.as_str()),
-        Some("dsk-4-flash"),
-        "Free launch_name must be passed verbatim"
-    );
-    assert_eq!(
-        row.selected_candidate().map(|c| c.cli),
-        Some(CliKind::Opencode),
-    );
-}
-
-#[test]
-fn unmatched_mapped_into_produces_soft_warning() {
-    let dashboard = vec![make_ipbr_entry(
-        "claude-opus-4-7",
-        "claude",
-        "claude-opus-4-7",
-    )];
-    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
-    let free_models = vec![FreeModelEntry {
-        mapped_into: "nonexistent-model".to_string(),
-        cli: CliKind::Opencode,
-        model_name: "free-xyz".to_string(),
-    }];
-    let available = BTreeSet::from([SubscriptionKind::Claude]);
-
-    let (models, warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &free_models,
-        &[],
-    );
-
-    assert_eq!(warnings.len(), 1);
-    assert!(
-        warnings[0].contains("nonexistent-model"),
-        "warning should mention the unmatched mapped_into: {:?}",
-        warnings
-    );
-    assert_eq!(models.len(), 1, "unmatched entry must not create a row");
-    assert_eq!(models[0].candidates.len(), 1, "only the direct candidate");
 }
 
 #[test]
@@ -1316,12 +1207,13 @@ fn ladder_quota_disabled_pool_picked_when_no_free_or_official() {
 #[test]
 fn ladder_skips_disabled_providers() {
     let mut disabled_free = candidate(
-        SubscriptionKind::Free,
+        SubscriptionKind::OpencodeGo,
         CliKind::Opencode,
         "disabled-free",
         Some(100),
         0,
     );
+    disabled_free.free = true;
     disabled_free.enabled = false;
     let active_official = candidate(
         SubscriptionKind::Codex,
@@ -1349,12 +1241,13 @@ fn ladder_returns_none_when_every_candidate_is_disabled() {
     );
     a.enabled = false;
     let mut b = candidate(
-        SubscriptionKind::Free,
+        SubscriptionKind::OpencodeGo,
         CliKind::Opencode,
         "free",
         Some(100),
         1,
     );
+    b.free = true;
     b.enabled = false;
     assert_eq!(select_candidate_index(&[a, b]), None);
 }
@@ -1375,10 +1268,10 @@ fn provider_override_disables_baked_candidate_in_universe() {
     )];
     let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
     let providers = vec![ProviderEntry {
-        vendor: "claude".to_string(),
-        model: "claude-opus-4-7".to_string(),
         cli: CliKind::Claude,
         launch_name: "claude-opus-4-7".to_string(),
+        model: "claude-opus-4-7".to_string(),
+        subscription: SubscriptionKind::Claude,
         enabled: false,
         free: false,
         official: true,
@@ -1387,6 +1280,7 @@ fn provider_override_disables_baked_candidate_in_universe() {
         tough_eligible: true,
         effort_eligible: true,
         effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
         display_order: 0,
     }];
     let available = BTreeSet::from([SubscriptionKind::Claude]);
@@ -1396,7 +1290,6 @@ fn provider_override_disables_baked_candidate_in_universe() {
         quotas,
         BTreeMap::new(),
         &available,
-        &[],
         &providers,
     );
 
@@ -1430,10 +1323,10 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
         ("opencode-go", "claude-opus-4-7", Some(95)),
     ]);
     let providers = vec![ProviderEntry {
-        vendor: "claude".to_string(),
-        model: "claude-opus-4-7".to_string(),
         cli: CliKind::Opencode,
         launch_name: "claude-opus-4-7".to_string(),
+        model: "claude-opus-4-7".to_string(),
+        subscription: SubscriptionKind::OpencodeGo,
         enabled: true,
         free: false,
         official: false,
@@ -1442,6 +1335,7 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
         tough_eligible: true,
         effort_eligible: true,
         effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
         display_order: 1,
     }];
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
@@ -1451,7 +1345,6 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
         quotas,
         BTreeMap::new(),
         &available,
-        &[],
         &providers,
     );
 
@@ -1479,7 +1372,7 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     quotas.failed_subscriptions.insert(SubscriptionKind::Codex);
     let available = BTreeSet::from([SubscriptionKind::Codex]);
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[], &[]);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
     assert_eq!(models.len(), 1);
     let candidate = &models[0].candidates[0];
     assert!(candidate.quota_failed);
@@ -1490,31 +1383,3 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     assert_eq!(models[0].quota_percent, Some(50));
 }
 
-#[test]
-fn free_candidate_launch_name_is_verbatim_in_acp_request() {
-    let mut direct = make_ipbr_entry("deepseek-v4-flash", "codex", "deepseek-v4-flash");
-    direct.display_order = 0;
-    let dashboard = vec![direct];
-    let quotas = make_quota_payload(&[("codex", "deepseek-v4-flash", Some(50))]);
-    let free_models = vec![FreeModelEntry {
-        mapped_into: "deepseek-v4-flash".to_string(),
-        cli: CliKind::Opencode,
-        model_name: "dsk-4-flash".to_string(),
-    }];
-    let available = BTreeSet::from([SubscriptionKind::Codex, SubscriptionKind::OpencodeGo]);
-
-    let (models, _warnings) = assemble_universe(
-        dashboard,
-        quotas,
-        BTreeMap::new(),
-        &available,
-        &free_models,
-        &[],
-    );
-
-    assert_eq!(models.len(), 1);
-    let selected = models[0].selected_candidate().unwrap();
-    assert_eq!(selected.subscription, SubscriptionKind::Free);
-    assert_eq!(selected.cli, CliKind::Opencode);
-    assert_eq!(selected.launch_name, "dsk-4-flash");
-}

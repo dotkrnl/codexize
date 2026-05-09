@@ -4,7 +4,7 @@ use crate::acp::{
 };
 use crate::data::config::schema::AcpAgentSection;
 use crate::data::config::view::{AcpAgentView, AcpInstallView};
-use crate::selection::{SubscriptionKind, vendor::vendor_kind_to_str};
+use crate::selection::{SubscriptionKind, vendor::subscription_kind_to_str};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 const CLAUDE_CLI: &str = "claude";
@@ -33,22 +33,13 @@ impl AcpConfig {
             .map(|(v, _)| *v).collect()
     }
     pub fn resolve(&self, request: &AcpLaunchRequest) -> AcpResult<AcpResolvedLaunch> {
-        // For Free and OpencodeGo candidates, the CLI determines which
-        // agent entry to use; for direct vendors the subscription IS the
-        // agent key. Free candidates always route through the CLI named in
-        // the config entry.
-        let agent_key = match request.vendor {
-            SubscriptionKind::Free => {
-                crate::selection::CliKind::to_subscription(request.cli)
-            }
-            _ => request.vendor,
-        };
+        let agent_key = request.vendor;
         let agent = self.agents.get(&agent_key).ok_or_else(|| AcpError::human_block(
-            format!("ACP agent not configured for vendor {}", vendor_kind_to_str(request.vendor))
+            format!("ACP agent not configured for vendor {}", subscription_kind_to_str(request.vendor))
         ))?;
         if agent.program.trim().is_empty() {
             return Err(AcpError::human_block(format!(
-                "ACP agent for vendor {} has no executable configured", vendor_kind_to_str(request.vendor)
+                "ACP agent for vendor {} has no executable configured", subscription_kind_to_str(request.vendor)
             )));
         }
         let cwd = absolutize(&request.cwd)?;
@@ -71,7 +62,7 @@ impl AcpConfig {
             &request.launch_name,
         );
         let entries = [
-            ("vendor", vendor_kind_to_str(request.vendor).to_string()),
+            ("vendor", subscription_kind_to_str(request.vendor).to_string()),
             ("model", launch_model.clone()),
             ("requested_effort", effort_str(request.requested_effort).to_string()),
             ("effective_effort", reasoning_effort.to_string()),
@@ -127,7 +118,7 @@ impl AcpConfig {
                     SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
                     SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
                     SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
-                    SubscriptionKind::Free => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+                    SubscriptionKind::Direct => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
                 };
                 if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
                     return Some(AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() });
@@ -190,7 +181,7 @@ fn agent_def(vendor: SubscriptionKind, program: &str, args: Vec<String>) -> AcpA
             SubscriptionKind::Gemini => "CODEXIZE_TEST_ACP_GEMINI_PROGRAM",
             SubscriptionKind::Kimi => "CODEXIZE_TEST_ACP_KIMI_PROGRAM",
             SubscriptionKind::OpencodeGo => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
-            SubscriptionKind::Free => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
+            SubscriptionKind::Direct => "CODEXIZE_TEST_ACP_OPENCODE_PROGRAM",
         };
         if let Ok(p) = std::env::var(key) && !p.trim().is_empty() {
             return AcpAgentDefinition { vendor, program: p, args: Vec::new(), env: BTreeMap::new() };
@@ -202,13 +193,8 @@ fn agent_def(vendor: SubscriptionKind, program: &str, args: Vec<String>) -> AcpA
 fn launch_model_for_vendor(
     vendor: SubscriptionKind,
     model: &str,
-    launch_name: &str,
+    _launch_name: &str,
 ) -> String {
-    // Free candidates pass the operator-supplied model name verbatim to
-    // the chosen CLI — no provider prefixing or routing wrapper.
-    if vendor == SubscriptionKind::Free {
-        return launch_name.to_string();
-    }
     // OpencodeGo rides through the `opencode-go` tier qualifier; inventory
     // stores bare ipbr-canonical ids, so the launch boundary prepends the
     // tier prefix unless the caller already qualified the value.

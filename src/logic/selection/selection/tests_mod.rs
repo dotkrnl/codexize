@@ -13,7 +13,7 @@ fn eligibility_for_name(vendor: SubscriptionKind, name: &str) -> (bool, bool) {
         SubscriptionKind::Claude => !lower.contains("opus"),
         SubscriptionKind::Codex | SubscriptionKind::Kimi => true,
         SubscriptionKind::Gemini => lower.contains("flash") || lower.contains("nano"),
-        SubscriptionKind::OpencodeGo | SubscriptionKind::Free => true,
+        SubscriptionKind::OpencodeGo | SubscriptionKind::Direct => true,
     };
     let tough = match vendor {
         SubscriptionKind::Claude => lower.contains("opus"),
@@ -21,7 +21,7 @@ fn eligibility_for_name(vendor: SubscriptionKind, name: &str) -> (bool, bool) {
         SubscriptionKind::Kimi
         | SubscriptionKind::Gemini
         | SubscriptionKind::OpencodeGo
-        | SubscriptionKind::Free => false,
+        | SubscriptionKind::Direct => false,
     };
     (cheap, tough)
 }
@@ -49,8 +49,8 @@ fn sample_model_with_score(
         quota_resets_at: None,
         display_order: 0,
         enabled: true,
-        free: vendor == SubscriptionKind::Free,
-        official: cli.to_subscription() == vendor && vendor != SubscriptionKind::Free,
+        free: false,
+        official: vendor != SubscriptionKind::Direct,
         quota_disabled: false,
         cheap_eligible,
         tough_eligible,
@@ -311,7 +311,7 @@ fn pool_pick_sampler_dominates_for_free_row_over_lower_fetched_quota() {
     // dashboard scores tied at 80.0, the free row's effective quota of
     // 100 vastly outweighs the fetched row's 40 — the sampler should
     // pick the free row in nearly every seed.
-    let mut free_row = sample_model_with_score(SubscriptionKind::Free, "free-row", 0, 80.0);
+    let mut free_row = sample_model_with_score(SubscriptionKind::OpencodeGo, "free-row", 0, 80.0);
     free_row.candidates[0].free = true;
     free_row.candidates[0].official = false;
     free_row.candidates[0].quota_percent = None;

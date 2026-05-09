@@ -982,7 +982,10 @@ impl ConfigPanelState {
                 );
                 let mut available: Vec<(String, String)> = Vec::new();
                 for entry in &merged {
-                    let pair = (entry.vendor.clone(), entry.model.clone());
+                    let vendor_label =
+                        crate::logic::selection::vendor::subscription_kind_to_str(entry.subscription)
+                            .to_string();
+                    let pair = (vendor_label, entry.model.clone());
                     if !available.contains(&pair) {
                         available.push(pair);
                     }
@@ -2377,10 +2380,10 @@ mod tests {
         let mut config = Config::baked_defaults();
         config.providers = crate::data::config::schema::Override::explicit(vec![
             crate::data::config::schema::ProviderEntry {
-                vendor: "claude".to_string(),
-                model: "claude-opus-4-7".to_string(),
                 cli: crate::selection::CliKind::Claude,
                 launch_name: "claude-opus-4-7".to_string(),
+                model: "claude-opus-4-7".to_string(),
+                subscription: crate::selection::SubscriptionKind::Claude,
                 enabled: true,
                 free: false,
                 official: true,
@@ -2389,6 +2392,7 @@ mod tests {
                 tough_eligible: true,
                 effort_eligible: true,
                 effort_mapping: Default::default(),
+                quota_lookup_key: None,
                 display_order: 0,
             },
         ]);

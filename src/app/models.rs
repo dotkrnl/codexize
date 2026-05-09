@@ -14,7 +14,6 @@ const REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) fn spawn_refresh(
     cache_dir: PathBuf,
     available_vendors: BTreeSet<SubscriptionKind>,
-    free_models: Vec<crate::selection::FreeModelEntry>,
     providers: Vec<ProviderEntry>,
 ) -> mpsc::UnboundedReceiver<(Vec<CachedModel>, Vec<QuotaError>)> {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -24,7 +23,6 @@ pub(crate) fn spawn_refresh(
                 crate::data::selection_assembly::assemble_models_async(
                     &cache_dir,
                     &available_vendors,
-                    &free_models,
                     &providers,
                 )
                 .await,
@@ -36,7 +34,6 @@ pub(crate) fn spawn_refresh(
             crate::data::selection_assembly::assemble_models_async(
                 &cache_dir_owned,
                 &available_vendors,
-                &free_models,
                 &providers,
             )
             .await
@@ -51,7 +48,7 @@ pub(crate) fn vendor_tag(vendor: SubscriptionKind) -> &'static str {
         SubscriptionKind::Gemini => "gemini",
         SubscriptionKind::Kimi => "kimi",
         SubscriptionKind::OpencodeGo => "opencode",
-        SubscriptionKind::Free => "free",
+        SubscriptionKind::Direct => "direct",
     }
 }
 pub(crate) fn vendor_color(vendor: SubscriptionKind) -> Color {
@@ -61,7 +58,7 @@ pub(crate) fn vendor_color(vendor: SubscriptionKind) -> Color {
         SubscriptionKind::Gemini => Color::Blue,
         SubscriptionKind::Kimi => Color::Yellow,
         SubscriptionKind::OpencodeGo => Color::Cyan,
-        SubscriptionKind::Free => Color::LightGreen,
+        SubscriptionKind::Direct => Color::White,
     }
 }
 pub(crate) fn vendor_prefix(vendor: SubscriptionKind) -> &'static str {
@@ -71,7 +68,7 @@ pub(crate) fn vendor_prefix(vendor: SubscriptionKind) -> &'static str {
         SubscriptionKind::Gemini => "gemini-",
         SubscriptionKind::Kimi => "kimi-",
         SubscriptionKind::OpencodeGo => "",
-        SubscriptionKind::Free => "",
+        SubscriptionKind::Direct => "",
     }
 }
 fn quota_error_summary(errors: &[QuotaError]) -> String {
@@ -142,7 +139,6 @@ impl App {
                         rx: spawn_refresh(
                             self.paths.cache_root.clone(),
                             self.available_vendors(),
-                            Vec::new(),
                             self.config.providers.value().clone(),
                         ),
                         started_at: Instant::now(),
@@ -156,7 +152,6 @@ impl App {
             rx: spawn_refresh(
                 self.paths.cache_root.clone(),
                 self.available_vendors(),
-                Vec::new(),
                 self.config.providers.value().clone(),
             ),
             started_at: Instant::now(),

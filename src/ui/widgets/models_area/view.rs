@@ -398,7 +398,7 @@ fn vendor_label(selected: Option<SubscriptionKind>) -> &'static str {
         Some(SubscriptionKind::Gemini) => "[gemini]",
         Some(SubscriptionKind::Kimi) => "[kimi]",
         Some(SubscriptionKind::OpencodeGo) => "[opencode-go]",
-        Some(SubscriptionKind::Free) => "[free]",
+        Some(SubscriptionKind::Direct) => "[direct]",
         None => "[—]",
     }
 }

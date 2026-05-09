@@ -6,7 +6,7 @@
 //! `Override<T>` ignores the explicit flag — round-trip tests compare the
 //! semantic value, not how the value got there.
 
-use crate::selection::{CliKind, FreeModelEntry};
+use crate::selection::{CliKind, SubscriptionKind};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 
@@ -40,20 +40,16 @@ impl Default for EffortMapping {
     }
 }
 
-/// One unified provider entry. Identity is the four-tuple
-/// `(vendor, model, cli, launch_name)`. The remaining fields are
-/// per-tuple knobs the operator can flip from the TUI or TOML.
+/// One unified provider entry. Identity is `(cli, launch_name)`; `model`
+/// and `subscription` are properties of that identity.
 ///
-/// Baked defaults live in [`crate::logic::selection::baked`]. The
-/// loader migrates legacy `[[free_models]]` entries to this shape with
-/// `free = true`, so downstream selection code can stop treating the
-/// "free" path as a separate channel.
+/// Baked defaults live in [`crate::logic::selection::baked`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderEntry {
-    pub vendor: String,
-    pub model: String,
     pub cli: CliKind,
     pub launch_name: String,
+    pub model: String,
+    pub subscription: SubscriptionKind,
     pub enabled: bool,
     pub free: bool,
     pub official: bool,
@@ -62,20 +58,15 @@ pub struct ProviderEntry {
     pub tough_eligible: bool,
     pub effort_eligible: bool,
     pub effort_mapping: EffortMapping,
+    pub quota_lookup_key: Option<String>,
     pub display_order: u16,
 }
 
 impl ProviderEntry {
     /// Stable identity used for override-vs-addition matching across
-    /// baked and user-supplied lists. Matches the spec's "matched-by-
-    /// (cli, launch_name)" rule under a (vendor, model) row.
-    pub fn identity(&self) -> (String, String, CliKind, String) {
-        (
-            self.vendor.clone(),
-            self.model.clone(),
-            self.cli,
-            self.launch_name.clone(),
-        )
+    /// baked and user-supplied lists.
+    pub fn identity(&self) -> (CliKind, String) {
+        (self.cli, self.launch_name.clone())
     }
 }
 
@@ -509,16 +500,8 @@ pub struct Config {
     pub ui: UiSection,
     pub diagnostics: DiagnosticsSection,
     pub memory: MemorySection,
-    /// Legacy free-tier provider list. The loader still parses
-    /// `[[free_models]]` blocks into this field for backward compat,
-    /// but on save it is dropped entirely — every entry is migrated
-    /// in-memory into [`Config::providers`] with `free = true`. New
-    /// code should read [`Config::providers`] instead.
-    pub free_models: Override<Vec<FreeModelEntry>>,
-    /// Unified per-tuple provider list. Populated from the new
-    /// `[[providers]]` TOML block plus the in-memory migration of any
-    /// legacy `[[free_models]]` entries; explicit `[[providers]]`
-    /// always wins on a `(vendor, model, cli, launch_name)` clash.
+    /// Unified per-tuple provider list. Populated from the
+    /// `[[providers]]` TOML block; identity is `(cli, launch_name)`.
     pub providers: Override<Vec<ProviderEntry>>,
 }
 
@@ -623,35 +606,35 @@ impl Config {
             return Err("memory.journal_retention_months must be >= 1".into());
         }
 
-        for (i, entry) in self.free_models.value().iter().enumerate() {
-            if entry.mapped_into.trim().is_empty() {
-                return Err(format!("free_models[{i}].mapped_into must be non-empty"));
-            }
-            if entry.model_name.trim().is_empty() {
-                return Err(format!("free_models[{i}].model_name must be non-empty"));
-            }
-        }
-
-        let mut seen: std::collections::HashSet<(String, String, CliKind, String)> =
+        let mut seen: std::collections::HashSet<(CliKind, String)> =
             std::collections::HashSet::new();
+        let mut by_identity: std::collections::HashMap<(CliKind, String), &str> =
+            std::collections::HashMap::new();
         for (i, entry) in self.providers.value().iter().enumerate() {
-            if entry.vendor.trim().is_empty() {
-                return Err(format!("providers[{i}].vendor must be non-empty"));
-            }
             if entry.model.trim().is_empty() {
                 return Err(format!("providers[{i}].model must be non-empty"));
             }
             if entry.launch_name.trim().is_empty() {
                 return Err(format!("providers[{i}].launch_name must be non-empty"));
             }
-            if !seen.insert(entry.identity()) {
+            let id = entry.identity();
+            if let Some(prev_model) = by_identity.get(&id)
+                && *prev_model != entry.model.as_str()
+            {
                 return Err(format!(
-                    "providers[{i}]: duplicate tuple \
-                     (vendor={:?}, model={:?}, cli={:?}, launch_name={:?})",
-                    entry.vendor,
-                    entry.model,
+                    "providers[{i}]: identity (cli={:?}, launch_name={:?}) reused with different model ({:?} vs {:?})",
                     entry.cli.as_str(),
                     entry.launch_name,
+                    prev_model,
+                    entry.model
+                ));
+            }
+            by_identity.insert(id.clone(), entry.model.as_str());
+            if !seen.insert(id) {
+                return Err(format!(
+                    "providers[{i}]: duplicate identity (cli={:?}, launch_name={:?})",
+                    entry.cli.as_str(),
+                    entry.launch_name
                 ));
             }
         }
@@ -717,12 +700,17 @@ mod tests {
         assert!(c.validate().is_err());
     }
 
-    fn provider_for(vendor: &str, model: &str, cli: CliKind, launch: &str) -> ProviderEntry {
+    fn provider_for(
+        cli: CliKind,
+        launch: &str,
+        model: &str,
+        subscription: SubscriptionKind,
+    ) -> ProviderEntry {
         ProviderEntry {
-            vendor: vendor.to_string(),
-            model: model.to_string(),
             cli,
             launch_name: launch.to_string(),
+            model: model.to_string(),
+            subscription,
             enabled: true,
             free: false,
             official: false,
@@ -731,63 +719,85 @@ mod tests {
             tough_eligible: false,
             effort_eligible: false,
             effort_mapping: EffortMapping::default(),
+            quota_lookup_key: None,
             display_order: 0,
         }
     }
 
     #[test]
-    fn validate_rejects_duplicate_provider_tuple() {
+    fn validate_rejects_duplicate_provider_identity() {
         let mut c = Config::baked_defaults();
         c.providers = Override::explicit(vec![
             provider_for(
-                "claude",
-                "claude-opus-4-7",
                 CliKind::Claude,
                 "claude-opus-4-7",
+                "claude-opus-4-7",
+                SubscriptionKind::Claude,
             ),
             provider_for(
-                "claude",
-                "claude-opus-4-7",
                 CliKind::Claude,
                 "claude-opus-4-7",
+                "claude-opus-4-7",
+                SubscriptionKind::Claude,
             ),
         ]);
         let err = c.validate().unwrap_err();
-        assert!(err.contains("duplicate tuple"), "{err}");
+        assert!(err.contains("duplicate identity"), "{err}");
     }
 
     #[test]
-    fn validate_rejects_empty_provider_identity_field() {
+    fn validate_rejects_identity_reused_with_different_model() {
+        let mut c = Config::baked_defaults();
+        c.providers = Override::explicit(vec![
+            provider_for(
+                CliKind::Claude,
+                "claude-opus-4-7",
+                "claude-opus-4-7",
+                SubscriptionKind::Claude,
+            ),
+            provider_for(
+                CliKind::Claude,
+                "claude-opus-4-7",
+                "claude-opus-4-6",
+                SubscriptionKind::Claude,
+            ),
+        ]);
+        let err = c.validate().unwrap_err();
+        assert!(err.contains("reused with different model"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_empty_provider_launch_name() {
         let mut c = Config::baked_defaults();
         c.providers = Override::explicit(vec![provider_for(
+            CliKind::Claude,
             "",
             "claude-opus-4-7",
-            CliKind::Claude,
-            "claude-opus-4-7",
+            SubscriptionKind::Claude,
         )]);
         let err = c.validate().unwrap_err();
-        assert!(err.contains("vendor"), "{err}");
+        assert!(err.contains("launch_name"), "{err}");
     }
 
     #[test]
     fn provider_identity_disambiguates_by_cli_and_launch_name() {
         let a = provider_for(
-            "claude",
-            "claude-opus-4-7",
             CliKind::Claude,
             "claude-opus-4-7",
+            "claude-opus-4-7",
+            SubscriptionKind::Claude,
         );
         let b = provider_for(
-            "claude",
-            "claude-opus-4-7",
             CliKind::Opencode,
             "claude-opus-4-7",
+            "claude-opus-4-7",
+            SubscriptionKind::OpencodeGo,
         );
         let c = provider_for(
-            "claude",
-            "claude-opus-4-7",
             CliKind::Claude,
             "claude-opus-4-7-thinking",
+            "claude-opus-4-7",
+            SubscriptionKind::Claude,
         );
         assert_ne!(a.identity(), b.identity());
         assert_ne!(a.identity(), c.identity());

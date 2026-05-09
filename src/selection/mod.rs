@@ -7,8 +7,8 @@
 //! server-mode binary import everything selection-shaped from one root
 //! path; new logic/data callers should still prefer the layered names.
 pub use crate::logic::selection::{
-    CachedModel, Candidate, CliKind, FreeModelEntry, IpbrPhaseScores, ModelRow, QuotaError,
-    ScoreSource, SubscriptionKind,
+    CachedModel, Candidate, CliKind, IpbrPhaseScores, ModelRow, QuotaError, ScoreSource,
+    SubscriptionKind,
 };
 pub use crate::logic::selection::{config, display, ranking, types, vendor};
 pub use config::*;

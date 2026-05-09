@@ -150,7 +150,6 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
         loaded_cache_with_resets(dashboard, quotas, resets),
         &available,
         &[],
-        &[],
     )
     .await;
 
@@ -205,7 +204,6 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
         assemble_from_loaded(
             &loaded,
             &crate::acp::AcpConfig::default().available_vendors(),
-            &[],
             &[],
         )
     });
@@ -318,7 +316,6 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
             cache_dir,
             &crate::acp::AcpConfig::default().available_vendors(),
             &[],
-            &[],
         ));
         assert!(
             errors.is_empty(),
@@ -338,7 +335,6 @@ fn assemble_from_cached_only_returns_empty_when_no_cache() {
         &cache_dir,
         &crate::acp::AcpConfig::default().available_vendors(),
         &[],
-        &[],
     );
     assert!(models.is_empty(), "no cache should yield empty model list");
 }
@@ -351,7 +347,6 @@ fn assemble_from_cached_only_yields_models_when_cache_is_present() {
         let models = assemble_from_cached_only(
             cache_dir,
             &crate::acp::AcpConfig::default().available_vendors(),
-            &[],
             &[],
         );
         assert_eq!(models.len(), 1);

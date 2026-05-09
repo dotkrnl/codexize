@@ -1,6 +1,6 @@
 use super::models::vendor_tag;
 use super::{App, FailedModelSet, RetryKey};
-use crate::selection::{self, SubscriptionKind, selection::select_excluding};
+use crate::selection::{SubscriptionKind, selection::select_excluding};
 use crate::state::{MessageKind, RunStatus, SessionState};
 use std::collections::{HashMap, HashSet};
 impl App {
@@ -20,7 +20,7 @@ impl App {
             {
                 continue;
             }
-            let Some(vendor) = selection::vendor::str_to_vendor(&run.vendor) else {
+            let Some(vendor) = crate::logic::selection::assemble::parse_subscription_str(&run.vendor) else {
                 continue;
             };
             failed_models
@@ -105,7 +105,8 @@ impl App {
             return false;
         }
         let key = Self::retry_key_for_run(failed_run);
-        let last_failed_vendor = selection::vendor::str_to_vendor(&failed_run.vendor);
+        let last_failed_vendor =
+            crate::logic::selection::assemble::parse_subscription_str(&failed_run.vendor);
         if let Some(vendor) = last_failed_vendor {
             self.failed_models
                 .entry(key.clone())

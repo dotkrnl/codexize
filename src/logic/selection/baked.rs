@@ -1,15 +1,16 @@
-//! Baked default provider table for known dashboard `(vendor, model)`
-//! pairs. The table seeds every provider's per-tuple knobs (eligibility,
-//! effort mapping, official/free flags) so the operator can override
-//! individual fields from TOML without losing the rest of the baked
-//! defaults.
+//! Baked default provider table for known dashboard `(model)` rows. The
+//! table seeds every provider's per-tuple knobs (eligibility, effort
+//! mapping, official/free flags) so the operator can override individual
+//! fields from TOML without losing the rest of the baked defaults.
 //!
-//! Resolution rules (per spec §"Migration and Conflicts"):
-//! - User entries with the same `(vendor, model, cli, launch_name)` as a
-//!   baked entry **override** the baked properties field-by-field where
-//!   the user explicitly diverged.
-//! - User entries with a tuple not in the baked table are **additions**
-//!   (new providers, `display_order = u16::MAX`).
+//! Identity is `(cli, launch_name)`; `model` and `subscription` are
+//! properties of the row/provider.
+//!
+//! Resolution rules:
+//! - User entries with the same `(cli, launch_name)` as a baked entry
+//!   **override** the baked properties.
+//! - User entries whose identity is not in the baked table are
+//!   **additions** (`display_order = u16::MAX`).
 //! - Baked entries cannot be removed; setting `enabled = false` is the
 //!   only way to take one out of selection.
 //!
@@ -17,23 +18,21 @@
 //! the baked table and has no user provider has zero candidates.
 
 use crate::data::config::schema::{EffortMapping, ProviderEntry};
-use crate::selection::CliKind;
+use crate::selection::{CliKind, SubscriptionKind};
 
-/// One row in the baked defaults table — a `(vendor, model)` pair plus
-/// its ordered list of baked providers. The ordering of `providers`
-/// drives the seeded `display_order`.
+/// One row in the baked defaults table — a model plus its ordered list
+/// of baked providers. The ordering of `providers` drives the seeded
+/// `display_order`.
 pub struct BakedRow {
-    pub vendor: &'static str,
     pub model: &'static str,
     pub providers: &'static [BakedProvider],
 }
 
-/// One baked provider entry. Identity is `(cli, launch_name)`; the
-/// remaining fields are the seeded baked defaults the resolver hands
-/// out when no user entry overrides them.
+/// One baked provider entry. Identity is `(cli, launch_name)`.
 pub struct BakedProvider {
     pub cli: CliKind,
     pub launch_name: &'static str,
+    pub subscription: SubscriptionKind,
     pub free: bool,
     pub official: bool,
     pub cheap_eligible: bool,
@@ -42,40 +41,38 @@ pub struct BakedProvider {
     pub effort_cheap: &'static str,
     pub effort_normal: &'static str,
     pub effort_tough: &'static str,
+    pub quota_lookup_key: Option<&'static str>,
 }
 
 /// Sentinel display order for user-additions with no baked counterpart.
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
-/// Static baked-defaults table. The list is intentionally short — only
-/// the tuples we actively ship — and grows as new vendor/model rows
-/// land on the dashboard. New entries should mirror the heuristic seeds
-/// used by the legacy assembly path so no operator-facing eligibility
-/// flips silently when this table replaces them.
+/// Static baked-defaults table. The 5-row stub here mirrors the legacy
+/// shape; Task 5 expands it to the full 30-row hand-curated set.
 pub const BAKED_TABLE: &[BakedRow] = &[
     BakedRow {
-        vendor: "claude",
         model: "claude-opus-4-7",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
             launch_name: "claude-opus-4-7",
+            subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
             cheap_eligible: false,
             tough_eligible: true,
             effort_eligible: true,
-            // Spec: "Codex is xhigh, claude is max, though."
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
+            quota_lookup_key: None,
         }],
     },
     BakedRow {
-        vendor: "claude",
         model: "claude-sonnet-4-6",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
             launch_name: "claude-sonnet-4-6",
+            subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
             cheap_eligible: true,
@@ -84,14 +81,15 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
+            quota_lookup_key: None,
         }],
     },
     BakedRow {
-        vendor: "codex",
         model: "gpt-5",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
             launch_name: "gpt-5",
+            subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
             cheap_eligible: false,
@@ -99,16 +97,16 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",
-            // Spec: "Codex is xhigh".
             effort_tough: "xhigh",
+            quota_lookup_key: None,
         }],
     },
     BakedRow {
-        vendor: "gemini",
-        model: "gemini-2.5-pro",
+        model: "gemini-2-5-pro",
         providers: &[BakedProvider {
             cli: CliKind::Gemini,
-            launch_name: "gemini-2.5-pro",
+            launch_name: "gemini-2-5-pro",
+            subscription: SubscriptionKind::Gemini,
             free: false,
             official: true,
             cheap_eligible: false,
@@ -117,14 +115,15 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "high",
+            quota_lookup_key: None,
         }],
     },
     BakedRow {
-        vendor: "kimi",
         model: "kimi-latest",
         providers: &[BakedProvider {
             cli: CliKind::Kimi,
             launch_name: "kimi-latest",
+            subscription: SubscriptionKind::Kimi,
             free: false,
             official: true,
             cheap_eligible: true,
@@ -133,18 +132,18 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "high",
+            quota_lookup_key: None,
         }],
     },
 ];
 
-/// Materialize a baked provider as a concrete [`ProviderEntry`]. The
-/// resolver below uses this when a baked tuple has no user override.
+/// Materialize a baked provider as a concrete [`ProviderEntry`].
 pub fn instantiate(row: &BakedRow, provider: &BakedProvider, display_order: u16) -> ProviderEntry {
     ProviderEntry {
-        vendor: row.vendor.to_string(),
-        model: row.model.to_string(),
         cli: provider.cli,
         launch_name: provider.launch_name.to_string(),
+        model: row.model.to_string(),
+        subscription: provider.subscription,
         enabled: true,
         free: provider.free,
         official: provider.official,
@@ -157,24 +156,13 @@ pub fn instantiate(row: &BakedRow, provider: &BakedProvider, display_order: u16)
             provider.effort_normal,
             provider.effort_tough,
         ),
+        quota_lookup_key: provider.quota_lookup_key.map(|s| s.to_string()),
         display_order,
     }
 }
 
 /// Merge the baked-defaults table with the operator's user-supplied
-/// providers list. The result is the unified list selection should
-/// consume:
-///
-/// - For every baked provider tuple, the user's override wins entirely
-///   when present (the user is responsible for re-stating fields they
-///   want to keep — the loader is the layer that fills holes from
-///   baked, not this resolver).
-/// - User entries with no baked match are appended with
-///   [`ADDITION_DISPLAY_ORDER`] as `display_order` if the user did not
-///   set one explicitly.
-///
-/// The list is returned in baked order first (preserving each row's
-/// authored sequence), with additions tacked on at the end.
+/// providers list. Identity is `(cli, launch_name)`.
 pub fn merge_with_overrides(user: &[ProviderEntry]) -> Vec<ProviderEntry> {
     let mut result: Vec<ProviderEntry> = Vec::new();
     let mut consumed_user_indices: std::collections::HashSet<usize> =
@@ -183,18 +171,13 @@ pub fn merge_with_overrides(user: &[ProviderEntry]) -> Vec<ProviderEntry> {
     for row in BAKED_TABLE {
         for (idx, baked) in row.providers.iter().enumerate() {
             let display_order = idx as u16;
-            let override_idx = user.iter().position(|u| {
-                u.vendor == row.vendor
-                    && u.model == row.model
-                    && u.cli == baked.cli
-                    && u.launch_name == baked.launch_name
-            });
+            let override_idx = user
+                .iter()
+                .position(|u| u.cli == baked.cli && u.launch_name == baked.launch_name);
             match override_idx {
                 Some(i) => {
                     consumed_user_indices.insert(i);
                     let mut entry = user[i].clone();
-                    // Identity is shared; baked dictates display_order
-                    // unless the user explicitly set a non-zero one.
                     if entry.display_order == 0 {
                         entry.display_order = display_order;
                     }
@@ -219,18 +202,10 @@ pub fn merge_with_overrides(user: &[ProviderEntry]) -> Vec<ProviderEntry> {
     result
 }
 
-/// Look up a baked provider by `(vendor, model, cli, launch_name)`.
-/// Returns `None` for additions — the spec rejects runtime heuristic
-/// fallbacks, so callers MUST treat absence as "no baked defaults
-/// available" rather than synthesizing one.
-pub fn baked_for(
-    vendor: &str,
-    model: &str,
-    cli: CliKind,
-    launch_name: &str,
-) -> Option<ProviderEntry> {
+/// Look up a baked provider by `(model, cli, launch_name)`.
+pub fn baked_for(model: &str, cli: CliKind, launch_name: &str) -> Option<ProviderEntry> {
     for row in BAKED_TABLE {
-        if row.vendor != vendor || row.model != model {
+        if row.model != model {
             continue;
         }
         for (idx, baked) in row.providers.iter().enumerate() {
@@ -242,19 +217,23 @@ pub fn baked_for(
     None
 }
 
+/// Return the subscription of the row's first (primary) baked provider,
+/// or `None` if the model is not in the baked table.
+pub fn primary_subscription_for_model(model: &str) -> Option<SubscriptionKind> {
+    BAKED_TABLE
+        .iter()
+        .find(|row| row.model == model)
+        .and_then(|row| row.providers.first())
+        .map(|p| p.subscription)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn baked_table_seeds_known_claude_opus_with_max_tough_effort() {
-        let entry = baked_for(
-            "claude",
-            "claude-opus-4-7",
-            CliKind::Claude,
-            "claude-opus-4-7",
-        )
-        .unwrap();
+        let entry = baked_for("claude-opus-4-7", CliKind::Claude, "claude-opus-4-7").unwrap();
         assert!(
             entry.official,
             "claude/claude-opus-4-7 is intrinsically official"
@@ -266,13 +245,13 @@ mod tests {
 
     #[test]
     fn baked_table_seeds_codex_with_xhigh_tough_effort() {
-        let entry = baked_for("codex", "gpt-5", CliKind::Codex, "gpt-5").unwrap();
+        let entry = baked_for("gpt-5", CliKind::Codex, "gpt-5").unwrap();
         assert_eq!(entry.effort_mapping.tough, "xhigh");
     }
 
     #[test]
     fn baked_for_returns_none_for_unknown_tuple() {
-        assert!(baked_for("nope", "no-model", CliKind::Claude, "no-model").is_none());
+        assert!(baked_for("no-model", CliKind::Claude, "no-model").is_none());
     }
 
     #[test]
@@ -282,19 +261,15 @@ mod tests {
         for entry in &merged {
             assert!(entry.enabled, "baked entries default to enabled");
         }
-        // Every baked tuple appears at least once.
         for row in BAKED_TABLE {
             for baked in row.providers {
                 let found = merged.iter().any(|e| {
-                    e.vendor == row.vendor
-                        && e.model == row.model
-                        && e.cli == baked.cli
-                        && e.launch_name == baked.launch_name
+                    e.model == row.model && e.cli == baked.cli && e.launch_name == baked.launch_name
                 });
                 assert!(
                     found,
-                    "merged list missing baked tuple ({}, {}, {:?}, {})",
-                    row.vendor, row.model, baked.cli, baked.launch_name,
+                    "merged list missing baked tuple ({}, {:?}, {})",
+                    row.model, baked.cli, baked.launch_name,
                 );
             }
         }
@@ -303,10 +278,10 @@ mod tests {
     #[test]
     fn merge_user_override_replaces_baked_props_for_matching_tuple() {
         let user = vec![ProviderEntry {
-            vendor: "claude".to_string(),
-            model: "claude-opus-4-7".to_string(),
             cli: CliKind::Claude,
             launch_name: "claude-opus-4-7".to_string(),
+            model: "claude-opus-4-7".to_string(),
+            subscription: SubscriptionKind::Claude,
             enabled: false,
             free: false,
             official: true,
@@ -315,27 +290,26 @@ mod tests {
             tough_eligible: true,
             effort_eligible: true,
             effort_mapping: EffortMapping::new("low", "medium", "high"),
+            quota_lookup_key: None,
             display_order: 0,
         }];
         let merged = merge_with_overrides(&user);
         let opus = merged
             .iter()
-            .find(|e| e.vendor == "claude" && e.model == "claude-opus-4-7")
+            .find(|e| e.cli == CliKind::Claude && e.launch_name == "claude-opus-4-7")
             .expect("opus row must remain present after override");
         assert!(!opus.enabled, "user override flipped enabled to false");
         assert!(opus.quota_disabled, "user override forced quota_disabled");
-        // Display order seeded from baked (idx 0) when the user left
-        // it as the default zero.
         assert_eq!(opus.display_order, 0);
     }
 
     #[test]
-    fn merge_user_addition_for_unknown_tuple_gets_addition_display_order() {
+    fn merge_user_addition_for_unknown_identity_gets_addition_display_order() {
         let user = vec![ProviderEntry {
-            vendor: "claude".to_string(),
-            model: "claude-opus-4-7".to_string(),
             cli: CliKind::Opencode,
-            launch_name: "claude-opus-4-7".to_string(),
+            launch_name: "opencode-go/claude-opus-4-7".to_string(),
+            model: "claude-opus-4-7".to_string(),
+            subscription: SubscriptionKind::OpencodeGo,
             enabled: true,
             free: false,
             official: false,
@@ -344,14 +318,13 @@ mod tests {
             tough_eligible: false,
             effort_eligible: false,
             effort_mapping: EffortMapping::default(),
+            quota_lookup_key: None,
             display_order: 0,
         }];
         let merged = merge_with_overrides(&user);
         let added = merged
             .iter()
-            .find(|e| {
-                e.vendor == "claude" && e.model == "claude-opus-4-7" && e.cli == CliKind::Opencode
-            })
+            .find(|e| e.cli == CliKind::Opencode && e.launch_name == "opencode-go/claude-opus-4-7")
             .expect("addition must appear in merged list");
         assert_eq!(added.display_order, ADDITION_DISPLAY_ORDER);
     }
@@ -359,10 +332,10 @@ mod tests {
     #[test]
     fn merge_user_explicit_display_order_is_preserved() {
         let user = vec![ProviderEntry {
-            vendor: "codex".to_string(),
-            model: "gpt-5".to_string(),
             cli: CliKind::Opencode,
-            launch_name: "gpt-5".to_string(),
+            launch_name: "opencode-go/gpt-5".to_string(),
+            model: "gpt-5".to_string(),
+            subscription: SubscriptionKind::OpencodeGo,
             enabled: true,
             free: true,
             official: false,
@@ -371,13 +344,32 @@ mod tests {
             tough_eligible: false,
             effort_eligible: false,
             effort_mapping: EffortMapping::default(),
+            quota_lookup_key: None,
             display_order: 7,
         }];
         let merged = merge_with_overrides(&user);
         let added = merged
             .iter()
-            .find(|e| e.vendor == "codex" && e.model == "gpt-5" && e.cli == CliKind::Opencode)
+            .find(|e| e.cli == CliKind::Opencode && e.launch_name == "opencode-go/gpt-5")
             .unwrap();
         assert_eq!(added.display_order, 7);
+    }
+
+    #[test]
+    fn baked_table_identity_is_unique() {
+        use std::collections::HashMap;
+        let mut seen: HashMap<(CliKind, &str), (&str, SubscriptionKind)> = HashMap::new();
+        for row in BAKED_TABLE {
+            for baked in row.providers {
+                let key = (baked.cli, baked.launch_name);
+                if let Some(prev) = seen.get(&key) {
+                    panic!(
+                        "duplicate baked identity (cli={:?}, launch_name={:?}): row={:?} (prev row={:?})",
+                        baked.cli, baked.launch_name, row.model, prev.0
+                    );
+                }
+                seen.insert(key, (row.model, baked.subscription));
+            }
+        }
     }
 }

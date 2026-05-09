@@ -8,7 +8,7 @@ pub enum SubscriptionKind {
     Kimi,
     #[serde(rename = "opencode-go")]
     OpencodeGo,
-    Free,
+    Direct,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -28,19 +28,6 @@ impl CliKind {
             CliKind::Gemini => "gemini",
             CliKind::Kimi => "kimi",
             CliKind::Opencode => "opencode",
-        }
-    }
-
-    /// Map a `CliKind` to the `SubscriptionKind` that owns the ACP agent
-    /// entry for that CLI. `Opencode` maps to `OpencodeGo` because the
-    /// opencode agent is configured under the opencode-go subscription.
-    pub fn to_subscription(self) -> SubscriptionKind {
-        match self {
-            CliKind::Claude => SubscriptionKind::Claude,
-            CliKind::Codex => SubscriptionKind::Codex,
-            CliKind::Gemini => SubscriptionKind::Gemini,
-            CliKind::Kimi => SubscriptionKind::Kimi,
-            CliKind::Opencode => SubscriptionKind::OpencodeGo,
         }
     }
 
@@ -151,12 +138,6 @@ impl Candidate {
         self.effective_quota().unwrap_or(0)
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FreeModelEntry {
-    pub mapped_into: String,
-    pub cli: CliKind,
-    pub model_name: String,
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelRow {
     /// Compatibility mirror of the selected candidate's subscription for
@@ -227,7 +208,7 @@ impl SubscriptionKind {
             SubscriptionKind::Codex => Some(CliKind::Codex),
             SubscriptionKind::Gemini => Some(CliKind::Gemini),
             SubscriptionKind::Kimi => Some(CliKind::Kimi),
-            SubscriptionKind::OpencodeGo | SubscriptionKind::Free => None,
+            SubscriptionKind::OpencodeGo | SubscriptionKind::Direct => None,
         }
     }
 }

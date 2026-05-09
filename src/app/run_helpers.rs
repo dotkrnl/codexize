@@ -1,6 +1,6 @@
 use super::{App, DEFAULT_STAMP_TIMEOUT_MS, ENV_STAMP_TIMEOUT_MS, guard, status_line};
 use crate::{
-    selection::{self, SubscriptionKind, config::SelectionPhase, selection::SelectionWarning},
+    selection::{SubscriptionKind, config::SelectionPhase, selection::SelectionWarning},
     state::{self as session_state, Message, MessageKind, MessageSender, Phase, RunStatus},
     tasks,
 };
@@ -158,7 +158,9 @@ impl App {
         let mut vendors = Vec::new();
         let mut models = Vec::new();
         for run in runs {
-            let Some(vendor) = selection::vendor::str_to_vendor(&run.vendor) else {
+            let Some(vendor) =
+                crate::logic::selection::assemble::parse_subscription_str(&run.vendor)
+            else {
                 continue;
             };
             if !vendors.contains(&vendor) {

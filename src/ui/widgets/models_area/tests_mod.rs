@@ -83,8 +83,8 @@ fn vendor_model_with_axis_score(
         quota_resets_at: model.quota_resets_at,
         display_order,
         enabled: true,
-        free: vendor == SubscriptionKind::Free,
-        official: cli.to_subscription() == vendor && vendor != SubscriptionKind::Free,
+        free: false,
+        official: vendor != SubscriptionKind::Direct,
         quota_disabled: false,
         cheap_eligible: false,
         tough_eligible: false,
@@ -1128,7 +1128,7 @@ fn full_table_renders_bracketed_subscription_tag_per_subscription_kind() {
         (SubscriptionKind::Gemini, "[gemini]"),
         (SubscriptionKind::Kimi, "[kimi]"),
         (SubscriptionKind::OpencodeGo, "[opencode-go]"),
-        (SubscriptionKind::Free, "[free]"),
+        (SubscriptionKind::Direct, "[direct]"),
     ];
     for (sub, expected) in cases {
         let model = vendor_model_with_axis_score(sub, "row-x", 100.0, 0);

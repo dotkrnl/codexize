@@ -60,8 +60,15 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
-            chosen;
+        let (
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        ) = chosen;
         let attempt = self.attempt_for("plan-review", None, round);
         let live_summary_path = self.live_summary_path_for_run("plan-review", None, round, attempt);
         let prompt = plan_review_prompt(
@@ -129,7 +136,7 @@ impl App {
                     None,
                     round,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,

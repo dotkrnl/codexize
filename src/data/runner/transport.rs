@@ -136,7 +136,7 @@ fn find_transcript_run(session_id: &str, window_name: &str) -> Option<(u64, Stri
                 .rev()
                 .find(|run| run.window_name == window_name)
         })
-        .map(|run| (run.id, run.model.clone(), run.vendor.clone()))
+        .map(|run| (run.id, run.model.clone(), run.subscription_label.clone()))
 }
 fn persist_agent_text_block(
     launch: &ManagedAcpLaunch,
@@ -161,7 +161,7 @@ fn persist_agent_text_block(
         }
         found
     });
-    let Some((run_id, model, vendor)) = run else {
+    let Some((run_id, model, subscription_label)) = run else {
         super::supervise::append_launch_cause(
             &launch.cause_path,
             "failed to persist ACP text: run record was not available",
@@ -173,7 +173,10 @@ fn persist_agent_text_block(
         ts,
         run_id,
         kind,
-        sender: MessageSender::Agent { model, vendor },
+        sender: MessageSender::Agent {
+            model,
+            subscription_label,
+        },
         text,
     };
     if let Err(err) = SessionState::load(session_id).and_then(|state| state.append_message(&msg)) {

@@ -20,7 +20,7 @@ fn run_record(interactive: bool) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "model".to_string(),
-        vendor: "vendor".to_string(),
+        subscription_label: "vendor".to_string(),
         window_name: "window".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

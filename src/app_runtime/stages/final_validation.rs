@@ -65,8 +65,15 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Review, effort, modes.cheap)
             });
-        let Some((model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible)) =
-            chosen
+        let Some((
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        )) = chosen
         else {
             self.record_agent_error("no model available for final validation".to_string());
             let _ = self.state.save();
@@ -148,7 +155,7 @@ impl App {
                     None,
                     round,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,
@@ -261,7 +268,7 @@ mod tests {
             round,
             attempt: 1,
             model: "test-model".to_string(),
-            vendor: "test-vendor".to_string(),
+            subscription_label: "test-vendor".to_string(),
             window_name: "[FinalValidation] test-model".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,

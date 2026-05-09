@@ -13,7 +13,7 @@ fn running_run(id: u64) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "kimi-k2.6".to_string(),
-        vendor: "moonshotai".to_string(),
+        subscription_label: "moonshotai".to_string(),
         window_name: "[Test]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,

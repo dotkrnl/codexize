@@ -9,7 +9,7 @@ fn run(stage: &str, task_id: Option<u32>, round: u32, attempt: u32) -> RunRecord
         round,
         attempt,
         model: "codex-latest".to_string(),
-        vendor: "openai".to_string(),
+        subscription_label: "openai".to_string(),
         window_name: format!("[{stage} r{round}]"),
         started_at: chrono::Utc::now(),
         ended_at: None,

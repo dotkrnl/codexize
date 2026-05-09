@@ -65,54 +65,54 @@ pub fn fetch_set_for(
     from_clis.intersection(&from_providers).copied().collect()
 }
 pub async fn load_quota_maps_for_async(
-    vendors: impl IntoIterator<Item = SubscriptionKind>,
+    subscriptions: impl IntoIterator<Item = SubscriptionKind>,
 ) -> QuotaLoadResult {
     // Defense-in-depth: the public API still accepts a `SubscriptionKind`
     // iterator for direct test use, but `Direct` is never a meaningful
-    // probe target — `load_quota_map_for_vendor` would just return empty
-    // maps for it. Drop it up front so callers cannot accidentally fan
-    // out a no-op task into the worker pool.
-    let vendors = vendors
+    // probe target — `load_quota_map_for_subscription` would just return
+    // empty maps for it. Drop it up front so callers cannot accidentally
+    // fan out a no-op task into the worker pool.
+    let subscriptions = subscriptions
         .into_iter()
-        .filter(|v| !matches!(v, SubscriptionKind::Direct))
+        .filter(|s| !matches!(s, SubscriptionKind::Direct))
         .collect::<Vec<_>>();
-    let tasks = vendors
+    let tasks = subscriptions
         .into_iter()
-        .map(|vendor| {
+        .map(|subscription| {
             (
-                vendor,
-                tokio::spawn(async move { load_quota_map_for_vendor(vendor).await }),
+                subscription,
+                tokio::spawn(async move { load_quota_map_for_subscription(subscription).await }),
             )
         })
         .collect::<Vec<_>>();
     let mut maps = BTreeMap::new();
     let mut reset_maps = BTreeMap::new();
     let mut errors = Vec::new();
-    for (vendor, task) in tasks {
+    for (subscription, task) in tasks {
         let Ok(result) = task.await else {
             errors.push(QuotaError {
-                subscription: vendor,
+                subscription,
                 message: "quota worker task failed".to_string(),
             });
             continue;
         };
         match result {
             Ok((map, reset_map)) => {
-                maps.insert(vendor, map);
-                reset_maps.insert(vendor, reset_map);
+                maps.insert(subscription, map);
+                reset_maps.insert(subscription, reset_map);
             }
             Err(e) => errors.push(QuotaError {
-                subscription: vendor,
+                subscription,
                 message: e,
             }),
         }
     }
     (maps, reset_maps, errors)
 }
-async fn load_quota_map_for_vendor(
-    vendor: SubscriptionKind,
+async fn load_quota_map_for_subscription(
+    subscription: SubscriptionKind,
 ) -> Result<ModelQuotaAndResetMaps, String> {
-    match vendor {
+    match subscription {
         SubscriptionKind::Codex => providers::codex::load_live_models_async()
             .await
             .map(live_map_codex)

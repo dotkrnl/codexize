@@ -119,7 +119,12 @@ pub struct RunRecord {
     pub round: u32,
     pub attempt: u32,
     pub model: String,
-    pub vendor: String,
+    /// Subscription label string (from `subscription_kind_to_str`) carried
+    /// through to the run record. The on-disk JSON field is kept as
+    /// `"vendor"` via `#[serde(rename)]` so existing session.toml files
+    /// continue to load.
+    #[serde(rename = "vendor")]
+    pub subscription_label: String,
     /// Persisted key retained for schema compatibility with existing runs.
     pub window_name: String,
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -223,7 +228,11 @@ pub struct DreamingDecision {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageSender {
     System,
-    Agent { model: String, vendor: String },
+    Agent {
+        model: String,
+        #[serde(rename = "vendor")]
+        subscription_label: String,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Message {

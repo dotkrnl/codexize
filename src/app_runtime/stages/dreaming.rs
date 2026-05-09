@@ -52,8 +52,15 @@ impl App {
             effort,
             modes.cheap,
         );
-        let Some((model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible)) =
-            chosen
+        let Some((
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        )) = chosen
         else {
             self.record_agent_error("no model available for dreaming".to_string());
             let _ = self.state.save();
@@ -132,7 +139,7 @@ impl App {
                     None,
                     round,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,
@@ -258,7 +265,7 @@ reason = "Captured durable session guidance."
             round,
             attempt: 1,
             model: "dream-model".to_string(),
-            vendor: "codex".to_string(),
+            subscription_label: "codex".to_string(),
             window_name: "[Dreaming] dream-model".to_string(),
             started_at: chrono::Utc::now(),
             ended_at: None,

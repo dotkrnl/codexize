@@ -840,15 +840,15 @@ impl ConfigPanelState {
                 // Cycle through models?
                 editor.selected_model_idx =
                     wrap_index(editor.selected_model_idx, editor.available_models.len(), -1);
-                let (v, m) = editor.available_models[editor.selected_model_idx].clone();
-                editor.vendor = v;
+                let (s, m) = editor.available_models[editor.selected_model_idx].clone();
+                editor.subscription = s;
                 editor.model = m;
             }
             KeyCode::Down | KeyCode::Char('j') if !editor.available_models.is_empty() => {
                 editor.selected_model_idx =
                     wrap_index(editor.selected_model_idx, editor.available_models.len(), 1);
-                let (v, m) = editor.available_models[editor.selected_model_idx].clone();
-                editor.vendor = v;
+                let (s, m) = editor.available_models[editor.selected_model_idx].clone();
+                editor.subscription = s;
                 editor.model = m;
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1430,7 +1430,7 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
     lines.push(Line::from("─".repeat(inner_w)));
 
     lines.push(Line::from(fit_cell(
-        &format!("  Model: {} / {}", editor.vendor, editor.model),
+        &format!("  Model: {} / {}", editor.subscription, editor.model),
         inner_w,
     )));
     lines.push(Line::from(fit_cell(
@@ -2475,7 +2475,7 @@ mod tests {
             "expected baked claude/claude-opus-4-7 in available models: {:?}",
             editor.available_models,
         );
-        assert_eq!(editor.vendor, editor.available_models[0].0);
+        assert_eq!(editor.subscription, editor.available_models[0].0);
         assert_eq!(editor.model, editor.available_models[0].1);
     }
 

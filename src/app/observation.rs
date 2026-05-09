@@ -90,9 +90,9 @@ impl App {
         let Some(run_id) = self.current_run_id else {
             return;
         };
-        let Some((run_model, run_vendor)) = self
+        let Some((run_model, run_subscription_label)) = self
             .running_run()
-            .map(|run| (run.model.clone(), run.vendor.clone()))
+            .map(|run| (run.model.clone(), run.subscription_label.clone()))
         else {
             return;
         };
@@ -137,7 +137,7 @@ impl App {
             kind: MessageKind::Brief,
             sender: MessageSender::Agent {
                 model: run_model,
-                vendor: run_vendor,
+                subscription_label: run_subscription_label,
             },
             text: sanitized.clone(),
         };
@@ -264,7 +264,7 @@ impl App {
                     kind: MessageKind::Brief,
                     sender: MessageSender::Agent {
                         model: run.model.clone(),
-                        vendor: run.vendor.clone(),
+                        subscription_label: run.subscription_label.clone(),
                     },
                     text: sanitized,
                 };

@@ -291,7 +291,7 @@ impl App {
                 kind,
                 sender: MessageSender::Agent {
                     model: run.model.clone(),
-                    vendor: run.vendor.clone(),
+                    subscription_label: run.subscription_label.clone(),
                 },
                 text: summary_text,
             };

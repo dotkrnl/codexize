@@ -81,8 +81,15 @@ impl App {
             .or_else(|| {
                 self.choose_primary_model(None, SelectionPhase::Build, effort, modes.cheap)
             });
-        let Some((model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible)) =
-            chosen
+        let Some((
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        )) = chosen
         else {
             self.record_agent_error("no model available for simplifier".to_string());
             let _ = self.state.save();
@@ -173,7 +180,7 @@ impl App {
                     None,
                     round,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,

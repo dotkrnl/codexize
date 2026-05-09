@@ -11,7 +11,7 @@ fn sample_run(id: u64, stage: &str, status: RunStatus) -> RunRecord {
         round: 0,
         attempt: 0,
         model: "test-model".to_string(),
-        vendor: "test-vendor".to_string(),
+        subscription_label: "test-vendor".to_string(),
         window_name: format!("codexize-run-{id}-{stage}"),
         started_at: Utc::now(),
         ended_at: None,

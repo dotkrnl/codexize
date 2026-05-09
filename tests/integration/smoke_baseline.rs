@@ -18,7 +18,7 @@ fn sample_run(id: u64, status: RunStatus) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "claude-opus-4-7".to_string(),
-        vendor: "anthropic".to_string(),
+        subscription_label: "anthropic".to_string(),
         window_name: "[Brainstorm]".to_string(),
         started_at: chrono::Utc::now(),
         ended_at: None,
@@ -76,7 +76,7 @@ fn create_smoke_session() -> String {
             kind: MessageKind::Brief,
             sender: MessageSender::Agent {
                 model: "claude-opus-4-7".to_string(),
-                vendor: "anthropic".to_string(),
+                subscription_label: "anthropic".to_string(),
             },
             text: format!("root={}", std::env::var("CODEXIZE_ROOT").expect("root")),
         })

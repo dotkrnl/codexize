@@ -47,7 +47,7 @@ use crate::{
 pub(crate) type StagePick = (
     String,           // model row name
     SubscriptionKind, // row subscription (compat mirror of selected candidate)
-    String,           // vendor tag string
+    String,           // subscription_tag string from subscription_tag(SubscriptionKind)
     CliKind,          // CLI to spawn
     String,           // verbatim launch_name passed to the CLI
     EffortMapping,    // per-tuple effort token table (cheap/normal/tough)
@@ -206,7 +206,7 @@ impl App {
         task_id: Option<u32>,
         round: u32,
         model: String,
-        vendor: String,
+        subscription_label: String,
         window_name: String,
         effort: EffortLevel,
         effort_mapping: EffortMapping,
@@ -233,7 +233,7 @@ impl App {
             round,
             attempt,
             model,
-            vendor,
+            subscription_label,
             window_name,
             effort,
             effort_mapping,
@@ -252,7 +252,7 @@ impl App {
         tracing::debug!(
             run_id = run.id,
             model = %run.model,
-            vendor = %run.vendor,
+            subscription_label = %run.subscription_label,
             window_name = %run.window_name,
             "agent run tracking started"
         );
@@ -281,7 +281,7 @@ impl App {
             sender: MessageSender::System,
             text: format!(
                 "agent started · {}{} ({})",
-                run.model, effort_suffix, run.vendor
+                run.model, effort_suffix, run.subscription_label
             ),
         };
         if let Err(err) = self.state.append_message(&started) {
@@ -359,7 +359,8 @@ impl App {
             .iter()
             .filter(|run| run.stage == stage && run.round == round)
             .max_by_key(|run| run.id)?;
-        let vendor_kind = crate::logic::selection::assemble::parse_subscription_str(&last.vendor)?;
+        let vendor_kind =
+            crate::logic::selection::assemble::parse_subscription_str(&last.subscription_label)?;
         // RunRecord doesn't persist the candidate's cli/launch_name, so when
         // resuming we look the row up in the current universe and reuse its
         // selected candidate (preserves Free-tier launch_name on resume); if

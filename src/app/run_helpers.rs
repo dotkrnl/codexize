@@ -159,7 +159,7 @@ impl App {
         let mut models = Vec::new();
         for run in runs {
             let Some(vendor) =
-                crate::logic::selection::assemble::parse_subscription_str(&run.vendor)
+                crate::logic::selection::assemble::parse_subscription_str(&run.subscription_label)
             else {
                 continue;
             };
@@ -409,7 +409,7 @@ impl App {
         let text = if success {
             format!(
                 "done in {minutes}m{seconds:02}s · {} ({})",
-                finished.model, finished.vendor
+                finished.model, finished.subscription_label
             )
         } else if finished.unverified {
             format!(

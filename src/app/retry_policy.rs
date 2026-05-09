@@ -21,7 +21,7 @@ impl App {
                 continue;
             }
             let Some(vendor) =
-                crate::logic::selection::assemble::parse_subscription_str(&run.vendor)
+                crate::logic::selection::assemble::parse_subscription_str(&run.subscription_label)
             else {
                 continue;
             };
@@ -51,7 +51,7 @@ impl App {
             lines.push(format!(
                 "  attempt {}: {}/{} — {}",
                 run.attempt,
-                run.vendor,
+                run.subscription_label,
                 run.model,
                 run.error.unwrap_or_else(|| "unknown error".to_string())
             ));
@@ -107,8 +107,9 @@ impl App {
             return false;
         }
         let key = Self::retry_key_for_run(failed_run);
-        let last_failed_vendor =
-            crate::logic::selection::assemble::parse_subscription_str(&failed_run.vendor);
+        let last_failed_vendor = crate::logic::selection::assemble::parse_subscription_str(
+            &failed_run.subscription_label,
+        );
         if let Some(vendor) = last_failed_vendor {
             self.failed_models
                 .entry(key.clone())

@@ -70,8 +70,15 @@ impl App {
             let _ = self.state.save();
             return false;
         };
-        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
-            chosen;
+        let (
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        ) = chosen;
         let attempt = self.attempt_for("reviewer", Some(task_id), r);
         let live_summary_path =
             self.live_summary_path_for_run("reviewer", Some(task_id), r, attempt);
@@ -163,7 +170,7 @@ impl App {
                     Some(task_id),
                     r,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,
@@ -216,7 +223,7 @@ impl App {
                 kind,
                 sender: MessageSender::Agent {
                     model: run.model.clone(),
-                    vendor: run.vendor.clone(),
+                    subscription_label: run.subscription_label.clone(),
                 },
                 text: summary_text.to_string(),
             };
@@ -251,7 +258,7 @@ impl App {
                         kind: MessageKind::SummaryWarn,
                         sender: MessageSender::Agent {
                             model: run.model.clone(),
-                            vendor: run.vendor.clone(),
+                            subscription_label: run.subscription_label.clone(),
                         },
                         text: advisory,
                     };

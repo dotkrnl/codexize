@@ -115,7 +115,7 @@ fn run_record(id: u64, status: RunStatus) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "model".to_string(),
-        vendor: "vendor".to_string(),
+        subscription_label: "vendor".to_string(),
         window_name: format!("[Run {id}]"),
         started_at: chrono::Utc::now(),
         ended_at: if status == RunStatus::Running {
@@ -142,7 +142,7 @@ fn message(run_id: u64, text: &str) -> Message {
         kind: MessageKind::Summary,
         sender: MessageSender::Agent {
             model: "model".to_string(),
-            vendor: "vendor".to_string(),
+            subscription_label: "vendor".to_string(),
         },
         text: text.to_string(),
     }
@@ -155,7 +155,7 @@ fn agent_text(run_id: u64, text: &str) -> Message {
         kind: MessageKind::AgentText,
         sender: MessageSender::Agent {
             model: "model".to_string(),
-            vendor: "vendor".to_string(),
+            subscription_label: "vendor".to_string(),
         },
         text: text.to_string(),
     }
@@ -168,7 +168,7 @@ fn agent_thought(run_id: u64, text: &str) -> Message {
         kind: MessageKind::AgentThought,
         sender: MessageSender::Agent {
             model: "model".to_string(),
-            vendor: "vendor".to_string(),
+            subscription_label: "vendor".to_string(),
         },
         text: text.to_string(),
     }

@@ -45,7 +45,7 @@ fn running_run(id: u64, stage: &str, interactive: bool) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "codex-latest".to_string(),
-        vendor: "openai".to_string(),
+        subscription_label: "openai".to_string(),
         window_name: format!("[{stage}]"),
         started_at: chrono::Utc::now(),
         ended_at: None,
@@ -215,7 +215,7 @@ fn interactive_wait_rising_edge_emits_once_until_next_prompt() {
             kind: MessageKind::AgentText,
             sender: MessageSender::Agent {
                 model: "codex-latest".to_string(),
-                vendor: "openai".to_string(),
+                subscription_label: "openai".to_string(),
             },
             text: "Need your input".to_string(),
         });
@@ -321,7 +321,7 @@ fn interactive_wait_event_carries_last_agent_response() {
             kind: MessageKind::Brief,
             sender: MessageSender::Agent {
                 model: "codex-latest".to_string(),
-                vendor: "openai".to_string(),
+                subscription_label: "openai".to_string(),
             },
             text: "live summary that should not surface".to_string(),
         });
@@ -331,7 +331,7 @@ fn interactive_wait_event_carries_last_agent_response() {
             kind: MessageKind::AgentText,
             sender: MessageSender::Agent {
                 model: "codex-latest".to_string(),
-                vendor: "openai".to_string(),
+                subscription_label: "openai".to_string(),
             },
             text: "Should I keep going on the migration plan?".to_string(),
         });

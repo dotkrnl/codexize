@@ -19,7 +19,7 @@ fn make_run(status: RunStatus) -> RunRecord {
         round: 1,
         attempt: 1,
         model: "claude-sonnet-4".to_string(),
-        vendor: "claude".to_string(),
+        subscription_label: "claude".to_string(),
         window_name: "test".to_string(),
         started_at: Utc::now(),
         ended_at: None,

@@ -1,7 +1,8 @@
 //! Providers sub-panel widget.
 //!
-//! Unified per-tuple provider list. Identity is `(vendor, model, cli, launch_name)`.
-//! The panel allows toggling properties for baked and user-added providers.
+//! Unified per-tuple provider list. Identity is `(cli, launch_name)`; the
+//! row label shows `(subscription, model)`. The panel allows toggling
+//! properties for baked and user-added providers.
 
 use crate::data::config::Config;
 use crate::data::config::schema::{EffortMapping, Override, ProviderEntry};
@@ -11,19 +12,19 @@ use crate::selection::{CliKind, SubscriptionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvidersEditor {
-    pub(crate) vendor: String,
+    pub(crate) subscription: String,
     pub(crate) model: String,
     pub(crate) cli: CliKind,
     pub(crate) launch_name: String,
-    pub(crate) available_models: Vec<(String, String)>, // (vendor, model)
+    pub(crate) available_models: Vec<(String, String)>, // (subscription, model)
     pub(crate) selected_model_idx: usize,
 }
 
 impl ProvidersEditor {
     pub(crate) fn new(available_models: Vec<(String, String)>) -> Self {
-        let (vendor, model) = available_models.first().cloned().unwrap_or_default();
+        let (subscription, model) = available_models.first().cloned().unwrap_or_default();
         Self {
-            vendor,
+            subscription,
             model,
             cli: CliKind::Opencode,
             launch_name: String::new(),
@@ -34,10 +35,11 @@ impl ProvidersEditor {
 
     pub(crate) fn commit(&self, config: &mut Config) -> bool {
         let trimmed_launch = self.launch_name.trim();
-        if trimmed_launch.is_empty() || self.vendor.is_empty() || self.model.is_empty() {
+        if trimmed_launch.is_empty() || self.subscription.is_empty() || self.model.is_empty() {
             return false;
         }
-        let subscription = parse_subscription_str(&self.vendor).unwrap_or(SubscriptionKind::Direct);
+        let subscription =
+            parse_subscription_str(&self.subscription).unwrap_or(SubscriptionKind::Direct);
 
         let new_entry = ProviderEntry {
             cli: self.cli,
@@ -72,7 +74,7 @@ impl ProvidersEditor {
 
 pub(crate) enum ProvidersLine {
     GroupHeader {
-        vendor: String,
+        subscription: String,
         model: String,
     },
     Provider {
@@ -91,13 +93,13 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
     let mut current_group: Option<(String, String)> = None;
 
     for entry in providers {
-        let vendor_label =
+        let subscription_label =
             crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
                 .to_string();
-        let group = (vendor_label, entry.model.clone());
+        let group = (subscription_label, entry.model.clone());
         if current_group.as_ref() != Some(&group) {
             lines.push(ProvidersLine::GroupHeader {
-                vendor: group.0.clone(),
+                subscription: group.0.clone(),
                 model: group.1.clone(),
             });
             current_group = Some(group.clone());
@@ -123,8 +125,11 @@ pub(crate) fn format_line(
     width: usize,
 ) -> String {
     match line {
-        ProvidersLine::GroupHeader { vendor, model } => {
-            let text = format!("{} / {}", vendor, model);
+        ProvidersLine::GroupHeader {
+            subscription,
+            model,
+        } => {
+            let text = format!("{} / {}", subscription, model);
             format!("  {}", text)
         }
         ProvidersLine::Provider {

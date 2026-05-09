@@ -11,7 +11,7 @@ fn sample_run(id: u64, stage: &str, round: u32, attempt: u32, error: Option<&str
         round,
         attempt,
         model: format!("model-{id}"),
-        vendor: "openai".to_string(),
+        subscription_label: "openai".to_string(),
         window_name: format!("[{stage} a{attempt}]"),
         started_at: Utc.with_ymd_and_hms(2026, 5, 8, 0, 0, 0).unwrap(),
         ended_at: None,
@@ -40,7 +40,7 @@ fn msg(run_id: u64, kind: MessageKind, text: &str) -> Message {
             MessageKind::UserInput => MessageSender::System,
             _ => MessageSender::Agent {
                 model: "model-1".into(),
-                vendor: "openai".into(),
+                subscription_label: "openai".into(),
             },
         },
         text: text.to_string(),

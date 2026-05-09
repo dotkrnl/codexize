@@ -38,8 +38,15 @@ impl App {
             self.rebuild_tree_view(None);
             return false;
         };
-        let (model, _vendor_kind, vendor, cli, launch_name, effort_mapping, effort_eligible) =
-            chosen;
+        let (
+            model,
+            _subscription,
+            subscription_tag,
+            cli,
+            launch_name,
+            effort_mapping,
+            effort_eligible,
+        ) = chosen;
         let _ = std::fs::remove_file(&tasks_path);
         let prompt_path = session_dir.join("prompts").join("sharding.md");
         if let Some(parent) = prompt_path.parent() {
@@ -103,7 +110,7 @@ impl App {
                     None,
                     1,
                     model,
-                    vendor,
+                    subscription_tag,
                     window_name,
                     effort,
                     effort_mapping,

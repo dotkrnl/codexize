@@ -188,6 +188,7 @@ fn arbitration_uses_display_order_then_launch_name_tiebreakers() {
 
 #[test]
 fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
     let mut direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
     direct.display_order = 0;
     let mut routed = make_ipbr_entry("claude-opus-4-7", "opencode", "claude-opus-4-7");
@@ -197,10 +198,29 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
         ("claude", "claude-opus-4-7", Some(70)),
         ("opencode-go", "claude-opus-4-7", Some(95)),
     ]);
+    // The baked table only carries the Claude provider for
+    // claude-opus-4-7; the operator's `[[providers]]` list adds the
+    // opencode-routed alternative so both candidates land on the row.
+    let providers = vec![ProviderEntry {
+        cli: CliKind::Opencode,
+        launch_name: "claude-opus-4-7".to_string(),
+        model: "claude-opus-4-7".to_string(),
+        subscription: SubscriptionKind::OpencodeGo,
+        enabled: true,
+        free: false,
+        official: false,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: true,
+        effort_eligible: false,
+        effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
+        display_order: 1,
+    }];
     let available = BTreeSet::from([SubscriptionKind::Claude, SubscriptionKind::OpencodeGo]);
 
     let (models, _warnings) =
-        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &[]);
+        assemble_universe(dashboard, quotas, BTreeMap::new(), &available, &providers);
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
@@ -219,6 +239,7 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
 }
 
 #[test]
+#[ignore = "legacy kimi-latest synthesis is retired; baked table maps the kimi row directly"]
 fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
     let dashboard = vec![
         make_ipbr_entry("kimi-k2.6", "moonshotai", "kimi-k2.6"),
@@ -235,8 +256,6 @@ fn assemble_universe_collapses_kimi_latest_into_canonical_row() {
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "kimi-k2.6");
-    // Kimi candidate is present (kimi-latest mapping is removed in Task 6;
-    // for now just verify the row groups properly).
     assert!(
         models[0]
             .candidates
@@ -412,10 +431,10 @@ fn assemble_merges_dashboard_and_quotas() {
     claude_entry
         .axis_provenance
         .insert("correctness".to_string(), "suite:hourly".to_string());
-    let dashboard = vec![claude_entry, make_entry("gpt-5.5", "openai", 80.0, 78.0)];
+    let dashboard = vec![claude_entry, make_entry("gpt-5-5", "openai", 80.0, 78.0)];
     let quotas = make_quota_payload(&[
         ("claude", "claude-sonnet-4-6", Some(80)),
-        ("openai", "gpt-5.5", Some(70)),
+        ("openai", "gpt-5-5", Some(70)),
     ]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
@@ -434,7 +453,7 @@ fn assemble_merges_dashboard_and_quotas() {
             .map(String::as_str),
         Some("suite:hourly")
     );
-    let codex = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
+    let codex = models.iter().find(|m| m.name == "gpt-5-5").unwrap();
     assert_eq!(codex.vendor, SubscriptionKind::Codex);
     assert_eq!(codex.quota_percent, Some(70));
 }
@@ -727,16 +746,18 @@ fn assemble_universe_uses_provided_snapshot_without_reloading() {
 }
 
 #[test]
-fn quota_heuristic_fallback_when_no_exact_match() {
+fn quota_strict_lookup_returns_none_when_no_exact_match() {
+    // Task 6 retired the per-vendor heuristic that used to cross-fill
+    // quotas across Claude models. The candidate's quota_lookup_key
+    // (or its launch_name fallback) must hit a real entry — otherwise
+    // the row reports an unknown quota.
     let dashboard = vec![make_entry("claude-opus-4-7", "claude", 90.0, 88.0)];
-    // Quota exists for a different claude model
     let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(75))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
     assert_eq!(models.len(), 1);
-    // Should get quota via heuristic (Claude models share quota)
-    assert_eq!(models[0].quota_percent, Some(75));
+    assert_eq!(models[0].quota_percent, None);
 }
 
 #[test]
@@ -816,14 +837,34 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
 
 #[test]
 fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
     let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4-7");
+    // The unbaked dashboard row needs an explicit provider entry now
+    // that synthesis is gone; the operator-supplied route is what
+    // turns into the candidate.
+    let providers = vec![ProviderEntry {
+        cli: CliKind::Opencode,
+        launch_name: "opencode/claude-opus-4-7".to_string(),
+        model: "opencode/claude-opus-4-7".to_string(),
+        subscription: SubscriptionKind::OpencodeGo,
+        enabled: true,
+        free: false,
+        official: false,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: false,
+        effort_eligible: false,
+        effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
+        display_order: 0,
+    }];
 
     let (models, _warnings) = assemble_universe(
         vec![routed],
         QuotaPayload::default(),
         BTreeMap::new(),
         &opencode_available(),
-        &[],
+        &providers,
     );
 
     assert_eq!(models.len(), 1);
@@ -952,7 +993,11 @@ fn merge_clears_failure_marker_when_subscription_recovers() {
 }
 
 #[test]
-fn merge_keeps_unknown_vendor_keys() {
+fn merge_drops_unknown_vendor_keys() {
+    // After Task 6 the merge is strict: unparseable subscription keys
+    // (e.g. legacy "free" rows from a previous schema, or this
+    // "aliens" sentinel) are dropped on the next refresh round so the
+    // cache cannot accumulate stale, untracked entries forever.
     let mut cached = QuotaPayload::default();
     cached.insert(
         "aliens".to_string(),
@@ -961,11 +1006,27 @@ fn merge_keeps_unknown_vendor_keys() {
 
     let merged = merge_quota_payload(&cached, BTreeMap::new(), &BTreeSet::new());
 
-    assert_eq!(
-        merged
-            .get("aliens")
-            .and_then(|m| m.get("ufo-9000").copied()),
-        Some(Some(33))
+    assert!(!merged.contains_key("aliens"));
+}
+
+#[test]
+fn merge_quota_payload_drops_unparseable_subscription() {
+    // A legacy cache that still has a "free" row (the schema dropped
+    // SubscriptionKind::Free in Task 1) must lose that row on the
+    // first refresh; tracked subscription strings are preserved.
+    let mut cached = QuotaPayload::default();
+    cached.values.insert("free".to_string(), BTreeMap::new());
+    cached.values.insert("claude".to_string(), BTreeMap::new());
+
+    let merged = merge_quota_payload(&cached, BTreeMap::new(), &BTreeSet::new());
+
+    assert!(
+        !merged.values.contains_key("free"),
+        "stale 'free' key must drop"
+    );
+    assert!(
+        merged.values.contains_key("claude"),
+        "tracked subscription preserved"
     );
 }
 
@@ -1095,6 +1156,7 @@ fn synth_kimi_latest_wins_when_opencode_quota_unknown() {
 }
 
 #[test]
+#[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
 fn synth_kimi_latest_skipped_when_no_kimi_semver() {
     // Only suffixed kimi variants (no k<major>.<minor>) means no row qualifies
     // as "the latest kimi"; the synth must not fire and opencode keeps the
@@ -1159,6 +1221,7 @@ fn synth_kimi_latest_picks_highest_semver_among_routes() {
 }
 
 #[test]
+#[ignore = "kimi-latest synthesis was retired in Task 6 — strict baked-only is the new contract"]
 fn synth_kimi_latest_skipped_when_kimi_unavailable() {
     // Without Kimi in available_vendors the synth must not emit a kimi-vendor
     // row, even when an opencode-routed kimi-2.6 is present.
@@ -1366,8 +1429,9 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     // Per spec, a subscription that failed its quota fetch has *all*
     // its providers reported as 50% effective when no per-model
     // quota came back. Wire this through assemble_universe and read
-    // the candidate's `effective_quota()`.
-    let dashboard = vec![make_ipbr_entry("gpt-5", "codex", "gpt-5")];
+    // the candidate's `effective_quota()`. Uses gpt-5-5 because it
+    // is in the baked table (the strict-baked path requires it).
+    let dashboard = vec![make_ipbr_entry("gpt-5-5", "codex", "gpt-5-5")];
     let mut quotas = QuotaPayload::default();
     quotas.failed_subscriptions.insert(SubscriptionKind::Codex);
     let available = BTreeSet::from([SubscriptionKind::Codex]);

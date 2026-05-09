@@ -1,8 +1,6 @@
 //! Backend probes that resolve per-vendor quota and reset maps from the
-//! provider adapters. Pure quota heuristics that operate on already-resolved
-//! maps live in [`crate::logic::selection::quota`].
+//! provider adapters.
 use crate::data::providers::{self, LiveModel};
-pub use crate::logic::selection::quota::{find_quota_by_heuristic, find_reset_by_heuristic};
 use crate::logic::selection::types::{QuotaError, SubscriptionKind};
 use crate::model_names;
 use chrono::{DateTime, Utc};
@@ -187,9 +185,9 @@ fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
 }
 fn live_map_opencode(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     // Opencode runs on a single Go-tier dollar pool, so any non-None entry
-    // returned by the provider applies to every opencode-routed model name
-    // the heuristic asks about. Surface a single shared key — the per-model
-    // heuristic in `logic::selection::quota` handles the lookup.
+    // returned by the provider applies to every opencode-routed model name.
+    // Surface a single shared key — baked entries point their
+    // `quota_lookup_key` at it so per-row lookups resolve here.
     let quota = models.into_iter().find_map(|m| m.quota_percent);
     (
         BTreeMap::from([(providers::opencode::SHARED_QUOTA_KEY.to_string(), quota)]),
@@ -198,11 +196,10 @@ fn live_map_opencode(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
 }
 fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     // Kimi runs every model off one shared usage pool, so we expose the
-    // quota under a single sentinel key and let
-    // `quota::find_quota_by_heuristic` resolve any Kimi-named model
-    // against it. Using a sentinel (not a synthetic model id like the
-    // former `kimi-latest`) means the universe surfaces real ipbr names
-    // instead of a placeholder that aliases another row's identifier.
+    // quota under a single sentinel key. Baked Kimi entries set
+    // `quota_lookup_key = "kimi-shared"` so per-row lookups resolve here
+    // without aliasing a real ipbr model id (the way the former
+    // `kimi-latest` placeholder did).
     let quota = models.into_iter().filter_map(|m| m.quota_percent).min();
     (
         BTreeMap::from([(providers::kimi::SHARED_QUOTA_KEY.to_string(), quota)]),

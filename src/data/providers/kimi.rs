@@ -9,10 +9,11 @@ use std::{
 };
 const DEFAULT_USAGE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 /// Quota-map key used by every Kimi-routed model: a single shared usage
-/// pool funds them all, so `logic::selection::quota::find_quota_by_heuristic`
-/// resolves any Kimi `model.name` against this single entry. Avoids
-/// pretending a synthetic placeholder is a real model id — which used to
-/// be `"kimi-latest"`, conflicting with the ipbr alias of the same name.
+/// pool funds them all. Baked Kimi entries set `quota_lookup_key` to this
+/// constant so per-row lookups in `assemble::make_candidate` resolve here.
+/// Avoids pretending a synthetic placeholder is a real model id — which
+/// used to be `"kimi-latest"`, conflicting with the ipbr alias of the
+/// same name.
 pub const SHARED_QUOTA_KEY: &str = "kimi-shared";
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;

@@ -8,13 +8,12 @@
 //! the snapshots have been resolved. The merge / coverage-gap helpers are
 //! exposed because that orchestrator needs them between IO calls.
 use super::baked;
-use super::quota;
 use super::ranking::stamp_selection_provenance;
 use super::types::{CachedModel, Candidate, CliKind, QuotaError, SubscriptionKind};
 use super::vendor;
 use crate::cache::{DashboardEntry, QuotaPayload, ResetPayload};
 use crate::dashboard::DashboardModel;
-use crate::data::config::schema::{EffortMapping, ProviderEntry};
+use crate::data::config::schema::ProviderEntry;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -85,7 +84,7 @@ pub fn assemble_universe(
         let Some(row_name) = row_name_for_entry(&entry) else {
             continue;
         };
-        let dashboard_subscription = parse_dashboard_subscription(&entry);
+        let dashboard_subscription = subscription_for_dashboard(&entry);
         let candidate = dashboard_subscription.and_then(|subscription| {
             build_candidate(
                 subscription,
@@ -102,13 +101,21 @@ pub fn assemble_universe(
             .entry(row_name.clone())
             .or_insert_with(|| row_from_entry(row_name.clone(), &entry));
         if let Some(candidate) = candidate {
-            consumed_providers.insert((
+            // With `subscription_for_dashboard` keyed off the baked
+            // table, multiple dashboard rows for the same model can
+            // resolve to the same subscription (e.g. an opencode
+            // dashboard row whose model is baked-owned by Claude).
+            // Dedupe on the candidate identity so the row collects one
+            // candidate per `(subscription, cli, launch_name)`.
+            let key = (
                 candidate.subscription,
                 entry.name.clone(),
                 candidate.cli,
                 candidate.launch_name.clone(),
-            ));
-            row.candidates.push(candidate);
+            );
+            if consumed_providers.insert(key) {
+                row.candidates.push(candidate);
+            }
         }
         // Append user-added providers keyed by this row's model whose
         // `(cli, launch_name)` differs from the natural dashboard
@@ -154,7 +161,7 @@ fn row_name_for_entry(entry: &DashboardEntry) -> Option<String> {
                 .unwrap_or_else(|| entry.name.clone()),
         )
     } else {
-        parse_dashboard_subscription(entry).map(|_| entry.name.clone())
+        subscription_for_dashboard(entry).map(|_| entry.name.clone())
     }
 }
 
@@ -180,12 +187,16 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
     }
 }
 
-fn parse_dashboard_subscription(entry: &DashboardEntry) -> Option<SubscriptionKind> {
-    if entry.vendor == "opencode" {
-        Some(SubscriptionKind::OpencodeGo)
-    } else {
-        parse_subscription_str(&entry.vendor)
+/// Resolve the subscription that "owns" a dashboard row. The baked table
+/// is consulted first so curated overrides (e.g. ipbr-aliased Kimi names
+/// that the dashboard surfaces under `moonshotai`) honour our hand-picked
+/// primary subscription. When the row is not in the baked table we fall
+/// back to parsing the dashboard's own vendor string.
+pub fn subscription_for_dashboard(entry: &DashboardEntry) -> Option<SubscriptionKind> {
+    if let Some(sub) = baked::primary_subscription_for_model(&entry.name) {
+        return Some(sub);
     }
+    parse_subscription_str(&entry.vendor)
 }
 
 /// Index of resolved providers (baked ⊕ user) keyed by `model`. Each
@@ -226,52 +237,20 @@ fn build_candidate(
         direct => direct.direct_cli()?,
     };
     let dashboard_name = dashboard_entry.name.as_str();
-    let launch_name = if subscription == SubscriptionKind::Kimi
-        && parsed_quotas
-            .get(&SubscriptionKind::Kimi)
-            .is_some_and(|models| models.contains_key("kimi-latest"))
-    {
-        "kimi-latest"
-    } else {
-        dashboard_name
-    };
-    // Per-tuple flags come from the resolved provider list when the
-    // dashboard's natural candidate identity matches a provider entry.
-    // Falling back to `baked::baked_for` would skip user overrides, so
-    // we look the entry up here and only synthesize a bare-bones
-    // fallback when no provider entry exists for this exact tuple.
-    //
-    // Fallback rationale: anything routed through OpencodeGo is by
-    // definition not the canonical owner of the model, so it is non-
-    // official. Direct CLIs (Claude, Codex, Gemini, Kimi) speaking to
-    // their own subscription remain official by default — the legacy
-    // "direct vs routed" pipeline depends on this distinction even
-    // when the (vendor, model) tuple has no provider entry on file.
+    let launch_name = dashboard_name;
+    // Strict baked-only path: a dashboard row produces no candidate
+    // unless the resolved (baked ⊕ user) provider list has an entry
+    // matching `(cli, launch_name)` keyed by this row's model. Without a
+    // hit we drop the candidate — there is no synthesized fallback.
     let resolved = providers_by_row
-        .get(dashboard_name)
+        .get(&dashboard_name.to_string())
         .and_then(|entries| {
             entries
                 .iter()
                 .copied()
                 .find(|entry| entry.cli == cli && entry.launch_name == launch_name)
         })
-        .cloned()
-        .unwrap_or_else(|| ProviderEntry {
-            cli,
-            launch_name: launch_name.to_string(),
-            model: dashboard_name.to_string(),
-            subscription,
-            enabled: true,
-            free: false,
-            official: subscription != SubscriptionKind::OpencodeGo,
-            quota_disabled: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_mapping: EffortMapping::default(),
-            quota_lookup_key: None,
-            display_order: display_order as u16,
-        });
+        .cloned()?;
     Some(make_candidate(
         subscription,
         cli,
@@ -281,18 +260,15 @@ fn build_candidate(
         parsed_quotas,
         parsed_resets,
         failed_subscriptions,
-        Some(dashboard_name),
     ))
 }
 
 /// Materialise a `Candidate` with quota/reset lookups applied. The
 /// per-tuple flags and effort mapping come from `props` (a resolved
 /// `ProviderEntry`); the caller is responsible for picking the right
-/// override-or-fallback entry. `dashboard_name` lets the dashboard-
-/// driven path opt into a secondary heuristic fallback (when
-/// `launch_name` was rewritten — e.g. Kimi → kimi-latest — but the
-/// dashboard name still has a quota entry); user-addition candidates
-/// pass `None` because their launch_name is authoritative.
+/// entry. Quota and reset lookups consult `props.quota_lookup_key` first
+/// (so e.g. Kimi/OpencodeGo entries can point at their shared-pool
+/// sentinel) and fall back to the launch name itself.
 #[allow(clippy::too_many_arguments)]
 fn make_candidate(
     subscription: SubscriptionKind,
@@ -306,25 +282,18 @@ fn make_candidate(
         BTreeMap<String, Option<chrono::DateTime<chrono::Utc>>>,
     >,
     failed_subscriptions: &BTreeSet<SubscriptionKind>,
-    dashboard_name: Option<&str>,
 ) -> Candidate {
+    let lookup_key = props.quota_lookup_key.as_deref().unwrap_or(launch_name);
     let quota_percent = parsed_quotas
         .get(&subscription)
-        .and_then(|by_model| by_model.get(launch_name))
+        .and_then(|by_model| by_model.get(lookup_key))
         .copied()
-        .flatten()
-        .or_else(|| quota::find_quota_by_heuristic(launch_name, subscription, parsed_quotas))
-        .or_else(|| {
-            dashboard_name
-                .filter(|name| *name != launch_name)
-                .and_then(|name| quota::find_quota_by_heuristic(name, subscription, parsed_quotas))
-        });
+        .flatten();
     let quota_resets_at = parsed_resets
         .get(&subscription)
-        .and_then(|by_model| by_model.get(launch_name))
+        .and_then(|by_model| by_model.get(lookup_key))
         .copied()
-        .flatten()
-        .or_else(|| quota::find_reset_by_heuristic(launch_name, subscription, parsed_resets));
+        .flatten();
     let quota_failed = failed_subscriptions.contains(&subscription);
     Candidate {
         subscription,
@@ -388,7 +357,6 @@ fn append_provider_additions(
             parsed_quotas,
             parsed_resets,
             failed_subscriptions,
-            None,
         ));
     }
 }
@@ -502,9 +470,13 @@ pub fn merge_quota_payload(
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged = QuotaPayload::default();
     for (subscription_str, models) in &cached.values {
+        // Drop cache entries whose subscription string no longer parses
+        // (e.g. legacy "free" rows from a previous schema). Tracked
+        // subscriptions either get refreshed-in below or carry forward
+        // their cached value.
         let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
-            None => true,
+            None => false,
         };
         if preserve {
             merged
@@ -540,9 +512,11 @@ pub fn merge_reset_payload(
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged: ResetPayload = BTreeMap::new();
     for (subscription_str, models) in cached {
+        // Mirror `merge_quota_payload`: unparseable subscription keys are
+        // stale and dropped on the next refresh.
         let preserve = match parse_subscription_str(subscription_str) {
             Some(kind) => !succeeded.contains(&kind),
-            None => true,
+            None => false,
         };
         if preserve {
             merged.insert(subscription_str.clone(), models.clone());

@@ -170,11 +170,11 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let loaded = loaded_cache_with(
         vec![
             make_entry("claude-sonnet-4-6", "claude", 85.0, 82.0),
-            make_entry("gpt-5.5", "openai", 80.0, 78.0),
+            make_entry("gpt-5-5", "openai", 80.0, 78.0),
         ],
         make_quota_payload(&[
             ("claude", "claude-sonnet-4-6", Some(80)),
-            ("openai", "gpt-5.5", Some(70)),
+            ("openai", "gpt-5-5", Some(70)),
         ]),
     );
     let _guard = crate::state::test_fs_lock()
@@ -234,12 +234,12 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let models = outcome.expect("assemble_from_loaded should not panic");
     // Model-first assembly produces rows for all dashboard entries; the
     // claude-sonnet row has zero candidates because Claude is not in the
-    // available set, while the gpt-5.5 row has a Codex candidate.
+    // available set, while the gpt-5-5 row has a Codex candidate.
     assert_eq!(models.len(), 2);
     let gpt = models
         .iter()
-        .find(|m| m.name == "gpt-5.5")
-        .expect("gpt-5.5 row must exist");
+        .find(|m| m.name == "gpt-5-5")
+        .expect("gpt-5-5 row must exist");
     assert_eq!(gpt.vendor, SubscriptionKind::Codex);
     assert_eq!(gpt.quota_percent, Some(70));
     let claude = models

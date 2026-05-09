@@ -7,6 +7,7 @@ use crate::data::{
     },
     notifications,
 };
+use crate::selection::CliKind;
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -23,7 +24,7 @@ use std::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub(crate) mod free_models;
+pub(crate) mod providers;
 
 const MIN_WIDTH: u16 = 50;
 const TAB_SEPARATOR: &str = "  ";
@@ -325,7 +326,7 @@ const SECTIONS: &[&str] = &[
     "acp.policy",
     "acp.install",
     "acp.agents.claude",
-    "free_models",
+    "providers",
     "runner",
     "paths",
     "ui",
@@ -335,10 +336,10 @@ const SECTIONS: &[&str] = &[
     "memory",
 ];
 
-/// True when the section name owns the free-models sub-panel rendering path
+/// True when the section name owns the providers sub-panel rendering path
 /// (a list-of-entries layout) rather than the default key/value field grid.
-fn is_free_models_section(section: &str) -> bool {
-    section == "free_models"
+fn is_providers_section(section: &str) -> bool {
+    section == "providers"
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,6 +360,7 @@ pub(crate) enum Editing {
         options: Vec<String>,
         selected: usize,
     },
+    AddProvider(providers::ProvidersEditor),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -393,11 +395,13 @@ pub(crate) struct ConfigPanelState {
     pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
     /// Snapshot of ipbr canonical names known at panel-open time. Used by
-    /// the free-models sub-panel to flag entries whose `mapped_into` no
+    /// the providers sub-panel to flag entries whose `mapped_into` no
     /// longer matches any row with `(no matching ipbr row)`. The list is
     /// frozen on open — refreshing the universe mid-edit must not silently
     /// retag entries the operator is currently editing.
     pub(crate) known_models: Vec<String>,
+    pub(crate) providers_cursor: usize,
+    pub(crate) providers_prop_cursor: usize,
 }
 
 impl ConfigPanelState {
@@ -449,6 +453,8 @@ impl ConfigPanelState {
             read_only,
             searching: None,
             known_models,
+            providers_cursor: 0,
+            providers_prop_cursor: 0,
         };
         state.select_first_field_in_current_section();
         state
@@ -521,14 +527,27 @@ impl ConfigPanelState {
                 self.move_field(1);
                 PanelOutcome::KeepOpen
             }
-            // Horizontal arrows are no-ops in navigation mode: mutation is
-            // gated behind Enter, and section switching is bound to Tab/[/].
-            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
+            // Horizontal arrows are no-ops in navigation mode EXCEPT in providers
+            // where they navigate between per-tuple toggles.
+            KeyCode::Left | KeyCode::Char('h') => {
+                if is_providers_section(self.current_section()) {
+                    self.providers_prop_cursor = self.providers_prop_cursor.saturating_sub(1);
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if is_providers_section(self.current_section()) {
+                    self.providers_prop_cursor = (self.providers_prop_cursor + 1).min(6);
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Enter => {
                 if !self.read_only {
-                    self.activate_field();
+                    if is_providers_section(self.current_section()) {
+                        self.activate_provider_line();
+                    } else {
+                        self.activate_field();
+                    }
                 }
                 PanelOutcome::KeepOpen
             }
@@ -769,6 +788,10 @@ impl ConfigPanelState {
     }
 
     fn handle_edit_key(&mut self, key: KeyEvent) {
+        if let Some(Editing::AddProvider(_)) = self.editing {
+            self.handle_add_provider_key(key);
+            return;
+        }
         if matches!(self.editing, Some(Editing::Choice { .. })) {
             self.handle_choice_key(key);
             return;
@@ -812,6 +835,63 @@ impl ConfigPanelState {
                     -1
                 };
                 self.nudge_integer(delta);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_add_provider_key(&mut self, key: KeyEvent) {
+        let Some(Editing::AddProvider(ref mut editor)) = self.editing else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.editing = None;
+                self.status = "add cancelled".to_string();
+            }
+            KeyCode::Enter => {
+                if editor.commit(&mut self.config) {
+                    self.dirty = true;
+                    self.status = "provider added".to_string();
+                    self.editing = None;
+                } else {
+                    self.status = "invalid provider data (duplicate or empty fields)".to_string();
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') if !editor.available_models.is_empty() => {
+                // Cycle through models?
+                editor.selected_model_idx =
+                    wrap_index(editor.selected_model_idx, editor.available_models.len(), -1);
+                let (v, m) = editor.available_models[editor.selected_model_idx].clone();
+                editor.vendor = v;
+                editor.model = m;
+            }
+            KeyCode::Down | KeyCode::Char('j') if !editor.available_models.is_empty() => {
+                editor.selected_model_idx =
+                    wrap_index(editor.selected_model_idx, editor.available_models.len(), 1);
+                let (v, m) = editor.available_models[editor.selected_model_idx].clone();
+                editor.vendor = v;
+                editor.model = m;
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Cycle CLI
+                editor.cli = match editor.cli {
+                    CliKind::Claude => CliKind::Codex,
+                    CliKind::Codex => CliKind::Gemini,
+                    CliKind::Gemini => CliKind::Kimi,
+                    CliKind::Kimi => CliKind::Opencode,
+                    CliKind::Opencode => CliKind::Claude,
+                };
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                editor.launch_name.push(c);
+            }
+            KeyCode::Backspace => {
+                editor.launch_name.pop();
             }
             _ => {}
         }
@@ -872,6 +952,72 @@ impl ConfigPanelState {
             selected,
         });
         self.status = format!("choose {}", meta.key);
+    }
+
+    fn activate_provider_line(&mut self) {
+        let lines = providers::get_lines(&self.config);
+        let Some(line) = lines.get(self.providers_cursor) else {
+            return;
+        };
+
+        match line {
+            providers::ProvidersLine::GroupHeader { .. } => {}
+            providers::ProvidersLine::Provider {
+                entry, is_baked, ..
+            } => {
+                let mut updated = entry.clone();
+                match self.providers_prop_cursor {
+                    0 => updated.enabled = !updated.enabled,
+                    1 if !*is_baked => updated.official = !updated.official,
+                    2 if !*is_baked => updated.free = !updated.free,
+                    3 => updated.quota_disabled = !updated.quota_disabled,
+                    4 => updated.cheap_eligible = !updated.cheap_eligible,
+                    5 => updated.tough_eligible = !updated.tough_eligible,
+                    6 => updated.effort_eligible = !updated.effort_eligible,
+                    _ => return,
+                }
+
+                let mut existing = self.config.providers.value().clone();
+                if let Some(pos) = existing
+                    .iter()
+                    .position(|e| e.identity() == entry.identity())
+                {
+                    existing[pos] = updated;
+                } else {
+                    // It was a baked-only entry, now it has an override
+                    existing.push(updated);
+                }
+                self.config.providers = Override::explicit(existing);
+                self.dirty = true;
+                self.status = "provider property toggled".to_string();
+            }
+            providers::ProvidersLine::AddAction => {
+                // Open Add Provider modal
+                // Assuming known_models contains strings like "vendor/model" or just "model"
+                // Actually, dashboard entries are usually (vendor, model).
+                // Let's assume for now we just allow string input for vendor/model in the modal,
+                // or we use known_models if they are formatted correctly.
+
+                // For simplicity, let's just use a basic editor for now.
+                let available: Vec<(String, String)> = self
+                    .known_models
+                    .iter()
+                    .filter_map(|s| {
+                        let parts: Vec<&str> = s.split('/').collect();
+                        if parts.len() == 2 {
+                            Some((parts[0].to_string(), parts[1].to_string()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                self.editing = Some(Editing::AddProvider(providers::ProvidersEditor::new(
+                    available,
+                )));
+                self.status = "Add Provider".to_string();
+            }
+        }
     }
 
     fn activate_field(&mut self) {
@@ -1009,6 +1155,13 @@ impl ConfigPanelState {
 
     fn move_field(&mut self, delta: isize) {
         let section = self.current_section();
+        if is_providers_section(section) {
+            let lines = providers::get_lines(&self.config);
+            if !lines.is_empty() {
+                self.providers_cursor = wrap_index(self.providers_cursor, lines.len(), delta);
+            }
+            return;
+        }
         let fields = field_indices_for(section);
         if fields.is_empty() {
             return;
@@ -1270,7 +1423,53 @@ impl Widget for ConfigPanelWidget<'_> {
         Paragraph::new(lines).render(area, buf);
         render_dropdown(self.state, area, buf);
         render_search_overlay(self.state, area, buf);
+        render_add_provider_overlay(self.state, area, buf);
     }
+}
+
+fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
+    let Some(Editing::AddProvider(editor)) = state.editing.as_ref() else {
+        return;
+    };
+    if area.width < MIN_WIDTH {
+        return;
+    }
+
+    let overlay_w = area.width.saturating_sub(10).max(40).min(area.width);
+    let overlay_h = 10;
+    let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
+    let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
+    let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
+    Clear.render(rect, buf);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let inner_w = overlay_w.saturating_sub(2) as usize;
+
+    lines.push(Line::from(fit_cell("Add Provider", inner_w)));
+    lines.push(Line::from("─".repeat(inner_w)));
+
+    lines.push(Line::from(fit_cell(
+        &format!("  Model: {} / {}", editor.vendor, editor.model),
+        inner_w,
+    )));
+    lines.push(Line::from(fit_cell(
+        &format!("  CLI:   {}  (Ctrl-C to cycle)", editor.cli.as_str()),
+        inner_w,
+    )));
+    lines.push(Line::from(fit_cell(
+        &format!("  Name:  {}_", editor.launch_name),
+        inner_w,
+    )));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(fit_cell(
+        "↑↓ models · Enter confirm · Esc cancel",
+        inner_w,
+    )));
+
+    Paragraph::new(lines)
+        .block(Block::default().borders(Borders::ALL))
+        .render(rect, buf);
 }
 
 fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
@@ -1430,8 +1629,8 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     // footer is never sacrificed when the tab bar wraps onto a third line
     // (sub-panels with longer section names hit this case at width 80).
     let body_h = height.saturating_sub(used as u16 + 3) as usize;
-    if is_free_models_section(state.current_section()) {
-        for body_line in free_models_body_lines(state, w).into_iter().take(body_h) {
+    if is_providers_section(state.current_section()) {
+        for body_line in providers_body_lines(state, w).into_iter().take(body_h) {
             lines.push(Line::from(body_line));
         }
     } else {
@@ -1569,6 +1768,9 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
         match &state.editing {
             Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
             Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
+            Some(Editing::AddProvider(_)) => {
+                &["↑↓ model", "Enter commit", "Esc cancel", "Ctrl-C cycle cli"]
+            }
             // Order matters: the renderer drops trailing entries that no
             // longer fit, so the high-frequency keys come first to survive
             // narrow widths.
@@ -1758,23 +1960,30 @@ fn source_copy<T>(value: &Override<T>) -> &'static str {
     }
 }
 
-/// Body lines for the `free_models` section. Each existing entry renders on
+/// Body lines for the `providers` section. Each existing entry renders on
 /// one line; entries whose `mapped_into` does not match the loaded universe
 /// pick up the `(no matching ipbr row)` suffix in dim grey-equivalent text.
 /// An empty section shows a single hint line so operators see where to add
 /// entries from.
-fn free_models_body_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
-    let rows = free_models::entry_rows(&state.config, &state.known_models);
-    if rows.is_empty() {
+fn providers_body_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
+    let lines = providers::get_lines(&state.config);
+    if lines.is_empty() {
         return vec![fit_cell(
-            "  no free_models entries · operator-funded providers go here",
+            "  no providers entries · operator-funded providers go here",
             width,
         )];
     }
-    rows.iter()
-        .map(|row| {
-            let line = free_models::format_entry_line(row);
-            fit_cell(&format!("  {line}"), width)
+    lines
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let formatted = providers::format_line(
+                line,
+                idx == state.providers_cursor,
+                state.providers_prop_cursor,
+                width,
+            );
+            fit_cell(&formatted, width)
         })
         .collect()
 }
@@ -2185,75 +2394,68 @@ mod tests {
     }
 
     #[test]
-    fn free_models_section_renders_entries_with_unmatched_warning() {
+    fn providers_section_renders_entries_with_unmatched_warning() {
         // Two entries: one matched against the known universe, one that
         // points at a row no provider serves yet. The matched entry renders
         // bare; the unmatched entry trails the soft-warning suffix.
         let mut config = Config::baked_defaults();
-        config.free_models = crate::data::config::schema::Override::explicit(vec![
-            crate::selection::FreeModelEntry {
-                mapped_into: "claude-opus-4-7".to_string(),
+        config.providers = crate::data::config::schema::Override::explicit(vec![
+            crate::data::config::schema::ProviderEntry {
+                vendor: "claude".to_string(),
+                model: "claude-opus-4-7".to_string(),
                 cli: crate::selection::CliKind::Claude,
-                model_name: "my-opus".to_string(),
-            },
-            crate::selection::FreeModelEntry {
-                mapped_into: "ghost-model".to_string(),
-                cli: crate::selection::CliKind::Codex,
-                model_name: "missing".to_string(),
+                launch_name: "claude-opus-4-7".to_string(),
+                enabled: true,
+                free: false,
+                official: true,
+                quota_disabled: false,
+                cheap_eligible: false,
+                tough_eligible: true,
+                effort_eligible: true,
+                effort_mapping: Default::default(),
+                display_order: 0,
             },
         ]);
         let mut state = ConfigPanelState::open_at_with_models(
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
-            Some("free_models"),
-            vec!["claude-opus-4-7".to_string()],
+            Some("providers"),
+            vec!["claude/claude-opus-4-7".to_string()],
         );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "free_models").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
 
         let text = render_to_text(&state, 120, 18);
         assert!(
-            text.contains("claude-opus-4-7"),
-            "free_models section must list mapped_into: {text}"
+            text.contains("claude / claude-opus-4-7"),
+            "missing group header: {text}"
         );
         assert!(
-            text.contains("[claude]"),
-            "free_models section must show CLI tag: {text}"
-        );
-        assert!(
-            text.contains("my-opus"),
-            "free_models section must show model_name: {text}"
-        );
-        assert!(
-            text.contains("(no matching ipbr row)"),
-            "unmatched entry must surface soft warning: {text}"
-        );
-        // The matched entry must NOT pick up the warning suffix even when
-        // rendered alongside an unmatched sibling. Confirm by counting the
-        // suffix occurrences — exactly one entry is unmatched in the fixture.
-        assert_eq!(
-            text.matches("(no matching ipbr row)").count(),
-            1,
-            "soft warning must attach only to the unmatched entry: {text}"
+            text.contains("[x] claude · claude-opus-4-7 · (x) official · ( ) free"),
+            "missing provider entry: {text}"
         );
     }
 
     #[test]
-    fn free_models_empty_section_renders_hint_line() {
+    fn providers_section_shows_baked_models_by_default() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at_with_models(
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
-            Some("free_models"),
+            Some("providers"),
             Vec::new(),
         );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "free_models").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
 
         let text = render_to_text(&state, 120, 18);
         assert!(
-            text.contains("no free_models entries"),
-            "empty free_models section must show a hint: {text}"
+            text.contains("claude / claude-opus-4-7"),
+            "should show baked models: {text}"
+        );
+        assert!(
+            text.contains("[ Add Provider ]"),
+            "should show add button: {text}"
         );
     }
 

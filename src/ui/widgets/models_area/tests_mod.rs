@@ -39,8 +39,15 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
         score_source: crate::selection::ScoreSource::Ipbr,
         ipbr_row_matched: true,
         ipbr_match_key: Some(name.to_string()),
-        candidates: Vec::new(),
-        selected_candidate: None,
+        candidates: vec![crate::selection::Candidate {
+            subscription: SubscriptionKind::Codex,
+            cli: crate::selection::CliKind::Codex,
+            launch_name: name.to_string(),
+            quota_percent: Some(100),
+            quota_resets_at: None,
+            display_order,
+        }],
+        selected_candidate: Some(0),
         quota_percent: Some(100),
         quota_resets_at: None,
         display_order,
@@ -56,6 +63,18 @@ fn vendor_model_with_axis_score(
 ) -> CachedModel {
     let mut model = model_with_axis_score(name, axis_score, display_order);
     model.vendor = vendor;
+    let cli = vendor
+        .direct_cli()
+        .unwrap_or(crate::selection::CliKind::Opencode);
+    model.candidates = vec![crate::selection::Candidate {
+        subscription: vendor,
+        cli,
+        launch_name: name.to_string(),
+        quota_percent: model.quota_percent,
+        quota_resets_at: model.quota_resets_at,
+        display_order,
+    }];
+    model.selected_candidate = Some(0);
     model
 }
 
@@ -1005,11 +1024,12 @@ fn scores_right_anchored_row_spans_equal_width() {
 
 #[test]
 fn verbose_tier_renders_full_labels_with_three_space_separation() {
-    // Acceptance criterion 1c: at width >= 63, IpbrVerbose tier chosen.
+    // The IpbrVerbose tier needs the full phase-label budget plus the wider
+    // bracketed vendor column; at width >= 68 there is room for both.
     let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
 
-    let (lines, _) = responsive_models_area(&models, &[], 63, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 63);
+    let (lines, _) = responsive_models_area(&models, &[], 68, 50, ModelsAreaMode::FullTable);
+    let row = full_buffer_line(&lines, 0, 68);
 
     // IpbrVerbose should render full phase labels.
     assert!(
@@ -1077,6 +1097,46 @@ fn full_table_orders_by_build_score_descending() {
     assert!(rows[0].contains("gemini"));
     assert!(rows[1].contains("claude"));
     assert!(rows[2].contains("codex"));
+}
+
+#[test]
+fn full_table_renders_bracketed_subscription_tag_per_subscription_kind() {
+    // The picker tag is sourced from the selected candidate's subscription,
+    // not the row's compatibility mirror; build one row per kind and verify
+    // the bracket label round-trips into the rendered buffer.
+    let cases = [
+        (SubscriptionKind::Claude, "[claude]"),
+        (SubscriptionKind::Codex, "[codex]"),
+        (SubscriptionKind::Gemini, "[gemini]"),
+        (SubscriptionKind::Kimi, "[kimi]"),
+        (SubscriptionKind::OpencodeGo, "[opencode-go]"),
+        (SubscriptionKind::Free, "[free]"),
+    ];
+    for (sub, expected) in cases {
+        let model = vendor_model_with_axis_score(sub, "row-x", 100.0, 0);
+        let (lines, _) = responsive_models_area(&[model], &[], 200, 50, ModelsAreaMode::FullTable);
+        let row = full_buffer_line(&lines, 0, 200);
+        assert!(
+            row.contains(expected),
+            "subscription {sub:?} must render `{expected}`, got: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn full_table_renders_dash_tag_for_zero_candidate_row() {
+    // ipbr-known rows with no candidates render `[—]` and arbitration declines
+    // to pick them; the dimmed tag is what makes that visible to the operator.
+    let mut model = vendor_model_with_axis_score(SubscriptionKind::Claude, "lonely", 100.0, 0);
+    model.candidates.clear();
+    model.selected_candidate = None;
+
+    let (lines, _) = responsive_models_area(&[model], &[], 200, 50, ModelsAreaMode::FullTable);
+    let row = full_buffer_line(&lines, 0, 200);
+    assert!(
+        row.contains("[—]"),
+        "zero-candidate row must render `[—]`, got: {row:?}"
+    );
 }
 
 #[test]

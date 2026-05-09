@@ -193,8 +193,16 @@ fn render_full_table(
     visible_models_list.sort_by(|a, b| build_rank_order(a, b));
     let mut lines: Vec<Line<'static>> = Vec::new();
     for model in visible_models_list {
-        let label = vendor_label(model.vendor);
-        let color = vendor_color(model.vendor);
+        // Tag the row by the arbitration-chosen candidate's subscription. Rows
+        // with no candidates render `[—]` and stay greyed out: arbitration
+        // already declines to pick them, so the picker cannot drive a launch
+        // through one — the dim tag mirrors that "informational only" state.
+        let selected_subscription = model.selected_candidate().map(|c| c.subscription);
+        let label = vendor_label(selected_subscription);
+        let color = match selected_subscription {
+            Some(sub) => vendor_color(sub),
+            None => Color::DarkGray,
+        };
         let prefix = vendor_prefix(model.vendor);
         let short_name = model_names::display_name_for_vendor(&model.name, prefix);
         let vendor_failed = quota_errors.iter().any(|err| err.vendor == model.vendor);
@@ -379,19 +387,25 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 // Full table mode
 // ---------------------------------------------------------------------------
 const STATUS_DOT: &str = "●";
-fn vendor_label(vendor: SubscriptionKind) -> &'static str {
-    match vendor {
-        SubscriptionKind::Claude => "claude",
-        SubscriptionKind::Codex => "codex",
-        SubscriptionKind::Gemini => "gemini",
-        SubscriptionKind::Kimi => "kimi",
-        SubscriptionKind::OpencodeGo => "opencode",
-        SubscriptionKind::Free => "free",
+/// Bracketed subscription tag drawn in the vendor column. `selected` is the
+/// row's selected candidate's subscription; `None` renders the dim `[—]` mark
+/// for zero-candidate rows so the operator can see the row exists without
+/// being able to select it.
+fn vendor_label(selected: Option<SubscriptionKind>) -> &'static str {
+    match selected {
+        Some(SubscriptionKind::Claude) => "[claude]",
+        Some(SubscriptionKind::Codex) => "[codex]",
+        Some(SubscriptionKind::Gemini) => "[gemini]",
+        Some(SubscriptionKind::Kimi) => "[kimi]",
+        Some(SubscriptionKind::OpencodeGo) => "[opencode-go]",
+        Some(SubscriptionKind::Free) => "[free]",
+        None => "[—]",
     }
 }
-/// Width of the vendor-tag column (padded).
+/// Width of the vendor-tag column (padded). Sized for the widest tag,
+/// `[opencode-go]`.
 fn vendor_column_width() -> usize {
-    8
+    13
 }
 fn top_rank_prob_span(vendor_failed: bool, candidates: &[(bool, &str, u8, u8)]) -> Span<'static> {
     if vendor_failed {
@@ -444,7 +458,7 @@ fn render_compact_quota(
         .iter()
         .map(|(vendor, model)| {
             let vendor_failed = quota_errors.iter().any(|err| err.vendor == *vendor);
-            let label = vendor_label(*vendor);
+            let label = vendor_label(Some(*vendor));
             let quota_str_len = if vendor_failed {
                 2
             } else {
@@ -463,7 +477,7 @@ fn render_compact_quota(
             spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
         }
         first = false;
-        let label = vendor_label(vendor);
+        let label = vendor_label(Some(vendor));
         spans.push(Span::styled(
             label.to_string(),
             Style::default().fg(vendor_color(vendor)),

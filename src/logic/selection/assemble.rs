@@ -312,68 +312,45 @@ fn build_candidate(
     // Per-tuple flags come from the resolved provider list when the
     // dashboard's natural candidate identity matches a provider entry.
     // Falling back to `baked::baked_for` would skip user overrides, so
-    // we look the entry up here and only reach the bare-bones fallback
-    // when no provider entry exists for this exact tuple.
-    let provider_match = providers_by_row
+    // we look the entry up here and only synthesize a bare-bones
+    // fallback when no provider entry exists for this exact tuple.
+    //
+    // Fallback rationale: anything routed through OpencodeGo is by
+    // definition not the canonical owner of the model, so it is non-
+    // official. Direct CLIs (Claude, Codex, Gemini, Kimi) speaking to
+    // their own subscription remain official by default — the legacy
+    // "direct vs routed" pipeline depends on this distinction even
+    // when the (vendor, model) tuple has no provider entry on file.
+    let resolved = providers_by_row
         .get(&(subscription, dashboard_name.to_string()))
         .and_then(|entries| {
             entries
                 .iter()
                 .copied()
                 .find(|entry| entry.cli == cli && entry.launch_name == launch_name)
+        })
+        .cloned()
+        .unwrap_or_else(|| ProviderEntry {
+            vendor: dashboard_entry.vendor.clone(),
+            model: dashboard_name.to_string(),
+            cli,
+            launch_name: launch_name.to_string(),
+            enabled: true,
+            free: false,
+            official: subscription != SubscriptionKind::OpencodeGo,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_mapping: EffortMapping::default(),
+            display_order: display_order as u16,
         });
-    let (
-        enabled,
-        free,
-        official,
-        quota_disabled,
-        cheap_eligible,
-        tough_eligible,
-        effort_eligible,
-        effort_mapping,
-    ) = match provider_match {
-        Some(entry) => (
-            entry.enabled,
-            entry.free,
-            entry.official,
-            entry.quota_disabled,
-            entry.cheap_eligible,
-            entry.tough_eligible,
-            entry.effort_eligible,
-            entry.effort_mapping.clone(),
-        ),
-        None => (
-            true,
-            false,
-            // Fallback when no provider entry matches: anything routed
-            // through OpencodeGo is by definition not the canonical
-            // owner of the model, so it is non-official. Direct CLIs
-            // (Claude, Codex, Gemini, Kimi) speaking to their own
-            // subscription remain official by default — the legacy
-            // "direct vs routed" pipeline depends on this distinction
-            // even when the (vendor, model) tuple has no provider
-            // entry on file.
-            subscription != SubscriptionKind::OpencodeGo,
-            false,
-            false,
-            false,
-            false,
-            EffortMapping::default(),
-        ),
-    };
     Some(make_candidate(
         subscription,
         cli,
         launch_name,
         display_order,
-        enabled,
-        free,
-        official,
-        quota_disabled,
-        cheap_eligible,
-        tough_eligible,
-        effort_eligible,
-        effort_mapping,
+        &resolved,
         parsed_quotas,
         parsed_resets,
         failed_subscriptions,
@@ -381,26 +358,21 @@ fn build_candidate(
     ))
 }
 
-/// Materialise a `Candidate` with quota/reset lookups applied for a
-/// fully-resolved per-tuple flag bundle. The `dashboard_name` argument
-/// lets the dashboard-driven path opt into a secondary heuristic
-/// fallback (when `launch_name` was rewritten — e.g. Kimi → kimi-latest
-/// — but the dashboard name still has a quota entry); user-addition
-/// candidates pass `None` because their launch_name is authoritative.
+/// Materialise a `Candidate` with quota/reset lookups applied. The
+/// per-tuple flags and effort mapping come from `props` (a resolved
+/// `ProviderEntry`); the caller is responsible for picking the right
+/// override-or-fallback entry. `dashboard_name` lets the dashboard-
+/// driven path opt into a secondary heuristic fallback (when
+/// `launch_name` was rewritten — e.g. Kimi → kimi-latest — but the
+/// dashboard name still has a quota entry); user-addition candidates
+/// pass `None` because their launch_name is authoritative.
 #[allow(clippy::too_many_arguments)]
 fn make_candidate(
     subscription: SubscriptionKind,
     cli: CliKind,
     launch_name: &str,
     display_order: usize,
-    enabled: bool,
-    free: bool,
-    official: bool,
-    quota_disabled: bool,
-    cheap_eligible: bool,
-    tough_eligible: bool,
-    effort_eligible: bool,
-    effort_mapping: EffortMapping,
+    props: &ProviderEntry,
     parsed_quotas: &BTreeMap<SubscriptionKind, BTreeMap<String, Option<u8>>>,
     parsed_resets: &BTreeMap<
         SubscriptionKind,
@@ -434,14 +406,14 @@ fn make_candidate(
         quota_percent,
         quota_resets_at,
         display_order,
-        enabled,
-        free,
-        official,
-        quota_disabled,
-        cheap_eligible,
-        tough_eligible,
-        effort_eligible,
-        effort_mapping,
+        enabled: props.enabled,
+        free: props.free,
+        official: props.official,
+        quota_disabled: props.quota_disabled,
+        cheap_eligible: props.cheap_eligible,
+        tough_eligible: props.tough_eligible,
+        effort_eligible: props.effort_eligible,
+        effort_mapping: props.effort_mapping.clone(),
         quota_failed,
     }
 }
@@ -498,14 +470,7 @@ fn append_provider_additions(
             entry.cli,
             &entry.launch_name,
             entry.display_order as usize,
-            entry.enabled,
-            entry.free,
-            entry.official,
-            entry.quota_disabled,
-            entry.cheap_eligible,
-            entry.tough_eligible,
-            entry.effort_eligible,
-            entry.effort_mapping.clone(),
+            entry,
             parsed_quotas,
             parsed_resets,
             failed_subscriptions,

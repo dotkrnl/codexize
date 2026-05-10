@@ -110,11 +110,9 @@ impl Phase {
         match self {
             Phase::IdeaInput => "Idea Input".to_string(),
             Phase::BrainstormRunning => "Brainstorming".to_string(),
-            Phase::SpecReviewRunning => "Spec Review".to_string(),
-            Phase::SpecReviewPaused => "Spec Review".to_string(),
+            Phase::SpecReviewRunning | Phase::SpecReviewPaused => "Spec Review".to_string(),
             Phase::PlanningRunning => "Planning".to_string(),
-            Phase::PlanReviewRunning => "Plan Review".to_string(),
-            Phase::PlanReviewPaused => "Plan Review".to_string(),
+            Phase::PlanReviewRunning | Phase::PlanReviewPaused => "Plan Review".to_string(),
             Phase::ShardingRunning => "Sharding".to_string(),
             Phase::ImplementationRound(r) => format!("Round {r} Coder"),
             Phase::ReviewRound(r) => format!("Round {r} Reviewer"),

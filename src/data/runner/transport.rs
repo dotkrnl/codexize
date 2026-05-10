@@ -89,10 +89,10 @@ pub(in crate::data::runner) fn acp_trace_path_from_cause_path(cause_path: &Path)
     let Some(file_name) = cause_path.file_name().and_then(|name| name.to_str()) else {
         return cause_path.with_extension("acp.jsonl");
     };
-    let trace_name = file_name
-        .strip_suffix(".cause.txt")
-        .map(|stem| format!("{stem}.acp.jsonl"))
-        .unwrap_or_else(|| format!("{file_name}.acp.jsonl"));
+    let trace_name = file_name.strip_suffix(".cause.txt").map_or_else(
+        || format!("{file_name}.acp.jsonl"),
+        |stem| format!("{stem}.acp.jsonl"),
+    );
     cause_path.with_file_name(trace_name)
 }
 pub(in crate::data::runner) fn acp_text_trace_path(launch: &ManagedAcpLaunch) -> PathBuf {

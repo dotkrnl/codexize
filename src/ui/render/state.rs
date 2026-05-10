@@ -17,8 +17,7 @@ pub(crate) fn is_last_sibling(visible_rows: &[VisibleNodeRow], index: usize) -> 
     visible_rows[index + 1..]
         .iter()
         .find(|r| r.depth <= cur_depth)
-        .map(|r| r.depth < cur_depth)
-        .unwrap_or(true)
+        .is_none_or(|r| r.depth < cur_depth)
 }
 pub(crate) fn spinner_frame(count: usize) -> &'static str {
     SPINNER[count % SPINNER.len()]
@@ -255,13 +254,14 @@ pub(crate) fn skip_to_impl_content(
     lines
 }
 pub(crate) fn guard_content(decision: Option<&PendingGuardDecision>) -> Vec<Line<'static>> {
-    let (captured_short, current_short) = decision
-        .map(|d| {
+    let (captured_short, current_short) = decision.map_or_else(
+        || ("???????".to_string(), "???????".to_string()),
+        |d| {
             let cap = d.captured_head.get(..7).unwrap_or(&d.captured_head);
             let cur = d.current_head.get(..7).unwrap_or(&d.current_head);
             (cap.to_string(), cur.to_string())
-        })
-        .unwrap_or_else(|| ("???????".to_string(), "???????".to_string()));
+        },
+    );
     vec![
         Line::from(Span::styled(
             "An interactive agent advanced HEAD during a stage that must not commit.".to_string(),

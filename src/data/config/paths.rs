@@ -12,9 +12,7 @@ pub fn config_path() -> PathBuf {
     if let Some(value) = std::env::var_os(CONFIG_ENV) {
         return PathBuf::from(value);
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
     home.join(".codexize").join(CONFIG_FILE_NAME)
 }
 

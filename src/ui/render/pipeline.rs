@@ -29,9 +29,10 @@ fn node_status_style(status: crate::state::NodeStatus) -> ratatui::style::Style 
     match status {
         crate::state::NodeStatus::Pending => Style::default().fg(Color::DarkGray),
         crate::state::NodeStatus::Running => Style::default().fg(Color::Cyan),
-        crate::state::NodeStatus::WaitingUser => Style::default().fg(Color::Yellow),
+        crate::state::NodeStatus::WaitingUser | crate::state::NodeStatus::Skipped => {
+            Style::default().fg(Color::Yellow)
+        }
         crate::state::NodeStatus::Done => Style::default().fg(Color::Green),
-        crate::state::NodeStatus::Skipped => Style::default().fg(Color::Yellow),
         crate::state::NodeStatus::Failed => Style::default().fg(Color::Red),
         crate::state::NodeStatus::FailedUnverified => Style::default().fg(Color::LightYellow),
     }
@@ -91,8 +92,7 @@ impl App {
                 chrono::Utc::now()
                     .signed_duration_since(run.started_at)
                     .to_std()
-                    .map(|age| age <= STALL_TIMEOUT)
-                    .unwrap_or(true)
+                    .map_or(true, |age| age <= STALL_TIMEOUT)
             })
     }
     pub(crate) fn live_agent_spinner_active(&self) -> bool {

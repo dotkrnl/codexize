@@ -114,8 +114,7 @@ impl SelectionConfig {
             .find(|(v, name_match, p, _)| {
                 *v == vendor && *p == phase && name_match.is_none_or(|needle| name.contains(needle))
             })
-            .map(|(_, _, _, bias)| *bias)
-            .unwrap_or(1.0)
+            .map_or(1.0, |(_, _, _, bias)| *bias)
     }
     /// Concave curve: reaches 1.0 at `quota_soft_threshold`, falls off
     /// quadratically to 0 at 0%. At and above the soft threshold this stays

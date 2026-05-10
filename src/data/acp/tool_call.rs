@@ -117,7 +117,7 @@ pub(super) fn sanitize_snippet(input: &str) -> String {
 #[rustfmt::skip]
 pub(super) fn truncate_with_ellipsis(text: &str, max: usize) -> String {
     if text.chars().count() <= max { return text.to_string(); }
-    let cutoff = text.char_indices().nth(max.saturating_sub(3)).map(|(i, _)| i).unwrap_or(text.len());
+    let cutoff = text.char_indices().nth(max.saturating_sub(3)).map_or(text.len(), |(i, _)| i);
     format!("{}...", &text[..cutoff])
 }
 fn collapse_ws(t: &str) -> String {
@@ -130,7 +130,7 @@ pub(super) enum SnippetKind {
 }
 #[rustfmt::skip]
 fn select_snippet(state: &ToolCallDisplayState) -> Option<(SnippetKind, String)> {
-    let success = state.status.as_deref().map(is_success_status).unwrap_or(true);
+    let success = state.status.as_deref().is_none_or(is_success_status);
     let pick = |k, t: Option<&str>| {
         let s = sanitize_snippet(t?);
         (!s.is_empty()).then_some((k, s))
@@ -161,8 +161,7 @@ fn shorten_path(path: &Path, cwd: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(cwd) && !rel.as_os_str().is_empty() {
         return rel.to_string_lossy().into_owned();
     }
-    path.file_name().map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+    path.file_name().map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned())
 }
 #[rustfmt::skip]
 fn extract_command(raw: &Value) -> Option<String> {

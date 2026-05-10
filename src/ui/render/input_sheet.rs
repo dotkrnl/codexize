@@ -45,8 +45,7 @@ impl App {
                 let byte = chunk
                     .char_indices()
                     .nth(split_col)
-                    .map(|(i, _)| i)
-                    .unwrap_or(chunk.len());
+                    .map_or(chunk.len(), |(i, _)| i);
                 let (left, right) = (&chunk[..byte], &chunk[byte..]);
                 let mut spans = Vec::new();
                 if idx == 0 {

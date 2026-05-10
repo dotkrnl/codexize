@@ -279,18 +279,20 @@ fn node_key_part(node: &Node, path: &[usize], depth: usize) -> NodeKeyPart {
         return NodeKeyPart::Run(run_id);
     }
     match node.kind {
-        NodeKind::Stage => stage_key_for(node, path)
-            .map(NodeKeyPart::Stage)
-            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path.to_vec())),
+        NodeKind::Stage => stage_key_for(node, path).map_or_else(
+            || NodeKeyPart::Fallback(node.kind, path.to_vec()),
+            NodeKeyPart::Stage,
+        ),
         NodeKind::Task => NodeKeyPart::Task(task_key_for(node, path)),
-        NodeKind::Round => parse_round(node)
-            .map(NodeKeyPart::Round)
-            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path.to_vec())),
+        NodeKind::Round => parse_round(node).map_or_else(
+            || NodeKeyPart::Fallback(node.kind, path.to_vec()),
+            NodeKeyPart::Round,
+        ),
         NodeKind::Mode => NodeKeyPart::Mode(mode_key_for(node)),
-        NodeKind::AgentRun => node
-            .leaf_run_id
-            .map(NodeKeyPart::Run)
-            .unwrap_or_else(|| NodeKeyPart::Fallback(node.kind, path[..=depth].to_vec())),
+        NodeKind::AgentRun => node.leaf_run_id.map_or_else(
+            || NodeKeyPart::Fallback(node.kind, path[..=depth].to_vec()),
+            NodeKeyPart::Run,
+        ),
     }
 }
 /// Identify a top-level stage node by its label rather than by position so
@@ -336,9 +338,10 @@ fn task_key_for(node: &Node, path: &[usize]) -> TaskKey {
     }
     // REVIEWER: pending builder tasks do not carry an intrinsic id in `Node`, so the
     // canonical key currently parses the stable `Task <id>` prefix emitted by build_tree().
-    parse_task_id(node)
-        .map(TaskKey::Task)
-        .unwrap_or_else(|| TaskKey::Fallback(node.kind, path.to_vec()))
+    parse_task_id(node).map_or_else(
+        || TaskKey::Fallback(node.kind, path.to_vec()),
+        TaskKey::Task,
+    )
 }
 fn parse_task_id(node: &Node) -> Option<u32> {
     let rest = node.label.strip_prefix("Task ")?;

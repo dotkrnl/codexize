@@ -83,8 +83,7 @@ impl App {
             .enumerate()
             .rev()
             .find(|(_, message)| message.run_id == run_id && message.kind == MessageKind::AgentText)
-            .map(|(index, _)| index)
-            .unwrap_or(self.messages.len());
+            .map_or(self.messages.len(), |(index, _)| index);
         Some(InteractiveWaitMarker {
             run_id,
             message_index,
@@ -230,10 +229,10 @@ fn session_label(state: &SessionState) -> String {
         .idea_text
         .as_deref()
         .filter(|idea| !idea.trim().is_empty());
-    title
-        .or(idea)
-        .map(|value| value.chars().take(80).collect())
-        .unwrap_or_else(|| state.session_id.clone())
+    title.or(idea).map_or_else(
+        || state.session_id.clone(),
+        |value| value.chars().take(80).collect(),
+    )
 }
 
 fn stage_for_block_origin(origin: BlockOrigin) -> &'static str {

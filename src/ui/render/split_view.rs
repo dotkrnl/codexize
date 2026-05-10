@@ -155,14 +155,12 @@ impl SplitWidget<'_> {
             let show_cursor_here = cursor_pos.is_some_and(|(line, _)| line == idx);
             let split_col = cursor_pos
                 .filter(|(line, _)| *line == idx)
-                .map(|(_, col)| col)
-                .unwrap_or(0);
+                .map_or(0, |(_, col)| col);
             let (left, right) = if show_cursor_here {
                 let byte = chunk
                     .char_indices()
                     .nth(split_col)
-                    .map(|(i, _)| i)
-                    .unwrap_or(chunk.len());
+                    .map_or(chunk.len(), |(i, _)| i);
                 (&chunk[..byte], &chunk[byte..])
             } else {
                 (chunk.as_str(), "")

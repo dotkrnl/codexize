@@ -355,8 +355,7 @@ impl SessionPicker {
                 let byte = chunk
                     .char_indices()
                     .nth(split_col)
-                    .map(|(i, _)| i)
-                    .unwrap_or(chunk.len());
+                    .map_or(chunk.len(), |(i, _)| i);
                 let (left, right) = (&chunk[..byte], &chunk[byte..]);
                 content.push(Line::from(vec![
                     Span::styled(left.to_string(), text_style),
@@ -465,18 +464,14 @@ impl SessionPicker {
     fn palette_overlay_height(&self, total_height: u16) -> u16 {
         picker_view_model::palette_overlay_height(
             &self.palette.buffer,
-            self.selected_entry()
-                .map(|entry| entry.archived)
-                .unwrap_or(false),
+            self.selected_entry().is_some_and(|entry| entry.archived),
             total_height,
         )
     }
     fn palette_lines(&self, width: u16, inner_h: u16) -> Vec<Line<'static>> {
         picker_view_model::palette_lines(
             &self.palette.buffer,
-            self.selected_entry()
-                .map(|entry| entry.archived)
-                .unwrap_or(false),
+            self.selected_entry().is_some_and(|entry| entry.archived),
             width,
             inner_h,
         )

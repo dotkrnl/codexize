@@ -168,8 +168,7 @@ fn wrap_spans(spans: Vec<Span<'static>>, content_width: usize) -> Vec<Vec<Span<'
             let split_at = remaining
                 .char_indices()
                 .nth(room)
-                .map(|(i, _)| i)
-                .unwrap_or(remaining.len());
+                .map_or(remaining.len(), |(i, _)| i);
             let chunk = remaining[..split_at].to_string();
             lines
                 .last_mut()

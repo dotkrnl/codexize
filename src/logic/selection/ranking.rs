@@ -87,8 +87,7 @@ pub fn effective_row_quota(model: &CachedModel) -> Option<u8> {
     match (max_quota, has_unknown) {
         (Some(0), false) => None,
         (Some(value), _) => Some(value),
-        (None, true) => Some(UNKNOWN_QUOTA_PERCENT),
-        (None, false) => None,
+        (None, unknown) => unknown.then_some(UNKNOWN_QUOTA_PERCENT),
     }
 }
 fn relative_quota_factor(deficit: u8) -> f64 {

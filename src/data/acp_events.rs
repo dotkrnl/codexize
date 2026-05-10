@@ -73,8 +73,7 @@ impl AcpTextAccumulator {
             if !block.is_empty() { self.ready.push_back(block); }
         }
         while self.buffer.chars().count() >= self.max_chars {
-            let at = self.buffer.char_indices().nth(self.max_chars).map(|(i, _)| i)
-                .unwrap_or(self.buffer.len());
+            let at = self.buffer.char_indices().nth(self.max_chars).map_or(self.buffer.len(), |(i, _)| i);
             let block = self.buffer[..at].to_string();
             self.buffer = self.buffer[at..].to_string();
             self.ready.push_back(block);

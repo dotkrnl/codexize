@@ -285,9 +285,7 @@ impl SessionPicker {
     }
     fn palette_commands(&self) -> Vec<PaletteCommand> {
         picker_view_model::palette_commands(
-            self.selected_entry()
-                .map(|entry| entry.archived)
-                .unwrap_or(false),
+            self.selected_entry().is_some_and(|entry| entry.archived),
         )
     }
     fn handle_palette_key(&mut self, key: KeyEvent) -> Result<KeyAction> {

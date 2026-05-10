@@ -430,8 +430,7 @@ impl App {
         let viewport_bottom = self.viewport_top + self.effective_body_inner_height();
         let unread_below_viewport = self
             .first_unread_rendered_line()
-            .map(|line| line >= viewport_bottom)
-            .unwrap_or(!at_bottom);
+            .map_or(!at_bottom, |line| line >= viewport_bottom);
         if unread > 0 && unread_below_viewport {
             Some(UnreadBadge { count: unread })
         } else {

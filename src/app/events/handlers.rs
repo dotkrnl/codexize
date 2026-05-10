@@ -128,15 +128,13 @@ impl App {
                             .buffer
                             .char_indices()
                             .nth(cursor - 1)
-                            .map(|(i, _)| i)
-                            .unwrap_or(0);
+                            .map_or(0, |(i, _)| i);
                         let end = self
                             .palette
                             .buffer
                             .char_indices()
                             .nth(cursor)
-                            .map(|(i, _)| i)
-                            .unwrap_or(self.palette.buffer.len());
+                            .map_or(self.palette.buffer.len(), |(i, _)| i);
                         self.palette.buffer.replace_range(byte..end, "");
                         self.palette.cursor -= 1;
                     }
@@ -149,8 +147,7 @@ impl App {
                     .buffer
                     .char_indices()
                     .nth(self.palette.cursor)
-                    .map(|(i, _)| i)
-                    .unwrap_or(self.palette.buffer.len());
+                    .map_or(self.palette.buffer.len(), |(i, _)| i);
                 self.palette.buffer.insert(byte, c);
                 self.palette.cursor += 1;
                 false

@@ -71,8 +71,7 @@ pub(super) fn working_tree_clean() -> bool {
         .output()
         .ok()
         .filter(|output| output.status.success())
-        .map(|output| output.stdout.is_empty())
-        .unwrap_or(false)
+        .is_some_and(|output| output.stdout.is_empty())
 }
 pub(super) fn git_status_porcelain() -> Result<String> {
     let output = Command::new("git")
@@ -89,16 +88,20 @@ fn stamp_stabilize_budget() -> Duration {
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
         .filter(|ms| *ms > 0)
-        .map(Duration::from_millis)
-        .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_STABILIZE_BUDGET_MS))
+        .map_or_else(
+            || Duration::from_millis(DEFAULT_STAMP_STABILIZE_BUDGET_MS),
+            Duration::from_millis,
+        )
 }
 fn stamp_stabilize_interval() -> Duration {
     std::env::var(ENV_STAMP_STABILIZE_INTERVAL_MS)
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
         .filter(|ms| *ms > 0)
-        .map(Duration::from_millis)
-        .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_STABILIZE_INTERVAL_MS))
+        .map_or_else(
+            || Duration::from_millis(DEFAULT_STAMP_STABILIZE_INTERVAL_MS),
+            Duration::from_millis,
+        )
 }
 /// Wait for `git HEAD` to stabilise after a managed ACP run, returning the
 /// final SHA plus a label describing whether the budget was exhausted.

@@ -15,7 +15,7 @@ pub(super) fn binding_enabled(
     binding: &KeyBinding,
     caps: &dyn Fn(Option<Capability>) -> bool,
 ) -> bool {
-    binding.capability.map(|c| caps(Some(c))).unwrap_or(true)
+    binding.capability.is_none_or(|c| caps(Some(c)))
 }
 pub(super) fn binding_width(
     binding: &KeyBinding,

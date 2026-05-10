@@ -97,8 +97,7 @@ impl App {
         rounds
             .iter()
             .position(|&candidate| candidate == round)
-            .map(|pos| (pos + 1) as u32)
-            .unwrap_or(1)
+            .map_or(1, |pos| (pos + 1) as u32)
     }
     /// Effort to launch a coder/reviewer at, applying the per-task
     /// auto-tough rule on top of the task's declared effort. Both the
@@ -171,14 +170,8 @@ impl App {
     pub(crate) fn phase_for_stage(stage: &str) -> SelectionPhase {
         match stage {
             "brainstorm" => SelectionPhase::Idea,
-            "spec-review" => SelectionPhase::Review,
-            "planning" => SelectionPhase::Planning,
-            "plan-review" => SelectionPhase::Review,
-            "sharding" => SelectionPhase::Planning,
-            "recovery" => SelectionPhase::Planning,
-            "coder" => SelectionPhase::Build,
-            "reviewer" => SelectionPhase::Review,
-            "simplifier" => SelectionPhase::Build,
+            "spec-review" | "plan-review" | "reviewer" => SelectionPhase::Review,
+            "planning" | "sharding" | "recovery" => SelectionPhase::Planning,
             _ => SelectionPhase::Build,
         }
     }
@@ -188,9 +181,7 @@ impl App {
         round: u32,
         attempt: u32,
     ) -> String {
-        let task = task_id
-            .map(|id| format!("task-{id}"))
-            .unwrap_or_else(|| "stage".to_string());
+        let task = task_id.map_or_else(|| "stage".to_string(), |id| format!("task-{id}"));
         format!("{stage}-{task}-r{round}-a{attempt}")
     }
     pub(crate) fn live_summary_path_for_run(
@@ -235,8 +226,10 @@ impl App {
             .ok()
             .and_then(|raw| raw.parse::<u64>().ok())
             .filter(|ms| *ms > 0)
-            .map(Duration::from_millis)
-            .unwrap_or_else(|| Duration::from_millis(DEFAULT_STAMP_TIMEOUT_MS))
+            .map_or_else(
+                || Duration::from_millis(DEFAULT_STAMP_TIMEOUT_MS),
+                Duration::from_millis,
+            )
     }
     pub(crate) fn guard_dir_for(
         &self,
@@ -245,9 +238,7 @@ impl App {
         round: u32,
         attempt: u32,
     ) -> std::path::PathBuf {
-        let task = task_id
-            .map(|id| format!("task-{id}"))
-            .unwrap_or_else(|| "stage".to_string());
+        let task = task_id.map_or_else(|| "stage".to_string(), |id| format!("task-{id}"));
         self.session_dir()
             .join(".guards")
             .join(format!("{stage}-{task}-r{round}-a{attempt}"))
@@ -275,9 +266,7 @@ impl App {
                 &dir,
                 &format!(
                     "{stage}-{}-r{round}-a{attempt}",
-                    task_id
-                        .map(|id| format!("task{id}"))
-                        .unwrap_or_else(|| "stage".to_string())
+                    task_id.map_or_else(|| "stage".to_string(), |id| format!("task{id}"))
                 ),
                 mode,
                 false,
@@ -299,9 +288,7 @@ impl App {
             .map(|stamp| stamp.exit_code)
     }
     pub(crate) fn artifact_present(path: &std::path::Path) -> bool {
-        std::fs::metadata(path)
-            .map(|meta| meta.is_file() && meta.len() > 0)
-            .unwrap_or(false)
+        std::fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
     }
     pub(crate) fn capture_round_base(&self, round_dir: &std::path::Path) {
         let scope_file = round_dir.join("review_scope.toml");

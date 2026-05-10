@@ -33,8 +33,7 @@ pub fn detect_git() -> bool {
     Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }
 pub fn detect_ignored(root: &Path) -> bool {
     let ignored = |path: &std::ffi::OsStr| {
@@ -42,8 +41,7 @@ pub fn detect_ignored(root: &Path) -> bool {
             .args(["check-ignore", "-q", "--no-index", "--"])
             .arg(path)
             .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+            .is_ok_and(|o| o.status.success())
     };
     if ignored(root.as_os_str()) {
         return true;

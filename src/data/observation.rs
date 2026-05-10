@@ -60,8 +60,7 @@ pub fn ensure_live_summary_watch_dir(live_summary_path: &Path) -> Result<PathBuf
     let watch_path: PathBuf = live_summary_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     if let Err(e) = std::fs::create_dir_all(&watch_path) {
         return Err(format!("watcher setup failed: {e}, falling back to poll"));
     }
@@ -114,8 +113,7 @@ pub fn probe_live_summary(path: &Path) -> LiveSummaryProbe {
     };
     let stale = mtime
         .elapsed()
-        .map(|d| d > LIVE_SUMMARY_STALE_AFTER)
-        .unwrap_or(true);
+        .map_or(true, |d| d > LIVE_SUMMARY_STALE_AFTER);
     if stale {
         LiveSummaryProbe::Stale
     } else {

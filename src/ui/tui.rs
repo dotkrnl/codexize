@@ -318,8 +318,7 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
                     let split_at = remaining
                         .char_indices()
                         .nth(width)
-                        .map(|(i, _)| i)
-                        .unwrap_or(remaining.len());
+                        .map_or(remaining.len(), |(i, _)| i);
                     out.push(remaining[..split_at].to_string());
                     remaining = &remaining[split_at..];
                 }

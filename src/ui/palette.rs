@@ -70,7 +70,7 @@ pub fn ghost_completion<'a>(input: &str, commands: &'a [PaletteCommand]) -> Opti
     if input.is_empty() {
         return None;
     }
-    let cmd_part = input.split_once(' ').map(|(c, _)| c).unwrap_or(input);
+    let cmd_part = input.split_once(' ').map_or(input, |(c, _)| c);
     // Don't show ghost for exact matches
     if commands
         .iter()
@@ -104,7 +104,7 @@ pub fn filter<'a>(buffer: &str, commands: &'a [PaletteCommand]) -> Vec<&'a Palet
     if trimmed.is_empty() {
         return commands.iter().collect();
     }
-    let cmd_part = trimmed.split_once(' ').map(|(c, _)| c).unwrap_or(trimmed);
+    let cmd_part = trimmed.split_once(' ').map_or(trimmed, |(c, _)| c);
     let needle = cmd_part.to_ascii_lowercase();
     commands
         .iter()

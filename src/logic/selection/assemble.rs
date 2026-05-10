@@ -268,33 +268,23 @@ fn refresh_selected_candidate(row: &mut CachedModel) {
 /// `super::selection`), pick the best provider inside the row using the
 /// Priority ladder `free > official(>=21) > no-quota > non-official`.
 pub fn select_candidate_index(candidates: &[Candidate]) -> Option<usize> {
-    let enabled: Vec<usize> = candidates
-        .iter()
-        .enumerate()
-        .filter_map(|(index, candidate)| candidate.enabled.then_some(index))
-        .collect();
-    if enabled.is_empty() {
-        return None;
-    }
-
     let mut free_pool = Vec::new();
     let mut official_pool = Vec::new();
     let mut no_quota_pool = Vec::new();
     let mut non_official_pool = Vec::new();
-    for index in &enabled {
-        let candidate = &candidates[*index];
+    for (index, candidate) in candidates.iter().enumerate().filter(|(_, c)| c.enabled) {
         if candidate.free {
-            free_pool.push(*index);
+            free_pool.push(index);
         } else if candidate.official {
-            official_pool.push(*index);
+            official_pool.push(index);
         } else if candidate.quota_disabled {
             // `quota_disabled` (force-100%) is the spec's "no-quota"
             // pool — it sits between official-with-good-quota and the
             // non-official pool so the operator can park a self-hosted
             // route here without having to lie about its quota.
-            no_quota_pool.push(*index);
+            no_quota_pool.push(index);
         } else {
-            non_official_pool.push(*index);
+            non_official_pool.push(index);
         }
     }
 
@@ -355,26 +345,18 @@ pub fn merge_quota_payload(
 ) -> QuotaPayload {
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged = QuotaPayload::default();
-    for (subscription_str, models) in &cached.values {
-        // Drop cache entries whose subscription string is not part of the
-        // current schema. Tracked subscriptions either get refreshed-in below
-        // or carry forward their cached value.
-        let preserve = match parse_subscription_str(subscription_str) {
-            Some(kind) => !succeeded.contains(&kind),
-            None => false,
-        };
-        if preserve {
-            merged
-                .values
-                .insert(subscription_str.clone(), models.clone());
-        }
-    }
-    for (kind, models) in fresh {
-        merged.values.insert(
-            subscription::subscription_kind_to_str(kind).to_string(),
-            models,
-        );
-    }
+    merged.values.extend(
+        cached
+            .values
+            .iter()
+            .filter(|(subscription, _)| should_preserve_cached(subscription, &succeeded))
+            .map(|(subscription, models)| (subscription.clone(), models.clone())),
+    );
+    merged.values.extend(
+        fresh
+            .into_iter()
+            .map(|(kind, models)| (subscription_key(kind), models)),
+    );
     // Re-derive `failed_subscriptions` for this round: drop markers
     // belonging to subscriptions that just refreshed cleanly, keep
     // markers for subscriptions we did not touch, and add fresh markers
@@ -397,24 +379,26 @@ pub fn merge_reset_payload(
 ) -> ResetPayload {
     let succeeded: HashSet<SubscriptionKind> = fresh.keys().copied().collect();
     let mut merged: ResetPayload = BTreeMap::new();
-    for (subscription_str, models) in cached {
-        // Mirror `merge_quota_payload`: unparseable subscription keys are
-        // stale and dropped on the next refresh.
-        let preserve = match parse_subscription_str(subscription_str) {
-            Some(kind) => !succeeded.contains(&kind),
-            None => false,
-        };
-        if preserve {
-            merged.insert(subscription_str.clone(), models.clone());
-        }
-    }
-    for (kind, models) in fresh {
-        merged.insert(
-            subscription::subscription_kind_to_str(kind).to_string(),
-            models,
-        );
-    }
+    merged.extend(
+        cached
+            .iter()
+            .filter(|(subscription, _)| should_preserve_cached(subscription, &succeeded))
+            .map(|(subscription, models)| (subscription.clone(), models.clone())),
+    );
+    merged.extend(
+        fresh
+            .into_iter()
+            .map(|(kind, models)| (subscription_key(kind), models)),
+    );
     merged
+}
+
+fn should_preserve_cached(subscription: &str, succeeded: &HashSet<SubscriptionKind>) -> bool {
+    parse_subscription_str(subscription).is_some_and(|kind| !succeeded.contains(&kind))
+}
+
+fn subscription_key(kind: SubscriptionKind) -> String {
+    subscription::subscription_kind_to_str(kind).to_string()
 }
 pub fn has_reset_coverage_gaps(quotas: &QuotaPayload, resets: &ResetPayload) -> bool {
     quotas.values.iter().any(|(subscription, models)| {

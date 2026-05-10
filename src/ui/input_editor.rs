@@ -103,10 +103,7 @@ pub fn insert_str(buffer: &mut String, cursor: &mut usize, s: &str) {
     *cursor += inserted_chars;
 }
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
+    s.char_indices().nth(char_idx).map_or(s.len(), |(i, _)| i)
 }
 fn delete_backward(buffer: &mut String, cursor: &mut usize) {
     if *cursor == 0 {

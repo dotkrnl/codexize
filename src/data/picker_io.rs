@@ -37,8 +37,7 @@ pub fn scan_sessions(sessions_dir: &Path) -> Result<Vec<SessionEntry>> {
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| truncate_idea(&state.idea_text)),
+                .map_or_else(|| truncate_idea(&state.idea_text), str::to_string),
             current_phase: state.current_phase,
             modes: state.modes,
             last_modified,

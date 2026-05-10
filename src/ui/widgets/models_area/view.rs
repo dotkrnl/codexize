@@ -139,8 +139,7 @@ fn render_full_table(
         models
             .iter()
             .position(|candidate| std::ptr::eq(candidate, model))
-            .map(|index| weights[index])
-            .unwrap_or(0.0)
+            .map_or(0.0, |index| weights[index])
     };
     let total_for = |phase: SelectionPhase| -> f64 {
         match phase {

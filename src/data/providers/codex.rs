@@ -104,13 +104,14 @@ fn resolve_usage_identity() -> Result<UsageIdentity> {
             account_id,
         });
     }
-    let auth_path = env::var_os("CODEX_AUTH_FILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
+    let auth_path = env::var_os("CODEX_AUTH_FILE").map_or_else(
+        || {
             codex_home()
                 .unwrap_or_else(|_| PathBuf::from(".codex"))
                 .join("auth.json")
-        });
+        },
+        PathBuf::from,
+    );
     let text = fs::read_to_string(&auth_path)
         .with_context(|| format!("failed to read {}", auth_path.display()))?;
     let auth: AuthFile = serde_json::from_str(&text)

@@ -82,7 +82,7 @@ fn git_head() -> Option<String> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 pub fn git_status_dirty() -> bool {
-    git_status().map(|s| !s.trim().is_empty()).unwrap_or(false)
+    git_status().is_some_and(|s| !s.trim().is_empty())
 }
 fn git_status() -> Option<String> {
     #[cfg(test)]
@@ -206,8 +206,7 @@ pub fn reset_hard_to(captured_head: &str) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 fn verify_non_coder(snap: &Snapshot) -> VerifyResult {
     let mut warnings = Vec::new();

@@ -1207,8 +1207,7 @@ pub fn render_sparse(config: &Config) -> String {
             // Per spec: `effort_mapping` is saved as an atomic block
             // when any sub-field diverges from the baked default.
             let resolved_baked = baked::baked_for(&entry.model, entry.cli, &entry.launch_name)
-                .map(|p| p.effort_mapping)
-                .unwrap_or_else(|| baked_default.clone());
+                .map_or_else(|| baked_default.clone(), |p| p.effort_mapping);
             if entry.effort_mapping != resolved_baked {
                 out.push_str("\n[providers.effort_mapping]\n");
                 let _ = writeln!(out, "cheap = {}", toml_quote(&entry.effort_mapping.cheap));

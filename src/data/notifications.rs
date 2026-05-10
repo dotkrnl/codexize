@@ -135,12 +135,16 @@ pub struct NotificationRuntime {
 
 impl NotificationRuntime {
     pub fn new(params: NotificationParams) -> Self {
-        let (report_tx, report_rx) = mpsc::unbounded_channel();
         let client = if params.enabled {
             ntfy_http_client(params.http_timeout_secs).ok()
         } else {
             None
         };
+        Self::with_client(params, client)
+    }
+
+    fn with_client(params: NotificationParams, client: Option<Client>) -> Self {
+        let (report_tx, report_rx) = mpsc::unbounded_channel();
         Self {
             params,
             client,
@@ -154,85 +158,50 @@ impl NotificationRuntime {
     }
 
     pub fn new_disabled() -> Self {
-        let (report_tx, report_rx) = mpsc::unbounded_channel();
-        Self {
-            params: NotificationParams {
-                enabled: false,
-                server: String::new(),
-                topic: String::new(),
-                detail_mode: NtfyDetailMode::Detailed,
-                body_max_bytes: 0,
-                excerpt_max_chars: 0,
-                retry_attempts: 0,
+        Self::new(NotificationParams {
+            enabled: false,
+            server: String::new(),
+            topic: String::new(),
+            detail_mode: NtfyDetailMode::Detailed,
+            body_max_bytes: 0,
+            excerpt_max_chars: 0,
+            retry_attempts: 0,
+            retry_delay_ms: 0,
+            http_timeout_secs: 0,
+            events: NtfyEventsView {
+                phase_wait: true,
+                interactive_wait: true,
+                pipeline_done: true,
+            },
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enabled_for_test() -> Self {
+        Self::with_client(
+            NotificationParams::from_view(&NtfyView {
+                enabled: true,
+                server: "https://ntfy.sh".to_string(),
+                topic: "test-topic".to_string(),
+                detail_mode: NtfyDetailMode::Minimal,
+                retry_attempts: 1,
                 retry_delay_ms: 0,
-                http_timeout_secs: 0,
+                http_timeout_secs: 5,
+                body_max_bytes: 4096,
+                excerpt_max_chars: 600,
                 events: NtfyEventsView {
                     phase_wait: true,
                     interactive_wait: true,
                     pipeline_done: true,
                 },
-            },
-            client: None,
-            report_tx,
-            report_rx,
-            pending_sends: Vec::new(),
-            occurrence: 0,
-            seen: HashSet::new(),
-            events: Vec::new(),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn enabled_for_test() -> Self {
-        let (report_tx, report_rx) = mpsc::unbounded_channel();
-        Self {
-            params: NotificationParams {
-                enabled: true,
-                ..NotificationParams::from_view(&NtfyView {
-                    enabled: true,
-                    server: "https://ntfy.sh".to_string(),
-                    topic: "test-topic".to_string(),
-                    detail_mode: NtfyDetailMode::Minimal,
-                    retry_attempts: 1,
-                    retry_delay_ms: 0,
-                    http_timeout_secs: 5,
-                    body_max_bytes: 4096,
-                    excerpt_max_chars: 600,
-                    events: NtfyEventsView {
-                        phase_wait: true,
-                        interactive_wait: true,
-                        pipeline_done: true,
-                    },
-                })
-            },
-            client: None,
-            report_tx,
-            report_rx,
-            pending_sends: Vec::new(),
-            occurrence: 0,
-            seen: HashSet::new(),
-            events: Vec::new(),
-        }
+            }),
+            None,
+        )
     }
 
     #[cfg(test)]
     pub(crate) fn from_params_for_test(params: NotificationParams) -> Self {
-        let (report_tx, report_rx) = mpsc::unbounded_channel();
-        let client = if params.enabled {
-            ntfy_http_client(params.http_timeout_secs).ok()
-        } else {
-            None
-        };
-        Self {
-            params,
-            client,
-            report_tx,
-            report_rx,
-            pending_sends: Vec::new(),
-            occurrence: 0,
-            seen: HashSet::new(),
-            events: Vec::new(),
-        }
+        Self::new(params)
     }
 
     pub fn events(&self) -> &[NotificationEvent] {
@@ -340,13 +309,8 @@ impl NotificationRuntime {
         let tx = self.report_tx.clone();
         let handle = tokio::spawn(async move {
             let subscribe_url = format!("{}/{}", server.trim_end_matches('/'), topic);
-            let title = normalize_header_title(&prose_title(&event));
-            let include_context = matches!(detail_mode, NtfyDetailMode::Detailed);
-            let body = prose_body(&event, include_context, excerpt_max_chars);
-            let message = NtfyMessage {
-                title,
-                body: truncate_body(body, body_max_bytes),
-            };
+            let message =
+                format_ntfy_message(&event, detail_mode, body_max_bytes, excerpt_max_chars);
             let attempts = retry_attempts.max(1) as usize;
             let mut last_error: Option<anyhow::Error> = None;
             for attempt in 1..=attempts {
@@ -360,9 +324,10 @@ impl NotificationRuntime {
                     }
                 }
             }
-            let last = last_error
-                .map(|err| format!("{err:#}"))
-                .unwrap_or_else(|| "unknown publish error".to_string());
+            let last = last_error.map_or_else(
+                || "unknown publish error".to_string(),
+                |err| format!("{err:#}"),
+            );
             let _ = tx.send(format!(
                 "ntfy publish failed after {attempts} attempts: {last}"
             ));
@@ -499,6 +464,22 @@ fn prose_body(event: &NotificationEvent, include_context: bool, excerpt_max_char
     body
 }
 
+fn format_ntfy_message(
+    event: &NotificationEvent,
+    detail_mode: NtfyDetailMode,
+    body_max_bytes: u64,
+    excerpt_max_chars: u32,
+) -> NtfyMessage {
+    let include_context = matches!(detail_mode, NtfyDetailMode::Detailed);
+    NtfyMessage {
+        title: normalize_header_title(&prose_title(event)),
+        body: truncate_body(
+            prose_body(event, include_context, excerpt_max_chars),
+            body_max_bytes,
+        ),
+    }
+}
+
 fn lead_sentence(event: &NotificationEvent) -> String {
     let session = quoted_session(&event.context.session_label);
     match (event.kind, event.reason, event.phase) {
@@ -594,23 +575,7 @@ fn non_empty_excerpt(text: &str, max_chars: u32) -> Option<String> {
 }
 
 fn collapse_whitespace(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut last_space = false;
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            if !last_space && !out.is_empty() {
-                out.push(' ');
-                last_space = true;
-            }
-        } else {
-            out.push(ch);
-            last_space = false;
-        }
-    }
-    if out.ends_with(' ') {
-        out.pop();
-    }
-    out
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn truncate_chars(text: &str, max_chars: usize) -> String {
@@ -625,28 +590,20 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 fn normalize_header_title(title: &str) -> String {
-    let mut normalized = String::new();
-    let mut last_was_space = false;
-    for ch in title.chars() {
-        let ch = if ch.is_ascii() && !ch.is_ascii_control() {
-            ch
-        } else {
-            ' '
-        };
-        if ch.is_ascii_whitespace() {
-            if !last_was_space {
-                normalized.push(' ');
-                last_was_space = true;
+    let ascii = title
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii() && !ch.is_ascii_control() {
+                ch
+            } else {
+                ' '
             }
-        } else {
-            normalized.push(ch);
-            last_was_space = false;
-        }
-        if normalized.chars().count() >= NTFY_TITLE_MAX_CHARS {
-            break;
-        }
-    }
-    normalized.trim().to_string()
+        })
+        .collect::<String>();
+    collapse_whitespace(&ascii)
+        .chars()
+        .take(NTFY_TITLE_MAX_CHARS)
+        .collect()
 }
 
 fn truncate_body(body: String, max_bytes: u64) -> String {

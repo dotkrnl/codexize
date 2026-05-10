@@ -27,7 +27,7 @@ pub(crate) fn nearest(target: &str, candidates: &[&str], max_distance: usize) ->
     let mut best: Option<(usize, &str)> = None;
     for c in candidates {
         let d = levenshtein(target, c);
-        if d <= max_distance && best.map(|(b, _)| d < b).unwrap_or(true) {
+        if d <= max_distance && best.is_none_or(|(b, _)| d < b) {
             best = Some((d, c));
         }
     }

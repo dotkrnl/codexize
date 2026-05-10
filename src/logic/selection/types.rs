@@ -159,8 +159,7 @@ impl ModelRow {
     }
     pub fn selected_launch_name(&self) -> &str {
         self.selected_candidate()
-            .map(|candidate| candidate.launch_name.as_str())
-            .unwrap_or(&self.name)
+            .map_or(&self.name, |candidate| candidate.launch_name.as_str())
     }
 }
 impl SubscriptionKind {

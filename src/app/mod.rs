@@ -348,8 +348,8 @@ fn effective_expansion(
     }
 }
 fn startup_cache_has_expired_section(loaded: &cache::LoadedCache) -> bool {
-    let dashboard_expired = loaded.dashboard.as_ref().map(|s| s.expired).unwrap_or(true);
-    let quotas_expired = loaded.quotas.as_ref().map(|s| s.expired).unwrap_or(true);
+    let dashboard_expired = loaded.dashboard.as_ref().is_none_or(|s| s.expired);
+    let quotas_expired = loaded.quotas.as_ref().is_none_or(|s| s.expired);
     dashboard_expired || quotas_expired
 }
 #[doc(hidden)]

@@ -62,8 +62,7 @@ pub(super) fn iteration_round_range(state: &SessionState, iteration: u32) -> (u3
     } else {
         bounds
             .get((iteration - 2) as usize)
-            .map(|round| round + 1)
-            .unwrap_or(1)
+            .map_or(1, |round| round + 1)
     };
     let end = bounds.get((iteration - 1) as usize).copied();
     (start, end)

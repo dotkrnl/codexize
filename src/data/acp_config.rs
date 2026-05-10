@@ -148,7 +148,7 @@ impl Default for AcpConfig {
 }
 #[rustfmt::skip]
 pub fn claude_acp_install_root() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
         .join(".codexize").join("acp")
 }
 #[rustfmt::skip]

@@ -78,10 +78,10 @@ pub(crate) fn brainstorm_prompt(
 ) -> String {
     let mut ctx = PromptCtx::new(meta);
     let summary_path = ctx.path(summary_path);
-    let skip_proposal_path = Path::new(&summary_path)
-        .parent()
-        .map(|dir| dir.join("skip_proposal.toml"))
-        .unwrap_or_else(|| resolved_agent_path(Path::new("skip_proposal.toml")));
+    let skip_proposal_path = Path::new(&summary_path).parent().map_or_else(
+        || resolved_agent_path(Path::new("skip_proposal.toml")),
+        |dir| dir.join("skip_proposal.toml"),
+    );
     let template = if yolo {
         include_str!("prompts/brainstorm_yolo.md")
     } else {
@@ -213,9 +213,7 @@ pub(crate) fn recovery_prompt(
         .memory_arg(spec_path)
         .set(
             "trigger_task",
-            trigger_task_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "(none)".to_string()),
+            trigger_task_id.map_or_else(|| "(none)".to_string(), |id| id.to_string()),
         )
         .set(
             "trigger_summary",

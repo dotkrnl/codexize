@@ -100,7 +100,7 @@ fn extract_identity(value: &Value) -> Option<String> {
 }
 #[rustfmt::skip]
 fn handle_tool_call(s: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
-    let terminal = s.status.as_deref().map(is_terminal_status).unwrap_or(false);
+    let terminal = s.status.as_deref().is_some_and(is_terminal_status);
     out.push_back(tool_text(format_invocation_line(&s, cwd)));
     let Some(id) = s.tool_call_id.clone() else {
         if terminal { out.push_back(tool_text(format_result_line(&s))); }
@@ -113,7 +113,7 @@ fn handle_tool_call(s: ToolCallDisplayState, cwd: &Path, map: &mut ToolCallMap, 
 }
 #[rustfmt::skip]
 fn handle_tool_call_update(p: ToolCallDisplayState, map: &mut ToolCallMap, out: &mut VecDeque<ClientUpdate>) {
-    let terminal = p.status.as_deref().map(is_terminal_status).unwrap_or(false);
+    let terminal = p.status.as_deref().is_some_and(is_terminal_status);
     let active = p.status.as_deref().is_some_and(|s| matches!(s, "pending" | "in_progress"));
     let Some(id) = p.tool_call_id.clone() else {
         if terminal { out.push_back(tool_text(format_result_line(&p))); }

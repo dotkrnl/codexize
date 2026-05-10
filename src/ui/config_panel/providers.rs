@@ -245,9 +245,10 @@ impl ProvidersEditor {
 }
 
 pub(crate) enum ProvidersLine {
-    /// Top-level vendor section — rendered once per vendor, contains
-    /// every model/provider grouped underneath.
-    VendorHeader { vendor: String },
+    /// Top-level vendor section. `folded` is true when the user has
+    /// collapsed the section — only this header line renders, all the
+    /// child models and providers are filtered out by `get_lines`.
+    VendorHeader { vendor: String, folded: bool },
     /// Model header nested under a vendor — drops the redundant vendor
     /// name from the label since the vendor section above is already
     /// visible.
@@ -272,12 +273,15 @@ pub(crate) fn vendor_for(model: &str, subscription: SubscriptionKind) -> String 
     crate::logic::selection::subscription::subscription_kind_to_str(subscription).to_string()
 }
 
-pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
+pub(crate) fn get_lines(
+    config: &Config,
+    folded_vendors: &std::collections::BTreeSet<String>,
+) -> Vec<ProvidersLine> {
     // Group rows by (vendor, model) so a single model collects every way
-    // to launch it. The provider list is then emitted as a 3-level tree:
-    // VendorHeader · ModelHeader · Provider rows. The merge step yields
-    // entries in stable display_order; we preserve relative order
-    // inside each (vendor, model) bucket.
+    // to launch it. The provider list is emitted as a 3-level tree
+    // (VendorHeader · ModelHeader · Provider rows); folded vendors only
+    // emit their header line so the page stays scannable when the user
+    // hasn't drilled in yet.
     let providers = baked::merge_with_overrides(config.providers.value());
     let mut buckets: Vec<((String, String), Vec<ProviderEntry>)> = Vec::new();
     for entry in providers {
@@ -291,12 +295,19 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
 
     let mut lines = Vec::new();
     let mut current_vendor: Option<String> = None;
+    let mut current_folded = false;
     for ((vendor, model), entries) in buckets {
         if current_vendor.as_deref() != Some(vendor.as_str()) {
+            let folded = folded_vendors.contains(&vendor);
             lines.push(ProvidersLine::VendorHeader {
                 vendor: vendor.clone(),
+                folded,
             });
             current_vendor = Some(vendor.clone());
+            current_folded = folded;
+        }
+        if current_folded {
+            continue;
         }
         lines.push(ProvidersLine::ModelHeader {
             model: model.clone(),
@@ -316,23 +327,51 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
     lines
 }
 
+/// Set of every vendor name reachable from the current config — used as
+/// the panel's "fold everything by default" seed.
+pub(crate) fn all_vendors(config: &Config) -> std::collections::BTreeSet<String> {
+    let providers = baked::merge_with_overrides(config.providers.value());
+    providers
+        .iter()
+        .map(|e| vendor_for(&e.model, e.subscription))
+        .collect()
+}
+
 /// Compact one-line render of a provider list entry. Group headers and the
 /// trailing "Add provider" action use distinct visual treatments so the
 /// flat row stream still scans as a hierarchy.
 pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) -> Line<'static> {
     match line {
-        ProvidersLine::VendorHeader { vendor } => Line::from(vec![
-            Span::styled(
-                "▾ ".to_string(),
-                Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                vendor.clone(),
+        ProvidersLine::VendorHeader { vendor, folded } => {
+            // Chevron flips with fold state so users see the affordance
+            // at a glance: ▾ open, ▸ closed (both spaced before vendor).
+            let chevron = if *folded { "▸" } else { "▾" };
+            let focus_glyph = if focused {
+                Span::styled(
+                    "▌".to_string(),
+                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::raw(" ")
+            };
+            let vendor_style = if focused {
                 Style::default()
                     .fg(COLOR_SUBSCRIPTION)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            } else {
+                Style::default()
+                    .fg(COLOR_SUBSCRIPTION)
+                    .add_modifier(Modifier::BOLD)
+            };
+            Line::from(vec![
+                focus_glyph,
+                Span::styled(
+                    format!("{} ", chevron),
+                    Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(vendor.clone(), vendor_style),
+            ])
+        }
         ProvidersLine::ModelHeader { model } => Line::from(vec![
             Span::raw("  "),
             Span::styled(

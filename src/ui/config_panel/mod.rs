@@ -476,7 +476,7 @@ const PROVIDER_TOGGLES: &[ProviderToggle] = &[
         label: "Free",
         description: "Marks usage as no-cost (display label only; does not affect billing).",
         field: ToggleField::Free,
-        baked_locked: true,
+        baked_locked: false,
     },
     ProviderToggle {
         label: "Ignore quota",
@@ -504,9 +504,7 @@ const PROVIDER_TOGGLES: &[ProviderToggle] = &[
     },
 ];
 
-/// First toggle index that is editable for the provider type. Built-in entries
-/// pin official/free, so the cursor lands on `Enabled` rather than a row the
-/// user can't actually flip.
+/// First toggle index that is editable for the provider type.
 fn first_toggle_index(_is_baked: bool) -> usize {
     0
 }
@@ -2009,6 +2007,7 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
             focus_span(focused),
             Span::raw(" "),
             Span::styled(pad_right(label, label_w), Style::default().fg(COLOR_DIM)),
+            Span::raw(" "),
             Span::styled(value_for(field), value_style),
         ];
         // Show a chevron next to enum-style fields so the dropdown

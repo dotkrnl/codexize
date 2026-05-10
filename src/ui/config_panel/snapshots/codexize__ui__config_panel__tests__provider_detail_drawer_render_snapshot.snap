@@ -1,5 +1,6 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 4344
 expression: "render_to_text(&state, 90, 22)"
 ---
 "⚙ Settings────────────────────────────────────────────────────────/tmp/example/config.toml"
@@ -11,7 +12,7 @@ expression: "render_to_text(&state, 90, 22)"
 "    ▌│                                                                              │     "
 "  ▾ c│ ▌  ✓  Enabled                                                                │     "
 "     │    ✓  Official  built-in                                                     │     "
-"  ▾ c│    ✗  Free  built-in                                                         │     "
+"  ▾ c│    ✗  Free                                                                   │     "
 "     │    ✗  Ignore quota                                                           │     "
 "  ▾ c│    ✗  Cheap eligible                                                         │     "
 "     │    ✗  Tough eligible                                                         │     "

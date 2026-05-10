@@ -1,19 +1,18 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 2255
 expression: "render_to_text(&state, 120, 20)"
 ---
 "settings────────────────────────────────────────────────────────────────────────────────────────/tmp/example/config.toml"
-"▾ Common  ▸ Models  ▸ Notifications*  ▸ Agents  ▸ System*                                                               "
+"▾ Common  ▸ Models  ▸ Notifications ●  ▸ Agents  ▸ System ●                                                             "
 "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
-"> Review cadence               │ 5                                                                                 (def)"
-"  Open runs in split view      │ false                                                                             (def)"
-"  Footer key hints             │ true                                                                              (def)"
-"  Log level                    │ info                                                                              (def)"
-"  Project memory               │ true                                                                              (def)"
+"▌  Review cadence               │ 5                                                                                     "
+"   Open runs in split view      │ false                                                                                 "
+"   Footer key hints             │ true                                                                                  "
+"   Log level                    │ info                                                                                  "
+"   Project memory               │ true                                                                                  "
 "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
 "Run a full alignment review every N review rounds. Minimum: 1.                                                          "
-"Tab page · Enter edit · Ctrl-S save · Esc close · d default · / search  |  config open                                  "
+"Tab page  Enter edit  Space toggle  d default  / search  Ctrl-S save  Esc close                            │ config open"
 "                                                                                                                        "
 "                                                                                                                        "
 "                                                                                                                        "

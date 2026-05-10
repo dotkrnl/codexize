@@ -1,21 +1,20 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 2278
 expression: text
 ---
 "settings────────────────────────────/tmp/example/config.toml"
-"▸ Common  ▸ Models  ▸ Notifications*  ▸ Agents  ▾ System*   "
+"▸ Common  ▸ Models  ▸ Notifications ●  ▸ Agents  ▾ System ● "
 "────────────────────────────────────────────────────────────"
-"> Config version               │ 1                     (def)"
-"  Notification config created  │                       (def)"
-"  Notification config updated  │                       (def)"
-"  Cache folder                 │ .codexize/cache       (def)"
-"   *Sessions folder              │ $HOME/.codexize/…  overri"
-"  Runs folder                  │ .codexize/runs        (def)"
-"  Memory folder                │ .codexize/memory      (def)"
-"  Palette help row             │ true                  (def)"
-"  JSON logs                    │ false                 (def)"
-"  Memory topics per prompt     │ 6                     (def)"
+"▌  Config version               │ 1                         "
+"   Notification config created  │                           "
+"   Notification config updated  │                           "
+"   Cache folder                 │ .codexize/cache           "
+" ● Sessions folder              │ $HOME/.codex… (overridden)"
+"   Runs folder                  │ .codexize/runs            "
+"   Memory folder                │ .codexize/memory          "
+"   Palette help row             │ true                      "
+"   JSON logs                    │ false                     "
+"   Memory topics per prompt     │ 6                         "
 "────────────────────────────────────────────────────────────"
 "Config schema version. This is stamped by the binary and ca…"
-"Tab page · Enter edit · Ctrl-S save · Esc close · d default…"
+"Tab page  Enter edit  Space toggle  d default  │ config open"

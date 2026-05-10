@@ -16,7 +16,7 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -31,8 +31,15 @@ pub(crate) mod providers;
 
 const MIN_WIDTH: u16 = 50;
 const TAB_SEPARATOR: &str = "  ";
-const TAG_WIDTH: usize = 9;
-const BOOL_OPTIONS: &[&str] = &["true", "false"];
+const LABEL_WIDTH: usize = 28;
+
+// Pipeline-style palette: focus accent matches the pipeline focus glyph,
+// override accent picks up the warning yellow used for waiting nodes.
+const COLOR_FOCUS: Color = Color::Cyan;
+const COLOR_OVERRIDE: Color = Color::Yellow;
+const COLOR_DIM: Color = Color::DarkGray;
+const COLOR_DANGER: Color = Color::Red;
+const COLOR_OK: Color = Color::Green;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldKind {
@@ -424,6 +431,105 @@ pub(crate) enum Editing {
         selected: usize,
     },
     AddProvider(providers::ProvidersEditor),
+    /// Detail drawer for the provider currently under `providers_cursor`.
+    /// `cursor` walks the toggleable property list (see [`PROVIDER_TOGGLES`]).
+    ProviderDetail {
+        cursor: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ToggleField {
+    Enabled,
+    Official,
+    Free,
+    QuotaDisabled,
+    Cheap,
+    Tough,
+    Effort,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProviderToggle {
+    label: &'static str,
+    /// Short helper line shown in the drawer when this row is focused.
+    description: &'static str,
+    field: ToggleField,
+    /// True for fields whose value is owned by the baked entry; the drawer
+    /// shows the live value but disallows toggling for built-in providers.
+    baked_locked: bool,
+}
+
+const PROVIDER_TOGGLES: &[ProviderToggle] = &[
+    ProviderToggle {
+        label: "Enabled",
+        description: "Whether this entry is offered when picking a model.",
+        field: ToggleField::Enabled,
+        baked_locked: false,
+    },
+    ProviderToggle {
+        label: "Official",
+        description: "Marks the provider as the vendor's official endpoint.",
+        field: ToggleField::Official,
+        baked_locked: true,
+    },
+    ProviderToggle {
+        label: "Free",
+        description: "Marks usage as no-cost (display label only; does not affect billing).",
+        field: ToggleField::Free,
+        baked_locked: true,
+    },
+    ProviderToggle {
+        label: "Ignore quota",
+        description: "Skip quota accounting when scheduling this entry.",
+        field: ToggleField::QuotaDisabled,
+        baked_locked: false,
+    },
+    ProviderToggle {
+        label: "Cheap eligible",
+        description: "Eligible for the [CHEAP] mode model rotation.",
+        field: ToggleField::Cheap,
+        baked_locked: false,
+    },
+    ProviderToggle {
+        label: "Tough eligible",
+        description: "Eligible for harder reasoning loops.",
+        field: ToggleField::Tough,
+        baked_locked: false,
+    },
+    ProviderToggle {
+        label: "Effort eligible",
+        description: "Eligible for fixed-effort modes.",
+        field: ToggleField::Effort,
+        baked_locked: false,
+    },
+];
+
+/// First toggle index that is editable for the provider type. Built-in entries
+/// pin official/free, so the cursor lands on `Enabled` rather than a row the
+/// user can't actually flip.
+fn first_toggle_index(_is_baked: bool) -> usize {
+    0
+}
+
+fn step_toggle(current: usize, is_baked: bool, delta: isize) -> usize {
+    if PROVIDER_TOGGLES.is_empty() {
+        return 0;
+    }
+    let len = PROVIDER_TOGGLES.len();
+    let mut next = wrap_index(current, len, delta);
+    // Skip baked-locked rows when navigating a built-in provider so the cursor
+    // never lands on a no-op step. The list always contains at least one
+    // unlocked row (`Enabled`), so the loop terminates.
+    if is_baked {
+        for _ in 0..len {
+            if !PROVIDER_TOGGLES[next].baked_locked {
+                break;
+            }
+            next = wrap_index(next, len, delta);
+        }
+    }
+    next
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,7 +563,6 @@ pub(crate) struct ConfigPanelState {
     pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
     pub(crate) providers_cursor: usize,
-    pub(crate) providers_prop_cursor: usize,
 }
 
 impl ConfigPanelState {
@@ -495,7 +600,6 @@ impl ConfigPanelState {
             read_only,
             searching: None,
             providers_cursor: 0,
-            providers_prop_cursor: 0,
         };
         state.select_first_field_in_current_section();
         state
@@ -560,41 +664,41 @@ impl ConfigPanelState {
                 self.status = "edit mode enabled".to_string();
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 self.move_field(-1);
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Char('j') => {
                 self.move_field(1);
                 PanelOutcome::KeepOpen
             }
-            // Horizontal arrows are no-ops in navigation mode EXCEPT in providers
-            // where they navigate between per-tuple toggles.
-            KeyCode::Left | KeyCode::Char('h') => {
-                if is_providers_section(self.current_section()) {
-                    self.providers_prop_cursor = self.providers_prop_cursor.saturating_sub(1);
-                }
-                PanelOutcome::KeepOpen
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                if is_providers_section(self.current_section()) {
-                    self.providers_prop_cursor = (self.providers_prop_cursor + 1).min(6);
-                }
+            // Horizontal arrows are no-ops in navigation mode. Models page now
+            // uses a detail drawer instead of per-property h/l cursors.
+            KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Enter => {
                 if !self.read_only {
                     if is_providers_section(self.current_section()) {
-                        self.toggle_selected_provider_enabled();
+                        self.activate_provider_line();
                     } else {
                         self.activate_field();
                     }
                 }
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Char(' ') if is_providers_section(self.current_section()) => {
+            // Space is a "fast toggle" everywhere it makes sense:
+            //  · Bool fields: flip without opening a dropdown.
+            //  · Provider rows: open the detail drawer (same as Enter).
+            KeyCode::Char(' ') => {
                 if !self.read_only {
-                    self.toggle_selected_provider_enabled();
+                    if is_providers_section(self.current_section()) {
+                        self.activate_provider_line();
+                    } else if let Some(meta) = self.current_meta().copied()
+                        && matches!(meta.kind, FieldKind::Bool)
+                    {
+                        self.flip_bool(&meta);
+                    }
                 }
                 PanelOutcome::KeepOpen
             }
@@ -608,14 +712,6 @@ impl ConfigPanelState {
                 if !self.read_only {
                     self.remove_selected_provider();
                 }
-                PanelOutcome::KeepOpen
-            }
-            KeyCode::Char('j') => {
-                self.move_field(1);
-                PanelOutcome::KeepOpen
-            }
-            KeyCode::Char('k') => {
-                self.move_field(-1);
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('d') => {
@@ -826,6 +922,10 @@ impl ConfigPanelState {
             self.handle_add_provider_key(key);
             return;
         }
+        if matches!(self.editing, Some(Editing::ProviderDetail { .. })) {
+            self.handle_provider_detail_key(key);
+            return;
+        }
         if matches!(self.editing, Some(Editing::Choice { .. })) {
             self.handle_choice_key(key);
             return;
@@ -988,13 +1088,6 @@ impl ConfigPanelState {
         self.status = format!("choose {}", meta.key);
     }
 
-    fn toggle_selected_provider_enabled(&mut self) {
-        let prop_before = self.providers_prop_cursor;
-        self.providers_prop_cursor = 0;
-        self.activate_provider_line();
-        self.providers_prop_cursor = prop_before;
-    }
-
     fn open_add_provider_editor(&mut self) {
         let merged =
             crate::logic::selection::baked::merge_with_overrides(self.config.providers.value());
@@ -1083,32 +1176,93 @@ impl ConfigPanelState {
 
         match line {
             providers::ProvidersLine::GroupHeader { .. } => {}
-            providers::ProvidersLine::Provider {
-                entry, is_baked, ..
-            } => {
-                let mut updated = entry.clone();
-                match self.providers_prop_cursor {
-                    0 => updated.enabled = !updated.enabled,
-                    1 if !*is_baked => updated.official = !updated.official,
-                    2 if !*is_baked => updated.free = !updated.free,
-                    3 => updated.quota_disabled = !updated.quota_disabled,
-                    4 => updated.cheap_eligible = !updated.cheap_eligible,
-                    5 => updated.tough_eligible = !updated.tough_eligible,
-                    6 => updated.effort_eligible = !updated.effort_eligible,
-                    _ => return,
-                }
-
-                self.upsert_provider_override(updated);
-                self.dirty = true;
-                self.status = if self.providers_prop_cursor == 0 {
-                    "model availability toggled".to_string()
-                } else {
-                    "model option toggled".to_string()
-                };
+            providers::ProvidersLine::Provider { entry, is_baked, .. } => {
+                let entry = entry.clone();
+                let is_baked = *is_baked;
+                self.editing = Some(Editing::ProviderDetail {
+                    cursor: first_toggle_index(is_baked),
+                });
+                self.status = format!("editing {} · {}", entry.cli.as_str(), entry.launch_name);
             }
             providers::ProvidersLine::AddAction => {
                 self.open_add_provider_editor();
             }
+        }
+    }
+
+    /// Toggle one property on the provider currently under
+    /// `providers_cursor` and refresh status text.
+    fn toggle_provider_property(&mut self, idx: usize) {
+        let lines = providers::get_lines(&self.config);
+        let Some(providers::ProvidersLine::Provider {
+            entry, is_baked, ..
+        }) = lines.get(self.providers_cursor)
+        else {
+            return;
+        };
+        let mut updated = entry.clone();
+        let is_baked = *is_baked;
+        let toggle = match PROVIDER_TOGGLES.get(idx) {
+            Some(t) => *t,
+            None => return,
+        };
+        if toggle.baked_locked && is_baked {
+            self.status = format!("{} is set by the built-in entry", toggle.label);
+            return;
+        }
+        match toggle.field {
+            ToggleField::Enabled => updated.enabled = !updated.enabled,
+            ToggleField::Official => updated.official = !updated.official,
+            ToggleField::Free => updated.free = !updated.free,
+            ToggleField::QuotaDisabled => updated.quota_disabled = !updated.quota_disabled,
+            ToggleField::Cheap => updated.cheap_eligible = !updated.cheap_eligible,
+            ToggleField::Tough => updated.tough_eligible = !updated.tough_eligible,
+            ToggleField::Effort => updated.effort_eligible = !updated.effort_eligible,
+        }
+        self.upsert_provider_override(updated);
+        self.dirty = true;
+        self.status = format!("{} toggled", toggle.label);
+    }
+
+    fn handle_provider_detail_key(&mut self, key: KeyEvent) {
+        let Some(Editing::ProviderDetail { cursor }) = self.editing else {
+            return;
+        };
+        let lines = providers::get_lines(&self.config);
+        let is_baked = matches!(
+            lines.get(self.providers_cursor),
+            Some(providers::ProvidersLine::Provider { is_baked: true, .. })
+        );
+        match key.code {
+            KeyCode::Esc => {
+                self.editing = None;
+                self.status = "closed details".to_string();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let next = step_toggle(cursor, is_baked, -1);
+                self.editing = Some(Editing::ProviderDetail { cursor: next });
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let next = step_toggle(cursor, is_baked, 1);
+                self.editing = Some(Editing::ProviderDetail { cursor: next });
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                self.toggle_provider_property(cursor);
+            }
+            KeyCode::Char('x') => {
+                self.editing = None;
+                self.remove_selected_provider();
+            }
+            _ => {}
+        }
+    }
+
+    fn flip_bool(&mut self, meta: &FieldMeta) {
+        let current = self.value_for(meta);
+        let next = if current == "true" { "false" } else { "true" };
+        match self.set_value(meta.key, next) {
+            Ok(()) => self.status = format!("set {} to {next}", meta.key),
+            Err(err) => self.status = err.to_string(),
         }
     }
 
@@ -1117,7 +1271,9 @@ impl ConfigPanelState {
             return;
         };
         match meta.kind {
-            FieldKind::Bool => self.open_choice(&meta, BOOL_OPTIONS),
+            // Bools have only two states — flipping inline beats popping a
+            // two-row dropdown and keeps the keymap consistent with Space.
+            FieldKind::Bool => self.flip_bool(&meta),
             FieldKind::Enum(variants) => self.open_choice(&meta, variants),
             FieldKind::Integer { .. } => {
                 let value = self.value_for(&meta);
@@ -1537,6 +1693,41 @@ impl Widget for ConfigPanelWidget<'_> {
         render_dropdown(self.state, area, buf);
         render_search_overlay(self.state, area, buf);
         render_add_provider_overlay(self.state, area, buf);
+        render_provider_detail_overlay(self.state, area, buf);
+    }
+}
+
+// --- helpers shared by all renderers ----------------------------------------
+
+fn dim(text: impl Into<String>) -> Span<'static> {
+    Span::styled(text.into(), Style::default().fg(COLOR_DIM))
+}
+
+fn focus_span(focused: bool) -> Span<'static> {
+    if focused {
+        Span::styled(
+            "▌".to_string(),
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::raw(" ")
+    }
+}
+
+fn override_dot(is_override: bool) -> Span<'static> {
+    if is_override {
+        Span::styled("●".to_string(), Style::default().fg(COLOR_OVERRIDE))
+    } else {
+        Span::raw(" ")
+    }
+}
+
+fn pad_right(text: &str, width: usize) -> String {
+    let used = text.width();
+    if used >= width {
+        ellipsize_end(text, width)
+    } else {
+        format!("{text}{}", " ".repeat(width - used))
     }
 }
 
@@ -1548,41 +1739,206 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         return;
     }
 
-    let overlay_w = area.width.saturating_sub(10).max(40).min(area.width);
+    let overlay_w = area.width.saturating_sub(10).max(44).min(area.width);
     let overlay_h = 10;
     let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
     let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
     let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
     Clear.render(rect, buf);
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
     let inner_w = overlay_w.saturating_sub(2) as usize;
-
-    lines.push(Line::from(fit_cell("Add Provider", inner_w)));
-    lines.push(Line::from("─".repeat(inner_w)));
-
-    lines.push(Line::from(fit_cell(
-        &format!("  Model: {} / {}", editor.subscription, editor.model),
-        inner_w,
-    )));
-    lines.push(Line::from(fit_cell(
-        &format!("  CLI:   {}  (Ctrl-C to cycle)", editor.cli.as_str()),
-        inner_w,
-    )));
-    lines.push(Line::from(fit_cell(
-        &format!("  Name:  {}_", editor.launch_name),
-        inner_w,
-    )));
-
+    let label_w: usize = 6;
+    let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(""));
-    lines.push(Line::from(fit_cell(
-        "↑↓ models · Enter confirm · Esc cancel",
-        inner_w,
-    )));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            pad_right("Model", label_w),
+            Style::default().fg(COLOR_DIM),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("{} · {}", editor.subscription, editor.model),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(pad_right("CLI", label_w), Style::default().fg(COLOR_DIM)),
+        Span::raw(" "),
+        Span::styled(
+            editor.cli.as_str().to_string(),
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  Ctrl-C cycles".to_string(), Style::default().fg(COLOR_DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(pad_right("Name", label_w), Style::default().fg(COLOR_DIM)),
+        Span::raw(" "),
+        Span::raw(format!("{}_", editor.launch_name)),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(dim("  ↑↓ pick model · Enter confirm · Esc cancel")));
+    if lines.len() < (overlay_h as usize).saturating_sub(2) {
+        while lines.len() < (overlay_h as usize).saturating_sub(2) {
+            lines.push(Line::from(""));
+        }
+    }
+    let _ = inner_w;
 
     Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_FOCUS))
+                .title(Span::styled(
+                    " Add provider ".to_string(),
+                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                )),
+        )
         .render(rect, buf);
+}
+
+fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
+    let Some(Editing::ProviderDetail { cursor }) = state.editing.as_ref() else {
+        return;
+    };
+    if area.width < MIN_WIDTH {
+        return;
+    }
+    let cursor = *cursor;
+    let lines = providers::get_lines(&state.config);
+    let Some(providers::ProvidersLine::Provider {
+        entry,
+        is_baked,
+        baked_free,
+        baked_official,
+    }) = lines.get(state.providers_cursor)
+    else {
+        return;
+    };
+
+    let subscription_label =
+        crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
+            .to_string();
+    let title = format!(
+        " {} · {} ",
+        subscription_label, entry.model,
+    );
+    let source = if *is_baked { "built-in" } else { "custom" };
+
+    let row_count = PROVIDER_TOGGLES.len();
+    let overlay_h = (row_count as u16) + 6; // border + title row + chrome
+    let overlay_h = overlay_h.min(area.height);
+    let overlay_w = area
+        .width
+        .saturating_sub(10)
+        .max(56)
+        .min(area.width);
+    let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
+    let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
+    let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
+    Clear.render(rect, buf);
+
+    let mut body: Vec<Line<'static>> = Vec::new();
+    body.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            format!("{} · {}", entry.cli.as_str(), entry.launch_name),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(format!("({source})"), Style::default().fg(COLOR_DIM)),
+    ]));
+    body.push(Line::from(""));
+
+    for (idx, toggle) in PROVIDER_TOGGLES.iter().enumerate() {
+        let on = current_toggle_value(entry, *is_baked, *baked_free, *baked_official, toggle);
+        let focused = idx == cursor;
+        let locked = *is_baked && toggle.baked_locked;
+        let check_glyph = if on { "[x]" } else { "[ ]" };
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::raw(" "));
+        spans.push(focus_span(focused));
+        spans.push(Span::raw(" "));
+        let check_style = if locked {
+            Style::default().fg(COLOR_DIM)
+        } else if on {
+            Style::default().fg(COLOR_OK).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(COLOR_DIM)
+        };
+        spans.push(Span::styled(check_glyph.to_string(), check_style));
+        spans.push(Span::raw(" "));
+        let label_style = if focused {
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        } else if locked {
+            Style::default().fg(COLOR_DIM)
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(toggle.label.to_string(), label_style));
+        if locked {
+            spans.push(Span::styled(
+                "  built-in".to_string(),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+        body.push(Line::from(spans));
+    }
+
+    body.push(Line::from(""));
+    let active_desc = PROVIDER_TOGGLES
+        .get(cursor)
+        .map(|t| t.description)
+        .unwrap_or_default();
+    body.push(Line::from(dim(format!(" {active_desc}"))));
+    body.push(Line::from(dim(
+        " Space toggle · ↑↓ navigate · x delete · Esc close",
+    )));
+
+    Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_FOCUS))
+                .title(Span::styled(
+                    title,
+                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                )),
+        )
+        .render(rect, buf);
+}
+
+fn current_toggle_value(
+    entry: &crate::data::config::schema::ProviderEntry,
+    is_baked: bool,
+    baked_free: bool,
+    baked_official: bool,
+    toggle: &ProviderToggle,
+) -> bool {
+    match toggle.field {
+        ToggleField::Enabled => entry.enabled,
+        ToggleField::Official => {
+            if is_baked {
+                baked_official
+            } else {
+                entry.official
+            }
+        }
+        ToggleField::Free => {
+            if is_baked {
+                baked_free
+            } else {
+                entry.free
+            }
+        }
+        ToggleField::QuotaDisabled => entry.quota_disabled,
+        ToggleField::Cheap => entry.cheap_eligible,
+        ToggleField::Tough => entry.tough_eligible,
+        ToggleField::Effort => entry.effort_eligible,
+    }
 }
 
 fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
@@ -1593,30 +1949,35 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
         return;
     }
 
-    // Center the overlay horizontally; leave a generous body underneath.
-    // Width clamps between 30 and area_width-4 so the box stays inset
-    // even on narrow terminals.
     let overlay_w = area.width.saturating_sub(4).max(30).min(area.width);
     let max_results: u16 = 8;
-    let overlay_h = (search.results.len() as u16).min(max_results) + 4; // input + border + status
+    let overlay_h = (search.results.len() as u16).min(max_results) + 4;
     let overlay_h = overlay_h.min(area.height);
     if overlay_h < 5 {
         return;
     }
     let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
-    let overlay_y = area.y + 2; // beneath the title line
+    let overlay_y = area.y + 2;
     let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
     Clear.render(rect, buf);
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
     let inner_w = overlay_w.saturating_sub(2) as usize;
-    lines.push(Line::from(fit_cell(
-        &format!("/ {}_", search.query),
-        inner_w,
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "/ ".to_string(),
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!("{}_", search.query)),
+    ]));
+    lines.push(Line::from(Span::styled(
+        "─".repeat(inner_w),
+        Style::default().fg(COLOR_DIM),
     )));
-    lines.push(Line::from("─".repeat(inner_w)));
+
     if search.results.is_empty() {
-        lines.push(Line::from(fit_cell("no fields match", inner_w)));
+        lines.push(Line::from(dim("  no fields match")));
     } else {
         let max_rows = (overlay_h.saturating_sub(4)) as usize;
         let total = search.results.len();
@@ -1632,18 +1993,35 @@ fn render_search_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer)
             .take(max_rows)
         {
             let meta = FIELDS[*field_idx];
-            let marker = if offset == search.selected { '>' } else { ' ' };
-            let row = format!("{marker} {} · {}", meta.key, meta.description);
-            lines.push(Line::from(fit_cell(&row, inner_w)));
+            let focused = offset == search.selected;
+            lines.push(Line::from(vec![
+                focus_span(focused),
+                Span::raw(" "),
+                Span::styled(
+                    meta.label.to_string(),
+                    if focused {
+                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    },
+                ),
+                Span::styled("  ".to_string(), Style::default().fg(COLOR_DIM)),
+                Span::styled(meta.key.to_string(), Style::default().fg(COLOR_DIM)),
+            ]));
         }
     }
-    lines.push(Line::from(fit_cell(
-        "↑↓ select · Enter jump · Esc cancel",
-        inner_w,
-    )));
+    lines.push(Line::from(dim("  ↑↓ select · Enter jump · Esc cancel")));
 
     Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_FOCUS))
+                .title(Span::styled(
+                    " Search ".to_string(),
+                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                )),
+        )
         .render(rect, buf);
 }
 
@@ -1712,19 +2090,32 @@ fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
     let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
     Clear.render(popup_rect, buf);
 
-    let inner_w = popup_rect.width.saturating_sub(2) as usize;
     let lines: Vec<Line<'static>> = options
         .iter()
         .enumerate()
         .map(|(i, opt)| {
-            let marker = if i == *selected { '>' } else { ' ' };
-            let text = fit_cell(&format!("{marker} {opt}"), inner_w);
-            Line::from(text)
+            let focused = i == *selected;
+            Line::from(vec![
+                focus_span(focused),
+                Span::raw(" "),
+                Span::styled(
+                    opt.clone(),
+                    if focused {
+                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    },
+                ),
+            ])
         })
         .collect();
 
     Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_FOCUS)),
+        )
         .render(popup_rect, buf);
 }
 
@@ -1733,9 +2124,7 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     let mut lines = Vec::new();
     lines.push(header_line(&state.path, width));
     let tab_lines = tab_bar_lines(state, w);
-    for line in tab_lines {
-        lines.push(Line::from(line));
-    }
+    lines.extend(tab_lines);
     lines.push(bottom_rule(width, None));
     let used = lines.len();
     // Reserve 3 lines for the trailing separator + help + footer so the
@@ -1744,112 +2133,173 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     let body_h = height.saturating_sub(used as u16 + 3) as usize;
     if is_providers_section(state.current_section()) {
         for body_line in providers_body_lines(state, w).into_iter().take(body_h) {
-            lines.push(Line::from(body_line));
+            lines.push(body_line);
         }
     } else {
         let fields = visible_fields(state);
-        for (pos, idx) in fields.into_iter().take(body_h).enumerate() {
-            let row = field_row(state, idx, w);
-            let row = if pos > 0 && state.value_for(&FIELDS[idx]).width() > value_width(w) {
-                format!("  {row}")
-            } else {
-                row
-            };
-            lines.push(Line::from(row));
+        for idx in fields.into_iter().take(body_h) {
+            lines.push(field_row(state, idx, w));
         }
     }
     lines.push(bottom_rule(width, None));
-    lines.push(Line::from(help_text(state, w)));
-    lines.push(Line::from(footer_line(state, w)));
+    lines.push(help_text(state, w));
+    lines.push(footer_line(state, w));
     lines
 }
 
-fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current = String::new();
+fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
+    // Greedy line-wrap of the tab segments (each tab contributing a small
+    // group of styled spans). When a row overflows, flush it and start the
+    // next one with the current segment; matches the old plain-text wrap.
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_w: usize = 0;
     for (i, section) in SECTIONS.iter().enumerate() {
         let active = i == state.selected_section;
         let dirty = state.section_override_count(section) > 0;
         let title = section_title(section);
-        let label = match (active, dirty) {
-            (true, true) => format!("▾ {title}*"),
-            (true, false) => format!("▾ {title}"),
-            (false, true) => format!("▸ {title}*"),
-            (false, false) => format!("▸ {title}"),
-        };
-        let sep = if current.is_empty() {
-            String::new()
-        } else {
-            TAB_SEPARATOR.to_string()
-        };
-        let candidate = format!("{current}{sep}{label}");
-        if candidate.width() <= width {
-            current = candidate;
-        } else {
-            if !current.is_empty() {
-                lines.push(fit_cell(&current, width));
-            }
-            current = label;
+        let chevron = if active { "▾" } else { "▸" };
+        let plain_w = chevron.width() + 1 + title.width() + if dirty { 2 } else { 0 };
+        let sep_w = if current_spans.is_empty() { 0 } else { TAB_SEPARATOR.width() };
+        if !current_spans.is_empty() && current_w + sep_w + plain_w > width {
+            lines.push(Line::from(std::mem::take(&mut current_spans)));
+            current_w = 0;
         }
-        if i == SECTIONS.len() - 1 && !current.is_empty() {
-            lines.push(fit_cell(&current, width));
+        if !current_spans.is_empty() {
+            current_spans.push(Span::raw(TAB_SEPARATOR));
+            current_w += TAB_SEPARATOR.width();
         }
+        let chevron_style = if active {
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(COLOR_DIM)
+        };
+        current_spans.push(Span::styled(chevron.to_string(), chevron_style));
+        current_spans.push(Span::raw(" "));
+        let title_style = if active {
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(COLOR_DIM)
+        };
+        current_spans.push(Span::styled(title.to_string(), title_style));
+        if dirty {
+            current_spans.push(Span::raw(" "));
+            current_spans.push(Span::styled(
+                "●".to_string(),
+                Style::default().fg(COLOR_OVERRIDE),
+            ));
+        }
+        current_w += plain_w;
+    }
+    if !current_spans.is_empty() {
+        lines.push(Line::from(current_spans));
     }
     if lines.is_empty() {
-        lines.push(fit_cell(&current, width));
+        lines.push(Line::from(""));
     }
     lines
 }
 
-fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> String {
+fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static> {
     let meta = &FIELDS[idx];
     let focused = idx == state.selected_field;
-    let name_w = width.min(30);
-    let tag = state.source_for(meta);
-    let mut value = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
+    let is_override = state.source_for(meta) == "override";
+    let read_only = matches!(meta.kind, FieldKind::ReadOnly | FieldKind::List | FieldKind::Map);
+
+    let value_text = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {
         state.edit_buffer.clone()
     } else {
-        render_value(state, meta, focused)
+        render_value_text(state, meta, focused)
     };
-    let fixed = name_w + 3 + 1 + TAG_WIDTH;
-    let val_w = width.saturating_sub(fixed).max(1);
-    value = ellipsize_end(&value, val_w);
-    let focus = if focused { ">" } else { " " };
-    // Promote the second prefix column to the override/dirty marker so
-    // operators can scan a section for overrides without inspecting the
-    // right-aligned source tag.
-    let dirty = if state.source_for(meta) == "override" {
-        "*"
+
+    // Width budget: 1 (focus) + 1 (override) + 1 (space) + LABEL_WIDTH +
+    // 1 (space) + 1 (separator) + 1 (space) + value (rest) + maybe chip.
+    let label_w = LABEL_WIDTH.min(width.saturating_sub(8));
+    let prefix_w = 1 + 1 + 1 + label_w + 1 + 1 + 1; // = label_w + 6
+    let chip_text = if is_override { " (overridden)" } else { "" };
+    let chip_w = chip_text.width();
+    let value_w = width.saturating_sub(prefix_w + chip_w).max(1);
+    let value_clipped = ellipsize_end(&value_text, value_w);
+
+    let label_style = if focused {
+        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+    } else if read_only {
+        Style::default().fg(COLOR_DIM)
     } else {
-        " "
+        Style::default()
     };
-    let name = fit_cell(&format!("{focus}{dirty}{}", meta.label), name_w);
-    format!("{name} │ {value:<val_w$} {tag:>TAG_WIDTH$}")
+    let value_style = if focused
+        && matches!(state.editing, Some(Editing::Integer | Editing::String))
+    {
+        Style::default()
+            .fg(COLOR_FOCUS)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else if is_override {
+        Style::default().fg(COLOR_OVERRIDE)
+    } else if read_only {
+        Style::default().fg(COLOR_DIM)
+    } else {
+        Style::default()
+    };
+
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(8);
+    spans.push(focus_span(focused));
+    spans.push(override_dot(is_override));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(pad_right(meta.label, label_w), label_style));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        "│".to_string(),
+        Style::default().fg(COLOR_DIM),
+    ));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(value_clipped, value_style));
+
+    if focused
+        && matches!(meta.kind, FieldKind::Enum(_))
+        && !matches!(state.editing, Some(Editing::Choice { .. }))
+    {
+        spans.push(Span::styled(
+            " ▼".to_string(),
+            Style::default().fg(COLOR_DIM),
+        ));
+    }
+
+    if is_override {
+        spans.push(Span::styled(
+            chip_text.to_string(),
+            Style::default().fg(COLOR_OVERRIDE),
+        ));
+    }
+
+    Line::from(spans)
 }
 
-fn render_value(state: &ConfigPanelState, meta: &FieldMeta, focused: bool) -> String {
+fn render_value_text(state: &ConfigPanelState, meta: &FieldMeta, _focused: bool) -> String {
     let raw = state.value_for(meta);
-    let mut value = if meta.secret && !state.reveal_topic && !raw.is_empty() {
+    if meta.secret && !state.reveal_topic && !raw.is_empty() {
         middle_ellipsis(&raw, 16)
     } else {
         raw
-    };
-    if focused && matches!(meta.kind, FieldKind::Enum(_)) {
-        value.push_str(" ▼");
     }
-    value
 }
 
-fn help_text(state: &ConfigPanelState, width: usize) -> String {
+fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
     if let Some(err) = state
         .current_meta()
         .and_then(|meta| state.edit_error_for(*meta, &state.edit_buffer))
     {
-        return fit_cell(&err, width);
+        return Line::from(Span::styled(
+            ellipsize_end(&err, width),
+            Style::default().fg(COLOR_DANGER),
+        ));
     }
     if let Some(err) = &state.save_error {
-        return fit_cell(err, width);
+        return Line::from(Span::styled(
+            ellipsize_end(err, width),
+            Style::default().fg(COLOR_DANGER),
+        ));
     }
     let banner = match &state.conflict {
         Some(ConflictBanner::MtimeAdvanced) => {
@@ -1862,64 +2312,78 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
         None => None,
     };
     if let Some(text) = banner {
-        return fit_cell(text, width);
+        return Line::from(Span::styled(
+            ellipsize_end(text, width),
+            Style::default().fg(COLOR_OVERRIDE),
+        ));
     }
     if is_providers_section(state.current_section()) {
-        return fit_cell(
-            "Space toggles availability. Use arrows for rows and options; a adds, x removes custom providers.",
+        return Line::from(dim(ellipsize_end(
+            "Enter opens the per-provider detail drawer · a adds a custom entry · x removes",
             width,
-        );
+        )));
     }
-    state
+    let text = state
         .current_meta()
-        .map(|meta| fit_cell(meta.description, width))
-        .unwrap_or_default()
+        .map(|meta| meta.description.to_string())
+        .unwrap_or_default();
+    Line::from(dim(ellipsize_end(&text, width)))
 }
 
-fn footer_line(state: &ConfigPanelState, width: usize) -> String {
-    let hotkeys: &[&str] = if state.searching.is_some() {
-        &["↑↓ select", "Enter jump", "Esc cancel"]
+fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
+    let hotkeys: &[(&str, &str)] = if state.searching.is_some() {
+        &[("↑↓", "select"), ("Enter", "jump"), ("Esc", "cancel")]
     } else if state.read_only {
-        &["Tab page", "/ search", "e edit", "Esc close"]
+        &[
+            ("Tab", "page"),
+            ("/", "search"),
+            ("e", "edit"),
+            ("Esc", "close"),
+        ]
     } else {
         match &state.editing {
-            Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
-            Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
-            Some(Editing::AddProvider(_)) => &["↑↓ model", "Enter add", "Esc cancel", "Ctrl-C CLI"],
-            // Order matters: the renderer drops trailing entries that no
-            // longer fit, so the high-frequency keys come first to survive
-            // narrow widths.
+            Some(Editing::Choice { .. }) => &[
+                ("↑↓", "select"),
+                ("Enter", "commit"),
+                ("Esc", "cancel"),
+            ],
+            Some(Editing::Integer | Editing::String) => {
+                &[("Enter", "commit"), ("Esc", "cancel")]
+            }
+            Some(Editing::AddProvider(_)) => &[
+                ("↑↓", "model"),
+                ("Enter", "add"),
+                ("Ctrl-C", "CLI"),
+                ("Esc", "cancel"),
+            ],
+            Some(Editing::ProviderDetail { .. }) => &[
+                ("↑↓", "option"),
+                ("Space", "toggle"),
+                ("x", "delete"),
+                ("Esc", "close"),
+            ],
             None if is_providers_section(state.current_section()) => &[
-                "↑↓ model",
-                "Space toggle",
-                "a add",
-                "x remove",
-                "Ctrl-S save",
-                "Esc close",
+                ("↑↓", "model"),
+                ("Enter", "details"),
+                ("a", "add"),
+                ("x", "remove"),
+                ("Ctrl-S", "save"),
+                ("Esc", "close"),
             ],
             None => &[
-                "Tab page",
-                "Enter edit",
-                "Ctrl-S save",
-                "Esc close",
-                "d default",
-                "/ search",
+                ("Tab", "page"),
+                ("Enter", "edit"),
+                ("Space", "toggle"),
+                ("d", "default"),
+                ("/", "search"),
+                ("Ctrl-S", "save"),
+                ("Esc", "close"),
             ],
         }
     };
-    let mut first = String::new();
-    for item in hotkeys {
-        let next = if first.is_empty() {
-            item.to_string()
-        } else {
-            format!("{first} · {item}")
-        };
-        if next.width() <= width {
-            first = next;
-        }
-    }
+
     let invalid = state.current_validation_error();
-    let second = if let Some(reason) = invalid {
+    let status_text = if let Some(reason) = invalid.clone() {
         reason
     } else if state.dirty {
         format!(
@@ -1929,7 +2393,55 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
     } else {
         state.status.clone()
     };
-    fit_cell(&format!("{first}  |  {second}"), width)
+    let status_color = if invalid.is_some() {
+        COLOR_DANGER
+    } else if state.dirty {
+        COLOR_OVERRIDE
+    } else {
+        COLOR_DIM
+    };
+    let status_chip_full = format!(" │ {status_text}");
+
+    // Pack hotkeys into the available width, dropping trailing entries that
+    // wouldn't fit alongside the status chip. Hotkeys render as `key label`
+    // with key colored cyan and label dim.
+    let status_w = status_chip_full.width();
+    let mut packed: Vec<Span<'static>> = Vec::new();
+    let mut packed_w: usize = 0;
+    for (idx, (key, label)) in hotkeys.iter().enumerate() {
+        let sep = if idx == 0 { "" } else { "  " };
+        let segment_w = sep.width() + key.width() + 1 + label.width();
+        if packed_w + segment_w + status_w > width {
+            break;
+        }
+        if !sep.is_empty() {
+            packed.push(Span::raw(sep));
+        }
+        packed.push(Span::styled(
+            key.to_string(),
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        ));
+        packed.push(Span::raw(" "));
+        packed.push(Span::styled(
+            label.to_string(),
+            Style::default().fg(COLOR_DIM),
+        ));
+        packed_w += segment_w;
+    }
+    // Status chip on the right; the gap fills with spaces.
+    let gap = width.saturating_sub(packed_w + status_w);
+    if gap > 0 {
+        packed.push(Span::raw(" ".repeat(gap)));
+    }
+    packed.push(Span::styled(
+        " │ ".to_string(),
+        Style::default().fg(COLOR_DIM),
+    ));
+    packed.push(Span::styled(
+        ellipsize_end(&status_text, width.saturating_sub(packed_w + 3).max(1)),
+        Style::default().fg(status_color),
+    ));
+    Line::from(packed)
 }
 
 fn header_line(path: &Path, width: u16) -> Line<'static> {
@@ -1971,16 +2483,6 @@ fn dirty_count(state: &ConfigPanelState) -> usize {
     } else {
         field_count
     }
-}
-
-fn value_width(width: usize) -> usize {
-    width.saturating_sub(30 + TAG_WIDTH + 3)
-}
-
-fn fit_cell(value: &str, width: usize) -> String {
-    let clipped = ellipsize_end(value, width);
-    let pad = width.saturating_sub(clipped.width());
-    format!("{clipped}{}", " ".repeat(pad))
 }
 
 fn ellipsize_end(value: &str, width: usize) -> String {
@@ -2065,31 +2567,20 @@ fn source_override<T>(value: &Override<T>) -> &'static str {
     }
 }
 
-/// Body lines for the `providers` section. Each existing entry renders on
-/// one line; entries whose `mapped_into` does not match the loaded universe
-/// pick up the `(no matching ipbr row)` suffix in dim grey-equivalent text.
-/// An empty section shows a single hint line so operators see where to add
-/// entries from.
-fn providers_body_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
+/// Body lines for the providers section. Provider rows render with a styled
+/// chip strip; the per-provider detail drawer is rendered separately as an
+/// overlay (see `render_provider_detail_overlay`).
+fn providers_body_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
     let lines = providers::get_lines(&state.config);
     if lines.is_empty() {
-        return vec![fit_cell(
+        return vec![Line::from(dim(
             "  no providers entries · operator-funded providers go here",
-            width,
-        )];
+        ))];
     }
     lines
         .iter()
         .enumerate()
-        .map(|(idx, line)| {
-            let formatted = providers::format_line(
-                line,
-                idx == state.providers_cursor,
-                state.providers_prop_cursor,
-                width,
-            );
-            fit_cell(&formatted, width)
-        })
+        .map(|(idx, line)| providers::format_line(line, idx == state.providers_cursor, width))
         .collect()
 }
 
@@ -2171,7 +2662,11 @@ mod tests {
     }
 
     #[test]
-    fn model_tab_space_toggles_selected_provider_enabled() {
+    fn model_tab_enter_opens_detail_drawer_with_enabled_focused() {
+        // Models page Enter (and Space) opens the per-provider detail drawer
+        // rather than directly toggling. The drawer's cursor lands on the
+        // first user-toggleable property — Enabled, index 0 — so the most
+        // common operation (Space, Space) still flips availability.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
             &config,
@@ -2185,15 +2680,22 @@ mod tests {
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .expect("provider row");
 
-        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            state.editing,
+            Some(Editing::ProviderDetail { cursor: 0 })
+        ));
 
+        // Space inside the drawer flips the focused property and stays open.
+        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
         let lines = providers::get_lines(&state.config);
         let providers::ProvidersLine::Provider { entry, .. } = &lines[state.providers_cursor]
         else {
             panic!("cursor should still point at provider");
         };
-        assert!(!entry.enabled, "space should toggle model availability off");
+        assert!(!entry.enabled, "space in drawer should flip availability");
         assert!(state.dirty);
+        assert!(matches!(state.editing, Some(Editing::ProviderDetail { .. })));
     }
 
     #[test]
@@ -2259,11 +2761,13 @@ mod tests {
     fn adaptive_snapshot_width_80_keeps_primary_hotkeys() {
         let state = state_with_overrides();
         let text = render_to_text(&state, 80, 18);
-        assert!(text.contains("Ctrl-S save"));
-        assert!(text.contains("Esc close"));
-        assert!(text.contains("d default"));
-        assert!(text.contains("Enter edit"));
-        assert!(text.contains("Tab page"));
+        // Footer renders `<key> <label>` pairs. High-frequency keys must
+        // survive narrower widths; trailing entries are dropped first when
+        // the line gets crowded.
+        assert!(text.contains("Tab page"), "missing Tab page: {text}");
+        assert!(text.contains("Enter edit"), "missing Enter edit: {text}");
+        assert!(text.contains("Space toggle"), "missing Space toggle: {text}");
+        assert!(text.contains("d default"), "missing d default: {text}");
         insta::assert_snapshot!(text);
     }
 
@@ -2397,51 +2901,28 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_bool_opens_dropdown_with_current_value_selected() {
+    fn enter_on_bool_flips_inline_without_dropdown() {
+        // Bools toggle directly: a two-row dropdown is dead weight when the
+        // only options are true/false, so Enter (and Space) flips the value
+        // and stays in nav mode.
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.enabled");
-        // Default is true; expect "true" preselected in the dropdown.
+        let value_before = state.value_for(state.current_meta().unwrap());
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let Some(Editing::Choice {
-            key,
-            options,
-            selected,
-        }) = state.editing.as_ref()
-        else {
-            panic!("expected Choice editing state, got {:?}", state.editing);
-        };
-        assert_eq!(*key, "ntfy.enabled");
-        assert_eq!(options, &vec!["true".to_string(), "false".to_string()]);
-        assert_eq!(options[*selected], "true");
-        assert_eq!(state.value_for(state.current_meta().unwrap()), "true");
-    }
-
-    #[test]
-    fn enter_on_dropdown_commits_and_returns_to_nav() {
-        let mut state = state_with_overrides();
-        focus_field(&mut state, "ntfy.enabled");
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        // Move highlight to "false" then commit.
-        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(state.editing.is_none());
-        assert_eq!(state.value_for(state.current_meta().unwrap()), "false");
+        assert!(state.editing.is_none(), "bool flip must not enter editing");
+        let after = state.value_for(state.current_meta().unwrap());
+        assert_ne!(after, value_before, "bool value should have flipped");
         assert!(state.dirty);
     }
 
     #[test]
-    fn esc_in_dropdown_returns_to_nav_without_mutation() {
+    fn space_on_bool_flips_inline() {
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.enabled");
-        let value_before = state.value_for(state.current_meta().unwrap());
-        let dirty_before = state.dirty;
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        // Move the highlight then cancel — must not commit.
-        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let before = state.value_for(state.current_meta().unwrap());
+        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
         assert!(state.editing.is_none());
-        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
-        assert_eq!(state.dirty, dirty_before);
+        assert_ne!(state.value_for(state.current_meta().unwrap()), before);
     }
 
     #[test]
@@ -2512,8 +2993,10 @@ mod tests {
 
     #[test]
     fn dropdown_snapshot() {
+        // Pop the dropdown for an enum field — bools flip inline without a
+        // popup, so this exercises the multi-variant overlay.
         let mut state = state_with_overrides();
-        focus_field(&mut state, "ntfy.enabled");
+        focus_field(&mut state, "ntfy.detail_mode");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         insta::assert_snapshot!(render_to_text(&state, 80, 18));
     }
@@ -2521,26 +3004,32 @@ mod tests {
     #[test]
     fn rendered_overrides_show_dirty_marker_source_tag_and_tab_suffix() {
         // The override fixture sets ntfy.topic + ntfy.detail_mode + paths.sessions_root.
-        // Verify the three operator-facing override signals are wired into render output:
-        // (1) `*` dirty prefix on the field rows, (2) right-aligned `override` source
-        // tag, and (3) `*` suffix on tab-bar entries for override-bearing sections.
+        // Verify the three operator-facing override signals: (1) `●` dot in
+        // the dirty column, (2) `(overridden)` chip on the value, (3) `●`
+        // suffix on tab-bar entries for override-bearing sections.
         let mut state = state_with_overrides();
         state.selected_section = SECTIONS.iter().position(|s| *s == "notifications").unwrap();
         state.select_first_field_in_current_section();
         let text = render_to_text(&state, 120, 20);
-        assert!(text.contains(" *Topic"), "missing dirty prefix on topic");
         assert!(
-            text.contains(" *Message detail"),
-            "missing dirty prefix on detail_mode"
-        );
-        assert!(text.contains("override"), "missing override source tag");
-        assert!(
-            text.contains("▾ Notifications*"),
-            "missing override suffix on notifications tab"
+            text.contains(" ● Topic"),
+            "missing override dot on topic row: {text}"
         );
         assert!(
-            text.contains("▸ System*"),
-            "missing override suffix on system tab"
+            text.contains(" ● Message detail"),
+            "missing override dot on detail_mode row: {text}"
+        );
+        assert!(
+            text.contains("(overridden)"),
+            "missing override chip on value: {text}"
+        );
+        assert!(
+            text.contains("▾ Notifications ●"),
+            "missing override marker on notifications tab: {text}"
+        );
+        assert!(
+            text.contains("▸ System ●"),
+            "missing override marker on system tab: {text}"
         );
     }
 
@@ -2669,8 +3158,12 @@ mod tests {
             "missing group header: {text}"
         );
         assert!(
-            text.contains("On   claude  claude-opus-4.7  built-in · official · paid"),
-            "missing provider entry: {text}"
+            text.contains("✓ claude · claude-opus-4.7"),
+            "missing enabled provider row: {text}"
+        );
+        assert!(
+            text.contains("built-in · official · paid"),
+            "missing provider chip strip: {text}"
         );
     }
 

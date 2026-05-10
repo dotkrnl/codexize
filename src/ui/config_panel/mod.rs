@@ -2194,7 +2194,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         let on = current_toggle_value(entry, *is_baked, *baked_free, *baked_official, toggle);
         let focused = idx == cursor;
         let locked = *is_baked && toggle.baked_locked;
-        let check_glyph = if on { "[x]" } else { "[ ]" };
+        let check_glyph = if on { " ✓ " } else { " ✗ " };
         let mut spans: Vec<Span<'static>> = Vec::new();
         spans.push(Span::raw(" "));
         spans.push(focus_span(focused));

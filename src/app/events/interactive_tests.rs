@@ -264,7 +264,7 @@ fn palette_config_with_exact_section_arg_jumps_to_section() {
     let mut app = mk_app(state);
     app.execute_palette_input("config ntfy");
     let panel = app.config_panel.as_ref().expect("panel open");
-    assert_eq!(panel.current_section_name(), "ntfy");
+    assert_eq!(panel.current_section_name(), "notifications");
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn palette_config_with_unique_prefix_jumps_to_section() {
     let mut app = mk_app(state);
     app.execute_palette_input("config acp.po");
     let panel = app.config_panel.as_ref().expect("panel open");
-    assert_eq!(panel.current_section_name(), "acp.policy");
+    assert_eq!(panel.current_section_name(), "agents");
 }
 
 #[test]
@@ -297,15 +297,15 @@ fn config_panel_remembers_last_section_within_app() {
     let state = SessionState::new("config-memory".to_string());
     let mut app = mk_app(state);
     app.execute_palette_input("config acp.policy");
-    // Close via Esc → should record acp.policy as the last-viewed section.
+    // Close via Esc -> should record the friendly Agents page.
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    assert_eq!(app.last_config_section.as_deref(), Some("acp.policy"));
+    assert_eq!(app.last_config_section.as_deref(), Some("agents"));
 
     app.execute_palette_input("config");
     let panel = app.config_panel.as_ref().expect("panel reopens");
     assert_eq!(
         panel.current_section_name(),
-        "acp.policy",
+        "agents",
         "no-arg :config must restore the last-viewed section in the same App"
     );
 }

@@ -1,21 +1,21 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 2032
+assertion_line: 2271
 expression: text
 ---
-"codexize · config · /tmp/example/config.toml                "
-"▸meta  ▸ntfy*  ▸ntfy.events  ▸acp.policy  ▸acp.install      "
-"▸acp.agents.claude  ▸providers  ▸runner  ▾paths*  ▸ui       "
-"▸ui.colon_palette  ▸ui.footer  ▸diagnostics  ▸memory        "
+"codexize · settings · /tmp/example/config.toml              "
+"▸ Common  ▸ Models  ▸ Notifications*  ▸ Agents  ▾ System*   "
 "────────────────────────────────────────────────────────────"
-"> cache_root           │ .codexize/cache               (def)"
-"   *sessions_root        │ $HOME/.codexize/sessions…  overri"
-"  runs_root            │ .codexize/runs                (def)"
-"  memory_root          │ .codexize/memory              (def)"
+"> Config version               │ 1                     (def)"
+"  Notification config created  │                       (def)"
+"  Notification config updated  │                       (def)"
+"  Cache folder                 │ .codexize/cache       (def)"
+"   *Sessions folder              │ $HOME/.codexize/…  overri"
+"  Runs folder                  │ .codexize/runs        (def)"
+"  Memory folder                │ .codexize/memory      (def)"
+"  Palette help row             │ true                  (def)"
+"  JSON logs                    │ false                 (def)"
+"  Memory topics per prompt     │ 6                     (def)"
 "────────────────────────────────────────────────────────────"
-"Root for cache files. $HOME and ~/ are expanded at load.    "
-"Tab section · Enter edit · Ctrl-S save · Esc close  |  conf…"
-"                                                            "
-"                                                            "
-"                                                            "
-"                                                            "
+"Config schema version. This is stamped by the binary and ca…"
+"Tab page · Enter edit · Ctrl-S save · Esc close · d default…"

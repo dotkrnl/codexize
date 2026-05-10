@@ -55,292 +55,352 @@ struct FieldMeta {
 
 const FIELDS: &[FieldMeta] = &[
     FieldMeta {
-        section: "meta",
+        section: "system",
         key: "meta.version",
-        label: "version",
+        label: "Config version",
         kind: FieldKind::ReadOnly,
         description: "Config schema version. This is stamped by the binary and cannot be edited.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.enabled",
-        label: "enabled",
+        label: "Notifications",
         kind: FieldKind::Bool,
         description: "Enables notification delivery when a topic is configured.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.server",
-        label: "server",
+        label: "Server URL",
         kind: FieldKind::String,
         description: "Base ntfy server URL. Must start with http:// or https://.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.topic",
-        label: "topic",
+        label: "Topic",
         kind: FieldKind::String,
         description: "Notification topic. Empty disables delivery; r reveals the full value and q regenerates it.",
         secret: true,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.detail_mode",
-        label: "detail_mode",
+        label: "Message detail",
         kind: FieldKind::Enum(NtfyDetailMode::variants()),
         description: "Controls notification body length. Allowed: detailed, minimal. Default: detailed.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.retry_attempts",
-        label: "retry_attempts",
+        label: "Retry attempts",
         kind: FieldKind::Integer { min: 1 },
         description: "Number of notification send attempts. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.retry_delay_ms",
-        label: "retry_delay_ms",
+        label: "Retry delay",
         kind: FieldKind::Integer { min: 0 },
         description: "Delay between notification retries in milliseconds.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.http_timeout_secs",
-        label: "http_timeout_secs",
+        label: "HTTP timeout",
         kind: FieldKind::Integer { min: 1 },
         description: "HTTP timeout for ntfy requests. Minimum: 1 second.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.body_max_bytes",
-        label: "body_max_bytes",
+        label: "Body limit",
         kind: FieldKind::Integer { min: 256 },
         description: "Maximum notification body size in bytes. Minimum: 256.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "notifications",
         key: "ntfy.excerpt_max_chars",
-        label: "excerpt_max_chars",
+        label: "Excerpt limit",
         kind: FieldKind::Integer { min: 32 },
         description: "Maximum excerpt characters used in notifications. Minimum: 32.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "system",
         key: "ntfy.created_at",
-        label: "created_at",
+        label: "Notification config created",
         kind: FieldKind::ReadOnly,
         description: "Metadata timestamp maintained by config mutation paths.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy",
+        section: "system",
         key: "ntfy.updated_at",
-        label: "updated_at",
+        label: "Notification config updated",
         kind: FieldKind::ReadOnly,
         description: "Metadata timestamp maintained by config mutation paths.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy.events",
+        section: "notifications",
         key: "ntfy.events.phase_wait",
-        label: "events.phase_wait",
+        label: "Phase wait alerts",
         kind: FieldKind::Bool,
         description: "Notify when a phase is waiting.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy.events",
+        section: "notifications",
         key: "ntfy.events.interactive_wait",
-        label: "events.interactive_wait",
+        label: "Input wait alerts",
         kind: FieldKind::Bool,
         description: "Notify when an interactive run is waiting for input.",
         secret: false,
     },
     FieldMeta {
-        section: "ntfy.events",
+        section: "notifications",
         key: "ntfy.events.pipeline_done",
-        label: "events.pipeline_done",
+        label: "Done alerts",
         kind: FieldKind::Bool,
         description: "Notify when the pipeline finishes.",
         secret: false,
     },
     FieldMeta {
-        section: "acp.policy",
+        section: "agents",
         key: "acp.policy.shell_policy",
-        label: "shell_policy",
+        label: "Shell access",
         kind: FieldKind::Enum(ShellPolicy::variants()),
         description: "Default ACP shell policy. Allowed: full-access, allowlist.",
         secret: false,
     },
     FieldMeta {
-        section: "acp.policy",
+        section: "agents",
         key: "acp.policy.shell_allowlist",
-        label: "shell_allowlist",
+        label: "Allowed shell commands",
         kind: FieldKind::List,
         description: "Read-only list in this panel; use the CLI for item-level edits.",
         secret: false,
     },
     FieldMeta {
-        section: "acp.policy",
+        section: "agents",
+        key: "acp.policy.enforce_readonly_workspace",
+        label: "Read-only workspaces",
+        kind: FieldKind::Bool,
+        description: "Force ACP runs to treat the workspace as read-only unless write paths are allowed.",
+        secret: false,
+    },
+    FieldMeta {
+        section: "agents",
         key: "acp.policy.allowed_write_paths",
-        label: "allowed_write_paths",
+        label: "Writable paths",
         kind: FieldKind::List,
         description: "Read-only list in this panel; use the CLI for item-level edits.",
         secret: false,
     },
     FieldMeta {
-        section: "acp.install",
+        section: "agents",
         key: "acp.install.claude_acp_root",
-        label: "claude_acp_root",
+        label: "Claude ACP install root",
         kind: FieldKind::String,
         description: "Claude ACP installation root; $HOME and ~/ are expanded by the loader.",
         secret: false,
     },
     FieldMeta {
-        section: "runner",
+        section: "agents",
+        key: "acp.install.prefer_local_claude_acp",
+        label: "Prefer local Claude ACP",
+        kind: FieldKind::Bool,
+        description: "Use the locally installed Claude ACP server before falling back to the global command.",
+        secret: false,
+    },
+    FieldMeta {
+        section: "general",
         key: "runner.full_review_interval",
-        label: "full_review_interval",
+        label: "Review cadence",
         kind: FieldKind::Integer { min: 1 },
         description: "Run a full alignment review every N review rounds. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
-        section: "paths",
+        section: "system",
         key: "paths.cache_root",
-        label: "cache_root",
+        label: "Cache folder",
         kind: FieldKind::String,
         description: "Root for cache files. $HOME and ~/ are expanded at load.",
         secret: false,
     },
     FieldMeta {
-        section: "paths",
+        section: "system",
         key: "paths.sessions_root",
-        label: "sessions_root",
+        label: "Sessions folder",
         kind: FieldKind::String,
         description: "Root for session artifacts. $HOME and ~/ are expanded at load.",
         secret: false,
     },
     FieldMeta {
-        section: "paths",
+        section: "system",
         key: "paths.runs_root",
-        label: "runs_root",
+        label: "Runs folder",
         kind: FieldKind::String,
         description: "Reserved top-level run root; no current subsystem consumes it directly.",
         secret: false,
     },
     FieldMeta {
-        section: "paths",
+        section: "system",
         key: "paths.memory_root",
-        label: "memory_root",
+        label: "Memory folder",
         kind: FieldKind::String,
         description: "Root for project memory files. $HOME and ~/ are expanded at load.",
         secret: false,
     },
     FieldMeta {
-        section: "ui",
+        section: "general",
         key: "ui.prefer_split_on_open",
-        label: "prefer_split_on_open",
+        label: "Open runs in split view",
         kind: FieldKind::Bool,
         description: "Prefer the split transcript when opening run output.",
         secret: false,
     },
     FieldMeta {
-        section: "ui.colon_palette",
+        section: "system",
         key: "ui.colon_palette.show_help",
-        label: "colon_palette.show_help",
+        label: "Palette help row",
         kind: FieldKind::Bool,
         description: "Show the command palette help row.",
         secret: false,
     },
     FieldMeta {
-        section: "ui.footer",
+        section: "general",
         key: "ui.footer.show_keys",
-        label: "footer.show_keys",
+        label: "Footer key hints",
         kind: FieldKind::Bool,
         description: "Show footer key hints.",
         secret: false,
     },
     FieldMeta {
-        section: "diagnostics",
+        section: "general",
         key: "diagnostics.log_level",
-        label: "log_level",
+        label: "Log level",
         kind: FieldKind::Enum(LogLevel::variants()),
         description: "Default log level. RUST_LOG still takes precedence.",
         secret: false,
     },
     FieldMeta {
-        section: "diagnostics",
+        section: "system",
         key: "diagnostics.json_logs",
-        label: "json_logs",
+        label: "JSON logs",
         kind: FieldKind::Bool,
         description: "Emit JSON logs unless the environment overrides diagnostics.",
         secret: false,
     },
     FieldMeta {
-        section: "memory",
+        section: "general",
         key: "memory.enabled",
-        label: "enabled",
+        label: "Project memory",
         kind: FieldKind::Bool,
         description: "Enable project memory prompt context.",
         secret: false,
     },
     FieldMeta {
-        section: "memory",
+        section: "system",
         key: "memory.max_topics_per_read",
-        label: "max_topics_per_read",
+        label: "Memory topics per prompt",
         kind: FieldKind::Integer { min: 1 },
         description: "Maximum memory topics read into one prompt. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
-        section: "memory",
+        section: "system",
         key: "memory.journal_retention_months",
-        label: "journal_retention_months",
+        label: "Journal retention",
         kind: FieldKind::Integer { min: 1 },
         description: "Monthly memory journals older than this are pruned at launch. Minimum: 1.",
         secret: false,
     },
     FieldMeta {
-        section: "acp.agents.claude",
+        section: "agents",
         key: "acp.agents.claude.env",
-        label: "claude.env",
+        label: "Claude environment",
         kind: FieldKind::Map,
         description: "Read-only map in this panel; use dotted CLI keys for env entries.",
         secret: false,
     },
 ];
 
-const SECTIONS: &[&str] = &[
-    "meta",
-    "ntfy",
-    "ntfy.events",
-    "acp.policy",
-    "acp.install",
-    "acp.agents.claude",
-    "providers",
-    "runner",
-    "paths",
-    "ui",
-    "ui.colon_palette",
-    "ui.footer",
-    "diagnostics",
-    "memory",
+const SECTIONS: &[&str] = &["general", "models", "notifications", "agents", "system"];
+const SECTION_ALIASES: &[(&str, &str)] = &[
+    ("general", "general"),
+    ("common", "general"),
+    ("settings", "general"),
+    ("ui", "general"),
+    ("ui.footer", "general"),
+    ("runner", "general"),
+    ("models", "models"),
+    ("model", "models"),
+    ("providers", "models"),
+    ("provider", "models"),
+    ("notifications", "notifications"),
+    ("notification", "notifications"),
+    ("ntfy", "notifications"),
+    ("ntfy.events", "notifications"),
+    ("agents", "agents"),
+    ("agent", "agents"),
+    ("acp", "agents"),
+    ("acp.policy", "agents"),
+    ("acp.install", "agents"),
+    ("acp.agents", "agents"),
+    ("acp.agents.claude", "agents"),
+    ("system", "system"),
+    ("advanced", "system"),
+    ("paths", "system"),
+    ("diagnostics", "system"),
+    ("memory", "system"),
+    ("meta", "system"),
+    ("ui.colon_palette", "system"),
 ];
 
 /// True when the section name owns the providers sub-panel rendering path
 /// (a list-of-entries layout) rather than the default key/value field grid.
 fn is_providers_section(section: &str) -> bool {
-    section == "providers"
+    section == "models"
+}
+
+fn section_title(section: &str) -> &'static str {
+    match section {
+        "general" => "Common",
+        "models" => "Models",
+        "notifications" => "Notifications",
+        "agents" => "Agents",
+        "system" => "System",
+        _ => "Settings",
+    }
+}
+
+fn resolve_section_name(name: &str) -> Option<&'static str> {
+    let normalized = name.trim().to_ascii_lowercase();
+    SECTION_ALIASES
+        .iter()
+        .find_map(|(alias, section)| (*alias == normalized).then_some(*section))
+}
+
+fn section_prefix_matches(prefix: &str) -> Vec<&'static str> {
+    let normalized = prefix.trim().to_ascii_lowercase();
+    let mut matches = Vec::new();
+    for (alias, section) in SECTION_ALIASES {
+        if alias.starts_with(&normalized) && !matches.contains(section) {
+            matches.push(*section);
+        }
+    }
+    matches
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -411,8 +471,9 @@ impl ConfigPanelState {
     ) -> Self {
         let opened_mtime = mtime(&path);
         let selected_section = initial_section
+            .and_then(resolve_section_name)
             .and_then(|name| SECTIONS.iter().position(|s| *s == name))
-            .unwrap_or(1);
+            .unwrap_or(0);
         let mut state = Self {
             config: config.clone(),
             path,
@@ -523,10 +584,28 @@ impl ConfigPanelState {
             KeyCode::Enter => {
                 if !self.read_only {
                     if is_providers_section(self.current_section()) {
-                        self.activate_provider_line();
+                        self.toggle_selected_provider_enabled();
                     } else {
                         self.activate_field();
                     }
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char(' ') if is_providers_section(self.current_section()) => {
+                if !self.read_only {
+                    self.toggle_selected_provider_enabled();
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('a') if is_providers_section(self.current_section()) => {
+                if !self.read_only {
+                    self.open_add_provider_editor();
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('x') if is_providers_section(self.current_section()) => {
+                if !self.read_only {
+                    self.remove_selected_provider();
                 }
                 PanelOutcome::KeepOpen
             }
@@ -745,10 +824,10 @@ impl ConfigPanelState {
             },
             ConflictBanner::ResetSectionPrompt { section, count } => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    match mutate::reset_section(&mut self.config, &section) {
+                    match self.reset_visible_section(&section) {
                         Ok(()) => {
                             self.dirty = count > 0 || self.dirty;
-                            self.status = format!("reset {section} to defaults");
+                            self.status = format!("reset {} to defaults", section_title(&section));
                             self.select_first_field_in_current_section();
                         }
                         Err(err) => self.status = err.to_string(),
@@ -933,6 +1012,93 @@ impl ConfigPanelState {
         self.status = format!("choose {}", meta.key);
     }
 
+    fn toggle_selected_provider_enabled(&mut self) {
+        let prop_before = self.providers_prop_cursor;
+        self.providers_prop_cursor = 0;
+        self.activate_provider_line();
+        self.providers_prop_cursor = prop_before;
+    }
+
+    fn open_add_provider_editor(&mut self) {
+        let merged =
+            crate::logic::selection::baked::merge_with_overrides(self.config.providers.value());
+        let mut available: Vec<(String, String)> = Vec::new();
+        for entry in &merged {
+            let vendor_label =
+                crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
+                    .to_string();
+            let pair = (vendor_label, entry.model.clone());
+            if !available.contains(&pair) {
+                available.push(pair);
+            }
+        }
+
+        self.editing = Some(Editing::AddProvider(providers::ProvidersEditor::new(
+            available,
+        )));
+        self.status = "add model provider".to_string();
+    }
+
+    fn remove_selected_provider(&mut self) {
+        let lines = providers::get_lines(&self.config);
+        let Some(providers::ProvidersLine::Provider {
+            entry, is_baked, ..
+        }) = lines.get(self.providers_cursor)
+        else {
+            self.status = "select a model provider first".to_string();
+            return;
+        };
+
+        let identity = entry.identity();
+        let mut existing = self.config.providers.value().clone();
+        let before = existing.len();
+        existing.retain(|candidate| candidate.identity() != identity);
+        if existing.len() < before {
+            self.config.providers = Override::explicit(existing);
+            self.dirty = true;
+            self.status = if *is_baked {
+                "removed custom override; built-in provider restored".to_string()
+            } else {
+                "deleted custom provider".to_string()
+            };
+            self.clamp_provider_cursor();
+            return;
+        }
+
+        if *is_baked {
+            let mut disabled = entry.clone();
+            disabled.enabled = false;
+            self.upsert_provider_override(disabled);
+            self.dirty = true;
+            self.status = "built-in provider disabled".to_string();
+        } else {
+            self.status = "provider already absent".to_string();
+        }
+        self.clamp_provider_cursor();
+    }
+
+    fn upsert_provider_override(&mut self, updated: crate::data::config::schema::ProviderEntry) {
+        let mut existing = self.config.providers.value().clone();
+        if let Some(pos) = existing
+            .iter()
+            .position(|entry| entry.identity() == updated.identity())
+        {
+            existing[pos] = updated;
+        } else {
+            existing.push(updated);
+        }
+        self.config.providers = Override::explicit(existing);
+    }
+
+    fn clamp_provider_cursor(&mut self) {
+        let len = providers::get_lines(&self.config).len();
+        if len == 0 {
+            self.providers_cursor = 0;
+        } else {
+            self.providers_cursor = self.providers_cursor.min(len - 1);
+        }
+    }
+
     fn activate_provider_line(&mut self) {
         let lines = providers::get_lines(&self.config);
         let Some(line) = lines.get(self.providers_cursor) else {
@@ -956,48 +1122,16 @@ impl ConfigPanelState {
                     _ => return,
                 }
 
-                let mut existing = self.config.providers.value().clone();
-                if let Some(pos) = existing
-                    .iter()
-                    .position(|e| e.identity() == entry.identity())
-                {
-                    existing[pos] = updated;
-                } else {
-                    // It was a baked-only entry, now it has an override
-                    existing.push(updated);
-                }
-                self.config.providers = Override::explicit(existing);
+                self.upsert_provider_override(updated);
                 self.dirty = true;
-                self.status = "provider property toggled".to_string();
+                self.status = if self.providers_prop_cursor == 0 {
+                    "model availability toggled".to_string()
+                } else {
+                    "model option toggled".to_string()
+                };
             }
             providers::ProvidersLine::AddAction => {
-                // Derive the (vendor, model) universe from the merged
-                // baked + user provider list so the modal is self-contained.
-                // Reading from `self.config.providers` (rather than threading
-                // the dashboard model list through `open_at`) keeps the
-                // production and test paths identical and lets the modal
-                // populate even when the panel is opened before any
-                // dashboard refresh has occurred.
-                let merged = crate::logic::selection::baked::merge_with_overrides(
-                    self.config.providers.value(),
-                );
-                let mut available: Vec<(String, String)> = Vec::new();
-                for entry in &merged {
-                    let vendor_label =
-                        crate::logic::selection::subscription::subscription_kind_to_str(
-                            entry.subscription,
-                        )
-                        .to_string();
-                    let pair = (vendor_label, entry.model.clone());
-                    if !available.contains(&pair) {
-                        available.push(pair);
-                    }
-                }
-
-                self.editing = Some(Editing::AddProvider(providers::ProvidersEditor::new(
-                    available,
-                )));
-                self.status = "Add Provider".to_string();
+                self.open_add_provider_editor();
             }
         }
     }
@@ -1163,10 +1297,39 @@ impl ConfigPanelState {
     }
 
     fn section_override_count(&self, section: &str) -> usize {
-        FIELDS
+        let field_count = FIELDS
             .iter()
             .filter(|meta| meta.section == section && self.source_for(meta) == "override")
-            .count()
+            .count();
+        if section == "models" && self.config.providers.is_explicit() {
+            field_count + self.config.providers.value().len().max(1)
+        } else {
+            field_count
+        }
+    }
+
+    fn reset_visible_section(&mut self, section: &str) -> Result<()> {
+        let mut first_error: Option<anyhow::Error> = None;
+        for meta in FIELDS
+            .iter()
+            .filter(|meta| meta.section == section && !matches!(meta.kind, FieldKind::ReadOnly))
+        {
+            if self.source_for(meta) == "override"
+                && let Err(err) =
+                    mutate::unset_value(&mut self.config, meta.key).map_err(|err| anyhow!(err))
+            {
+                first_error = Some(err);
+                break;
+            }
+        }
+        if section == "models" && self.config.providers.is_explicit() {
+            self.config.providers = Override::baked(Vec::new());
+        }
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     fn value_for(&self, meta: &FieldMeta) -> String {
@@ -1209,11 +1372,17 @@ impl ConfigPanelState {
             "acp.policy.shell_allowlist" => {
                 format_list(self.config.acp.policy.shell_allowlist.value())
             }
+            "acp.policy.enforce_readonly_workspace" => {
+                value_bool(&self.config.acp.policy.enforce_readonly_workspace)
+            }
             "acp.policy.allowed_write_paths" => {
                 format_list(self.config.acp.policy.allowed_write_paths.value())
             }
             "acp.install.claude_acp_root" => {
                 self.config.acp.install.claude_acp_root.value().clone()
+            }
+            "acp.install.prefer_local_claude_acp" => {
+                value_bool(&self.config.acp.install.prefer_local_claude_acp)
             }
             "runner.full_review_interval" => {
                 self.config.runner.full_review_interval.value().to_string()
@@ -1271,11 +1440,17 @@ impl ConfigPanelState {
             "acp.policy.shell_allowlist" => {
                 source_override(&self.config.acp.policy.shell_allowlist)
             }
+            "acp.policy.enforce_readonly_workspace" => {
+                source_override(&self.config.acp.policy.enforce_readonly_workspace)
+            }
             "acp.policy.allowed_write_paths" => {
                 source_override(&self.config.acp.policy.allowed_write_paths)
             }
             "acp.install.claude_acp_root" => {
                 source_override(&self.config.acp.install.claude_acp_root)
+            }
+            "acp.install.prefer_local_claude_acp" => {
+                source_override(&self.config.acp.install.prefer_local_claude_acp)
             }
             "runner.full_review_interval" => {
                 source_override(&self.config.runner.full_review_interval)
@@ -1351,14 +1526,10 @@ pub(crate) fn lookup_section(arg: &str) -> SectionLookup {
     if needle.is_empty() {
         return SectionLookup::Unknown;
     }
-    if let Some(name) = SECTIONS.iter().copied().find(|s| *s == needle) {
+    if let Some(name) = resolve_section_name(needle) {
         return SectionLookup::Exact(name);
     }
-    let matches: Vec<&'static str> = SECTIONS
-        .iter()
-        .copied()
-        .filter(|s| s.starts_with(needle))
-        .collect();
+    let matches = section_prefix_matches(needle);
     match matches.len() {
         0 => SectionLookup::Unknown,
         1 => SectionLookup::UniquePrefix(matches[0]),
@@ -1563,7 +1734,7 @@ fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
         return;
     }
 
-    let name_w = w.min(22) as u16;
+    let name_w = w.min(30) as u16;
     let mut popup_x = area.x.saturating_add(name_w + 3);
     let area_right = area.x.saturating_add(area.width);
     if popup_x + popup_w > area_right {
@@ -1647,11 +1818,12 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
     for (i, section) in SECTIONS.iter().enumerate() {
         let active = i == state.selected_section;
         let dirty = state.section_override_count(section) > 0;
+        let title = section_title(section);
         let label = match (active, dirty) {
-            (true, true) => format!("▾{section}*"),
-            (true, false) => format!("▾{section}"),
-            (false, true) => format!("▸{section}*"),
-            (false, false) => format!("▸{section}"),
+            (true, true) => format!("▾ {title}*"),
+            (true, false) => format!("▾ {title}"),
+            (false, true) => format!("▸ {title}*"),
+            (false, false) => format!("▸ {title}"),
         };
         let sep = if current.is_empty() {
             String::new()
@@ -1680,7 +1852,7 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<String> {
 fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> String {
     let meta = &FIELDS[idx];
     let focused = idx == state.selected_field;
-    let name_w = width.min(22);
+    let name_w = width.min(30);
     let tag = state.source_for(meta);
     let mut value = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {
@@ -1743,6 +1915,12 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
     if let Some(text) = banner {
         return fit_cell(text, width);
     }
+    if is_providers_section(state.current_section()) {
+        return fit_cell(
+            "Space toggles availability. Use arrows for rows and options; a adds, x removes custom providers.",
+            width,
+        );
+    }
     state
         .current_meta()
         .map(|meta| fit_cell(meta.description, width))
@@ -1753,25 +1931,31 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
     let hotkeys: &[&str] = if state.searching.is_some() {
         &["↑↓ select", "Enter jump", "Esc cancel"]
     } else if state.read_only {
-        &["Tab section", "/ search", "e edit", "Esc close"]
+        &["Tab page", "/ search", "e edit", "Esc close"]
     } else {
         match &state.editing {
             Some(Editing::Choice { .. }) => &["↑↓ select", "Enter commit", "Esc cancel"],
             Some(Editing::Integer | Editing::String) => &["Enter commit", "Esc cancel"],
-            Some(Editing::AddProvider(_)) => {
-                &["↑↓ model", "Enter commit", "Esc cancel", "Ctrl-C cycle cli"]
-            }
+            Some(Editing::AddProvider(_)) => &["↑↓ model", "Enter add", "Esc cancel", "Ctrl-C CLI"],
             // Order matters: the renderer drops trailing entries that no
             // longer fit, so the high-frequency keys come first to survive
             // narrow widths.
+            None if is_providers_section(state.current_section()) => &[
+                "↑↓ model",
+                "Space toggle",
+                "a add",
+                "x remove",
+                "Ctrl-S save",
+                "Esc close",
+            ],
             None => &[
-                "Tab section",
+                "Tab page",
                 "Enter edit",
                 "Ctrl-S save",
                 "Esc close",
                 "d default",
                 "/ search",
-                "D reset section",
+                "D reset page",
             ],
         }
     };
@@ -1801,7 +1985,7 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
 }
 
 fn header_text(path: &Path, width: usize) -> String {
-    let title = "codexize · config";
+    let title = "codexize · settings";
     let path = path.display().to_string();
     let reserve = title.width() + 3;
     let path_w = width.saturating_sub(reserve);
@@ -1822,17 +2006,22 @@ fn field_indices_for(section: &str) -> Vec<usize> {
 }
 
 fn dirty_count(state: &ConfigPanelState) -> usize {
-    FIELDS
+    let field_count = FIELDS
         .iter()
         .filter(|meta| match meta.key {
             "meta.version" => false,
             _ => state.source_for(meta) == "override",
         })
-        .count()
+        .count();
+    if state.config.providers.is_explicit() {
+        field_count + state.config.providers.value().len().max(1)
+    } else {
+        field_count
+    }
 }
 
 fn value_width(width: usize) -> usize {
-    width.saturating_sub(22 + TAG_WIDTH + 3)
+    width.saturating_sub(30 + TAG_WIDTH + 3)
 }
 
 fn fit_cell(value: &str, width: usize) -> String {
@@ -1989,6 +2178,125 @@ mod tests {
     }
 
     #[test]
+    fn redesigned_panel_opens_on_common_settings_with_friendly_tabs() {
+        let state = state_with_overrides();
+        assert_eq!(state.current_section_name(), "general");
+
+        let text = render_to_text(&state, 100, 18);
+        assert!(text.contains("Common"));
+        assert!(text.contains("Models"));
+        assert!(text.contains("Notifications"));
+        assert!(text.contains("Agents"));
+        assert!(text.contains("System"));
+        assert!(
+            text.contains("Review cadence"),
+            "common settings should use friendly labels: {text}"
+        );
+        assert!(
+            !text.contains("full_review_interval"),
+            "raw config labels should not be visible in the common page: {text}"
+        );
+    }
+
+    #[test]
+    fn notification_page_uses_friendly_names_not_raw_keys() {
+        let mut state = state_with_overrides();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "notifications").unwrap();
+        state.select_first_field_in_current_section();
+
+        let text = render_to_text(&state, 100, 18);
+        assert!(text.contains("Retry attempts"));
+        assert!(text.contains("Topic"));
+        assert!(
+            !text.contains("retry_attempts"),
+            "raw snake_case labels should not render: {text}"
+        );
+        assert!(
+            !text.contains("detail_mode"),
+            "raw snake_case labels should not render: {text}"
+        );
+    }
+
+    #[test]
+    fn model_tab_space_toggles_selected_provider_enabled() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
+            .expect("provider row");
+
+        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        let lines = providers::get_lines(&state.config);
+        let providers::ProvidersLine::Provider { entry, .. } = &lines[state.providers_cursor]
+        else {
+            panic!("cursor should still point at provider");
+        };
+        assert!(!entry.enabled, "space should toggle model availability off");
+        assert!(state.dirty);
+    }
+
+    #[test]
+    fn model_tab_x_deletes_user_added_provider() {
+        let mut config = Config::baked_defaults();
+        config.providers = crate::data::config::schema::Override::explicit(vec![
+            crate::data::config::schema::ProviderEntry {
+                cli: crate::selection::CliKind::Opencode,
+                launch_name: "custom-opus".to_string(),
+                model: "claude-opus-4.7".to_string(),
+                subscription: crate::selection::SubscriptionKind::Claude,
+                enabled: true,
+                free: false,
+                official: false,
+                quota_disabled: false,
+                cheap_eligible: false,
+                tough_eligible: true,
+                effort_eligible: true,
+                effort_mapping: Default::default(),
+                quota_lookup_key: None,
+                display_order: 0,
+            },
+        ]);
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| {
+                matches!(
+                    l,
+                    providers::ProvidersLine::Provider { entry, is_baked: false, .. }
+                        if entry.launch_name == "custom-opus"
+                )
+            })
+            .expect("custom provider row");
+
+        state.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        assert!(
+            !state
+                .config
+                .providers
+                .value()
+                .iter()
+                .any(|entry| entry.launch_name == "custom-opus"),
+            "custom provider should be removed from overrides"
+        );
+        assert!(state.dirty);
+    }
+
+    #[test]
     fn adaptive_snapshot_width_120() {
         let state = state_with_overrides();
         insta::assert_snapshot!(render_to_text(&state, 120, 20));
@@ -2002,18 +2310,18 @@ mod tests {
         assert!(text.contains("Esc close"));
         assert!(text.contains("d default"));
         assert!(text.contains("Enter edit"));
-        assert!(text.contains("Tab section"));
+        assert!(text.contains("Tab page"));
         insta::assert_snapshot!(text);
     }
 
     #[test]
     fn adaptive_snapshot_width_60_shows_tab_bar() {
         let mut state = state_with_overrides();
-        state.selected_section = SECTIONS.iter().position(|s| *s == "paths").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "system").unwrap();
         state.select_first_field_in_current_section();
         let text = render_to_text(&state, 60, 16);
-        assert!(text.contains("▸meta"));
-        assert!(text.contains("▾paths"));
+        assert!(text.contains("▸ Common"));
+        assert!(text.contains("▾ System"));
         insta::assert_snapshot!(text);
     }
 
@@ -2053,7 +2361,7 @@ mod tests {
     #[allow(non_snake_case)]
     fn g_G_jumps_first_last_field() {
         let mut state = state_with_overrides();
-        state.selected_section = SECTIONS.iter().position(|s| *s == "ntfy").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "notifications").unwrap();
         state.selected_field = 5;
         state.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
         let fields = field_indices_for(state.current_section());
@@ -2251,21 +2559,23 @@ mod tests {
         // Verify the three operator-facing override signals are wired into render output:
         // (1) `*` dirty prefix on the field rows, (2) right-aligned `override` source
         // tag, and (3) `*` suffix on tab-bar entries for override-bearing sections.
-        let state = state_with_overrides();
+        let mut state = state_with_overrides();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "notifications").unwrap();
+        state.select_first_field_in_current_section();
         let text = render_to_text(&state, 120, 20);
-        assert!(text.contains(" *topic"), "missing dirty prefix on topic");
+        assert!(text.contains(" *Topic"), "missing dirty prefix on topic");
         assert!(
-            text.contains(" *detail_mode"),
+            text.contains(" *Message detail"),
             "missing dirty prefix on detail_mode"
         );
         assert!(text.contains("override"), "missing override source tag");
         assert!(
-            text.contains("▾ntfy*"),
-            "missing override suffix on active ntfy tab"
+            text.contains("▾ Notifications*"),
+            "missing override suffix on notifications tab"
         );
         assert!(
-            text.contains("▸paths*"),
-            "missing override suffix on inactive paths tab"
+            text.contains("▸ System*"),
+            "missing override suffix on system tab"
         );
     }
 
@@ -2294,8 +2604,8 @@ mod tests {
     #[test]
     fn enter_in_search_jumps_to_field_across_sections() {
         let mut state = state_with_overrides();
-        // Start on "ntfy"; jump to a field in "memory" via search.
-        state.selected_section = SECTIONS.iter().position(|s| *s == "ntfy").unwrap();
+        // Start on notifications; jump to a field in system via search.
+        state.selected_section = SECTIONS.iter().position(|s| *s == "notifications").unwrap();
         state.select_first_field_in_current_section();
         state.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         for c in "max_topics".chars() {
@@ -2303,7 +2613,7 @@ mod tests {
         }
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(state.searching.is_none(), "Enter must close search");
-        assert_eq!(state.current_section_name(), "memory");
+        assert_eq!(state.current_section_name(), "system");
         assert_eq!(
             state.current_meta().unwrap().key,
             "memory.max_topics_per_read"
@@ -2384,17 +2694,17 @@ mod tests {
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
-            Some("providers"),
+            Some("models"),
         );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
         let text = render_to_text(&state, 120, 18);
         assert!(
-            text.contains("claude / claude-opus-4.7"),
+            text.contains("claude · claude-opus-4.7"),
             "missing group header: {text}"
         );
         assert!(
-            text.contains("[x] claude · claude-opus-4.7 · (x) official · ( ) free"),
+            text.contains("On   claude  claude-opus-4.7  built-in · official · paid"),
             "missing provider entry: {text}"
         );
     }
@@ -2406,19 +2716,19 @@ mod tests {
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
-            Some("providers"),
+            Some("models"),
         );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
         // Height tall enough to render every baked row + the Add Provider
         // footer; the section now has 30 baked rows and grows over time.
         let text = render_to_text(&state, 120, 80);
         assert!(
-            text.contains("claude / claude-opus-4.7"),
+            text.contains("claude · claude-opus-4.7"),
             "should show baked models: {text}"
         );
         assert!(
-            text.contains("[ Add Provider ]"),
+            text.contains("+ Add model provider"),
             "should show add button: {text}"
         );
     }
@@ -2430,9 +2740,9 @@ mod tests {
             &config,
             PathBuf::from("/tmp/example/config.toml"),
             false,
-            Some("providers"),
+            Some("models"),
         );
-        state.selected_section = SECTIONS.iter().position(|s| *s == "providers").unwrap();
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
         let lines = providers::get_lines(&state.config);
         let add_idx = lines

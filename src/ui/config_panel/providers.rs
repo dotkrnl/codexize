@@ -129,8 +129,8 @@ pub(crate) fn format_line(
             subscription,
             model,
         } => {
-            let text = format!("{} / {}", subscription, model);
-            format!("  {}", text)
+            let text = format!("{} · {}", subscription, model);
+            format!("  {text}")
         }
         ProvidersLine::Provider {
             entry,
@@ -140,97 +140,102 @@ pub(crate) fn format_line(
         } => {
             let marker = if selected { ">" } else { " " };
 
-            let enabled_str = if entry.enabled { "[x]" } else { "[ ]" };
+            let enabled_str = if entry.enabled { "On " } else { "Off" };
             let enabled = if selected && prop_selected == 0 {
-                format!("*{}*", enabled_str)
+                format!("[{enabled_str}]")
             } else {
                 enabled_str.to_string()
             };
 
             let official_str = if *is_baked {
-                if *baked_official {
-                    "(x) official"
-                } else {
-                    "( ) official"
-                }
+                *baked_official
             } else {
-                if entry.official {
-                    "[x] official"
-                } else {
-                    "[ ] official"
-                }
+                entry.official
             };
             let official = if selected && prop_selected == 1 {
-                format!("*{}*", official_str)
+                format!(
+                    "[{}]",
+                    if official_str {
+                        "official"
+                    } else {
+                        "unofficial"
+                    }
+                )
             } else {
-                official_str.to_string()
+                (if official_str {
+                    "official"
+                } else {
+                    "unofficial"
+                })
+                .to_string()
             };
 
-            let free_str = if *is_baked {
-                if *baked_free { "(x) free" } else { "( ) free" }
-            } else {
-                if entry.free { "[x] free" } else { "[ ] free" }
-            };
+            let free_str = if *is_baked { *baked_free } else { entry.free };
             let free = if selected && prop_selected == 2 {
-                format!("*{}*", free_str)
+                format!("[{}]", if free_str { "free" } else { "paid" })
             } else {
-                free_str.to_string()
+                (if free_str { "free" } else { "paid" }).to_string()
             };
 
             let quota_str = if entry.quota_disabled {
-                "[x] no-quota"
+                "ignores quota"
             } else {
-                "[ ] no-quota"
+                "uses quota"
             };
             let quota = if selected && prop_selected == 3 {
-                format!("*{}*", quota_str)
+                format!("[{quota_str}]")
             } else {
                 quota_str.to_string()
             };
 
-            let mut text = format!(
-                "{} {} {} · {} · {} · {} · {}",
-                marker,
-                enabled,
-                entry.cli.as_str(),
-                entry.launch_name,
-                official,
-                free,
-                quota
-            );
-
-            // Add eligibility flags
-            let cheap_str = if entry.cheap_eligible { "c" } else { "-" };
+            let source = if *is_baked { "built-in" } else { "custom" };
+            let cheap_str = if entry.cheap_eligible {
+                "cheap"
+            } else {
+                "normal"
+            };
             let cheap = if selected && prop_selected == 4 {
-                format!("*{}*", cheap_str)
+                format!("[{cheap_str}]")
             } else {
                 cheap_str.to_string()
             };
 
-            let tough_str = if entry.tough_eligible { "t" } else { "-" };
+            let tough_str = if entry.tough_eligible {
+                "tough"
+            } else {
+                "standard"
+            };
             let tough = if selected && prop_selected == 5 {
-                format!("*{}*", tough_str)
+                format!("[{tough_str}]")
             } else {
                 tough_str.to_string()
             };
 
-            let effort_str = if entry.effort_eligible { "e" } else { "-" };
+            let effort_str = if entry.effort_eligible {
+                "effort"
+            } else {
+                "fixed effort"
+            };
             let effort = if selected && prop_selected == 6 {
-                format!("*{}*", effort_str)
+                format!("[{effort_str}]")
             } else {
                 effort_str.to_string()
             };
 
-            text.push_str(&format!(" · {}{}{}", cheap, tough, effort));
+            let mut text = format!(
+                "{marker} {enabled}  {}  {}  {source} · {official} · {free} · {quota} · {cheap}, {tough}, {effort}",
+                entry.cli.as_str(),
+                entry.launch_name,
+            );
 
             if text.len() > width {
                 text.truncate(width);
             }
-            format!("  {}", text)
+            format!("  {text}")
         }
         ProvidersLine::AddAction => {
             let marker = if selected { ">" } else { " " };
-            format!("  {} [ Add Provider ]", marker)
+            format!("  {marker} + Add model provider")
         }
     }
 }

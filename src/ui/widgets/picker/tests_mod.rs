@@ -843,7 +843,7 @@ fn config_panel_read_only_mode_ignores_mutation_keys() {
     picker.execute_palette_command("config", "").unwrap();
 
     let panel = picker.config_panel.as_mut().unwrap();
-    // Default selected section is ntfy, selected field is ntfy.enabled (Bool).
+    // Default selected page is Common.
 
     // Press Enter to try to edit
     panel.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -865,7 +865,7 @@ fn picker_config_with_section_arg_jumps_to_section() {
         .execute_palette_command("config", "acp.po")
         .expect("palette dispatch");
     let panel = picker.config_panel.as_ref().expect("panel open");
-    assert_eq!(panel.current_section_name(), "acp.policy");
+    assert_eq!(panel.current_section_name(), "agents");
 }
 
 #[test]

@@ -37,20 +37,22 @@ const DISPLAY: &[(&str, &str, &str)] = &[
     ("glm-5.1", "glm", "5.1"),
 ];
 
-pub fn display_vendor(canonical: &str) -> &'static str {
+pub fn display_vendor(canonical: &str) -> Option<&'static str> {
     DISPLAY
         .iter()
         .find(|(c, _, _)| *c == canonical)
         .map(|(_, v, _)| *v)
-        .unwrap_or("")
 }
 
-pub fn display_short(canonical: &str) -> String {
+pub fn display_short(canonical: &str) -> Option<&'static str> {
     DISPLAY
         .iter()
         .find(|(c, _, _)| *c == canonical)
-        .map(|(_, _, s)| s.to_string())
-        .unwrap_or_else(|| canonical.to_string())
+        .map(|(_, _, s)| *s)
+}
+
+pub fn is_curated(canonical: &str) -> bool {
+    DISPLAY.iter().any(|(c, _, _)| *c == canonical)
 }
 
 pub fn run_label_name(canonical: &str) -> String {

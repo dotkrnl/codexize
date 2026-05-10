@@ -122,7 +122,8 @@ fn render_full_table(
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .map(|model| {
-            let short_name = model_names::display_short(&model.name);
+            let short_name =
+                model_names::display_short(&model.name).expect("visible model must be curated");
             short_name.width()
         })
         .max()
@@ -191,17 +192,17 @@ fn render_full_table(
         .into_iter()
         .collect();
     for model in visible_models_list {
-        // Tag the row by the arbitration-chosen candidate's subscription. Rows
-        // with no candidates render `[—]` and stay greyed out: arbitration
-        // already declines to pick them, so the picker cannot drive a launch
-        // through one — the dim tag mirrors that "informational only" state.
+        // Tag the row by curated model brand. Rows with no candidates stay
+        // greyed out: arbitration already declines to pick them, so the
+        // dim tag mirrors that "informational only" state.
         let selected_subscription = model.selected_candidate().map(|c| c.subscription);
         let label = display_vendor_tag(model);
         let color = match selected_subscription {
             Some(sub) => subscription_color(sub),
             None => Color::DarkGray,
         };
-        let short_name = model_names::display_short(&model.name);
+        let short_name =
+            model_names::display_short(&model.name).expect("visible model must be curated");
         let vendor_failed = quota_errors
             .iter()
             .any(|err| err.subscription == model.subscription);
@@ -249,7 +250,7 @@ fn render_full_table(
             quota_span,
             Span::raw(" "),
         ];
-        spans.extend(format_name_with_freshness(&short_name, name_width));
+        spans.extend(format_name_with_freshness(short_name, name_width));
         let phase_data = [
             (
                 "Idea ",
@@ -384,14 +385,10 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 const STATUS_DOT: &str = "●";
 /// Bracketed brand tag drawn in the vendor column. The tag text comes only
 /// from the model's curated `display_vendor` (e.g. `[deepseek]`, `[claude]`).
-/// Uncurated rows render `[—]` so missing curation stays visible.
 fn display_vendor_tag(model: &CachedModel) -> String {
-    let dv = crate::model_names::display_vendor(&model.name);
-    if dv.is_empty() {
-        "[—]".to_string()
-    } else {
-        format!("[{dv}]")
-    }
+    let dv =
+        crate::model_names::display_vendor(&model.name).expect("visible model must be curated");
+    format!("[{dv}]")
 }
 /// Width of the vendor-tag column (padded). Sized for the widest curated
 /// brand-tag, `[deepseek]` / `[opencode]` (10 chars).

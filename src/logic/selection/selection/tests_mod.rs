@@ -68,8 +68,6 @@ fn sample_model_with_score(
             review: Some(score),
         },
         score_source: ScoreSource::Ipbr,
-        ipbr_row_matched: true,
-        ipbr_match_key: Some(name.to_string()),
         candidates: vec![candidate],
         selected_candidate: Some(0),
         quota_percent: Some(quota),
@@ -158,7 +156,6 @@ fn pick_for_phase_returns_none_when_pool_empty_after_exclusions() {
     let mut unranked = sample_model(SubscriptionKind::Claude, "unranked", 80);
     unranked.ipbr_phase_scores = IpbrPhaseScores::default();
     unranked.score_source = ScoreSource::None;
-    unranked.ipbr_row_matched = false;
     let models = vec![
         sample_model(SubscriptionKind::Claude, "exhausted", 0),
         unranked,
@@ -356,7 +353,7 @@ fn pool_pick_sampler_dominates_for_quota_disabled_row_over_lower_fetched_quota()
 
 fn opus_sonnet_codex_kimi() -> Vec<CachedModel> {
     vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(SubscriptionKind::Claude, "claude-haiku-4-5", 80),
         sample_model(SubscriptionKind::Codex, "gpt-5.5", 80),
@@ -407,7 +404,7 @@ fn pick_with_effort_low_does_not_use_tough_filter() {
 #[test]
 fn pick_with_effort_cheap_filters_to_budget_subset() {
     let models = vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 80),
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5-flash", 80),
@@ -441,13 +438,13 @@ fn pick_with_effort_cheap_fallback_warns_when_eligible_quota_empty() {
     let models = vec![
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 0),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5-flash", 0),
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
     ];
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen =
         pick_for_phase_with_effort(&models, SelectionPhase::Build, None, EffortLevel::Low, true)
             .expect("full-pool fallback must yield a candidate");
-    assert_eq!(chosen.model.name, "claude-opus-4-7");
+    assert_eq!(chosen.model.name, "claude-opus-4.7");
     assert_eq!(
         chosen.warning,
         Some(SelectionWarning::CheapFallback {
@@ -527,11 +524,11 @@ fn pick_with_effort_tough_falls_back_to_sonnet_haiku() {
 #[test]
 fn select_for_review_normal_can_pick_ineligible_vendor() {
     let models = vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
     let used_vendors = vec![SubscriptionKind::Claude];
-    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4.7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -549,11 +546,11 @@ fn select_for_review_normal_can_pick_ineligible_vendor() {
 #[test]
 fn select_for_review_low_can_pick_ineligible_vendor() {
     let models = vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
     let used_vendors = vec![SubscriptionKind::Claude];
-    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4.7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -610,12 +607,12 @@ fn select_for_review_cheap_fallback_warns_when_eligible_quota_empty() {
 #[test]
 fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
     let models = vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 80),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 80),
         sample_model(SubscriptionKind::Claude, "claude-sonnet-4-6", 80),
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
     ];
     let used_vendors = vec![SubscriptionKind::Claude];
-    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4-7".to_string())];
+    let used_models = vec![(SubscriptionKind::Claude, "claude-opus-4.7".to_string())];
 
     TEST_SAMPLE_SEED.store(1, AtomicOrdering::Relaxed);
     let chosen = select_for_review_with_effort(
@@ -627,7 +624,7 @@ fn select_for_review_tough_reuses_opus_over_fresh_sonnet() {
     )
     .expect("eligibility-dominated reuse expected");
     assert_eq!(chosen.subscription, SubscriptionKind::Claude);
-    assert_eq!(chosen.name, "claude-opus-4-7");
+    assert_eq!(chosen.name, "claude-opus-4.7");
     TEST_SAMPLE_SEED.store(0, AtomicOrdering::Relaxed);
 }
 
@@ -650,7 +647,7 @@ fn select_for_review_tough_degrades_when_no_eligible_remain() {
 #[test]
 fn select_for_review_tough_degrades_when_eligible_have_zero_probability() {
     let models = vec![
-        sample_model(SubscriptionKind::Claude, "claude-opus-4-7", 0),
+        sample_model(SubscriptionKind::Claude, "claude-opus-4.7", 0),
         sample_model(SubscriptionKind::Codex, "gpt-5.5", 0),
         sample_model(SubscriptionKind::Kimi, "kimi-k2", 80),
         sample_model(SubscriptionKind::Gemini, "gemini-2.5", 80),

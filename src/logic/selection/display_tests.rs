@@ -11,8 +11,6 @@ fn ipbr_model(vendor: SubscriptionKind, name: &str, score: f64, quota: Option<u8
             review: Some(score),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        ipbr_row_matched: true,
-        ipbr_match_key: Some(name.to_string()),
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: quota,
@@ -27,8 +25,6 @@ fn unscored_model(vendor: SubscriptionKind, name: &str, display_order: usize) ->
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: Some(80),
@@ -102,8 +98,8 @@ fn visible_models_backfills_missing_vendors_by_build_rank() {
 }
 
 #[test]
-fn visible_models_inventory_only_model_remains_via_vendor_backfill() {
-    // Spec: inventory/CLI-visible models stay visible even with no ipbr
+fn visible_models_unscored_provider_model_remains_via_vendor_backfill() {
+    // Spec: provider-backed models stay visible even with no ipbr
     // score. The backfill rule is the visibility safety net.
     let models = vec![
         ipbr_model(SubscriptionKind::Claude, "claude-top", 95.0, Some(80)),
@@ -155,13 +151,13 @@ fn phase_rank_omits_unscored_models() {
     // rank map at all (callers treat absence as "no rank for this phase").
     let models = vec![
         ipbr_model(SubscriptionKind::Codex, "ranked", 80.0, Some(80)),
-        unscored_model(SubscriptionKind::Gemini, "inventory-only", 0),
+        unscored_model(SubscriptionKind::Gemini, "gemini-2.5-pro", 0),
     ];
     let ranks = phase_rank(&models, SelectionPhase::Build);
 
     assert_eq!(ranks.len(), 1);
     assert_eq!(ranks["ranked"], 1);
-    assert!(!ranks.contains_key("inventory-only"));
+    assert!(!ranks.contains_key("gemini-2.5-pro"));
 }
 
 #[test]

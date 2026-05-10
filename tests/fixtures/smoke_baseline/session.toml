@@ -1,5 +1,5 @@
 agent_runs = [
-  { attempt = 1, effort = "Normal", effort_eligible = false, effort_mapping = { cheap = "low", normal = "medium", tough = "high" }, hostname = "<ENV>", id = 1, model = "claude-opus-4-7", modes = { cheap = true, yolo = true }, mount_device_id = "<ENV>", round = 1, stage = "brainstorm", started_at = "<TIMESTAMP>", status = "Done", vendor = "anthropic", window_name = "[Brainstorm]" },
+  { attempt = 1, effort = "Normal", effort_eligible = false, effort_mapping = { cheap = "low", normal = "medium", tough = "high" }, hostname = "<ENV>", id = 1, model = "claude-opus-4.7", modes = { cheap = true, yolo = true }, mount_device_id = "<ENV>", round = 1, stage = "brainstorm", started_at = "<TIMESTAMP>", status = "Done", vendor = "anthropic", window_name = "[Brainstorm]" },
 ]
 archived = false
 current_phase = "IdeaInput"

@@ -60,7 +60,7 @@ fn acp_run_labels_match_snapshot() {
             "brainstorm={}",
             run_label_with_model(
                 "[Brainstorm]",
-                "claude-opus-4-7",
+                "claude-opus-4.7",
                 EffortLevel::Normal,
                 true,
                 &claude_mapping,

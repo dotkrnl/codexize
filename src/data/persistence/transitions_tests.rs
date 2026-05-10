@@ -69,7 +69,7 @@ fn simplifier_run_captures_iteration_simplification_round_stage_path() {
         None,
         9,
         2,
-        "claude-opus-4-6".to_string(),
+        "claude-opus-4.6".to_string(),
         "claude".to_string(),
         "[Simplifier]".to_string(),
         EffortLevel::Normal,

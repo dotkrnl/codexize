@@ -43,11 +43,9 @@ fn sample_cached_model() -> CachedModel {
         name: "gpt-5.5".to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
         quota_percent: Some(80),
         quota_resets_at: None,
         display_order: 0,
-        ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
     }
@@ -57,7 +55,7 @@ fn sample_cached_model() -> CachedModel {
 fn is_cheap_eligible_reads_selected_candidate_flag() {
     let cheap = model_with_candidate_flags(
         SubscriptionKind::Claude,
-        "claude-opus-4-7",
+        "claude-opus-4.7",
         true,
         false,
         false,

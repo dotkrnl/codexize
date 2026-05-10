@@ -6,6 +6,8 @@
 //! `Override<T>` ignores the explicit flag — round-trip tests compare the
 //! semantic value, not how the value got there.
 
+use crate::logic::selection::baked;
+use crate::model_names;
 use crate::selection::{CliKind, SubscriptionKind};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
@@ -617,6 +619,23 @@ impl Config {
             if entry.launch_name.trim().is_empty() {
                 return Err(format!("providers[{i}].launch_name must be non-empty"));
             }
+            if !model_names::is_curated(&entry.model) {
+                return Err(format!(
+                    "providers[{i}].model {:?} is not curated in model_names",
+                    entry.model
+                ));
+            }
+            if let Some(baked_model) = baked::model_for_identity(entry.cli, &entry.launch_name)
+                && baked_model != entry.model
+            {
+                return Err(format!(
+                    "providers[{i}]: baked identity (cli={:?}, launch_name={:?}) belongs to model {:?}, not {:?}",
+                    entry.cli.as_str(),
+                    entry.launch_name,
+                    baked_model,
+                    entry.model
+                ));
+            }
             let id = entry.identity();
             if let Some(prev_model) = by_identity.get(&id)
                 && *prev_model != entry.model.as_str()
@@ -751,19 +770,37 @@ mod tests {
         c.providers = Override::explicit(vec![
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4.7",
-                "claude-opus-4.7",
+                "custom-route",
+                "gpt-5.4",
                 SubscriptionKind::Claude,
             ),
             provider_for(
                 CliKind::Claude,
-                "claude-opus-4.7",
-                "claude-opus-4.6",
+                "custom-route",
+                "gpt-5.5",
                 SubscriptionKind::Claude,
             ),
         ]);
         let err = c.validate().unwrap_err();
         assert!(err.contains("reused with different model"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_baked_identity_override_with_different_model() {
+        let mut c = Config::baked_defaults();
+        c.providers = Override::explicit(vec![provider_for(
+            CliKind::Claude,
+            "claude-opus-4.7",
+            "claude-opus-4.6",
+            SubscriptionKind::Claude,
+        )]);
+
+        let err = c.validate().unwrap_err();
+
+        assert!(
+            err.contains("baked identity") && err.contains("claude-opus-4.7"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -777,6 +814,21 @@ mod tests {
         )]);
         let err = c.validate().unwrap_err();
         assert!(err.contains("launch_name"), "{err}");
+    }
+
+    #[test]
+    fn validate_rejects_uncurated_provider_model() {
+        let mut c = Config::baked_defaults();
+        c.providers = Override::explicit(vec![provider_for(
+            CliKind::Claude,
+            "uncurated-model",
+            "uncurated-model",
+            SubscriptionKind::Claude,
+        )]);
+
+        let err = c.validate().unwrap_err();
+
+        assert!(err.contains("not curated"), "{err}");
     }
 
     #[test]

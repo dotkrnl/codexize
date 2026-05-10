@@ -21,8 +21,6 @@ fn model_with_axis_score(name: &str, axis_score: f64, display_order: usize) -> C
             review: Some(axis_score),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        ipbr_row_matched: true,
-        ipbr_match_key: Some(name.to_string()),
         candidates: vec![crate::selection::Candidate {
             subscription: SubscriptionKind::Codex,
             cli: crate::selection::CliKind::Codex,
@@ -161,7 +159,7 @@ fn empty_models_returns_empty_lines() {
 #[test]
 fn term_h_below_floor_returns_empty_preserving_prev_mode() {
     // term_h <= CHROME_RESERVED_LINES → models_budget == 0 → omit area.
-    let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     for term_h in [0u16, 5, CHROME_RESERVED_LINES] {
         let (lines, mode) =
@@ -176,9 +174,9 @@ fn term_h_below_floor_returns_empty_preserving_prev_mode() {
 #[test]
 fn full_to_compact_uses_strict_threshold() {
     let models = vec![
-        model_with_axis_score("gpt-a", 1.0, 0),
-        model_with_axis_score("gpt-b", 1.0, 1),
-        model_with_axis_score("gpt-c", 1.0, 2),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
+        model_with_axis_score("gpt-5.5", 1.0, 2),
     ];
     // visible_count >= 3 (all three picked because per-vendor backfill
     // promotes the best-score representative when phases miss).
@@ -213,9 +211,9 @@ fn full_to_compact_uses_strict_threshold() {
 #[test]
 fn compact_to_full_requires_extra_line() {
     let models = vec![
-        model_with_axis_score("gpt-a", 1.0, 0),
-        model_with_axis_score("gpt-b", 1.0, 1),
-        model_with_axis_score("gpt-c", 1.0, 2),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
+        model_with_axis_score("gpt-5.5", 1.0, 2),
     ];
     let visible_count = visible_models(&models).len() as u16;
 
@@ -251,9 +249,9 @@ fn boundary_oscillation_does_not_flip_mode_each_frame() {
     // Spec: "at the boundary, oscillating the height by ±1 across frames
     // must not flip the mode each frame."
     let models = vec![
-        model_with_axis_score("gpt-a", 1.0, 0),
-        model_with_axis_score("gpt-b", 1.0, 1),
-        model_with_axis_score("gpt-c", 1.0, 2),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
+        model_with_axis_score("gpt-5.5", 1.0, 2),
     ];
     let visible_count = visible_models(&models).len() as u16;
     let term_at = term_h_for_budget(visible_count);
@@ -289,9 +287,9 @@ fn omit_then_grow_preserves_compact_state() {
     // Omit must not flip the hysteresis state — when the terminal grows
     // back, prev_mode applies as if the omit never happened.
     let models = vec![
-        model_with_axis_score("gpt-a", 1.0, 0),
-        model_with_axis_score("gpt-b", 1.0, 1),
-        model_with_axis_score("gpt-c", 1.0, 2),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
+        model_with_axis_score("gpt-5.5", 1.0, 2),
     ];
     let visible_count = visible_models(&models).len() as u16;
 
@@ -317,8 +315,8 @@ fn mode_default_is_full_table() {
 #[test]
 fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
     let models = vec![
-        model_with_axis_score("gpt-alpha", 1.0, 0),
-        model_with_axis_score("gpt-beta", 0.996_655, 1),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 0.996_655, 1),
     ];
 
     // Width 60 → Ipbr tier (compact single-letter format).
@@ -335,15 +333,15 @@ fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
             (0..area.width)
                 .map(|x| buf.cell((x, *y)).map(|c| c.symbol()).unwrap_or(" "))
                 .collect::<String>()
-                .contains("beta")
+                .contains("5.4")
         })
-        .expect("beta row should be rendered");
+        .expect("second gpt row should be rendered");
     let beta_line: String = (0..area.width)
         .map(|x| buf.cell((x, beta_y)).map(|c| c.symbol()).unwrap_or(" "))
         .collect();
     let build_col = beta_line
         .rfind("B50")
-        .expect("beta build probability should round to B50") as u16;
+        .expect("second gpt build probability should round to B50") as u16;
     let build_cell = buf.cell((build_col, beta_y)).expect("build cell");
 
     assert!(!build_cell.modifier.contains(Modifier::BOLD));
@@ -351,23 +349,20 @@ fn full_table_bolds_only_phase_rank_one_when_percentages_round_together() {
 
 #[test]
 fn full_table_truncates_long_names_on_narrow_width() {
-    let models = vec![model_with_axis_score(
-        "gpt-very-long-model-name-that-will-overflow",
-        1.0,
-        0,
-    )];
+    let models = vec![model_with_axis_score("gemini-3.1-pro-preview", 1.0, 0)];
 
-    // Width 50 → tier 3 (no probabilities, 2-letter vendor) with a tight
+    // Width 26 leaves a small name budget, so even the curated short
+    // label must be ellipsized.
     // name budget so the full name cannot fit.
-    let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
-    let row = full_model_buffer_line(&lines, 0, 50);
+    let (lines, _) = responsive_models_area(&models, &[], 26, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 26);
 
     assert!(
         row.contains("..."),
         "narrow width should truncate name with ellipsis: {row:?}"
     );
     assert!(
-        !row.contains("very-long-model-name-that-will-overflow"),
+        !row.contains("gemini-3.1-pro-preview"),
         "full name should not fit: {row:?}"
     );
 }
@@ -377,11 +372,7 @@ fn full_table_drops_probabilities_below_60() {
     // Spec rule: "drop probabilities entirely below ~60 cols". The
     // pre-cutover model_strip used to keep IPBR at width 50 — under the
     // new spec, that whole column collapses.
-    let models = vec![model_with_axis_score(
-        "gpt-very-long-model-name-that-will-overflow",
-        1.0,
-        0,
-    )];
+    let models = vec![model_with_axis_score("gemini-3.1-pro-preview", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 50);
@@ -397,7 +388,7 @@ fn full_table_drops_probabilities_below_60() {
 
 #[test]
 fn full_table_keeps_full_ipbr_at_or_above_80() {
-    let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 80, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 80);
@@ -412,8 +403,8 @@ fn full_table_keeps_full_ipbr_at_or_above_80() {
 #[test]
 fn full_table_collapses_to_top_rank_only_between_60_and_80() {
     let models = vec![
-        model_with_axis_score("gpt-alpha", 100.0, 0),
-        model_with_axis_score("gpt-beta", 1.0, 1),
+        model_with_axis_score("gpt-5.2", 100.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
     ];
 
     let (lines, _) = responsive_models_area(&models, &[], 70, 50, ModelsAreaMode::FullTable);
@@ -447,13 +438,13 @@ fn full_table_collapses_to_top_rank_only_between_60_and_80() {
 
 #[test]
 fn full_table_shows_full_name_on_wide_width() {
-    let models = vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)];
+    let models = vec![model_with_axis_score("grok-code-fast-1", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 120);
 
     assert!(
-        row.contains("opus-4-5-20251101"),
+        row.contains("code fast 1"),
         "full short name should appear on wide width: {row:?}"
     );
     assert!(
@@ -695,7 +686,7 @@ fn compact_quota_keeps_full_vendor_names_below_60() {
 fn compact_quota_uses_long_form_below_40_when_it_fits() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Kimi,
-        "kimi-1",
+        "kimi-k2.6",
         50.0,
         0,
     )];
@@ -804,7 +795,7 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
 #[test]
 fn full_table_dot_color_tracks_quota_not_score() {
     // Use two different vendors so the per-vendor visibility floor admits
-    // both rows even though gpt-5-4 has zero quota (which collapses its
+    // both rows even though gpt-5.4 has zero quota (which collapses its
     // pool weight to 0 under the >10% visibility rule).
     let mut high_score_no_quota =
         vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 1.0, 0);
@@ -830,14 +821,14 @@ fn full_table_dot_color_tracks_quota_not_score() {
     let red_row = rows
         .iter()
         .position(|row| row.contains("5.4"))
-        .expect("gpt-5-4 row");
-    let red_col = rows[red_row].find(STATUS_DOT).expect("gpt-5-4 dot") as u16;
+        .expect("gpt-5.4 row");
+    let red_col = rows[red_row].find(STATUS_DOT).expect("gpt-5.4 dot") as u16;
     assert_eq!(buf.cell((red_col, red_row as u16)).unwrap().fg, Color::Red);
 
     let green_row = rows
         .iter()
         .position(|row| row.contains("opus 4.7"))
-        .expect("claude-opus-4-7 row");
+        .expect("claude-opus-4.7 row");
     let green_col = rows[green_row].find(STATUS_DOT).expect("opus dot") as u16;
     assert_eq!(
         buf.cell((green_col, green_row as u16)).unwrap().fg,
@@ -853,7 +844,7 @@ fn snapshot_models() -> Vec<CachedModel> {
     // curated brand-tags appear in rendered output.
     vec![
         vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 80.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
         vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.3-codex", 70.0, 0),
         vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 60.0, 0),
     ]
@@ -889,7 +880,7 @@ fn snapshot_matrix_widths() {
 #[test]
 fn wide_layout_shows_relative_reset_time() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
         Utc::now() + Duration::hours(2),
     )];
 
@@ -906,7 +897,7 @@ fn wide_layout_shows_relative_reset_time() {
 #[test]
 fn reset_time_stays_hidden_below_very_wide_threshold() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
         Utc::now() + Duration::hours(2),
     )];
 
@@ -923,7 +914,7 @@ fn reset_time_stays_hidden_below_very_wide_threshold() {
 #[test]
 fn wide_layout_marks_past_reset_as_expired() {
     let models = vec![model_with_reset(
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
         Utc::now() - Duration::hours(1),
     )];
 
@@ -1052,7 +1043,7 @@ fn snapshot_compact_at_width_60_keeps_full_vendor_labels() {
 #[test]
 fn width_tier_selection_at_50_picks_toprank_or_none() {
     // Acceptance criterion 1a: at width 50, TopRank or None shown (not Ipbr).
-    let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 50);
@@ -1068,7 +1059,7 @@ fn width_tier_selection_at_50_picks_toprank_or_none() {
 #[test]
 fn width_tier_selection_at_45_empirically_fits_toprank() {
     // Acceptance criterion 1a: at width 45, TopRank fits if budget >= NAME_WIDTH_MIN.
-    let models = vec![model_with_axis_score("short", 1.0, 0)];
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 45, 50, ModelsAreaMode::FullTable);
 
@@ -1084,7 +1075,7 @@ fn width_tier_selection_at_45_empirically_fits_toprank() {
 #[test]
 fn scores_right_anchored_row_spans_equal_width() {
     // Acceptance criterion 1b: at width 120, row total spans = 120 cols.
-    let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
 
@@ -1101,11 +1092,11 @@ fn scores_right_anchored_row_spans_equal_width() {
 #[test]
 fn verbose_tier_renders_full_labels_with_three_space_separation() {
     // The IpbrVerbose tier needs the full phase-label budget plus the wider
-    // bracketed vendor column; at width >= 68 there is room for both.
-    let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
+    // bracketed vendor column; at width 80 there is room for both.
+    let models = vec![model_with_axis_score("gpt-5.2", 1.0, 0)];
 
-    let (lines, _) = responsive_models_area(&models, &[], 68, 50, ModelsAreaMode::FullTable);
-    let row = full_model_buffer_line(&lines, 0, 68);
+    let (lines, _) = responsive_models_area(&models, &[], 80, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 80);
 
     // IpbrVerbose should render full phase labels.
     assert!(
@@ -1140,8 +1131,8 @@ fn verbose_tier_renders_full_labels_with_three_space_separation() {
 #[test]
 fn term_h_below_50_forces_compact_quota() {
     let models = vec![
-        model_with_axis_score("gpt-a", 1.0, 0),
-        model_with_axis_score("gpt-b", 1.0, 1),
+        model_with_axis_score("gpt-5.2", 1.0, 0),
+        model_with_axis_score("gpt-5.4", 1.0, 1),
     ];
 
     let (lines, mode) = responsive_models_area(&models, &[], 120, 49, ModelsAreaMode::FullTable);
@@ -1203,35 +1194,19 @@ fn full_table_renders_bracketed_curated_brand_tag_per_baked_model() {
 }
 
 #[test]
-fn full_table_renders_dash_tag_for_zero_candidate_row() {
-    // ipbr-known rows with no candidates render `[—]` and arbitration declines
-    // to pick them; the dimmed tag is what makes that visible to the operator.
-    let mut model = vendor_model_with_axis_score(SubscriptionKind::Claude, "lonely", 100.0, 0);
+fn full_table_renders_curated_dim_tag_for_zero_candidate_row() {
+    // IPBR-known rows with no candidates keep their curated model brand,
+    // but the dimmed tag makes the non-launchable state visible.
+    let mut model =
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 100.0, 0);
     model.candidates.clear();
     model.selected_candidate = None;
 
     let (lines, _) = responsive_models_area(&[model], &[], 200, 50, ModelsAreaMode::FullTable);
     let row = full_model_buffer_line(&lines, 0, 200);
     assert!(
-        row.contains("[—]"),
-        "zero-candidate row must render `[—]`, got: {row:?}"
-    );
-}
-
-#[test]
-fn full_table_renders_dash_tag_for_uncurated_model_name_even_with_candidate() {
-    let model = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-alpha", 100.0, 0);
-
-    let (lines, _) = responsive_models_area(&[model], &[], 120, 50, ModelsAreaMode::FullTable);
-    let rows = render_model_text(&lines, 120);
-    let model_row = rows
-        .iter()
-        .find(|row| row.contains("claude-alpha"))
-        .expect("model row should render");
-
-    assert!(
-        model_row.contains("[—]"),
-        "uncurated selected model should render dash badge, got: {model_row:?}"
+        row.contains("[claude]"),
+        "zero-candidate row must keep curated brand, got: {row:?}"
     );
 }
 
@@ -1256,7 +1231,7 @@ fn full_table_renders_vendor_label_on_every_row() {
 fn compact_quota_renders_expanded_quota_when_space_permits() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Claude,
-        "claude-alpha",
+        "claude-opus-4.7",
         100.0,
         0,
     )];
@@ -1277,10 +1252,10 @@ fn compact_quota_renders_expanded_quota_when_space_permits() {
 #[test]
 fn compact_quota_renders_narrow_quota_when_tight() {
     let models = vec![
-        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-1", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-1", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-1", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-1", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 50.0, 0),
     ];
 
     let (lines, _) = responsive_models_area(
@@ -1301,7 +1276,7 @@ fn compact_quota_renders_narrow_quota_when_tight() {
 fn full_table_expands_quota_and_phase_labels_when_space_permits() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Claude,
-        "claude",
+        "claude-opus-4.7",
         100.0,
         0,
     )];
@@ -1315,7 +1290,7 @@ fn full_table_expands_quota_and_phase_labels_when_space_permits() {
 
 // ----- new ipbr-pipeline display contracts -----
 
-fn unscored_inventory_model(
+fn unscored_provider_model(
     vendor: SubscriptionKind,
     name: &str,
     quota: Option<u8>,
@@ -1326,8 +1301,6 @@ fn unscored_inventory_model(
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: quota,
@@ -1337,33 +1310,34 @@ fn unscored_inventory_model(
 }
 
 #[test]
-fn full_table_inventory_only_model_renders_as_unscored_for_current_phase() {
-    // Spec: inventory/CLI-visible models with no ipbr phase score remain
-    // visible (via vendor backfill) but render with no sampling weight and
-    // no rank-1 highlight for any phase.
-    let mut ranked = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-ranked", 90.0, 0);
+fn full_table_unscored_model_renders_as_unscored_for_current_phase() {
+    let mut ranked = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 90.0, 0);
     ranked.quota_percent = Some(80);
-    let inventory_only = unscored_inventory_model(SubscriptionKind::Claude, "inv", Some(80), 0);
+    let unscored = unscored_provider_model(SubscriptionKind::Gemini, "gemini-2.5-pro", Some(80), 0);
 
-    let models = vec![ranked, inventory_only];
+    let models = vec![ranked, unscored];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
     let rows = render_to_text(&lines, 120);
 
-    let inv_row = rows
+    let unscored_row = rows
         .iter()
-        .find(|r| r.contains("inv"))
-        .expect("inventory-only row should still render via vendor backfill");
+        .find(|r| r.contains("2.5 pro"))
+        .expect("unscored row should still render");
     // Sampling cells must show 0% for the unscored model — it has no
     // pool weight in any phase. The ranked model is the only sampling
     // candidate and gets ~99%.
     assert!(
-        inv_row.contains("Idea  0") || inv_row.contains("I  0") || inv_row.contains("I 0"),
-        "inventory-only Idea cell should render as 0% (unscored): {inv_row:?}"
+        unscored_row.contains("Idea  0")
+            || unscored_row.contains("I  0")
+            || unscored_row.contains("I 0"),
+        "unscored Idea cell should render as 0%: {unscored_row:?}"
     );
     assert!(
-        inv_row.contains("Build  0") || inv_row.contains("B  0") || inv_row.contains("B 0"),
-        "inventory-only Build cell should render as 0% (unscored): {inv_row:?}"
+        unscored_row.contains("Build  0")
+            || unscored_row.contains("B  0")
+            || unscored_row.contains("B 0"),
+        "unscored Build cell should render as 0%: {unscored_row:?}"
     );
 }
 
@@ -1372,7 +1346,7 @@ fn full_table_unknown_quota_renders_as_unknown_not_exhausted() {
     // Spec: missing quota displays as unknown (DarkGray), not exhausted
     // (Red). Selection still treats it as effective-30, but the dot color
     // must distinguish unknown from known-zero.
-    let mut model = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-unknown", 80.0, 0);
+    let mut model = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 80.0, 0);
     model.quota_percent = None;
     let models = vec![model];
 
@@ -1386,9 +1360,9 @@ fn full_table_unknown_quota_renders_as_unknown_not_exhausted() {
             (0..area.width)
                 .map(|x| buf.cell((x, *y)).map(|c| c.symbol()).unwrap_or(" "))
                 .collect::<String>()
-                .contains("gpt-unknown")
+                .contains("5.4")
         })
-        .expect("gpt-unknown row should render");
+        .expect("gpt-5.4 row should render");
     let row: String = (0..area.width)
         .map(|x| buf.cell((x, row_y)).map(|c| c.symbol()).unwrap_or(" "))
         .collect();
@@ -1452,14 +1426,17 @@ fn full_table_sampling_percentage_sourced_from_pool_weights_not_phase_score() {
     // With two ipbr-ranked models at scores 90 and 75, the pool softmax
     // assigns the lower-scored model a small but nonzero share (well below
     // its share of phase-score totals, which would be 75/(90+75) ≈ 45%).
-    let high = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-high", 90.0, 0);
-    let low = vendor_model_with_axis_score(SubscriptionKind::Claude, "low", 75.0, 0);
+    let high = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 90.0, 0);
+    let low = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 75.0, 0);
     let models = vec![high, low];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
     let rows = render_to_text(&lines, 120);
 
-    let low_row = rows.iter().find(|r| r.contains("low")).expect("low row");
+    let low_row = rows
+        .iter()
+        .find(|r| r.contains("opus 4.7"))
+        .expect("low row");
     // 15-point softmax gap → lower-scored share is ~6-8%. Phase-score
     // proportional rendering would have put it near 45.
     assert!(

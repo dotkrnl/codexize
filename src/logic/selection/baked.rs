@@ -6,11 +6,12 @@
 //! Identity is `(cli, launch_name)`; `model` and `subscription` are
 //! properties of the row/provider.
 //!
-//! Naming conventions: every `model` and `launch_name` here matches the
-//! dashboard's `entry.name` (the lowercased ipbr `display_name`) and the
-//! shape the corresponding CLI accepts. The live quota provider returns
-//! values under that same shape — there is no normalization layer between
-//! the live key and the baked launch_name. Shared-pool subscriptions
+//! Naming conventions: every `model` here matches the dashboard's
+//! `entry.name` (the lowercased ipbr `display_name`). `launch_name` is the
+//! literal CLI argument and may differ from `model` (for example
+//! `kimi-latest` or qualified `opencode-go/...` routes). The live quota
+//! provider returns values under `quota_lookup_key.unwrap_or(launch_name)`;
+//! there is no normalization layer. Shared-pool subscriptions
 //! (claude/kimi/opencode) point `quota_lookup_key` at their pool sentinel.
 //!
 //! Resolution rules:
@@ -593,14 +594,19 @@ pub fn baked_for(model: &str, cli: CliKind, launch_name: &str) -> Option<Provide
     None
 }
 
-/// Return the subscription of the row's first (primary) baked provider,
-/// or `None` if the model is not in the baked table.
-pub fn primary_subscription_for_model(model: &str) -> Option<SubscriptionKind> {
-    BAKED_TABLE
-        .iter()
-        .find(|row| row.model == model)
-        .and_then(|row| row.providers.first())
-        .map(|p| p.subscription)
+/// Return the baked row model for a provider identity, if that identity is
+/// built in. User overrides must keep this canonical model unchanged.
+pub fn model_for_identity(cli: CliKind, launch_name: &str) -> Option<&'static str> {
+    for row in BAKED_TABLE {
+        if row
+            .providers
+            .iter()
+            .any(|provider| provider.cli == cli && provider.launch_name == launch_name)
+        {
+            return Some(row.model);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

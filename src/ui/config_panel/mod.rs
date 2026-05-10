@@ -2472,7 +2472,7 @@ mod tests {
                 .available_models
                 .iter()
                 .any(|(v, m)| v == "claude" && m == "claude-opus-4.7"),
-            "expected baked claude/claude-opus-4-7 in available models: {:?}",
+            "expected baked claude/claude-opus-4.7 in available models: {:?}",
             editor.available_models,
         );
         assert_eq!(editor.subscription, editor.available_models[0].0);

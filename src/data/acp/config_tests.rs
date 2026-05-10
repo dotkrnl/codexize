@@ -196,7 +196,7 @@ fn opencode_go_launch_name_passes_through_verbatim() {
 }
 
 #[test]
-fn opencode_launch_does_not_prefix_bare_inventory_model() {
+fn opencode_launch_does_not_prefix_bare_launch_name() {
     // Inverse of `opencode_go_launch_name_passes_through_verbatim`: a
     // bare model id with no qualifier reaches the spawn unmodified.
     let request = AcpLaunchRequest {

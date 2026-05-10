@@ -107,10 +107,10 @@ fn current_version_cache_without_quota_resets_loads() {
 }
 
 /// An older cache file (which stores legacy aistupidlevel-shaped fields)
-/// MUST NOT be readable as a current dashboard. The v8 bump invalidates
-/// pre-v8 dashboard payloads (now lacking `axes` / `axis_provenance` /
-/// `overall_score` etc.) and the v7 quota-payload reshape kept the
-/// quota section dropped on version mismatch as well.
+/// MUST NOT be readable as a current dashboard. Version bumps invalidate
+/// stale dashboard payloads so old score/name semantics cannot survive;
+/// the v7 quota-payload reshape kept the quota section dropped on version
+/// mismatch as well.
 #[test]
 fn old_v7_cache_cannot_masquerade_as_current_cache() {
     let dir = TempDir::new().unwrap();
@@ -146,11 +146,45 @@ fn old_v7_cache_cannot_masquerade_as_current_cache() {
 
     assert!(
         loaded.dashboard.is_none(),
-        "v7 dashboard must not be readable under v{CACHE_VERSION}"
+        "old dashboard must not be readable under v{CACHE_VERSION}"
     );
     assert!(
         loaded.quotas.is_none(),
         "v7 quota payload must also be dropped on a version mismatch"
+    );
+}
+
+#[test]
+fn old_v8_normalized_dashboard_names_are_invalidated() {
+    let dir = TempDir::new().unwrap();
+    let old_payload = serde_json::json!({
+        "version": 8,
+        "dashboard": {
+            "fetched_at": now_secs(),
+            "data": [{
+                "vendor": "anthropic",
+                "name": "claude-opus-4-6",
+                "ipbr_phase_scores": {"idea": 91.0, "planning": 90.0, "build": 89.0, "review": 88.0},
+                "score_source": "ipbr",
+                "ipbr_row_matched": true,
+                "ipbr_match_key": "claude-opus-4-6",
+                "display_order": 0
+            }]
+        },
+        "quotas": null
+    });
+    fs::create_dir_all(dir.path()).unwrap();
+    fs::write(
+        dir.path().join("models.json"),
+        serde_json::to_string(&old_payload).unwrap(),
+    )
+    .unwrap();
+
+    let loaded = load(dir.path());
+
+    assert!(
+        loaded.dashboard.is_none(),
+        "v8 normalized dashboard names must be refreshed under v{CACHE_VERSION}"
     );
 }
 

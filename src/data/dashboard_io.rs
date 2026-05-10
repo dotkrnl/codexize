@@ -1,15 +1,11 @@
-use crate::data::dashboard_model::{
-    InventoryEntry, ScoreEntry, merge_with_warnings, normalize_ipbr_key,
-};
-use crate::data::providers::opencode;
+use crate::data::dashboard_model::{ScoreEntry, models_from_scores};
 use crate::selection::{IpbrPhaseScores, ScoreSource};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-/// Source of truth for the model universe — both the inventory of models
-/// and their per-phase rank scores. ipbr is the only upstream feed; opencode
-/// inventory is layered on top via the local `opencode` CLI.
+/// Source of truth for the model universe and its per-phase rank scores.
+/// ipbr is the only upstream feed; provider entries are the launch inventory.
 pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
@@ -41,34 +37,11 @@ pub async fn load_models_async() -> Result<LoadOutcome> {
         .build()
         .context("failed to build HTTP client")?;
     let scores = load_scores(&client).await?;
-    let mut inventory = Vec::new();
-    append_opencode_inventory(&mut inventory, opencode::enumerate_models());
-    let merged = merge_with_warnings(inventory, scores);
+    let merged = models_from_scores(scores);
     Ok(LoadOutcome {
         models: merged.models,
         warnings: merged.warnings,
     })
-}
-pub(crate) fn append_opencode_inventory(
-    inventory: &mut Vec<InventoryEntry>,
-    models: Vec<opencode::OpencodeModelMeta>,
-) {
-    inventory.extend(models.into_iter().filter_map(|meta| {
-        // Both opencode and opencode-go advertise as `vendor = "opencode"` in
-        // the UI and ride the shared OpencodeGo subscription quota; the
-        // launch boundary applies the tier qualifier from the subscription.
-        if meta.provider_id != "opencode" && meta.provider_id != "opencode-go" {
-            return None;
-        }
-        let name = meta.id.trim().to_ascii_lowercase();
-        if name.is_empty() {
-            return None;
-        }
-        Some(InventoryEntry {
-            name,
-            vendor: "opencode".to_string(),
-        })
-    }));
 }
 async fn load_scores(client: &Client) -> Result<Vec<ScoreEntry>> {
     let body = client
@@ -94,11 +67,7 @@ struct IpbrModelRow {
     #[serde(default)]
     display_name: String,
     #[serde(default)]
-    canonical_id: Option<String>,
-    #[serde(default)]
     vendor: String,
-    #[serde(default)]
-    aliases: Vec<String>,
     #[serde(default)]
     scores: Option<IpbrScoresRow>,
 }
@@ -118,11 +87,9 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
         toml::from_str(body).context("ipbr scoreboard was not valid TOML")?;
     let mut entries = Vec::new();
     for (i, row) in board.models.into_iter().enumerate() {
-        // The merge key shape (lowercase only, no kebab/punctuation collapse)
-        // matches the opencode inventory shape so the merge layer can cross
-        // them with a normalized-exact lookup. Richer matching against the
-        // richer `normalize_ipbr_key` form runs over `canonical_id` and
-        // `aliases`.
+        // `display_name` is the canonical model id. Lowercase it for
+        // case-stable provider matching, but do not collapse punctuation:
+        // `claude-opus-4.6` and `claude-opus-4-6` are different ids.
         let display_key = row.display_name.trim().to_ascii_lowercase();
         if display_key.is_empty() {
             // No usable display_name: cannot index this row. Skip rather
@@ -137,28 +104,12 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
             build: scores_row.b_adj,
             review: scores_row.r,
         };
-        let canonical_id = row
-            .canonical_id
-            .as_deref()
-            .map(normalize_ipbr_key)
-            .filter(|key| !key.is_empty());
-        let aliases: Vec<String> = row
-            .aliases
-            .iter()
-            .map(|alias| normalize_ipbr_key(alias))
-            .filter(|key| !key.is_empty())
-            .collect();
         entries.push(ScoreEntry {
             name: display_key,
             vendor: row.vendor.trim().to_ascii_lowercase(),
             display_order: i,
-            canonical_id,
-            aliases,
             ipbr_phase_scores: phase_scores,
             score_source: ScoreSource::Ipbr,
-            // Every parsed ipbr row IS an ipbr-matched row; downstream
-            // merging into inventory will preserve this flag when the row
-            // attaches to an inventory model.
             ipbr_row_matched: true,
         });
     }

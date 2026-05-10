@@ -4,93 +4,6 @@ use crate::selection::ranking::phase_score_for_legacy_callers;
 use crate::selection::types::{CachedModel, SubscriptionKind};
 use std::collections::BTreeMap;
 
-#[test]
-fn opencode_enumerated_inventory_intersects_ipbr_and_preserves_route_metadata() {
-    let mut inventory = Vec::new();
-    append_opencode_inventory(
-        &mut inventory,
-        vec![
-            crate::data::providers::opencode::OpencodeModelMeta {
-                id: "gpt-5-nano".to_string(),
-                provider_id: "opencode".to_string(),
-                display_name: None,
-                api_npm: None,
-            },
-            crate::data::providers::opencode::OpencodeModelMeta {
-                id: "opencode-only-model".to_string(),
-                provider_id: "opencode".to_string(),
-                display_name: None,
-                api_npm: None,
-            },
-        ],
-    );
-    let scores = parse_ipbr_scoreboard(
-        r#"
-        [[models]]
-        display_name = "gpt-5-nano"
-        vendor = "openai"
-
-        [models.scores]
-        i_adj = 60.0
-        p_adj = 61.0
-        b_adj = 62.0
-        r = 63.0
-        "#,
-    )
-    .unwrap();
-
-    let merged = merge_with_warnings(inventory, scores).models;
-
-    assert_eq!(merged.len(), 1);
-    assert_eq!(merged[0].name, "gpt-5-nano");
-    assert_eq!(merged[0].dashboard_vendor, "opencode");
-    assert_eq!(merged[0].ipbr_match_key.as_deref(), Some("gpt-5-nano"));
-}
-
-#[test]
-fn opencode_go_inventory_surfaces_when_ipbr_matches() {
-    // Drives the headline use case: deepseek lives only under
-    // `opencode-go`, has an ipbr scoreboard row by `display_name =
-    // "deepseek-v4-flash"`, and must reach the universe so the launch
-    // path can qualify it via the OpencodeGo subscription rather than
-    // falling back to the zen-tier `opencode/`.
-    let mut inventory = Vec::new();
-    append_opencode_inventory(
-        &mut inventory,
-        vec![crate::data::providers::opencode::OpencodeModelMeta {
-            id: "deepseek-v4-flash".to_string(),
-            provider_id: "opencode-go".to_string(),
-            display_name: None,
-            api_npm: Some("@ai-sdk/openai-compatible".to_string()),
-        }],
-    );
-    let scores = parse_ipbr_scoreboard(
-        r#"
-        [[models]]
-        display_name = "deepseek-v4-flash"
-        canonical_id = "deepseek/deepseek-v4-flash"
-        vendor = "deepseek"
-
-        [models.scores]
-        i_adj = 70.0
-        p_adj = 71.0
-        b_adj = 72.0
-        r = 73.0
-        "#,
-    )
-    .unwrap();
-
-    let merged = merge_with_warnings(inventory, scores).models;
-
-    assert_eq!(merged.len(), 1);
-    assert_eq!(merged[0].name, "deepseek-v4-flash");
-    assert_eq!(merged[0].dashboard_vendor, "opencode");
-    assert_eq!(
-        merged[0].ipbr_match_key.as_deref(),
-        Some("deepseek-v4-flash")
-    );
-}
-
 fn vendor_for_fixture_model(name: &str) -> SubscriptionKind {
     match name {
         "claude-sonnet-4.6" => SubscriptionKind::Claude,
@@ -227,7 +140,7 @@ fn ranking_order_among_healthy_models_unchanged() {
 
 const IPBR_FIXTURE: &str = r#"
 [[models]]
-display_name = "claude-opus-4-7"
+display_name = "claude-opus-4.7"
 canonical_id = "anthropic/claude-opus-4-7"
 vendor = "anthropic"
 aliases = ["claude_opus_4_7"]
@@ -259,26 +172,17 @@ vendor = "google"
 "#;
 
 #[test]
-fn parse_ipbr_preserves_inventory_compatible_name_and_normalizes_canonical_id_aliases() {
+fn parse_ipbr_uses_display_name_as_canonical_model_name() {
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
     assert_eq!(entries.len(), 3, "all three rows should parse");
 
     let opus = entries
         .iter()
-        .find(|e| e.name == "claude-opus-4-7")
+        .find(|e| e.name == "claude-opus-4.7")
         .unwrap();
     assert_eq!(opus.vendor, "anthropic");
     assert_eq!(opus.score_source, ScoreSource::Ipbr);
     assert!(opus.ipbr_row_matched);
-    // canonical_id is fully normalized via `normalize_ipbr_key` for the
-    // upcoming matching task — distinct from `name`, which preserves the
-    // inventory lookup shape.
-    assert_eq!(
-        opus.canonical_id.as_deref(),
-        Some("anthropic-claude-opus-4-7")
-    );
-    // Aliases are normalized: punctuation/underscores collapse to `-`.
-    assert_eq!(opus.aliases, vec!["claude-opus-4-7".to_string()]);
     assert_eq!(opus.ipbr_phase_scores.idea, Some(92.5));
     assert_eq!(opus.ipbr_phase_scores.planning, Some(91.0));
     assert_eq!(opus.ipbr_phase_scores.build, Some(90.0));
@@ -286,14 +190,12 @@ fn parse_ipbr_preserves_inventory_compatible_name_and_normalizes_canonical_id_al
 }
 
 #[test]
-fn parse_ipbr_name_is_lowercase_only_to_match_inventory_lookup_shape() {
-    // Inventory rows store names via `trim().to_ascii_lowercase()`. A
-    // dotted form like `gpt-5.4` must round-trip on the score side so
-    // the existing exact-match merge still enriches inventory-visible
-    // models. Normalized/kebab forms belong to canonical_id/aliases.
+fn parse_ipbr_name_is_lowercase_only_without_punctuation_normalization() {
+    // Provider entries must use IPBR's canonical display_name. A dotted
+    // form like `gpt-5.4` must not become `gpt-5-4`.
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
     let gpt = entries.iter().find(|e| e.name == "gpt-5.4").unwrap();
-    assert_eq!(gpt.canonical_id.as_deref(), Some("openai-gpt-5-4"));
+    assert_eq!(gpt.name, "gpt-5.4");
 }
 
 #[test]
@@ -327,7 +229,7 @@ fn parse_ipbr_ignores_unknown_top_level_and_score_fields() {
     // The fixture exercises both an unknown top-level row field and an
     // unknown nested score field; parsing must not error.
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("unknown fields must be ignored");
-    assert!(entries.iter().any(|e| e.name == "claude-opus-4-7"));
+    assert!(entries.iter().any(|e| e.name == "claude-opus-4.7"));
 }
 
 #[test]
@@ -364,17 +266,4 @@ fn parse_ipbr_scoreboard_is_what_load_scores_uses() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "x");
     assert_eq!(entries[0].vendor, "v");
-}
-
-#[test]
-fn normalize_ipbr_key_handles_punctuation_and_whitespace() {
-    use crate::data::dashboard_model::normalize_ipbr_key;
-    assert_eq!(normalize_ipbr_key("Claude Opus 4.1"), "claude-opus-4-1");
-    assert_eq!(
-        normalize_ipbr_key("anthropic/claude_opus"),
-        "anthropic-claude-opus"
-    );
-    assert_eq!(normalize_ipbr_key("--gpt..5__4--"), "gpt-5-4");
-    assert_eq!(normalize_ipbr_key("   "), "");
-    assert_eq!(normalize_ipbr_key(""), "");
 }

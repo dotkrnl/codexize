@@ -9,14 +9,11 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bumped to 8 because the dashboard entry shape lost its legacy
-/// aistupidlevel fields (`overall_score`, `current_score`, `standard_error`,
-/// `axes`, `axis_provenance`) and the sibling-synthesis `fallback_from`.
-/// v7 caches still carry those fields and would deserialize fine via
-/// `#[serde(deny_unknown_fields)]`-free serde, but the version bump
-/// invalidates them so we never silently load stale aistupidlevel data
-/// alongside fresh ipbr scores.
-pub const CACHE_VERSION: u32 = 8;
+/// Bumped to 9 because dashboard rows are now exact IPBR `display_name`
+/// records with no CLI inventory merge and no normalized alias key. v8
+/// caches can contain normalized names such as `claude-opus-4-6`, so they
+/// must be dropped and refreshed from IPBR.
+pub const CACHE_VERSION: u32 = 9;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------

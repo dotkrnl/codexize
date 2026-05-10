@@ -1,21 +1,10 @@
 use super::*;
 
-fn ipbr_score(
-    name: &str,
-    canonical_id: Option<&str>,
-    aliases: &[&str],
-    value: f64,
-    order: usize,
-) -> ScoreEntry {
+fn ipbr_score(name: &str, vendor: &str, value: f64, order: usize) -> ScoreEntry {
     ScoreEntry {
         name: name.to_string(),
-        vendor: "vendor".to_string(),
+        vendor: vendor.to_string(),
         display_order: order,
-        canonical_id: canonical_id.map(normalize_ipbr_key),
-        aliases: aliases
-            .iter()
-            .map(|alias| normalize_ipbr_key(alias))
-            .collect(),
         ipbr_phase_scores: IpbrPhaseScores {
             idea: Some(value),
             planning: Some(value + 1.0),
@@ -27,187 +16,61 @@ fn ipbr_score(
     }
 }
 
-fn inventory(name: &str, _order: usize) -> InventoryEntry {
-    InventoryEntry {
-        name: name.to_string(),
-        vendor: String::new(),
-    }
-}
-
-fn vendor_inventory(name: &str, vendor: &str, _order: usize) -> InventoryEntry {
-    InventoryEntry {
-        name: name.to_string(),
-        vendor: vendor.to_string(),
-    }
-}
-
 #[test]
-fn merge_drops_inventory_without_ipbr_match_and_admits_orphan_scores() {
-    // ipbr is the sole authority for the supported universe: an inventory
-    // row without an ipbr match disappears, while an ipbr score with no
-    // inventory still surfaces directly under its scoreboard vendor.
-    let models = merge(
-        vec![inventory("gpt-5.5", 0), inventory("claude-sonnet-4.5", 1)],
-        vec![ipbr_score("gpt-5.4", None, &[], 0.8, 0)],
-    );
+fn models_surface_directly_from_ipbr_scores() {
+    let result = models_from_scores(vec![
+        ipbr_score("claude-opus-4.6", "anthropic", 91.0, 2),
+        ipbr_score("gpt-5.4", "openai", 87.0, 1),
+    ]);
 
-    assert!(
-        !models.iter().any(|m| m.name == "gpt-5.5"),
-        "inventory rows without an ipbr match should not be kept"
-    );
-    assert!(
-        !models.iter().any(|m| m.name == "claude-sonnet-4.5"),
-        "inventory rows without an ipbr match should not be kept"
-    );
-    assert!(
-        models.iter().any(|m| m.name == "gpt-5.4"),
-        "ipbr scores with no matching inventory still surface"
-    );
-}
-
-#[test]
-fn merge_matches_inventory_by_normalized_ipbr_aliases() {
-    let models = merge(
-        vec![inventory("claude-opus-4.1", 0)],
-        vec![ipbr_score(
-            "Claude Opus 4",
-            None,
-            &["claude_opus_4_1"],
-            91.0,
-            3,
-        )],
-    );
-
-    let model = models
-        .iter()
-        .find(|model| model.name == "claude-opus-4.1")
-        .expect("inventory model should remain visible");
-
-    assert_eq!(model.score_source, ScoreSource::Ipbr);
-    assert_eq!(model.ipbr_phase_scores.build, Some(93.0));
-}
-
-#[test]
-fn merge_drops_alias_match_when_canonical_inventory_already_consumed_row() {
-    // Regression: opencode advertised both `glm-5` and `glm-5.1` while the
-    // ipbr scoreboard listed only `glm-5.1`, with `glm-5` among its
-    // aliases. The pre-fix merge let `glm-5` borrow `glm-5.1`'s
-    // authoritative phase scores via the alias, making it auto-selectable
-    // alongside `glm-5.1`. The strong (display_name / canonical_id) match
-    // must claim the row before any alias resolves, so the alias-only
-    // inventory id drops instead of duplicating.
-    let models = merge(
-        vec![inventory("glm-5", 0), inventory("glm-5.1", 1)],
-        vec![ipbr_score("glm-5.1", None, &["glm-5"], 80.0, 3)],
-    );
-
-    assert!(
-        !models.iter().any(|m| m.name == "glm-5"),
-        "alias-only inventory match must drop when the canonical id already owns the row"
-    );
-    let canonical = models
-        .iter()
-        .find(|m| m.name == "glm-5.1")
-        .expect("canonical inventory row should remain");
-    assert_eq!(canonical.score_source, ScoreSource::Ipbr);
-    assert_eq!(canonical.ipbr_phase_scores.build, Some(82.0));
-}
-
-#[test]
-fn merge_does_not_readd_ipbr_row_consumed_by_normalized_inventory_match() {
-    let models = merge(
-        vec![inventory("claude-opus-4.1", 0)],
-        vec![ipbr_score("Claude Opus 4.1", None, &[], 91.0, 3)],
-    );
-
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].name, "claude-opus-4.1");
-    assert_eq!(models[0].score_source, ScoreSource::Ipbr);
-    assert_eq!(models[0].ipbr_phase_scores.build, Some(93.0));
-}
-
-#[test]
-fn merge_matches_inventory_by_normalized_provider_path_aliases() {
-    let models = merge(
-        vec![inventory("anthropic/claude-opus-4", 0)],
-        vec![ipbr_score(
-            "Claude Opus 4",
-            Some("anthropic/claude-opus-4"),
-            &[],
-            88.0,
-            2,
-        )],
-    );
-
-    let model = models
-        .iter()
-        .find(|model| model.name == "anthropic/claude-opus-4")
-        .expect("provider-path inventory model should remain visible");
-
-    assert_eq!(model.score_source, ScoreSource::Ipbr);
-    assert_eq!(model.ipbr_phase_scores.review, Some(91.0));
-}
-
-#[test]
-fn merge_excludes_collided_normalized_ipbr_keys_and_warns() {
-    let result = merge_with_warnings(
-        vec![inventory("claude-opus-4.1", 0)],
-        vec![
-            ipbr_score("Claude Opus 4.1", None, &[], 90.0, 1),
-            ipbr_score("Other Opus", None, &["claude_opus_4_1"], 70.0, 2),
-        ],
-    );
-
-    // Both colliding scores are excluded from the lookup, so the inventory
-    // row has nothing to match and is dropped. The collision still surfaces
-    // as a warning so operators see the upstream feed problem.
-    assert!(
-        !result.models.iter().any(|m| m.name == "claude-opus-4.1"),
-        "inventory rows whose only matches collided should be dropped"
-    );
-    assert_eq!(result.warnings.len(), 1);
-    assert!(result.warnings[0].contains("claude-opus-4-1"));
-}
-
-#[test]
-fn merge_drops_opencode_inventory_without_ipbr_match() {
-    let models = merge(
-        vec![
-            vendor_inventory("gpt-5-nano", "opencode", 0),
-            vendor_inventory("opencode-only-model", "opencode", 1),
-        ],
-        vec![ipbr_score("gpt-5-nano", None, &[], 86.0, 1)],
-    );
-
-    assert!(
-        models.iter().any(|model| model.name == "gpt-5-nano"),
-        "ipbr-matched opencode inventory should remain visible"
-    );
-    assert!(
-        !models
+    assert!(result.warnings.is_empty());
+    assert_eq!(
+        result
+            .models
             .iter()
-            .any(|model| model.name == "opencode-only-model"),
-        "opencode inventory with no ipbr row is outside the supported universe"
+            .map(|m| m.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gpt-5.4", "claude-opus-4.6"]
+    );
+    assert_eq!(result.models[1].dashboard_vendor, "anthropic");
+    assert_eq!(
+        result.models[1].ipbr_match_key.as_deref(),
+        Some("claude-opus-4.6")
+    );
+    assert_eq!(result.models[1].ipbr_phase_scores.build, Some(93.0));
+}
+
+#[test]
+fn models_keep_canonical_punctuation_without_normalization() {
+    let result = models_from_scores(vec![ipbr_score("claude-opus-4.6", "anthropic", 90.0, 0)]);
+
+    assert_eq!(result.models.len(), 1);
+    assert_eq!(result.models[0].name, "claude-opus-4.6");
+    assert_eq!(
+        result.models[0].ipbr_match_key.as_deref(),
+        Some("claude-opus-4.6")
     );
 }
 
 #[test]
-fn merge_drops_inventory_without_ipbr_match() {
-    // Sibling synthesis was removed; ipbr is now the sole authority for
-    // the supported universe, so an inventory row with no ipbr match is
-    // dropped rather than borrowing a same-stem sibling's scores.
-    let models = merge(
-        vec![inventory("gpt-5.5", 0)],
-        vec![ipbr_score("gpt-5.4", None, &[], 86.0, 1)],
+fn duplicate_ipbr_display_names_are_dropped_and_warned() {
+    let result = models_from_scores(vec![
+        ipbr_score("claude-opus-4.6", "anthropic", 90.0, 1),
+        ipbr_score("claude-opus-4.6", "anthropic", 80.0, 2),
+        ipbr_score("gpt-5.4", "openai", 70.0, 3),
+    ]);
+
+    assert_eq!(result.models.len(), 1);
+    assert_eq!(result.models[0].name, "gpt-5.4");
+    assert_eq!(result.warnings.len(), 1);
+    assert!(
+        result.warnings[0].contains("ipbr display_name 'claude-opus-4.6' collided"),
+        "unexpected warning: {}",
+        result.warnings[0]
     );
-    assert!(!models.iter().any(|m| m.name == "gpt-5.5"));
 }
 
 fn render_dashboard_models(models: &[DashboardModel]) -> String {
-    // Hand-rolled rendering keeps the snapshot stable across Rust
-    // versions that may format Debug-derived floats differently. We
-    // also pin the order by name so HashMap-derived merges don't
-    // make the snapshot ordering-sensitive.
     let mut sorted: Vec<&DashboardModel> = models.iter().collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
     let mut out = String::new();
@@ -230,25 +93,13 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
 
 #[test]
 fn dashboard_model_after_representative_merge_snapshot() {
-    // Mirrors a typical refresh: a couple of inventory rows joined against
-    // a small set of scores. Inventory rows without an ipbr match are
-    // dropped; ipbr-sourced rows survive with phase scores.
-    let models = merge(
-        vec![
-            inventory("anthropic/claude-opus-4", 0),
-            inventory("gpt-5.5", 1),
-            inventory("claude-sonnet-4.5", 2),
-        ],
-        vec![ipbr_score(
-            "Claude Opus 4",
-            Some("anthropic/claude-opus-4"),
-            &[],
-            88.0,
-            2,
-        )],
-    );
+    let result = models_from_scores(vec![
+        ipbr_score("claude-opus-4.6", "anthropic", 91.0, 0),
+        ipbr_score("gpt-5.4", "openai", 87.0, 1),
+    ]);
+
     insta::assert_snapshot!(
         "dashboard_model_after_representative_merge",
-        render_dashboard_models(&models)
+        render_dashboard_models(&result.models)
     );
 }

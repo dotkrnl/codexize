@@ -13,7 +13,7 @@ use super::state::{
     format_name_with_freshness, name_budget_for, name_width_min, probability_color,
     probability_percent,
 };
-use crate::app::models::subscription_color;
+use crate::app::models::{subscription_color, subscription_tag};
 use crate::model_names;
 use crate::selection::{
     CachedModel, QuotaError, SubscriptionKind,
@@ -64,7 +64,8 @@ pub fn responsive_models_area(
         let lines = render_compact_quota(models, quota_errors, width);
         return (lines, ModelsAreaMode::CompactQuota);
     }
-    let mode = choose_mode(visible_count, models_budget, prev_mode);
+    let full_row_count = visible_count.saturating_add(1);
+    let mode = choose_mode(full_row_count, models_budget, prev_mode);
     let lines = match mode {
         ModelsAreaMode::FullTable => render_full_table(models, quota_errors, width),
         ModelsAreaMode::CompactQuota => render_compact_quota(models, quota_errors, width),
@@ -186,7 +187,9 @@ fn render_full_table(
         .filter(|m| visible_set.contains(&m.name))
         .collect();
     visible_models_list.sort_by(|a, b| build_rank_order(a, b));
-    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut lines: Vec<Line<'static>> = quota_summary_line(models, quota_errors, width)
+        .into_iter()
+        .collect();
     for model in visible_models_list {
         // Tag the row by the arbitration-chosen candidate's subscription. Rows
         // with no candidates render `[—]` and stay greyed out: arbitration
@@ -379,10 +382,9 @@ fn probability_unavailable_span(label: &str) -> Span<'static> {
 // Full table mode
 // ---------------------------------------------------------------------------
 const STATUS_DOT: &str = "●";
-/// Bracketed brand tag drawn in the vendor column. The tag text is the
-/// model's curated `display_vendor` (e.g. `[deepseek]`, `[claude]`). Models
-/// without a curated brand (and therefore not in the baked table) render the
-/// dim `[—]` placeholder.
+/// Bracketed brand tag drawn in the vendor column. The tag text comes only
+/// from the model's curated `display_vendor` (e.g. `[deepseek]`, `[claude]`).
+/// Uncurated rows render `[—]` so missing curation stays visible.
 fn display_vendor_tag(model: &CachedModel) -> String {
     let dv = crate::model_names::display_vendor(&model.name);
     if dv.is_empty() {
@@ -413,91 +415,205 @@ fn top_rank_prob_span(vendor_failed: bool, candidates: &[(bool, &str, u8, u8)]) 
 // ---------------------------------------------------------------------------
 // Compact quota line
 // ---------------------------------------------------------------------------
-const COMPACT_OMIT_BELOW: u16 = 40;
 fn render_compact_quota(
     models: &[CachedModel],
     quota_errors: &[QuotaError],
     width: u16,
 ) -> Vec<Line<'static>> {
-    if width < COMPACT_OMIT_BELOW {
-        return Vec::new();
+    quota_summary_line(models, quota_errors, width)
+        .into_iter()
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+struct QuotaSummaryEntry<'a> {
+    subscription: SubscriptionKind,
+    model: &'a CachedModel,
+    failed: bool,
+}
+
+#[derive(Clone, Copy)]
+enum QuotaSummaryForm {
+    Long,
+    Mid,
+    Short,
+    Extreme,
+}
+
+fn quota_summary_line(
+    models: &[CachedModel],
+    quota_errors: &[QuotaError],
+    width: u16,
+) -> Option<Line<'static>> {
+    if width == 0 {
+        return None;
     }
+    let entries = quota_summary_entries(models, quota_errors);
+    if entries.is_empty() {
+        return None;
+    }
+    for form in [
+        QuotaSummaryForm::Long,
+        QuotaSummaryForm::Mid,
+        QuotaSummaryForm::Short,
+        QuotaSummaryForm::Extreme,
+    ] {
+        let line = build_quota_summary_line(&entries, form, width as usize);
+        if line_width(&line) <= width as usize {
+            return Some(line);
+        }
+    }
+    None
+}
+
+fn quota_summary_entries<'a>(
+    models: &'a [CachedModel],
+    quota_errors: &[QuotaError],
+) -> Vec<QuotaSummaryEntry<'a>> {
     let order = [
-        SubscriptionKind::Kimi,
         SubscriptionKind::Claude,
         SubscriptionKind::Codex,
         SubscriptionKind::Gemini,
+        SubscriptionKind::Kimi,
         SubscriptionKind::OpencodeGo,
         SubscriptionKind::Direct,
     ];
-    // Pick each vendor's representative by `build_rank_order` so the
-    // compact strip mirrors the full table's ranking. ipbr Build phase
-    // rank is the authoritative signal, with name as the alphabetical
-    // tiebreaker.
-    let mut vendors_to_render = Vec::new();
-    for vendor in order {
+    let mut entries = Vec::new();
+    for subscription in order {
         if let Some(model) = models
             .iter()
-            .filter(|m| m.subscription == vendor)
+            .filter(|m| m.subscription == subscription)
             .min_by(|a, b| build_rank_order(a, b))
         {
-            vendors_to_render.push((vendor, model));
+            let failed = quota_errors
+                .iter()
+                .any(|err| err.subscription == subscription);
+            entries.push(QuotaSummaryEntry {
+                subscription,
+                model,
+                failed,
+            });
         }
     }
-    let expanded_width: usize = vendors_to_render
-        .iter()
-        .map(|(_vendor, model)| {
-            let label = display_vendor_tag(model);
-            // Both failed and known/unknown quota render as 4 chars now
-            // (" --%" or "{v:>3}%"), so the budget is uniform.
-            let quota_str_len = 4;
-            label.width() + 1 + 6 + quota_str_len
-        })
-        .sum::<usize>()
-        + (vendors_to_render.len().saturating_sub(1) * 3);
-    let use_expanded_quota = expanded_width <= width as usize;
+    entries
+}
+
+fn build_quota_summary_line(
+    entries: &[QuotaSummaryEntry<'_>],
+    form: QuotaSummaryForm,
+    target_width: usize,
+) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut first = true;
-    for (vendor, model) in vendors_to_render {
-        let vendor_failed = quota_errors.iter().any(|err| err.subscription == vendor);
-        if !first {
-            spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
+    match form {
+        QuotaSummaryForm::Long => {
+            spans.push(Span::styled(
+                "Remaining Quota: ",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
-        first = false;
-        let label = display_vendor_tag(model);
+        QuotaSummaryForm::Mid => {
+            spans.push(Span::styled(
+                "Quota: ",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => {}
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        if index > 0 {
+            let sep = match form {
+                QuotaSummaryForm::Long | QuotaSummaryForm::Mid => ", ",
+                QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => " ",
+            };
+            spans.push(Span::styled(sep, Style::default().fg(Color::DarkGray)));
+        }
+        let label = match form {
+            QuotaSummaryForm::Long | QuotaSummaryForm::Mid | QuotaSummaryForm::Short => {
+                subscription_tag(entry.subscription).to_string()
+            }
+            QuotaSummaryForm::Extreme => {
+                quota_summary_extreme_label(entry.subscription).to_string()
+            }
+        };
         spans.push(Span::styled(
             label,
-            Style::default().fg(subscription_color(vendor)),
+            Style::default().fg(subscription_color(entry.subscription)),
         ));
-        spans.push(Span::raw(" "));
-        if use_expanded_quota {
-            spans.push(Span::styled("Quota ", Style::default().fg(Color::DarkGray)));
-        }
-        if vendor_failed {
+        let separator = match form {
+            QuotaSummaryForm::Long | QuotaSummaryForm::Mid | QuotaSummaryForm::Short => " ",
+            QuotaSummaryForm::Extreme => "",
+        };
+        spans.push(Span::raw(separator));
+        push_quota_value(&mut spans, *entry, form);
+        if matches!(form, QuotaSummaryForm::Long)
+            && let Some(quota_resets_at) = entry.model.quota_resets_at
+        {
+            spans.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));
             spans.push(Span::styled(
-                " --%".to_string(),
-                Style::default().fg(Color::Red),
+                format_reset_time(quota_resets_at),
+                Style::default().fg(Color::DarkGray),
             ));
-        } else {
-            match model.quota_percent {
-                Some(v) => {
-                    let style = Style::default().fg(probability_color(v, 100));
-                    spans.push(Span::styled(format!("{v:>3}%"), style));
-                }
-                None => {
-                    spans.push(Span::styled(
-                        " --%".to_string(),
-                        Style::default().fg(Color::DarkGray),
-                    ));
-                }
-            }
+            spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
         }
     }
-    if spans.is_empty() {
-        Vec::new()
-    } else {
-        vec![Line::from(spans)]
+    let used = spans.iter().map(|span| span.content.width()).sum::<usize>();
+    if used < target_width {
+        spans.push(Span::raw(" ".repeat(target_width - used)));
     }
+    Line::from(spans)
+}
+
+fn push_quota_value(
+    spans: &mut Vec<Span<'static>>,
+    entry: QuotaSummaryEntry<'_>,
+    form: QuotaSummaryForm,
+) {
+    if entry.failed {
+        spans.push(Span::styled(
+            quota_unknown_text(form).to_string(),
+            Style::default().fg(Color::Red),
+        ));
+        return;
+    }
+    match entry.model.quota_percent {
+        Some(value) => spans.push(Span::styled(
+            quota_value_text(value, form),
+            Style::default().fg(probability_color(value, 100)),
+        )),
+        None => spans.push(Span::styled(
+            quota_unknown_text(form).to_string(),
+            Style::default().fg(Color::DarkGray),
+        )),
+    }
+}
+
+fn quota_value_text(value: u8, form: QuotaSummaryForm) -> String {
+    match form {
+        QuotaSummaryForm::Long | QuotaSummaryForm::Mid => format!("{value}%"),
+        QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => value.to_string(),
+    }
+}
+
+fn quota_unknown_text(form: QuotaSummaryForm) -> &'static str {
+    match form {
+        QuotaSummaryForm::Long | QuotaSummaryForm::Mid => "--%",
+        QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => "--",
+    }
+}
+
+fn quota_summary_extreme_label(subscription: SubscriptionKind) -> &'static str {
+    match subscription {
+        SubscriptionKind::Claude => "cl",
+        SubscriptionKind::Codex => "co",
+        SubscriptionKind::Gemini => "ge",
+        SubscriptionKind::Kimi => "ki",
+        SubscriptionKind::OpencodeGo => "op",
+        SubscriptionKind::Direct => "di",
+    }
+}
+
+fn line_width(line: &Line<'_>) -> usize {
+    line.spans.iter().map(|span| span.content.width()).sum()
 }
 #[cfg(test)]
 #[path = "tests_mod.rs"]

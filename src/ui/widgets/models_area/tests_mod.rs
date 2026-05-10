@@ -87,6 +87,14 @@ fn model_with_reset(
     model
 }
 
+fn model_with_quota(mut model: CachedModel, quota: u8) -> CachedModel {
+    model.quota_percent = Some(quota);
+    if let Some(candidate) = model.candidates.get_mut(0) {
+        candidate.quota_percent = Some(quota);
+    }
+    model
+}
+
 fn render_to_text(lines: &[Line<'static>], width: u16) -> Vec<String> {
     let height = lines.len().max(1) as u16;
     let area = Rect::new(0, 0, width, height);
@@ -103,6 +111,25 @@ fn render_to_text(lines: &[Line<'static>], width: u16) -> Vec<String> {
 
 fn full_buffer_line(lines: &[Line<'static>], y: usize, width: u16) -> String {
     render_to_text(lines, width)
+        .into_iter()
+        .nth(y)
+        .unwrap_or_default()
+}
+
+fn is_quota_summary_row(row: &str) -> bool {
+    let trimmed = row.trim_start();
+    trimmed.starts_with("Remaining Quota:") || trimmed.starts_with("Quota:")
+}
+
+fn render_model_text(lines: &[Line<'static>], width: u16) -> Vec<String> {
+    render_to_text(lines, width)
+        .into_iter()
+        .filter(|row| !is_quota_summary_row(row))
+        .collect()
+}
+
+fn full_model_buffer_line(lines: &[Line<'static>], y: usize, width: u16) -> String {
+    render_model_text(lines, width)
         .into_iter()
         .nth(y)
         .unwrap_or_default()
@@ -333,7 +360,7 @@ fn full_table_truncates_long_names_on_narrow_width() {
     // Width 50 → tier 3 (no probabilities, 2-letter vendor) with a tight
     // name budget so the full name cannot fit.
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 50);
+    let row = full_model_buffer_line(&lines, 0, 50);
 
     assert!(
         row.contains("..."),
@@ -357,7 +384,7 @@ fn full_table_drops_probabilities_below_60() {
     )];
 
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 50);
+    let row = full_model_buffer_line(&lines, 0, 50);
 
     assert!(
         !row.contains("I 0")
@@ -373,7 +400,7 @@ fn full_table_keeps_full_ipbr_at_or_above_80() {
     let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 80, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 80);
+    let row = full_model_buffer_line(&lines, 0, 80);
 
     // All four phase letters must appear at width 80.
     assert!(
@@ -396,7 +423,7 @@ fn full_table_collapses_to_top_rank_only_between_60_and_80() {
     // L is one of I/P/B/R and xx is two digits). We assert that at
     // least one row carries one such cell, and no row carries the full
     // four-cell IPBR sequence.
-    let texts = render_to_text(&lines, 70);
+    let texts = render_model_text(&lines, 70);
     for (i, row) in texts.iter().enumerate() {
         let cell_count = ["I", "P", "B", "R"]
             .iter()
@@ -423,7 +450,7 @@ fn full_table_shows_full_name_on_wide_width() {
     let models = vec![model_with_axis_score("gpt-opus-4-5-20251101", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 120);
+    let row = full_model_buffer_line(&lines, 0, 120);
 
     assert!(
         row.contains("opus-4-5-20251101"),
@@ -445,7 +472,7 @@ fn full_table_uses_gemini_preview_display_label() {
     )];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 120);
+    let row = full_model_buffer_line(&lines, 0, 120);
 
     assert!(
         row.contains("3.1 preview"),
@@ -501,9 +528,6 @@ fn format_name_wide_display() {
 
 #[test]
 fn compact_quota_renders_per_vendor_entries() {
-    // Bracket text comes from the row's curated `display_vendor`, which is
-    // keyed by canonical model name — pick baked names so the curated
-    // brand-tags appear (e.g. `[kimi]`, `[claude]`, `[gpt]`, `[gemini]`).
     let models = vec![
         vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
         vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
@@ -521,12 +545,130 @@ fn compact_quota_renders_per_vendor_entries() {
     assert_eq!(mode, ModelsAreaMode::CompactQuota);
 
     let row = full_buffer_line(&lines, 0, 120);
-    for tag in ["[kimi]", "[claude]", "[gpt]", "[gemini]"] {
+    for tag in ["claude", "codex", "gemini", "kimi"] {
         assert!(row.contains(tag), "missing {tag}: {row:?}");
     }
     assert!(
         row.contains("100%"),
         "100% quota should render verbatim: {row:?}"
+    );
+}
+
+#[test]
+fn full_mode_renders_quota_summary_before_model_rows() {
+    let mut claude = model_with_quota(
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
+        10,
+    );
+    claude.quota_resets_at = Some(Utc::now() + Duration::days(1) + Duration::hours(2));
+    let models = vec![
+        claude,
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 50.0, 0),
+            20,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 50.0, 0),
+            30,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
+            40,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(
+                SubscriptionKind::OpencodeGo,
+                "deepseek-v4-flash",
+                50.0,
+                0,
+            ),
+            50,
+        ),
+    ];
+
+    let (lines, mode) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
+    assert_eq!(mode, ModelsAreaMode::FullTable);
+
+    let rows = render_to_text(&lines, 200);
+    assert!(
+        rows[0].contains("Remaining Quota: claude 10% (in 1d ")
+            && rows[0].contains("), codex 20%, gemini 30%, kimi 40%, opencode 50%"),
+        "first row should be the long quota summary: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1..].iter().any(|row| row.contains("[claude]")),
+        "model rows should follow quota summary: {rows:?}"
+    );
+}
+
+#[test]
+fn compact_quota_chooses_text_form_by_actual_rendered_length() {
+    let models = vec![
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
+            10,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 50.0, 0),
+            20,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 50.0, 0),
+            30,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
+            40,
+        ),
+        model_with_quota(
+            vendor_model_with_axis_score(
+                SubscriptionKind::OpencodeGo,
+                "deepseek-v4-flash",
+                50.0,
+                0,
+            ),
+            50,
+        ),
+    ];
+
+    let (mid_lines, _) = responsive_models_area(
+        &models,
+        &[],
+        70,
+        term_h_for_budget(1),
+        ModelsAreaMode::CompactQuota,
+    );
+    let mid = full_buffer_line(&mid_lines, 0, 70);
+    assert!(
+        mid.contains("Quota: claude 10%, codex 20%, gemini 30%, kimi 40%, opencode 50%"),
+        "mid form should fit exactly by measured width: {mid:?}"
+    );
+
+    let (short_lines, _) = responsive_models_area(
+        &models,
+        &[],
+        48,
+        term_h_for_budget(1),
+        ModelsAreaMode::CompactQuota,
+    );
+    let short = full_buffer_line(&short_lines, 0, 48);
+    assert!(
+        short.contains("claude 10 codex 20 gemini 30 kimi 40 opencode 50"),
+        "short form should be selected when mid is too long: {short:?}"
+    );
+
+    let (extreme_lines, _) = responsive_models_area(
+        &models,
+        &[],
+        24,
+        term_h_for_budget(1),
+        ModelsAreaMode::CompactQuota,
+    );
+    let extreme = full_buffer_line(&extreme_lines, 0, 24);
+    assert!(
+        extreme.contains("cl10 co20 ge30 ki40 op50"),
+        "extreme form should be selected at very narrow widths: {extreme:?}"
     );
 }
 
@@ -545,12 +687,12 @@ fn compact_quota_keeps_full_vendor_names_below_60() {
         ModelsAreaMode::CompactQuota,
     );
     let row = full_buffer_line(&lines, 0, 50);
-    assert!(row.contains("[kimi]"), "full kimi label: {row:?}");
-    assert!(row.contains("[claude]"), "full claude label: {row:?}");
+    assert!(row.contains("kimi"), "full kimi label: {row:?}");
+    assert!(row.contains("claude"), "full claude label: {row:?}");
 }
 
 #[test]
-fn compact_quota_omits_below_40() {
+fn compact_quota_uses_long_form_below_40_when_it_fits() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Kimi,
         "kimi-1",
@@ -565,7 +707,11 @@ fn compact_quota_omits_below_40() {
         term_h_for_budget(1),
         ModelsAreaMode::CompactQuota,
     );
-    assert!(lines.is_empty(), "compact line must omit below 40 cols");
+    let row = full_buffer_line(&lines, 0, 30);
+    assert!(
+        row.contains("Remaining Quota: kimi 100%"),
+        "compact line should use the longest form that fits: {row:?}"
+    );
 }
 
 #[test]
@@ -622,13 +768,21 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
     let area = Rect::new(0, 0, 120, lines.len() as u16);
     let mut buf = Buffer::empty(area);
     Paragraph::new(lines).render(area, &mut buf);
+    let row_y = (0..area.height)
+        .find(|y| {
+            (0..area.width)
+                .map(|x| buf.cell((x, *y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect::<String>()
+                .contains(STATUS_DOT)
+        })
+        .expect("kimi model row should render");
     let row: String = (0..area.width)
-        .map(|x| buf.cell((x, 0)).map(|c| c.symbol()).unwrap_or(" "))
+        .map(|x| buf.cell((x, row_y)).map(|c| c.symbol()).unwrap_or(" "))
         .collect();
 
     // Quota cell shows `--%` in red.
     let quota_col = row.find("--%").expect("--% must appear for failed quota") as u16;
-    assert_eq!(buf.cell((quota_col, 0)).unwrap().fg, Color::Red);
+    assert_eq!(buf.cell((quota_col, row_y)).unwrap().fg, Color::Red);
 
     // At width 120, IpbrVerbose is chosen, so phase labels are full words.
     // probability_unavailable_span renders the entire label+dashes as one red span.
@@ -643,7 +797,7 @@ fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
             .unwrap_or_else(|| panic!("expected {pat:?} for failed vendor ({label}): {row:?}"))
             as u16;
         // Check that the first char of the label is red (the whole span is red).
-        assert_eq!(buf.cell((col, 0)).unwrap().fg, Color::Red);
+        assert_eq!(buf.cell((col, row_y)).unwrap().fg, Color::Red);
     }
 }
 
@@ -718,8 +872,8 @@ fn snapshot_matrix_widths() {
         assert_eq!(mode, ModelsAreaMode::FullTable, "width {width}: mode");
         assert_eq!(
             lines.len() as u16,
-            visible_count,
-            "width {width}: line count must equal visible count"
+            visible_count + 1,
+            "width {width}: line count must equal quota summary plus visible count"
         );
 
         for (i, line) in lines.iter().enumerate() {
@@ -742,7 +896,7 @@ fn wide_layout_shows_relative_reset_time() {
     let (lines, mode) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
 
     assert_eq!(mode, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 200);
+    let row = full_model_buffer_line(&lines, 0, 200);
     assert!(
         row.contains("in "),
         "expected relative reset time in wide layout, got: {row:?}"
@@ -759,7 +913,7 @@ fn reset_time_stays_hidden_below_very_wide_threshold() {
     let (lines, mode) = responsive_models_area(&models, &[], 139, 50, ModelsAreaMode::FullTable);
 
     assert_eq!(mode, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 139);
+    let row = full_model_buffer_line(&lines, 0, 139);
     assert!(
         !row.contains("in "),
         "reset time should stay hidden below very-wide threshold: {row:?}"
@@ -775,7 +929,7 @@ fn wide_layout_marks_past_reset_as_expired() {
 
     let (lines, _) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
 
-    let row = full_buffer_line(&lines, 0, 200);
+    let row = full_model_buffer_line(&lines, 0, 200);
     assert!(
         row.contains("expired"),
         "expected expired reset text, got: {row:?}"
@@ -901,7 +1055,7 @@ fn width_tier_selection_at_50_picks_toprank_or_none() {
     let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 50, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 50);
+    let row = full_model_buffer_line(&lines, 0, 50);
 
     // Width 50 should not show full Ipbr (15 cols) — that requires more space.
     // TopRank (3 cols) or None should be chosen based on name budget.
@@ -951,7 +1105,7 @@ fn verbose_tier_renders_full_labels_with_three_space_separation() {
     let models = vec![model_with_axis_score("gpt-alpha", 1.0, 0)];
 
     let (lines, _) = responsive_models_area(&models, &[], 68, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 68);
+    let row = full_model_buffer_line(&lines, 0, 68);
 
     // IpbrVerbose should render full phase labels.
     assert!(
@@ -1013,7 +1167,7 @@ fn full_table_orders_by_build_score_descending() {
     let models = vec![m1, m2, m3];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let rows = render_to_text(&lines, 120);
+    let rows = render_model_text(&lines, 120);
 
     assert!(rows[0].contains("[gemini]"), "row 0: {:?}", rows[0]);
     assert!(rows[1].contains("[claude]"), "row 1: {:?}", rows[1]);
@@ -1040,7 +1194,7 @@ fn full_table_renders_bracketed_curated_brand_tag_per_baked_model() {
     for (sub, name, expected) in cases {
         let model = vendor_model_with_axis_score(sub, name, 100.0, 0);
         let (lines, _) = responsive_models_area(&[model], &[], 200, 50, ModelsAreaMode::FullTable);
-        let row = full_buffer_line(&lines, 0, 200);
+        let row = full_model_buffer_line(&lines, 0, 200);
         assert!(
             row.contains(expected),
             "model {name} must render `{expected}`, got: {row:?}"
@@ -1057,10 +1211,27 @@ fn full_table_renders_dash_tag_for_zero_candidate_row() {
     model.selected_candidate = None;
 
     let (lines, _) = responsive_models_area(&[model], &[], 200, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 200);
+    let row = full_model_buffer_line(&lines, 0, 200);
     assert!(
         row.contains("[—]"),
         "zero-candidate row must render `[—]`, got: {row:?}"
+    );
+}
+
+#[test]
+fn full_table_renders_dash_tag_for_uncurated_model_name_even_with_candidate() {
+    let model = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-alpha", 100.0, 0);
+
+    let (lines, _) = responsive_models_area(&[model], &[], 120, 50, ModelsAreaMode::FullTable);
+    let rows = render_model_text(&lines, 120);
+    let model_row = rows
+        .iter()
+        .find(|row| row.contains("claude-alpha"))
+        .expect("model row should render");
+
+    assert!(
+        model_row.contains("[—]"),
+        "uncurated selected model should render dash badge, got: {model_row:?}"
     );
 }
 
@@ -1075,7 +1246,7 @@ fn full_table_renders_vendor_label_on_every_row() {
     let models = vec![m1, m2];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let rows = render_to_text(&lines, 120);
+    let rows = render_model_text(&lines, 120);
 
     assert!(rows[0].contains("[claude]"));
     assert!(rows[1].contains("[claude]"));
@@ -1100,7 +1271,7 @@ fn compact_quota_renders_expanded_quota_when_space_permits() {
     let row = full_buffer_line(&lines, 0, 120);
     println!("ROW 2: {:?}", row);
 
-    assert!(row.contains("Quota 100%"));
+    assert!(row.contains("Remaining Quota: claude 100%"));
 }
 
 #[test]
@@ -1123,7 +1294,7 @@ fn compact_quota_renders_narrow_quota_when_tight() {
     println!("ROW: {:?}", row);
 
     assert!(!row.contains("Quota"));
-    assert!(row.contains("100%"));
+    assert!(row.contains("100"));
 }
 
 #[test]
@@ -1136,7 +1307,7 @@ fn full_table_expands_quota_and_phase_labels_when_space_permits() {
     )];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
-    let row = full_buffer_line(&lines, 0, 120);
+    let row = full_model_buffer_line(&lines, 0, 120);
 
     assert!(row.contains("Quota"));
     assert!(row.contains("Idea"));
@@ -1210,11 +1381,19 @@ fn full_table_unknown_quota_renders_as_unknown_not_exhausted() {
     let area = Rect::new(0, 0, 120, lines.len() as u16);
     let mut buf = Buffer::empty(area);
     Paragraph::new(lines).render(area, &mut buf);
+    let row_y = (0..area.height)
+        .find(|y| {
+            (0..area.width)
+                .map(|x| buf.cell((x, *y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect::<String>()
+                .contains("gpt-unknown")
+        })
+        .expect("gpt-unknown row should render");
     let row: String = (0..area.width)
-        .map(|x| buf.cell((x, 0)).map(|c| c.symbol()).unwrap_or(" "))
+        .map(|x| buf.cell((x, row_y)).map(|c| c.symbol()).unwrap_or(" "))
         .collect();
     let dot_col = row.find(STATUS_DOT).expect("status dot") as u16;
-    assert_eq!(buf.cell((dot_col, 0)).unwrap().fg, Color::DarkGray);
+    assert_eq!(buf.cell((dot_col, row_y)).unwrap().fg, Color::DarkGray);
 }
 
 #[test]

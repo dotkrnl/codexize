@@ -43,34 +43,6 @@ pub enum RuntimeControl {
     Exit,
 }
 
-pub struct RuntimeHarness {
-    view: AppView,
-    commands: Vec<AppCommand>,
-}
-
-impl RuntimeHarness {
-    pub fn new(view: AppView) -> Self {
-        Self {
-            view,
-            commands: Vec::new(),
-        }
-    }
-
-    pub fn commands(&self) -> &[AppCommand] {
-        &self.commands
-    }
-
-    fn apply_command(&mut self, command: AppCommand) -> RuntimeControl {
-        let control = if matches!(command, AppCommand::Quit) {
-            RuntimeControl::Exit
-        } else {
-            RuntimeControl::Continue
-        };
-        self.commands.push(command);
-        control
-    }
-}
-
 pub struct HeadlessRuntime {
     view: AppView,
     live_summary_path: PathBuf,
@@ -171,19 +143,4 @@ pub fn headless_runtime_for_live_summary(
         AppView::empty(session_id),
         live_summary_path.as_ref().to_path_buf(),
     )
-}
-
-pub fn run_harness_until_exit(
-    harness: &mut RuntimeHarness,
-    mut runtime: RuntimeChannels,
-) -> anyhow::Result<RuntimeControl> {
-    let mut control = RuntimeControl::Continue;
-    while let Ok(command) = runtime.commands_rx.try_recv() {
-        control = harness.apply_command(command);
-        runtime.views_tx.send(harness.view.clone())?;
-        if control == RuntimeControl::Exit {
-            break;
-        }
-    }
-    Ok(control)
 }

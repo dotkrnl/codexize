@@ -6,7 +6,7 @@ fn display_vendor_returns_curated_brand_for_known_canonical() {
     assert_eq!(display_vendor("gpt-5.4"), "gpt");
     assert_eq!(display_vendor("gemini-3.1-pro-preview"), "gemini");
     assert_eq!(display_vendor("deepseek-v4-flash"), "deepseek");
-    assert_eq!(display_vendor("grok-code-fast-1"), "grok");
+    assert_eq!(display_vendor("qwen3.6-plus"), "qwen");
     assert_eq!(display_vendor("kimi-k2.6"), "kimi");
 }
 
@@ -20,7 +20,7 @@ fn display_short_returns_curated_short_for_known_canonical() {
     assert_eq!(display_short("claude-opus-4.7"), "opus 4.7");
     assert_eq!(display_short("gpt-5.3-codex"), "5.3 codex");
     assert_eq!(display_short("gemini-3.1-pro-preview"), "3.1 preview");
-    assert_eq!(display_short("grok-4-latest"), "4");
+    assert_eq!(display_short("mimo-v2.5-pro"), "v2.5 pro");
     assert_eq!(display_short("glm-5.1"), "5.1");
 }
 

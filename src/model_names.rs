@@ -25,12 +25,8 @@ const DISPLAY: &[(&str, &str, &str)] = &[
     ("minimax-m2.5", "minimax", "m2.5"),
     ("minimax-m2.7", "minimax", "m2.7"),
     ("qwen3.6-plus", "qwen", "3.6 plus"),
-    ("grok-4-latest", "grok", "4"),
-    ("grok-code-fast-1", "grok", "code fast"),
     ("mimo-v2.5", "mimo", "v2.5"),
     ("mimo-v2.5-pro", "mimo", "v2.5 pro"),
-    ("glm-4.6", "glm", "4.6"),
-    ("glm-4.7", "glm", "4.7"),
     ("glm-5", "glm", "5"),
     ("glm-5.1", "glm", "5.1"),
 ];

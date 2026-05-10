@@ -54,11 +54,14 @@ pub struct BakedProvider {
 /// Sentinel display order for user-additions with no baked counterpart.
 pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
-/// Static baked-defaults table — 30 hand-curated rows mirroring the
+/// Static baked-defaults table — 26 hand-curated rows mirroring the
 /// ipbr scoreboard: 17 direct-subscription rows (Claude opus/sonnet,
-/// Codex gpt-5.x, Gemini variants, Kimi k2.6) plus 13 opencode-go rows
-/// (deepseek, glm, grok, mimo, minimax, qwen) sharing the
-/// `"opencode-shared"` quota pool.
+/// Codex gpt-5.x, Gemini variants, Kimi k2.6) plus 9 opencode-go rows
+/// (deepseek, glm, mimo, minimax, qwen) sharing the
+/// `"opencode-shared"` quota pool. Models that the live `opencode`
+/// CLI does not advertise (verified via `opencode models`) are not
+/// baked here even if they appear on the IPBR scoreboard, since
+/// launching them errors with `ProviderModelNotFoundError`.
 pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
     BakedRow {
@@ -441,40 +444,6 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "grok-4-latest",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/grok-4-latest",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
-    },
-    BakedRow {
-        model: "grok-code-fast-1",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/grok-code-fast-1",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
-    },
-    BakedRow {
         model: "mimo-v2.5",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
@@ -496,40 +465,6 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
             launch_name: "opencode-go/mimo-v2.5-pro",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
-    },
-    BakedRow {
-        model: "glm-4.6",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/glm-4.6",
-            subscription: SubscriptionKind::OpencodeGo,
-            free: false,
-            official: false,
-            cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
-            effort_cheap: "low",
-            effort_normal: "medium",
-            effort_tough: "high",
-            quota_lookup_key: Some("opencode-shared"),
-        }],
-    },
-    BakedRow {
-        model: "glm-4.7",
-        providers: &[BakedProvider {
-            cli: CliKind::Opencode,
-            launch_name: "opencode-go/glm-4.7",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -720,8 +655,11 @@ mod tests {
     }
 
     #[test]
-    fn baked_table_has_thirty_rows() {
-        assert_eq!(BAKED_TABLE.len(), 30);
+    fn baked_table_has_twenty_six_rows() {
+        assert_eq!(
+            BAKED_TABLE.iter().map(|r| r.providers.len()).sum::<usize>(),
+            26
+        );
     }
 
     #[test]

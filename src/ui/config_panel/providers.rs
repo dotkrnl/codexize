@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span};
 
 const COLOR_FOCUS: Color = Color::Cyan;
 const COLOR_OVERRIDE: Color = Color::Yellow;
-const COLOR_DIM: Color = Color::DarkGray;
+const COLOR_DIM: Color = Color::Gray;
 const COLOR_OK: Color = Color::Green;
 /// Subscription label color — visually distinct from the primary
 /// (cli/launch_name) text so the billing pool reads as a chip rather

@@ -35,9 +35,12 @@ const LABEL_WIDTH: usize = 28;
 
 // Pipeline-style palette: focus accent matches the pipeline focus glyph,
 // override accent picks up the warning yellow used for waiting nodes.
+// Note: COLOR_DIM uses Gray (the lighter ANSI grey) rather than DarkGray
+// because the config panel covers entire labels and values in dim text;
+// DarkGray rendered as nearly-black on most themes and was hard to read.
 const COLOR_FOCUS: Color = Color::Cyan;
 const COLOR_OVERRIDE: Color = Color::Yellow;
-const COLOR_DIM: Color = Color::DarkGray;
+const COLOR_DIM: Color = Color::Gray;
 const COLOR_DANGER: Color = Color::Red;
 const COLOR_OK: Color = Color::Green;
 
@@ -690,9 +693,15 @@ impl ConfigPanelState {
                 self.move_field(1);
                 PanelOutcome::KeepOpen
             }
-            // Horizontal arrows are no-ops in navigation mode. Models page now
-            // uses a detail drawer instead of per-property h/l cursors.
-            KeyCode::Left | KeyCode::Char('h') | KeyCode::Right | KeyCode::Char('l') => {
+            // Horizontal arrows mirror Tab/Shift-Tab for section navigation
+            // — pressing → on the last section wraps to the first, matching
+            // tab-bar conventions.
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.move_section(-1);
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.move_section(1);
                 PanelOutcome::KeepOpen
             }
             KeyCode::Enter => {
@@ -3268,39 +3277,39 @@ mod tests {
     }
 
     #[test]
-    fn arrow_keys_in_nav_mode_are_no_ops_for_field_and_section() {
+    fn arrow_keys_navigate_between_section_tabs() {
+        // ←/→ and h/l mirror Tab/Shift-Tab for section navigation. They
+        // never enter edit mode and never mutate the focused field's value.
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.enabled");
         let section_before = state.selected_section;
-        let value_before = state.value_for(state.current_meta().unwrap());
-        for code in [
-            KeyCode::Left,
-            KeyCode::Right,
-            KeyCode::Char('h'),
-            KeyCode::Char('l'),
-        ] {
-            state.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
-            assert_eq!(
-                state.selected_section, section_before,
-                "{code:?} moved section"
-            );
-            assert_eq!(
-                state.value_for(state.current_meta().unwrap()),
-                value_before,
-                "{code:?} mutated value"
-            );
-            assert!(state.editing.is_none(), "{code:?} entered edit mode");
-        }
+
+        state.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(state.selected_section, (section_before + 1) % SECTIONS.len());
+        assert!(state.editing.is_none());
+
+        state.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(state.selected_section, section_before);
+
+        state.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+        assert_eq!(state.selected_section, (section_before + 1) % SECTIONS.len());
+
+        state.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert_eq!(state.selected_section, section_before);
     }
 
     #[test]
-    fn arrow_keys_in_nav_mode_dont_cycle_enum() {
+    fn horizontal_arrows_dont_cycle_enum_values() {
+        // Defensive check: with the old keymap, h/l flipped the focused
+        // enum value. They now switch sections instead — the original
+        // value lives on whichever section the cursor leaves behind.
         let mut state = state_with_overrides();
         focus_field(&mut state, "ntfy.detail_mode");
-        // The override fixture sets detail_mode = "minimal"; cycling under
-        // the old keymap would flip to "detailed" — these arrows must now
-        // leave the value alone.
         let value_before = state.value_for(state.current_meta().unwrap());
+
+        // After ←, the section changes and current_meta() points at a
+        // different field. We re-focus the original field and confirm
+        // its persisted value is unchanged.
         for code in [
             KeyCode::Left,
             KeyCode::Right,
@@ -3308,7 +3317,12 @@ mod tests {
             KeyCode::Char('l'),
         ] {
             state.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
-            assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
+            focus_field(&mut state, "ntfy.detail_mode");
+            assert_eq!(
+                state.value_for(state.current_meta().unwrap()),
+                value_before,
+                "{code:?} mutated detail_mode"
+            );
         }
     }
 

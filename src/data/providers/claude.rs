@@ -17,8 +17,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
     let object = payload
         .as_object()
         .context("Claude usage response was not an object")?;
-    let mut min_remaining: Option<u8> = None;
-    let mut earliest_reset: Option<DateTime<Utc>> = None;
+    let mut limiting_window: Option<(u8, Option<DateTime<Utc>>)> = None;
     for (_name, value) in object {
         let Some(obj) = value.as_object() else {
             continue;
@@ -31,21 +30,25 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
             continue;
         };
         let remaining = (100.0 - utilization).round().clamp(0.0, 100.0) as u8;
-        min_remaining = Some(min_remaining.map_or(remaining, |prev| prev.min(remaining)));
-        if let Some(ts) = obj.get("resets_at").and_then(Value::as_str)
-            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        let reset = obj
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .map(|dt| dt.with_timezone(&Utc));
+        if limiting_window
+            .as_ref()
+            .is_none_or(|(prev_remaining, _)| remaining < *prev_remaining)
         {
-            let dt_utc = dt.with_timezone(&Utc);
-            earliest_reset = Some(earliest_reset.map_or(dt_utc, |earliest| earliest.min(dt_utc)));
+            limiting_window = Some((remaining, reset));
         }
     }
-    let Some(remaining) = min_remaining else {
+    let Some((remaining, reset)) = limiting_window else {
         bail!("Claude usage response had no utilization windows");
     };
     Ok(vec![LiveModel {
         name: "claude-shared".to_string(),
         quota_percent: Some(remaining),
-        quota_resets_at: earliest_reset,
+        quota_resets_at: reset,
     }])
 }
 fn dummy_invoke() -> Result<()> {

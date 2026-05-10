@@ -1212,6 +1212,10 @@ fn verbose_tier_renders_full_labels_with_three_space_separation() {
         idea_to_plan.is_some(),
         "verbose tier: three spaces should separate Idea and Plan: {row:?}"
     );
+    assert!(
+        row.contains("Review 99  Quota 99%"),
+        "verbose tier should keep two spaces before quota: {row:?}"
+    );
 }
 
 #[test]

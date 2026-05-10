@@ -139,7 +139,11 @@ pub(super) fn full_row_fixed_width(
         QuotaColumn::Expanded => 9,
         QuotaColumn::Narrow => 4,
     };
-    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs
+    let quota_separator = match prob_col {
+        ProbColumn::IpbrVerbose => 2,
+        ProbColumn::Ipbr | ProbColumn::TopRank | ProbColumn::None => 1,
+    };
+    vendor_width + 1 + 1 + 1 + quota_width + quota_separator + prob_separator + probs
 }
 fn name_style() -> Style {
     Style::default().fg(Color::Cyan)

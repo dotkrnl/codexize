@@ -314,7 +314,11 @@ fn render_full_table(
             }
             ProbColumn::None => {}
         }
-        spans.push(Span::raw(" "));
+        let quota_separator = match prob_col {
+            ProbColumn::IpbrVerbose => "  ",
+            ProbColumn::Ipbr | ProbColumn::TopRank | ProbColumn::None => " ",
+        };
+        spans.push(Span::raw(quota_separator));
         spans.push(quota_span);
         lines.push(Line::from(spans));
     }

@@ -604,6 +604,10 @@ pub(crate) struct ConfigPanelState {
     /// `providers::all_vendors(&config)` on open so the page lands
     /// fully collapsed; Space on a vendor header flips its membership.
     pub(crate) folded_vendors: std::collections::BTreeSet<String>,
+    /// Models whose provider rows are currently hidden. Default empty
+    /// — once the user expands a vendor, every model inside is open
+    /// until they explicitly fold it with Space.
+    pub(crate) folded_models: std::collections::BTreeSet<String>,
 }
 
 impl ConfigPanelState {
@@ -639,6 +643,7 @@ impl ConfigPanelState {
             providers_scroll: Cell::new(0),
             providers_body_h: Cell::new(0),
             folded_vendors,
+            folded_models: std::collections::BTreeSet::new(),
         };
         state.select_first_field_in_current_section();
         state
@@ -805,7 +810,7 @@ impl ConfigPanelState {
             }
             KeyCode::Char('G') => {
                 if is_providers_section(self.current_section()) {
-                    let len = providers::get_lines(&self.config, &self.folded_vendors).len();
+                    let len = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models).len();
                     self.providers_cursor = len.saturating_sub(1);
                 } else if let Some(last) = field_indices_for(self.current_section()).last() {
                     self.selected_field = *last;
@@ -1249,7 +1254,7 @@ impl ConfigPanelState {
     }
 
     fn remove_selected_provider(&mut self) {
-        let lines = providers::get_lines(&self.config, &self.folded_vendors);
+        let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
         let Some(providers::ProvidersLine::Provider {
             entry, is_baked, ..
         }) = lines.get(self.providers_cursor)
@@ -1300,7 +1305,7 @@ impl ConfigPanelState {
     }
 
     fn clamp_provider_cursor(&mut self) {
-        let len = providers::get_lines(&self.config, &self.folded_vendors).len();
+        let len = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models).len();
         if len == 0 {
             self.providers_cursor = 0;
         } else {
@@ -1309,7 +1314,7 @@ impl ConfigPanelState {
     }
 
     fn activate_provider_line(&mut self) {
-        let lines = providers::get_lines(&self.config, &self.folded_vendors);
+        let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
         let Some(line) = lines.get(self.providers_cursor) else {
             return;
         };
@@ -1327,7 +1332,7 @@ impl ConfigPanelState {
                 }
                 // Re-snap scroll: line indices shifted, but the cursor
                 // should stay on this same vendor header.
-                let new_lines = providers::get_lines(&self.config, &self.folded_vendors);
+                let new_lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
                 if let Some(idx) = new_lines.iter().position(|l| {
                     matches!(
                         l,
@@ -1338,7 +1343,31 @@ impl ConfigPanelState {
                     self.providers_cursor = idx;
                 }
             }
-            providers::ProvidersLine::ModelHeader { .. } => {}
+            providers::ProvidersLine::ModelHeader { model, folded } => {
+                let model = model.clone();
+                let was_folded = *folded;
+                if was_folded {
+                    self.folded_models.remove(&model);
+                    self.status = format!("expanded {model}");
+                } else {
+                    self.folded_models.insert(model.clone());
+                    self.status = format!("folded {model}");
+                }
+                let new_lines = providers::get_lines(
+                    &self.config,
+                    &self.folded_vendors,
+                    &self.folded_models,
+                );
+                if let Some(idx) = new_lines.iter().position(|l| {
+                    matches!(
+                        l,
+                        providers::ProvidersLine::ModelHeader { model: m, .. }
+                            if m == &model
+                    )
+                }) {
+                    self.providers_cursor = idx;
+                }
+            }
             providers::ProvidersLine::Provider { entry, is_baked, .. } => {
                 let entry = entry.clone();
                 let is_baked = *is_baked;
@@ -1356,7 +1385,7 @@ impl ConfigPanelState {
     /// Toggle one property on the provider currently under
     /// `providers_cursor` and refresh status text.
     fn toggle_provider_property(&mut self, idx: usize) {
-        let lines = providers::get_lines(&self.config, &self.folded_vendors);
+        let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
         let Some(providers::ProvidersLine::Provider {
             entry, is_baked, ..
         }) = lines.get(self.providers_cursor)
@@ -1391,7 +1420,7 @@ impl ConfigPanelState {
         let Some(Editing::ProviderDetail { cursor }) = self.editing else {
             return;
         };
-        let lines = providers::get_lines(&self.config, &self.folded_vendors);
+        let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
         let is_baked = matches!(
             lines.get(self.providers_cursor),
             Some(providers::ProvidersLine::Provider { is_baked: true, .. })
@@ -1568,23 +1597,14 @@ impl ConfigPanelState {
     fn move_field(&mut self, delta: isize) {
         let section = self.current_section();
         if is_providers_section(section) {
-            let lines = providers::get_lines(&self.config, &self.folded_vendors);
+            let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
             if !lines.is_empty() {
                 // Skip group headers so j/k always lands on something the
                 // user can act on.
-                let mut next = wrap_index(self.providers_cursor, lines.len(), delta);
-                // ModelHeader is purely structural — skip it. VendorHeader
-                // is interactive (Space toggles fold) so the cursor must
-                // be allowed to land there.
-                for _ in 0..lines.len() {
-                    if !matches!(
-                        lines.get(next),
-                        Some(providers::ProvidersLine::ModelHeader { .. })
-                    ) {
-                        break;
-                    }
-                    next = wrap_index(next, lines.len(), delta);
-                }
+                // VendorHeader and ModelHeader are both interactive
+                // (Space/Enter toggles fold), so navigation lands on
+                // every visible line — no skips.
+                let next = wrap_index(self.providers_cursor, lines.len(), delta);
                 self.providers_cursor = next;
             }
             return;
@@ -1605,7 +1625,7 @@ impl ConfigPanelState {
     /// any group headers so the cursor lands on actionable content. Used by
     /// PgUp/PgDown and Ctrl-U/Ctrl-D.
     fn move_providers_page(&mut self, delta: isize) {
-        let lines = providers::get_lines(&self.config, &self.folded_vendors);
+        let lines = providers::get_lines(&self.config, &self.folded_vendors, &self.folded_models);
         if lines.is_empty() {
             return;
         }
@@ -2115,7 +2135,7 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
         return;
     }
     let cursor = *cursor;
-    let lines = providers::get_lines(&state.config, &state.folded_vendors);
+    let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
     let Some(providers::ProvidersLine::Provider {
         entry,
         is_baked,
@@ -2708,13 +2728,23 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
         ));
     }
     if is_providers_section(state.current_section()) {
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(
+            &state.config,
+            &state.folded_vendors,
+            &state.folded_models,
+        );
         let text = match lines.get(state.providers_cursor) {
             Some(providers::ProvidersLine::VendorHeader { folded: true, .. }) => {
                 "Space/Enter expands this vendor · n adds a new model"
             }
             Some(providers::ProvidersLine::VendorHeader { folded: false, .. }) => {
                 "Space/Enter folds this vendor · n adds a new model"
+            }
+            Some(providers::ProvidersLine::ModelHeader { folded: true, .. }) => {
+                "Space/Enter expands this model · n adds a new model"
+            }
+            Some(providers::ProvidersLine::ModelHeader { folded: false, .. }) => {
+                "Space/Enter folds this model · n adds a new model"
             }
             Some(providers::ProvidersLine::Provider { .. }) => {
                 "Enter opens the per-provider detail drawer · x removes · n adds"
@@ -2987,7 +3017,7 @@ fn providers_body_lines(
     width: usize,
     body_h: usize,
 ) -> Vec<Line<'static>> {
-    let lines = providers::get_lines(&state.config, &state.folded_vendors);
+    let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
     if lines.is_empty() {
         state.providers_scroll.set(0);
         state.providers_body_h.set(body_h);
@@ -3148,7 +3178,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .expect("provider row");
@@ -3161,7 +3191,7 @@ mod tests {
 
         // Space inside the drawer flips the focused property and stays open.
         state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
         let providers::ProvidersLine::Provider { entry, .. } = &lines[state.providers_cursor]
         else {
             panic!("cursor should still point at provider");
@@ -3197,7 +3227,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| {
                 matches!(
@@ -3612,7 +3642,9 @@ mod tests {
             "missing launch_name on row: {text}"
         );
         assert!(
-            text.contains("built-in · official · paid"),
+            // The chip strip shows only the ticked flags; paid and
+            // unofficial are intentionally suppressed.
+            text.contains("built-in · official"),
             "missing provider chip strip: {text}"
         );
     }
@@ -3670,7 +3702,7 @@ mod tests {
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
 
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
         let add_idx = lines
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::AddAction))
@@ -3706,10 +3738,11 @@ mod tests {
         // child model header is `deepseek-v4-flash`; and `opencode-go`
         // never appears as a vendor header.
         let config = Config::baked_defaults();
-        // Pass an empty fold-set so every model header is emitted and
-        // we can verify the vendor → model mapping.
-        let folded = std::collections::BTreeSet::new();
-        let lines = providers::get_lines(&config, &folded);
+        // Pass empty fold-sets so every model header is emitted and we
+        // can verify the vendor → model mapping.
+        let folded_v = std::collections::BTreeSet::new();
+        let folded_m = std::collections::BTreeSet::new();
+        let lines = providers::get_lines(&config, &folded_v, &folded_m);
         let mut seen_vendors: Vec<String> = Vec::new();
         let mut seen_pairs: Vec<(String, String)> = Vec::new();
         let mut current_vendor: Option<String> = None;
@@ -3719,7 +3752,7 @@ mod tests {
                     seen_vendors.push(vendor.clone());
                     current_vendor = Some(vendor.clone());
                 }
-                providers::ProvidersLine::ModelHeader { model } => {
+                providers::ProvidersLine::ModelHeader { model, .. } => {
                     if let Some(v) = &current_vendor {
                         seen_pairs.push((v.clone(), model.clone()));
                     }
@@ -3815,7 +3848,7 @@ mod tests {
         for _ in 0..(body_h * 3) {
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         }
-        let lines_total = providers::get_lines(&state.config, &state.folded_vendors).len();
+        let lines_total = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models).len();
         let cursor = state.providers_cursor;
         assert!(cursor < lines_total);
 
@@ -3845,43 +3878,36 @@ mod tests {
     }
 
     #[test]
-    fn providers_navigation_skips_model_headers_but_lands_on_vendor_headers() {
-        // ModelHeader is purely structural — never a navigation target.
-        // VendorHeader is interactive (Space toggles fold), so the cursor
-        // is allowed to land there.
+    fn providers_navigation_lands_on_vendor_and_model_headers() {
+        // Both header tiers are interactive (Space toggles fold), so j/k
+        // walks through every visible row including the headers.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
             &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(
+            &state.config,
+            &state.folded_vendors,
+            &state.folded_models,
+        );
         state.providers_cursor = lines
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .unwrap();
-        let mut hit_vendor_header = false;
+        let mut hit_vendor = false;
+        let mut hit_model = false;
         for _ in 0..40 {
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-            assert!(
-                !matches!(
-                    lines.get(state.providers_cursor),
-                    Some(providers::ProvidersLine::ModelHeader { .. })
-                ),
-                "cursor {} landed on a model header",
-                state.providers_cursor
-            );
-            if matches!(
-                lines.get(state.providers_cursor),
-                Some(providers::ProvidersLine::VendorHeader { .. })
-            ) {
-                hit_vendor_header = true;
+            match lines.get(state.providers_cursor) {
+                Some(providers::ProvidersLine::VendorHeader { .. }) => hit_vendor = true,
+                Some(providers::ProvidersLine::ModelHeader { .. }) => hit_model = true,
+                _ => {}
             }
         }
-        assert!(
-            hit_vendor_header,
-            "expected j to walk through at least one vendor header"
-        );
+        assert!(hit_vendor, "j should walk through vendor headers");
+        assert!(hit_model, "j should walk through model headers");
     }
 
     #[test]
@@ -3895,7 +3921,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { is_baked: true, .. }))
             .expect("baked provider row");
@@ -3930,7 +3956,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .expect("provider row");
@@ -3945,7 +3971,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .expect("provider row");
@@ -3965,7 +3991,7 @@ mod tests {
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.expand_all_vendors_for_test();
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
         let add_idx = lines
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::AddAction))
@@ -4079,7 +4105,7 @@ mod tests {
             &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.expand_all_vendors_for_test();
-        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors)
+        state.providers_cursor = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models)
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .unwrap();
@@ -4369,7 +4395,7 @@ mod tests {
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = 0; // first vendor header
 
-        let lines = providers::get_lines(&state.config, &state.folded_vendors);
+        let lines = providers::get_lines(&state.config, &state.folded_vendors, &state.folded_models);
         let (target, folded): (String, bool) = match &lines[0] {
             providers::ProvidersLine::VendorHeader { vendor, folded } => {
                 (vendor.clone(), *folded)
@@ -4390,6 +4416,76 @@ mod tests {
         assert!(
             state.folded_vendors.contains(&target),
             "space should fold the focused vendor again"
+        );
+    }
+
+    #[test]
+    fn space_on_model_header_toggles_model_fold() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        // Expand the first vendor so the model headers become reachable.
+        state.expand_all_vendors_for_test();
+        let lines = providers::get_lines(
+            &state.config,
+            &state.folded_vendors,
+            &state.folded_models,
+        );
+        let (model_idx, target_model) = lines
+            .iter()
+            .enumerate()
+            .find_map(|(i, l)| match l {
+                providers::ProvidersLine::ModelHeader { model, .. } => Some((i, model.clone())),
+                _ => None,
+            })
+            .expect("model header should exist after expanding vendors");
+
+        state.providers_cursor = model_idx;
+        assert!(!state.folded_models.contains(&target_model));
+
+        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(
+            state.folded_models.contains(&target_model),
+            "space on a model header should fold it"
+        );
+
+        state.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(
+            !state.folded_models.contains(&target_model),
+            "space again should unfold it"
+        );
+    }
+
+    #[test]
+    fn provider_row_chip_strip_shows_only_ticked_flags() {
+        // built-in claude-opus rows are tough_eligible + effort_eligible
+        // but not free, not paid-shown. The new render must not include
+        // the suppressed labels (paid, unofficial).
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.expand_all_vendors_for_test();
+        let text = render_to_text(&state, 130, 30);
+
+        assert!(
+            text.contains("official"),
+            "official should render when set: {text}"
+        );
+        assert!(
+            !text.contains("paid"),
+            "paid is suppressed; only `free` should ever appear: {text}"
+        );
+        assert!(
+            !text.contains("unofficial"),
+            "unofficial is suppressed; only `official` should ever appear: {text}"
         );
     }
 

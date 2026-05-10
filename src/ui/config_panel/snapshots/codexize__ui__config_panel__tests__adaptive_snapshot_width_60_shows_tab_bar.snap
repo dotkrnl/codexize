@@ -2,9 +2,10 @@
 source: src/ui/config_panel/mod.rs
 expression: text
 ---
-"Settings────────────────────────────/tmp/example/config.toml"
-" Common  Models  Notifications ●  Agents  System ●          "
+"⚙ Settings──────────────────────────/tmp/example/config.toml"
+" Common  Models  Notifications ●  Agents  [System] ●        "
 "────────────────────────────────────────────────────────────"
+" ⊕ System (1 override)                                      "
 "▌  Notification config created  │                           "
 "   Notification config updated  │                           "
 "   Cache folder                 │ .codexize/cache           "
@@ -14,7 +15,6 @@ expression: text
 "   Palette help row             │ ✓ on                      "
 "   JSON logs                    │ ✗ off                     "
 "   Memory topics per prompt     │ 6                         "
-"   Journal retention            │ 12                        "
 "────────────────────────────────────────────────────────────"
 "Metadata timestamp maintained by config mutat… │ config open"
-"←→ section · ↑↓ navigate  ·              ^S save · Esc close"
+"←→ section · ↑↓ navigate  │              ^S save · Esc close"

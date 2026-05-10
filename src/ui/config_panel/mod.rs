@@ -43,6 +43,7 @@ const COLOR_OVERRIDE: Color = Color::Yellow;
 const COLOR_DIM: Color = Color::Gray;
 const COLOR_DANGER: Color = Color::Red;
 const COLOR_OK: Color = Color::Green;
+const COLOR_SECTION_TITLE: Color = Color::Magenta;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldKind {
@@ -1924,10 +1925,14 @@ fn overlay_keymap_line(bindings: &[(&str, &str)]) -> Line<'static> {
                 Style::default().fg(Color::DarkGray),
             ));
         }
-        spans.push(Span::styled(
-            key.to_string(),
-            Style::default().fg(Color::White),
-        ));
+        // First binding in list is primary action - use cyan
+        let key_color = if i == 0 { COLOR_FOCUS } else { Color::White };
+        let key_style = if i == 0 {
+            Style::default().fg(key_color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(key_color)
+        };
+        spans.push(Span::styled(key.to_string(), key_style));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             action.to_string(),
@@ -2541,30 +2546,107 @@ fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
 
 fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
     let w = width as usize;
+    let h = height as usize;
     let mut lines = Vec::new();
+
+    // Header with title
     lines.push(header_line(&state.path, width));
+
+    // Tab bar with section navigation
     let tab_lines = tab_bar_lines(state, w);
     lines.extend(tab_lines);
+
+    // Separator after tabs
     lines.push(bottom_rule(width, None));
-    let used = lines.len();
-    // Reserve 3 lines for the trailing separator + help + footer so the
-    // footer is never sacrificed when the tab bar wraps onto a third line
-    // (sub-panels with longer section names hit this case at width 80).
-    let body_h = height.saturating_sub(used as u16 + 3) as usize;
+
+    // Calculate body height: reserve space for footer chrome
+    // Footer chrome = separator (1) + help (1) + keymap (1) = 3 lines
+    let chrome_used = lines.len() + 3;
+    let body_h = h.saturating_sub(chrome_used);
+
+    // Section title with visual treatment
+    if body_h > 0 {
+        lines.push(section_header_line(state, w));
+    }
+
+    // Adjust body_h for section header
+    let content_h = body_h.saturating_sub(1);
+
+    // Body content
     if is_providers_section(state.current_section()) {
-        for body_line in providers_body_lines(state, w, body_h).into_iter().take(body_h) {
+        for body_line in providers_body_lines(state, w, content_h).into_iter().take(content_h) {
             lines.push(body_line);
         }
     } else {
         let fields = visible_fields(state);
-        for idx in fields.into_iter().take(body_h) {
+        for idx in fields.into_iter().take(content_h) {
             lines.push(field_row(state, idx, w));
         }
     }
+
+    // Pad to fill remaining body space for consistent footer positioning
+    let target_body_end = chrome_used.saturating_sub(3) + body_h;
+    while lines.len() < target_body_end {
+        lines.push(Line::from(""));
+    }
+
+    // Footer chrome: separator + help + keymap (always at bottom)
     lines.push(bottom_rule(width, None));
     lines.push(help_text(state, w));
     lines.push(footer_line(state, w));
+
+    // Ensure we don't exceed height
+    lines.truncate(h);
     lines
+}
+
+fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
+    let section = state.current_section();
+    let title = section_title(section);
+    let override_count = state.section_override_count(section);
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    // Section icon based on type
+    let icon = match section {
+        "general" => "⚙",
+        "models" => "◇",
+        "notifications" => "🔔",
+        "agents" => "⚡",
+        "system" => "⊕",
+        _ => "▸",
+    };
+
+    spans.push(Span::styled(
+        format!(" {} ", icon),
+        Style::default().fg(COLOR_SECTION_TITLE),
+    ));
+    spans.push(Span::styled(
+        title.to_string(),
+        Style::default()
+            .fg(COLOR_SECTION_TITLE)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    if override_count > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("({} override{})", override_count, if override_count == 1 { "" } else { "s" }),
+            Style::default().fg(COLOR_OVERRIDE),
+        ));
+    }
+
+    // Fill remaining width with subtle separator
+    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let remaining = width.saturating_sub(used);
+    if remaining > 0 {
+        spans.push(Span::styled(
+            " ".repeat(remaining),
+            Style::default(),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
@@ -2575,7 +2657,9 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
         let active = i == state.selected_section;
         let dirty = state.section_override_count(section) > 0;
         let title = section_title(section);
-        let plain_w = title.width() + if dirty { 2 } else { 0 };
+        // Account for brackets around active tab
+        let bracket_extra = if active { 2 } else { 0 };
+        let plain_w = title.width() + bracket_extra + if dirty { 2 } else { 0 };
         let sep_w = if current_spans.is_empty() { 1 } else { TAB_SEPARATOR.width() };
         if !current_spans.is_empty() && current_w + sep_w + plain_w > width {
             lines.push(Line::from(std::mem::take(&mut current_spans)));
@@ -2585,17 +2669,33 @@ fn tab_bar_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
             current_spans.push(Span::raw(" "));
             current_w += 1;
         } else {
-            current_spans.push(Span::raw(TAB_SEPARATOR));
+            current_spans.push(Span::styled(
+                TAB_SEPARATOR.to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
             current_w += TAB_SEPARATOR.width();
+        }
+        // Active tab gets bracket treatment for better visibility
+        if active {
+            current_spans.push(Span::styled(
+                "[".to_string(),
+                Style::default().fg(COLOR_FOCUS),
+            ));
         }
         let title_style = if active {
             Style::default()
                 .fg(COLOR_FOCUS)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(COLOR_DIM)
         };
         current_spans.push(Span::styled(title.to_string(), title_style));
+        if active {
+            current_spans.push(Span::styled(
+                "]".to_string(),
+                Style::default().fg(COLOR_FOCUS),
+            ));
+        }
         if dirty {
             current_spans.push(Span::raw(" "));
             current_spans.push(Span::styled(
@@ -2718,24 +2818,30 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
         .current_meta()
         .and_then(|meta| state.edit_error_for(*meta, &state.edit_buffer))
     {
-        return Line::from(Span::styled(
-            ellipsize_end(&err, width),
-            Style::default().fg(COLOR_DANGER),
-        ));
+        return Line::from(vec![
+            Span::styled("✗ ".to_string(), Style::default().fg(COLOR_DANGER)),
+            Span::styled(
+                ellipsize_end(&err, width.saturating_sub(2)),
+                Style::default().fg(COLOR_DANGER),
+            ),
+        ]);
     }
     if let Some(err) = &state.save_error {
-        return Line::from(Span::styled(
-            ellipsize_end(err, width),
-            Style::default().fg(COLOR_DANGER),
-        ));
+        return Line::from(vec![
+            Span::styled("✗ ".to_string(), Style::default().fg(COLOR_DANGER)),
+            Span::styled(
+                ellipsize_end(err, width.saturating_sub(2)),
+                Style::default().fg(COLOR_DANGER),
+            ),
+        ]);
     }
     let banner = match &state.conflict {
         Some(ConflictBanner::MtimeAdvanced) => {
-            Some("mtime conflict: r reload · o overwrite · Esc keep editing")
+            Some("⚠ mtime conflict: r reload · o overwrite · Esc keep editing")
         }
         Some(ConflictBanner::ExitPrompt { .. }) => None,
         Some(ConflictBanner::RegenerateTopicPrompt) => {
-            Some("regenerate ntfy.topic? y accept · n keep")
+            Some("⚠ regenerate ntfy.topic? y accept · n keep")
         }
         None => None,
     };
@@ -2769,19 +2875,21 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
     };
 
     let invalid = state.current_validation_error();
-    let (status_text, status_color) = if let Some(reason) = invalid {
-        (reason, COLOR_DANGER)
+    let (status_icon, status_text, status_color) = if let Some(reason) = invalid {
+        ("✗ ", reason, COLOR_DANGER)
     } else if state.dirty {
         (
-            format!("{} changes · ^S to save", dirty_count(state)),
+            "● ",
+            format!("{} change{} · ^S to save", dirty_count(state), if dirty_count(state) == 1 { "" } else { "s" }),
             COLOR_OVERRIDE,
         )
     } else {
-        (state.status.clone(), COLOR_DIM)
+        ("", state.status.clone(), COLOR_DIM)
     };
 
     let sep = " │ ";
-    let status_w = status_text.width();
+    let icon_w = status_icon.width();
+    let status_w = status_text.width() + icon_w;
     let sep_w = sep.width();
     let desc_budget = width.saturating_sub(sep_w + status_w);
 
@@ -2795,18 +2903,32 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
         }
         spans.push(Span::styled(
             sep.to_string(),
-            Style::default().fg(COLOR_DIM),
+            Style::default().fg(Color::DarkGray),
         ));
+        if !status_icon.is_empty() {
+            spans.push(Span::styled(
+                status_icon.to_string(),
+                Style::default().fg(status_color),
+            ));
+        }
         spans.push(Span::styled(
-            ellipsize_end(&status_text, width.saturating_sub(desc_budget + sep_w).max(1)),
+            ellipsize_end(&status_text, width.saturating_sub(desc_budget + sep_w + icon_w).max(1)),
             Style::default().fg(status_color),
         ));
         Line::from(spans)
     } else {
-        Line::from(Span::styled(
-            ellipsize_end(&status_text, width),
+        let mut spans = Vec::new();
+        if !status_icon.is_empty() {
+            spans.push(Span::styled(
+                status_icon.to_string(),
+                Style::default().fg(status_color),
+            ));
+        }
+        spans.push(Span::styled(
+            ellipsize_end(&status_text, width.saturating_sub(icon_w)),
             Style::default().fg(status_color),
-        ))
+        ));
+        Line::from(spans)
     }
 }
 
@@ -2895,10 +3017,11 @@ fn footer_bindings(state: &ConfigPanelState) -> (Vec<ConfigKey>, Vec<ConfigKey>)
 
 fn render_config_keymap(main: &[ConfigKey], system: &[ConfigKey], width: usize) -> Line<'static> {
     const KEY_NORMAL: Color = Color::White;
-    const KEY_PRIMARY: Color = Color::Blue;
+    const KEY_PRIMARY: Color = Color::Cyan;
+    const KEY_SYSTEM: Color = Color::Yellow;
     const LABEL: Color = Color::DarkGray;
     const SEP: &str = " · ";
-    const CAT_SEP: &str = "  ·  ";
+    const CAT_SEP: &str = "  │  ";
 
     let mut right: Vec<Span<'static>> = Vec::new();
     let mut right_w: usize = 0;
@@ -2907,10 +3030,11 @@ fn render_config_keymap(main: &[ConfigKey], system: &[ConfigKey], width: usize) 
             right.push(Span::styled(SEP.to_string(), Style::default().fg(LABEL)));
             right_w += SEP.width();
         }
-        let color = if k.primary { KEY_PRIMARY } else { KEY_NORMAL };
+        // System keys use yellow to stand out
+        let color = KEY_SYSTEM;
         right.push(Span::styled(
             k.glyph.to_string(),
-            Style::default().fg(color),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         ));
         right.push(Span::raw(" "));
         right.push(Span::styled(
@@ -2934,11 +3058,14 @@ fn render_config_keymap(main: &[ConfigKey], system: &[ConfigKey], width: usize) 
         if i > 0 {
             left.push(Span::styled(SEP.to_string(), Style::default().fg(LABEL)));
         }
+        // Primary keys use cyan (focus color), others use white
         let color = if k.primary { KEY_PRIMARY } else { KEY_NORMAL };
-        left.push(Span::styled(
-            k.glyph.to_string(),
-            Style::default().fg(color),
-        ));
+        let style = if k.primary {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        left.push(Span::styled(k.glyph.to_string(), style));
         left.push(Span::raw(" "));
         left.push(Span::styled(
             k.action.to_string(),
@@ -2952,12 +3079,12 @@ fn render_config_keymap(main: &[ConfigKey], system: &[ConfigKey], width: usize) 
     if fill > 0 {
         spans.push(Span::styled(
             format!("{}{}", CAT_SEP, " ".repeat(fill)),
-            Style::default().fg(LABEL),
+            Style::default().fg(Color::DarkGray),
         ));
     } else {
         spans.push(Span::styled(
             CAT_SEP.to_string(),
-            Style::default().fg(LABEL),
+            Style::default().fg(Color::DarkGray),
         ));
     }
     spans.extend(right);
@@ -2970,13 +3097,16 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
 }
 
 fn header_line(path: &Path, width: u16) -> Line<'static> {
-    let path = path.display().to_string();
-    let right_w = (width as usize).saturating_sub("Settings".width() + 4);
-    let right = middle_ellipsis(&path, right_w);
+    let path_str = path.display().to_string();
+    let title = "⚙ Settings";
+    let right_w = (width as usize).saturating_sub(title.width() + 4);
+    let right = middle_ellipsis(&path_str, right_w);
     top_rule_with_left_spans(
         vec![Span::styled(
-            "Settings".to_string(),
-            Style::default().fg(Color::DarkGray),
+            title.to_string(),
+            Style::default()
+                .fg(COLOR_FOCUS)
+                .add_modifier(Modifier::BOLD),
         )],
         Some(&right),
         width,
@@ -3621,8 +3751,9 @@ mod tests {
             text.contains("(overridden)"),
             "missing override chip on value: {text}"
         );
+        // Active tab shows brackets: [Notifications], inactive tabs show plain text
         assert!(
-            text.contains("Notifications ●"),
+            text.contains("[Notifications] ●") || text.contains("Notifications ●"),
             "missing override marker on notifications tab: {text}"
         );
         assert!(

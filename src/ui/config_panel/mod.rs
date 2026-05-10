@@ -7,7 +7,6 @@ use crate::data::{
     },
     notifications,
 };
-use crate::selection::CliKind;
 use crate::ui::chrome::{bottom_rule, top_rule_with_left_spans};
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -21,6 +20,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use std::{
+    cell::Cell,
     fs,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -563,6 +563,15 @@ pub(crate) struct ConfigPanelState {
     pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
     pub(crate) providers_cursor: usize,
+    /// Top-of-viewport scroll offset for the providers list, kept in a Cell
+    /// so the immutable render path can clamp it after seeing `body_h` —
+    /// the cursor stays in view even as the user pages through dozens of
+    /// rows. Reset to 0 on section switches and on cursor jumps.
+    pub(crate) providers_scroll: Cell<usize>,
+    /// Last observed body height for the providers section. Set by the
+    /// render path so half-page key shortcuts (Ctrl-D / Ctrl-U / PgDown /
+    /// PgUp) can move by a real viewport rather than guessing.
+    pub(crate) providers_body_h: Cell<usize>,
 }
 
 impl ConfigPanelState {
@@ -600,6 +609,8 @@ impl ConfigPanelState {
             read_only,
             searching: None,
             providers_cursor: 0,
+            providers_scroll: Cell::new(0),
+            providers_body_h: Cell::new(0),
         };
         state.select_first_field_in_current_section();
         state
@@ -714,6 +725,18 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if is_providers_section(self.current_section()) {
+                    self.move_providers_page(1);
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if is_providers_section(self.current_section()) {
+                    self.move_providers_page(-1);
+                }
+                PanelOutcome::KeepOpen
+            }
             KeyCode::Char('d') => {
                 if !self.read_only {
                     self.reset_field();
@@ -761,6 +784,10 @@ impl ConfigPanelState {
             KeyCode::Char('g') => {
                 if is_providers_section(self.current_section()) {
                     self.providers_cursor = 0;
+                    self.providers_scroll.set(0);
+                    // Skip the leading group header onto the first provider.
+                    self.move_field(1);
+                    self.move_field(-1);
                 } else {
                     self.select_first_field_in_current_section();
                 }
@@ -772,6 +799,18 @@ impl ConfigPanelState {
                     self.providers_cursor = len.saturating_sub(1);
                 } else if let Some(last) = field_indices_for(self.current_section()).last() {
                     self.selected_field = *last;
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::PageDown => {
+                if is_providers_section(self.current_section()) {
+                    self.move_providers_page(1);
+                }
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::PageUp => {
+                if is_providers_section(self.current_section()) {
+                    self.move_providers_page(-1);
                 }
                 PanelOutcome::KeepOpen
             }
@@ -999,40 +1038,27 @@ impl ConfigPanelState {
                     self.status = "invalid provider data (duplicate or empty fields)".to_string();
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') if !editor.available_models.is_empty() => {
-                // Cycle through models?
-                editor.selected_model_idx =
-                    wrap_index(editor.selected_model_idx, editor.available_models.len(), -1);
-                let (s, m) = editor.available_models[editor.selected_model_idx].clone();
-                editor.subscription = s;
-                editor.model = m;
+            KeyCode::Tab => {
+                editor.focus = editor.focus.next();
             }
-            KeyCode::Down | KeyCode::Char('j') if !editor.available_models.is_empty() => {
-                editor.selected_model_idx =
-                    wrap_index(editor.selected_model_idx, editor.available_models.len(), 1);
-                let (s, m) = editor.available_models[editor.selected_model_idx].clone();
-                editor.subscription = s;
-                editor.model = m;
+            KeyCode::BackTab => {
+                editor.focus = editor.focus.prev();
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // Cycle CLI
-                editor.cli = match editor.cli {
-                    CliKind::Claude => CliKind::Codex,
-                    CliKind::Codex => CliKind::Gemini,
-                    CliKind::Gemini => CliKind::Kimi,
-                    CliKind::Kimi => CliKind::Opencode,
-                    CliKind::Opencode => CliKind::Claude,
-                };
+            KeyCode::Up => editor.cycle_focused(-1),
+            KeyCode::Down => editor.cycle_focused(1),
+            KeyCode::Backspace => {
+                if matches!(editor.focus, providers::AddProviderField::LaunchName) {
+                    editor.launch_name.pop();
+                }
             }
             KeyCode::Char(c)
                 if !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                editor.launch_name.push(c);
-            }
-            KeyCode::Backspace => {
-                editor.launch_name.pop();
+                if matches!(editor.focus, providers::AddProviderField::LaunchName) {
+                    editor.launch_name.push(c);
+                }
             }
             _ => {}
         }
@@ -1405,6 +1431,7 @@ impl ConfigPanelState {
 
     fn move_section(&mut self, delta: isize) {
         self.selected_section = wrap_index(self.selected_section, SECTIONS.len(), delta);
+        self.providers_scroll.set(0);
         self.select_first_field_in_current_section();
     }
 
@@ -1413,7 +1440,17 @@ impl ConfigPanelState {
         if is_providers_section(section) {
             let lines = providers::get_lines(&self.config);
             if !lines.is_empty() {
-                self.providers_cursor = wrap_index(self.providers_cursor, lines.len(), delta);
+                // Skip group headers so j/k always lands on something the
+                // user can act on.
+                let mut next = wrap_index(self.providers_cursor, lines.len(), delta);
+                for _ in 0..lines.len() {
+                    if !matches!(lines.get(next), Some(providers::ProvidersLine::GroupHeader { .. }))
+                    {
+                        break;
+                    }
+                    next = wrap_index(next, lines.len(), delta);
+                }
+                self.providers_cursor = next;
             }
             return;
         }
@@ -1427,6 +1464,27 @@ impl ConfigPanelState {
             .unwrap_or(0);
         let next = wrap_index(pos, fields.len(), delta);
         self.selected_field = fields[next];
+    }
+
+    /// Move the providers cursor by roughly half a viewport, snapping past
+    /// any group headers so the cursor lands on actionable content. Used by
+    /// PgUp/PgDown and Ctrl-U/Ctrl-D.
+    fn move_providers_page(&mut self, delta: isize) {
+        let lines = providers::get_lines(&self.config);
+        if lines.is_empty() {
+            return;
+        }
+        let body_h = self.providers_body_h.get().max(1);
+        let step = ((body_h as isize) / 2).max(1) * delta.signum();
+        // Step in unit increments so the group-header skip from move_field
+        // stays applied. Falls through naturally when total < body.
+        for _ in 0..step.unsigned_abs() {
+            let before = self.providers_cursor;
+            self.move_field(delta.signum());
+            if self.providers_cursor == before {
+                break;
+            }
+        }
     }
 
     fn select_first_field_in_current_section(&mut self) {
@@ -1746,53 +1804,60 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         return;
     }
 
-    let overlay_w = area.width.saturating_sub(10).max(44).min(area.width);
-    let overlay_h = 10;
+    let overlay_w = area.width.saturating_sub(10).max(54).min(area.width);
+    let overlay_h: u16 = 12;
     let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
     let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
     let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
     Clear.render(rect, buf);
 
-    let inner_w = overlay_w.saturating_sub(2) as usize;
-    let label_w: usize = 6;
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(
-            pad_right("Model", label_w),
-            Style::default().fg(COLOR_DIM),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            format!("{} · {}", editor.subscription, editor.model),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(pad_right("CLI", label_w), Style::default().fg(COLOR_DIM)),
-        Span::raw(" "),
-        Span::styled(
-            editor.cli.as_str().to_string(),
-            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("  Ctrl-C cycles".to_string(), Style::default().fg(COLOR_DIM)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(pad_right("Name", label_w), Style::default().fg(COLOR_DIM)),
-        Span::raw(" "),
-        Span::raw(format!("{}_", editor.launch_name)),
-    ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(dim("  ↑↓ pick model · Enter confirm · Esc cancel")));
-    if lines.len() < (overlay_h as usize).saturating_sub(2) {
-        while lines.len() < (overlay_h as usize).saturating_sub(2) {
-            lines.push(Line::from(""));
+    let label_w: usize = 12;
+    let value_for = |field: providers::AddProviderField| -> String {
+        match field {
+            providers::AddProviderField::Model => editor.model.clone(),
+            providers::AddProviderField::Subscription => editor.subscription.clone(),
+            providers::AddProviderField::Cli => editor.cli.as_str().to_string(),
+            providers::AddProviderField::LaunchName => format!("{}_", editor.launch_name),
         }
-    }
-    let _ = inner_w;
+    };
+    let render_row = |field: providers::AddProviderField, label: &str| -> Line<'static> {
+        let focused = editor.focus == field;
+        let value_style = if focused {
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let mut spans: Vec<Span<'static>> = vec![
+            Span::raw(" "),
+            focus_span(focused),
+            Span::raw(" "),
+            Span::styled(pad_right(label, label_w), Style::default().fg(COLOR_DIM)),
+            Span::styled(value_for(field), value_style),
+        ];
+        if focused {
+            let hint = match field {
+                providers::AddProviderField::LaunchName => "  type · ↑↓ presets",
+                providers::AddProviderField::Model => "  ↑↓ cycles known models",
+                providers::AddProviderField::Subscription => "  ↑↓ cycles subscriptions",
+                providers::AddProviderField::Cli => "  ↑↓ cycles CLIs",
+            };
+            spans.push(Span::styled(
+                hint.to_string(),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+        Line::from(spans)
+    };
+
+    let lines: Vec<Line<'static>> = vec![
+        Line::from(""),
+        render_row(providers::AddProviderField::Model, "Model"),
+        render_row(providers::AddProviderField::Subscription, "Subscription"),
+        render_row(providers::AddProviderField::Cli, "CLI"),
+        render_row(providers::AddProviderField::LaunchName, "Launch name"),
+        Line::from(""),
+        Line::from(dim("  Tab cycles fields · Enter confirms · Esc cancels")),
+    ];
 
     Paragraph::new(lines)
         .block(
@@ -2139,7 +2204,7 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     // (sub-panels with longer section names hit this case at width 80).
     let body_h = height.saturating_sub(used as u16 + 3) as usize;
     if is_providers_section(state.current_section()) {
-        for body_line in providers_body_lines(state, w).into_iter().take(body_h) {
+        for body_line in providers_body_lines(state, w, body_h).into_iter().take(body_h) {
             lines.push(body_line);
         }
     } else {
@@ -2550,7 +2615,7 @@ fn format_map(map: &std::collections::BTreeMap<String, String>) -> String {
     )
 }
 
-fn wrap_index(current: usize, len: usize, delta: isize) -> usize {
+pub(super) fn wrap_index(current: usize, len: usize, delta: isize) -> usize {
     if len == 0 {
         return 0;
     }
@@ -2577,18 +2642,89 @@ fn source_override<T>(value: &Override<T>) -> &'static str {
 /// Body lines for the providers section. Provider rows render with a styled
 /// chip strip; the per-provider detail drawer is rendered separately as an
 /// overlay (see `render_provider_detail_overlay`).
-fn providers_body_lines(state: &ConfigPanelState, width: usize) -> Vec<Line<'static>> {
+///
+/// `body_h` is the number of rows the viewport can hold. The function clamps
+/// the persisted scroll offset so the focused row stays visible and emits
+/// scroll indicators (`↑ N more above` / `↓ N more below`) when content
+/// overflows the viewport.
+fn providers_body_lines(
+    state: &ConfigPanelState,
+    width: usize,
+    body_h: usize,
+) -> Vec<Line<'static>> {
     let lines = providers::get_lines(&state.config);
     if lines.is_empty() {
+        state.providers_scroll.set(0);
+        state.providers_body_h.set(body_h);
         return vec![Line::from(dim(
             "  no providers entries · operator-funded providers go here",
         ))];
     }
-    lines
-        .iter()
-        .enumerate()
-        .map(|(idx, line)| providers::format_line(line, idx == state.providers_cursor, width))
-        .collect()
+    state.providers_body_h.set(body_h);
+
+    let total = lines.len();
+    let cursor = state.providers_cursor.min(total.saturating_sub(1));
+    let mut scroll = state.providers_scroll.get().min(total.saturating_sub(1));
+
+    // Reserve one row for each scroll indicator we'll need to draw.
+    let inner_h = body_h.max(1);
+    let needs_top_indicator = |scroll: usize| scroll > 0;
+    let needs_bottom_indicator =
+        |scroll: usize, capacity: usize| scroll + capacity < total;
+
+    // Snap so cursor sits in the visible window. Account for the indicators
+    // that will render once we know the final scroll position.
+    if cursor < scroll {
+        scroll = cursor;
+    }
+    let mut content_h = inner_h;
+    loop {
+        let mut budget = content_h;
+        if needs_top_indicator(scroll) {
+            budget = budget.saturating_sub(1);
+        }
+        if needs_bottom_indicator(scroll, budget) {
+            budget = budget.saturating_sub(1);
+        }
+        let last_visible = scroll + budget;
+        if cursor >= last_visible {
+            scroll = (cursor + 1).saturating_sub(budget);
+        } else if scroll + budget > total && scroll > 0 {
+            scroll = total.saturating_sub(budget);
+        } else {
+            break;
+        }
+        if content_h == 0 {
+            break;
+        }
+        content_h = inner_h;
+    }
+    state.providers_scroll.set(scroll);
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut budget = inner_h;
+    if needs_top_indicator(scroll) {
+        out.push(Line::from(dim(format!(
+            "  ↑ {} more above",
+            scroll
+        ))));
+        budget = budget.saturating_sub(1);
+    }
+    let bottom_reserved = if scroll + budget < total { 1 } else { 0 };
+    let visible_count = budget.saturating_sub(bottom_reserved);
+    let end = (scroll + visible_count).min(total);
+    for (idx, line) in lines.iter().enumerate().take(end).skip(scroll) {
+        out.push(providers::format_line(
+            line,
+            idx == state.providers_cursor,
+            width,
+        ));
+    }
+    if bottom_reserved == 1 {
+        let remaining = total.saturating_sub(end);
+        out.push(Line::from(dim(format!("  ↓ {remaining} more below"))));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -3165,7 +3301,7 @@ mod tests {
             "missing group header: {text}"
         );
         assert!(
-            text.contains("✓ claude · claude-opus-4.7"),
+            text.contains("✓ claude/claude  claude-opus-4.7"),
             "missing enabled provider row: {text}"
         );
         assert!(
@@ -3209,7 +3345,9 @@ mod tests {
         );
 
         for width in MIN_WIDTH..=140 {
-            let result = std::panic::catch_unwind(|| render_to_text(&state, width, 24));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                render_to_text(&state, width, 24)
+            }));
             assert!(
                 result.is_ok(),
                 "models page render panicked at width {width}"
@@ -3253,6 +3391,168 @@ mod tests {
         );
         assert_eq!(editor.subscription, editor.available_models[0].0);
         assert_eq!(editor.model, editor.available_models[0].1);
+    }
+
+    #[test]
+    fn providers_group_by_model_vendor_not_subscription_label() {
+        // opencode-go is a subscription (it bills through the opencode pool),
+        // not a vendor — the actual model vendor is deepseek/minimax/etc.
+        // Group headers must read off the model's vendor so opencode-go
+        // entries get filed under their real vendor.
+        let config = Config::baked_defaults();
+        let lines = providers::get_lines(&config);
+        let mut seen_groups: Vec<(String, String)> = Vec::new();
+        for line in &lines {
+            if let providers::ProvidersLine::GroupHeader { vendor, model } = line {
+                seen_groups.push((vendor.clone(), model.clone()));
+            }
+        }
+        assert!(
+            seen_groups.iter().any(|(v, m)| v == "deepseek" && m == "deepseek-v4-flash"),
+            "expected deepseek-v4-flash filed under vendor 'deepseek', got: {seen_groups:?}"
+        );
+        assert!(
+            !seen_groups
+                .iter()
+                .any(|(v, _)| v == "opencode-go"),
+            "subscription label 'opencode-go' must not appear as a vendor: {seen_groups:?}"
+        );
+    }
+
+    #[test]
+    fn provider_row_renders_subscription_cli_and_launch_name_separately() {
+        // Each entry under a (vendor, model) group must display all three
+        // facets — subscription, CLI, launch_name — so the user can tell
+        // a kimi-via-Kimi pool entry apart from a (hypothetical)
+        // kimi-via-Opencode entry at a glance.
+        let mut config = Config::baked_defaults();
+        // Inject an opencode-routed kimi-k2.6 row alongside the baked
+        // kimi-via-Kimi row so the group has two distinct entries.
+        let mut overrides = config.providers.value().clone();
+        overrides.push(crate::data::config::schema::ProviderEntry {
+            cli: crate::selection::CliKind::Opencode,
+            launch_name: "opencode-go/kimi-k2.6".to_string(),
+            model: "kimi-k2.6".to_string(),
+            subscription: crate::selection::SubscriptionKind::OpencodeGo,
+            enabled: true,
+            free: false,
+            official: false,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_mapping: Default::default(),
+            quota_lookup_key: None,
+            display_order: 0,
+        });
+        config.providers = crate::data::config::schema::Override::explicit(overrides);
+
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+
+        let text = render_to_text(&state, 120, 80);
+        assert!(
+            text.contains("kimi · kimi-k2.6"),
+            "expected vendor-grouped header: {text}"
+        );
+        // Subscription label for SubscriptionKind::Kimi is "moonshotai".
+        assert!(
+            text.contains("moonshotai/kimi  kimi-latest"),
+            "expected built-in kimi entry to show subscription/cli + launch_name: {text}"
+        );
+        assert!(
+            text.contains("opencode-go/opencode  opencode-go/kimi-k2.6"),
+            "expected opencode-routed kimi entry under the same group: {text}"
+        );
+    }
+
+    #[test]
+    fn providers_pagination_keeps_focused_row_in_viewport() {
+        // 30+ baked rows + group headers can't fit a typical viewport. As
+        // the cursor moves down, the top of the window must follow so the
+        // focused row stays visible and the bottom indicator updates.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+
+        // Render once to seed body_h.
+        let _ = render_to_text(&state, 100, 18);
+        let body_h = state.providers_body_h.get();
+        assert!(body_h > 4, "viewport should hold a handful of rows");
+
+        // Push the cursor far past the visible window.
+        for _ in 0..(body_h * 3) {
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        let lines_total = providers::get_lines(&state.config).len();
+        let cursor = state.providers_cursor;
+        assert!(cursor < lines_total);
+
+        // Render again so providers_body_lines snaps the scroll offset.
+        let _ = render_to_text(&state, 100, 18);
+        let scroll = state.providers_scroll.get();
+        assert!(
+            cursor >= scroll && cursor < scroll + body_h,
+            "cursor {cursor} must be inside [{scroll}, {}]",
+            scroll + body_h
+        );
+    }
+
+    #[test]
+    fn providers_pagination_indicator_visible_when_overflowing() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        let text = render_to_text(&state, 100, 14);
+        assert!(
+            text.contains("more below"),
+            "expected bottom scroll indicator: {text}"
+        );
+    }
+
+    #[test]
+    fn providers_navigation_skips_group_headers() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        let lines = providers::get_lines(&state.config);
+        // Place the cursor at the second provider (skip the leading header).
+        state.providers_cursor = lines
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
+            .unwrap();
+        // Walking forward 10 steps must never land on a group header.
+        for _ in 0..10 {
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            assert!(
+                !matches!(
+                    lines.get(state.providers_cursor),
+                    Some(providers::ProvidersLine::GroupHeader { .. })
+                ),
+                "cursor {} landed on a header",
+                state.providers_cursor
+            );
+        }
     }
 
     #[test]
@@ -3329,6 +3629,96 @@ mod tests {
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         insta::assert_snapshot!(render_to_text(&state, 90, 22));
     }
+
+    #[test]
+    fn add_provider_modal_can_compose_opencode_for_kimi_via_independent_pickers() {
+        // The user complaint: kimi has no opencode entry. With the modal's
+        // form-style focus walk, the user can pick model=kimi-k2.6 from the
+        // baked universe, then Tab to subscription and cycle to OpencodeGo,
+        // then Tab to CLI and cycle to Opencode, then type the launch name.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        let lines = providers::get_lines(&state.config);
+        let add_idx = lines
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::AddAction))
+            .expect("add row");
+        state.providers_cursor = add_idx;
+        state.activate_provider_line();
+
+        // Cycle the model picker until kimi-k2.6 is selected.
+        for _ in 0..50 {
+            if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
+                && editor.model == "kimi-k2.6"
+            {
+                break;
+            }
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        assert!(
+            matches!(state.editing.as_ref(),
+                Some(Editing::AddProvider(e)) if e.model == "kimi-k2.6"),
+            "could not navigate the picker to kimi-k2.6"
+        );
+
+        // Tab to Subscription and walk to OpencodeGo.
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for _ in 0..SUBSCRIPTION_OPTIONS_COUNT {
+            if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
+                && editor.subscription == "opencode-go"
+            {
+                break;
+            }
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        assert!(
+            matches!(state.editing.as_ref(),
+                Some(Editing::AddProvider(e)) if e.subscription == "opencode-go"),
+            "subscription picker did not reach opencode-go"
+        );
+
+        // Tab to CLI and walk to Opencode.
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for _ in 0..CLI_OPTIONS_COUNT {
+            if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
+                && matches!(editor.cli, crate::selection::CliKind::Opencode)
+            {
+                break;
+            }
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+
+        // Tab to Launch name and type a value.
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        for c in "opencode-go/kimi-k2.6".chars() {
+            state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // Commit and confirm the provider lands under the kimi vendor group.
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.editing.is_none(), "modal should close after commit");
+
+        let added = state
+            .config
+            .providers
+            .value()
+            .iter()
+            .find(|e| {
+                e.model == "kimi-k2.6"
+                    && matches!(e.cli, crate::selection::CliKind::Opencode)
+                    && matches!(e.subscription, crate::selection::SubscriptionKind::OpencodeGo)
+            });
+        assert!(added.is_some(), "opencode-routed kimi entry should be persisted");
+    }
+
+    const SUBSCRIPTION_OPTIONS_COUNT: usize = 6; // SubscriptionKind variants
+    const CLI_OPTIONS_COUNT: usize = 5;
 
     #[test]
     fn save_detects_mtime_conflict_and_overwrite_writes_sparse_file() {

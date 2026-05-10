@@ -18,41 +18,148 @@ const COLOR_OVERRIDE: Color = Color::Yellow;
 const COLOR_DIM: Color = Color::DarkGray;
 const COLOR_OK: Color = Color::Green;
 
+/// Which field of the Add Provider modal currently has the focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AddProviderField {
+    Model,
+    Subscription,
+    Cli,
+    LaunchName,
+}
+
+impl AddProviderField {
+    pub(crate) fn next(self) -> Self {
+        match self {
+            AddProviderField::Model => AddProviderField::Subscription,
+            AddProviderField::Subscription => AddProviderField::Cli,
+            AddProviderField::Cli => AddProviderField::LaunchName,
+            AddProviderField::LaunchName => AddProviderField::Model,
+        }
+    }
+    pub(crate) fn prev(self) -> Self {
+        match self {
+            AddProviderField::Model => AddProviderField::LaunchName,
+            AddProviderField::Subscription => AddProviderField::Model,
+            AddProviderField::Cli => AddProviderField::Subscription,
+            AddProviderField::LaunchName => AddProviderField::Cli,
+        }
+    }
+}
+
+const SUBSCRIPTION_OPTIONS: &[SubscriptionKind] = &[
+    SubscriptionKind::Claude,
+    SubscriptionKind::Codex,
+    SubscriptionKind::Gemini,
+    SubscriptionKind::Kimi,
+    SubscriptionKind::OpencodeGo,
+    SubscriptionKind::Direct,
+];
+
+const CLI_OPTIONS: &[CliKind] = &[
+    CliKind::Claude,
+    CliKind::Codex,
+    CliKind::Gemini,
+    CliKind::Kimi,
+    CliKind::Opencode,
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvidersEditor {
     pub(crate) subscription: String,
     pub(crate) model: String,
     pub(crate) cli: CliKind,
     pub(crate) launch_name: String,
-    pub(crate) available_models: Vec<(String, String)>, // (subscription, model)
+    /// Unique (subscription, model) pairs derived from the baked + override
+    /// universe. Used as suggestions for the Model picker — the user can
+    /// also free-cycle subscription/cli to compose entries the universe
+    /// doesn't already advertise (e.g. opencode-go for kimi-k2.6).
+    pub(crate) available_models: Vec<(String, String)>,
     pub(crate) selected_model_idx: usize,
+    pub(crate) focus: AddProviderField,
+    /// Index into [`SUBSCRIPTION_OPTIONS`].
+    pub(crate) subscription_idx: usize,
+    /// Index into [`CLI_OPTIONS`].
+    pub(crate) cli_idx: usize,
 }
 
 impl ProvidersEditor {
     pub(crate) fn new(available_models: Vec<(String, String)>) -> Self {
         let (subscription, model) = available_models.first().cloned().unwrap_or_default();
+        let cli = CliKind::Opencode;
+        let cli_idx = CLI_OPTIONS.iter().position(|c| *c == cli).unwrap_or(0);
+        let subscription_idx = SUBSCRIPTION_OPTIONS
+            .iter()
+            .position(|s| {
+                crate::logic::selection::subscription::subscription_kind_to_str(*s)
+                    == subscription.as_str()
+            })
+            .unwrap_or(0);
         Self {
             subscription,
             model,
-            cli: CliKind::Opencode,
+            cli,
             launch_name: String::new(),
             available_models,
             selected_model_idx: 0,
+            focus: AddProviderField::Model,
+            subscription_idx,
+            cli_idx,
+        }
+    }
+
+    pub(crate) fn cycle_focused(&mut self, delta: isize) {
+        match self.focus {
+            AddProviderField::Model => {
+                if self.available_models.is_empty() {
+                    return;
+                }
+                self.selected_model_idx =
+                    super::wrap_index(self.selected_model_idx, self.available_models.len(), delta);
+                let (s, m) = self.available_models[self.selected_model_idx].clone();
+                self.subscription = s;
+                self.model = m;
+                self.subscription_idx = SUBSCRIPTION_OPTIONS
+                    .iter()
+                    .position(|sk| {
+                        crate::logic::selection::subscription::subscription_kind_to_str(*sk)
+                            == self.subscription.as_str()
+                    })
+                    .unwrap_or(self.subscription_idx);
+            }
+            AddProviderField::Subscription => {
+                self.subscription_idx =
+                    super::wrap_index(self.subscription_idx, SUBSCRIPTION_OPTIONS.len(), delta);
+                self.subscription = crate::logic::selection::subscription::subscription_kind_to_str(
+                    SUBSCRIPTION_OPTIONS[self.subscription_idx],
+                )
+                .to_string();
+            }
+            AddProviderField::Cli => {
+                self.cli_idx = super::wrap_index(self.cli_idx, CLI_OPTIONS.len(), delta);
+                self.cli = CLI_OPTIONS[self.cli_idx];
+            }
+            AddProviderField::LaunchName => {}
         }
     }
 
     pub(crate) fn commit(&self, config: &mut Config) -> bool {
         let trimmed_launch = self.launch_name.trim();
-        if trimmed_launch.is_empty() || self.subscription.is_empty() || self.model.is_empty() {
+        let trimmed_model = self.model.trim();
+        if trimmed_launch.is_empty() || self.subscription.is_empty() || trimmed_model.is_empty() {
             return false;
         }
-        let subscription =
-            parse_subscription_str(&self.subscription).unwrap_or(SubscriptionKind::Direct);
+        // Prefer the picker-tracked subscription (set by `cycle_focused`)
+        // and fall back to parsing the label so legacy data round-trips.
+        let subscription = SUBSCRIPTION_OPTIONS
+            .get(self.subscription_idx)
+            .copied()
+            .or_else(|| parse_subscription_str(&self.subscription))
+            .unwrap_or(SubscriptionKind::Direct);
 
         let new_entry = ProviderEntry {
             cli: self.cli,
             launch_name: trimmed_launch.to_string(),
-            model: self.model.clone(),
+            model: trimmed_model.to_string(),
             subscription,
             enabled: true,
             free: false,
@@ -81,7 +188,7 @@ impl ProvidersEditor {
 
 pub(crate) enum ProvidersLine {
     GroupHeader {
-        subscription: String,
+        vendor: String,
         model: String,
     },
     Provider {
@@ -93,31 +200,48 @@ pub(crate) enum ProvidersLine {
     AddAction,
 }
 
+/// Vendor key for a model. Curated models pull their vendor from the
+/// model_names table (e.g. `claude`, `gpt`, `kimi`, `deepseek`); anything
+/// else falls back to the subscription label so unknown additions still
+/// land somewhere consistent.
+pub(crate) fn vendor_for(model: &str, subscription: SubscriptionKind) -> String {
+    if let Some(v) = crate::model_names::display_vendor(model) {
+        return v.to_string();
+    }
+    crate::logic::selection::subscription::subscription_kind_to_str(subscription).to_string()
+}
+
 pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
+    // Group rows by (vendor, model) so a single model collects every way
+    // to launch it (one entry per subscription/CLI). The merge step yields
+    // entries in a stable display_order, which we then re-sort by group
+    // key while preserving relative order inside each group.
     let providers = baked::merge_with_overrides(config.providers.value());
-    let mut lines = Vec::new();
-    let mut current_group: Option<(String, String)> = None;
-
+    let mut buckets: Vec<((String, String), Vec<ProviderEntry>)> = Vec::new();
     for entry in providers {
-        let subscription_label =
-            crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription)
-                .to_string();
-        let group = (subscription_label, entry.model.clone());
-        if current_group.as_ref() != Some(&group) {
-            lines.push(ProvidersLine::GroupHeader {
-                subscription: group.0.clone(),
-                model: group.1.clone(),
-            });
-            current_group = Some(group.clone());
+        let key = (vendor_for(&entry.model, entry.subscription), entry.model.clone());
+        if let Some(bucket) = buckets.iter_mut().find(|(k, _)| *k == key) {
+            bucket.1.push(entry);
+        } else {
+            buckets.push((key, vec![entry]));
         }
+    }
 
-        let baked = baked::baked_for(&group.1, entry.cli, &entry.launch_name);
-        lines.push(ProvidersLine::Provider {
-            is_baked: baked.is_some(),
-            baked_free: baked.as_ref().is_some_and(|b| b.free),
-            baked_official: baked.as_ref().is_some_and(|b| b.official),
-            entry,
+    let mut lines = Vec::new();
+    for ((vendor, model), entries) in buckets {
+        lines.push(ProvidersLine::GroupHeader {
+            vendor: vendor.clone(),
+            model: model.clone(),
         });
+        for entry in entries {
+            let baked = baked::baked_for(&model, entry.cli, &entry.launch_name);
+            lines.push(ProvidersLine::Provider {
+                is_baked: baked.is_some(),
+                baked_free: baked.as_ref().is_some_and(|b| b.free),
+                baked_official: baked.as_ref().is_some_and(|b| b.official),
+                entry,
+            });
+        }
     }
 
     lines.push(ProvidersLine::AddAction);
@@ -129,9 +253,7 @@ pub(crate) fn get_lines(config: &Config) -> Vec<ProvidersLine> {
 /// flat row stream still scans as a hierarchy.
 pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) -> Line<'static> {
     match line {
-        ProvidersLine::GroupHeader { subscription, model } => {
-            // Indent + dim, like a tree-section heading. The chevron makes it
-            // visually distinct from provider rows.
+        ProvidersLine::GroupHeader { vendor, model } => {
             Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
@@ -139,7 +261,7 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                     Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{} · {}", subscription, model),
+                    format!("{} · {}", vendor, model),
                     Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
                 ),
             ])
@@ -159,14 +281,13 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 Span::raw(" ")
             };
 
-            // ✓/✗ enabled state: green check when on, dim cross when off.
             let enabled_glyph = if entry.enabled {
                 Span::styled("✓".to_string(), Style::default().fg(COLOR_OK))
             } else {
                 Span::styled("✗".to_string(), Style::default().fg(COLOR_DIM))
             };
 
-            let cli_style = if focused {
+            let primary_style = if focused {
                 Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -182,15 +303,31 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             let official = if *is_baked { *baked_official } else { entry.official };
             let free = if *is_baked { *baked_free } else { entry.free };
 
+            let subscription_label = crate::logic::selection::subscription::subscription_kind_to_str(
+                entry.subscription,
+            );
+
             let mut spans: Vec<Span<'static>> = Vec::new();
-            spans.push(Span::raw("  "));
+            // Indent extra so entries sit visually inside their group header.
+            spans.push(Span::raw("    "));
             spans.push(focus_glyph);
             spans.push(Span::raw(" "));
             spans.push(enabled_glyph);
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(entry.cli.as_str().to_string(), cli_style));
-            spans.push(Span::raw(" · "));
-            spans.push(Span::styled(entry.launch_name.clone(), cli_style));
+            // subscription · cli  launch_name — the user-facing way to think
+            // about an entry: which billing pool, which CLI binary, which
+            // model name passed at launch.
+            spans.push(Span::styled(
+                subscription_label.to_string(),
+                Style::default().fg(COLOR_DIM),
+            ));
+            spans.push(Span::styled(
+                "/".to_string(),
+                Style::default().fg(COLOR_DIM),
+            ));
+            spans.push(Span::styled(entry.cli.as_str().to_string(), primary_style));
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(entry.launch_name.clone(), primary_style));
             spans.push(Span::styled("  ".to_string(), Style::default()));
             spans.push(Span::styled(source_label.to_string(), source_style));
             spans.push(Span::styled(" · ".to_string(), Style::default().fg(COLOR_DIM)));
@@ -203,7 +340,6 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 if free { "free" } else { "paid" }.to_string(),
                 Style::default().fg(COLOR_DIM),
             ));
-            // Eligibility chips (compact, dim by default; brighter when on)
             for (label, on) in [
                 ("cheap", entry.cheap_eligible),
                 ("tough", entry.tough_eligible),

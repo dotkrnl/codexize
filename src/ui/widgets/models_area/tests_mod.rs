@@ -1151,18 +1151,53 @@ fn term_h_below_50_forces_compact_quota() {
     );
 }
 #[test]
-fn full_table_orders_by_build_score_descending() {
-    let m1 = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 0.5, 0);
-    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 0.75, 0);
-    let m3 = vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 1.0, 0);
-    let models = vec![m1, m2, m3];
+fn full_table_orders_by_build_possibility_descending() {
+    let high_score_low_quota = model_with_quota(
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 100.0, 0),
+        50,
+    );
+    let lower_score_full_quota = model_with_quota(
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 96.0, 0),
+        100,
+    );
+    let low_score_full_quota = model_with_quota(
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 80.0, 0),
+        100,
+    );
+    let models = vec![
+        high_score_low_quota,
+        lower_score_full_quota,
+        low_score_full_quota,
+    ];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
     let rows = render_model_text(&lines, 120);
 
-    assert!(rows[0].contains("[gemini]"), "row 0: {:?}", rows[0]);
-    assert!(rows[1].contains("[claude]"), "row 1: {:?}", rows[1]);
-    assert!(rows[2].contains("[gpt]"), "row 2: {:?}", rows[2]);
+    assert!(rows[0].contains("[claude]"), "row 0: {:?}", rows[0]);
+    assert!(rows[1].contains("[gpt]"), "row 1: {:?}", rows[1]);
+    assert!(rows[2].contains("[gemini]"), "row 2: {:?}", rows[2]);
+}
+
+#[test]
+fn full_table_places_quota_after_name_and_score_columns() {
+    let models = vec![vendor_model_with_axis_score(
+        SubscriptionKind::Codex,
+        "gpt-5.4",
+        100.0,
+        0,
+    )];
+
+    let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 120);
+
+    let name_col = row.find("5.4").expect("model name");
+    let build_col = row.find("Build").expect("build probability");
+    let quota_col = row.find("Quota").expect("quota");
+
+    assert!(
+        name_col < build_col && build_col < quota_col,
+        "quota should render at the end of the model row: {row:?}"
+    );
 }
 
 #[test]

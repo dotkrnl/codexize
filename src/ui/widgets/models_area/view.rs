@@ -24,6 +24,7 @@ use crate::selection::{
 use chrono::{DateTime, Utc};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::cmp::Ordering;
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 /// Lines reserved by surrounding chrome before the models area:
@@ -187,7 +188,14 @@ fn render_full_table(
         .iter()
         .filter(|m| visible_set.contains(&m.name))
         .collect();
-    visible_models_list.sort_by(|a, b| build_rank_order(a, b));
+    visible_models_list.sort_by(|a, b| {
+        let a_weight = weight_for(SelectionPhase::Build, a);
+        let b_weight = weight_for(SelectionPhase::Build, b);
+        b_weight
+            .partial_cmp(&a_weight)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| build_rank_order(a, b))
+    });
     let mut lines: Vec<Line<'static>> = quota_summary_line(models, quota_errors, width)
         .into_iter()
         .collect();
@@ -224,7 +232,7 @@ fn render_full_table(
         let dot_span = Span::styled(STATUS_DOT, Style::default().fg(dot_color));
         let (quota_text, quota_color) = if vendor_failed {
             match quota_col {
-                QuotaColumn::Expanded => ("Quota --% ".to_string(), Color::Red),
+                QuotaColumn::Expanded => ("Quota  --%".to_string(), Color::Red),
                 QuotaColumn::Narrow => (" --%".to_string(), Color::Red),
             }
         } else {
@@ -236,20 +244,14 @@ fn render_full_table(
                     QuotaColumn::Narrow => (format!("{:>3}%", v), probability_color(v, 100)),
                 },
                 None => match quota_col {
-                    QuotaColumn::Expanded => ("Quota --% ".to_string(), Color::DarkGray),
+                    QuotaColumn::Expanded => ("Quota  --%".to_string(), Color::DarkGray),
                     QuotaColumn::Narrow => (" --%".to_string(), Color::DarkGray),
                 },
             }
         };
         let quota_span = Span::styled(quota_text, Style::default().fg(quota_color));
-        let mut spans: Vec<Span<'static>> = vec![
-            vendor_span,
-            Span::raw(" "),
-            dot_span,
-            Span::raw(" "),
-            quota_span,
-            Span::raw(" "),
-        ];
+        let mut spans: Vec<Span<'static>> =
+            vec![vendor_span, Span::raw(" "), dot_span, Span::raw(" ")];
         spans.extend(format_name_with_freshness(short_name, name_width));
         let phase_data = [
             (
@@ -332,6 +334,8 @@ fn render_full_table(
                 spans.push(Span::raw(" ".repeat(RESET_TIME_MAX_WIDTH)));
             }
         }
+        spans.push(Span::raw(" "));
+        spans.push(quota_span);
         lines.push(Line::from(spans));
     }
     lines

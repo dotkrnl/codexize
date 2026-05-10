@@ -1,5 +1,9 @@
-use super::{LiveModel, build_http_client, fetch_json_response, home_dir, run_provider_warmup};
+use super::{
+    LiveModel, build_http_client, fetch_json_response, home_dir, reset_time_from_object,
+    run_provider_warmup,
+};
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, env, fs};
@@ -20,7 +24,7 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
         .get("buckets")
         .and_then(Value::as_array)
         .context("Gemini usage response did not include buckets")?;
-    let mut models = BTreeMap::<String, Option<u8>>::new();
+    let mut models = BTreeMap::<String, BucketQuota>::new();
     for bucket in buckets {
         let name = bucket
             .get("modelId")
@@ -33,9 +37,16 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
             .or_else(|| bucket.get("remaining_fraction"))
             .and_then(Value::as_f64)
             .map(|value| (value * 100.0).round().clamp(0.0, 100.0) as u8);
-        let entry = models.entry(name).or_insert(remaining);
-        if let (Some(a), Some(b)) = (*entry, remaining) {
-            *entry = Some(a.min(b));
+        let reset = bucket.as_object().and_then(reset_time_from_object);
+        let entry = models.entry(name).or_default();
+        if entry
+            .quota_percent
+            .is_none_or(|current| remaining.is_some_and(|candidate| candidate < current))
+        {
+            entry.quota_percent = remaining;
+            entry.quota_resets_at = reset;
+        } else if entry.quota_percent == remaining && entry.quota_resets_at.is_none() {
+            entry.quota_resets_at = reset;
         }
     }
     if models.is_empty() {
@@ -43,12 +54,17 @@ fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
     }
     Ok(models
         .into_iter()
-        .map(|(name, quota_percent)| LiveModel {
+        .map(|(name, quota)| LiveModel {
             name,
-            quota_percent,
-            quota_resets_at: None,
+            quota_percent: quota.quota_percent,
+            quota_resets_at: quota.quota_resets_at,
         })
         .collect())
+}
+#[derive(Debug, Default)]
+struct BucketQuota {
+    quota_percent: Option<u8>,
+    quota_resets_at: Option<DateTime<Utc>>,
 }
 fn dummy_invoke() -> Result<()> {
     run_provider_warmup("Gemini", "gemini", &["--yolo"], "/stats\n/exit\n", &[])

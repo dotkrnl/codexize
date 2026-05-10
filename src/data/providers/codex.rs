@@ -1,5 +1,6 @@
 use super::{
-    LiveModel, build_http_client, fetch_json_response, home_dir, percent_to_u8, run_provider_warmup,
+    LiveModel, build_http_client, fetch_json_response, home_dir, percent_to_u8,
+    reset_time_from_object, run_provider_warmup,
 };
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -29,6 +30,7 @@ struct UsageIdentity {
 #[derive(Debug, Default)]
 struct ModelQuota {
     remaining_min: Option<f64>,
+    resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     dummy_invoke()?;
@@ -67,18 +69,21 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
         models.push(LiveModel {
             name: default_model.clone(),
             quota_percent: quota.remaining_min.map(percent_to_u8),
-            quota_resets_at: None,
+            quota_resets_at: quota.resets_at,
         });
     }
     for (name, quota) in quotas {
         models.push(LiveModel {
             name,
             quota_percent: quota.remaining_min.map(percent_to_u8),
-            quota_resets_at: None,
+            quota_resets_at: quota.resets_at,
         });
     }
     Ok(models)
 }
+#[cfg(test)]
+#[path = "codex_tests.rs"]
+mod tests;
 fn dummy_invoke() -> Result<()> {
     run_provider_warmup("Codex", "codex", &[], "/status\n/exit\n", &[])
 }
@@ -154,6 +159,7 @@ async fn fetch_usage_payload(identity: &UsageIdentity) -> Result<Value> {
 fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate_limit: &Value) {
     let quota = quotas.entry(name.to_string()).or_default();
     for key in ["primary_window", "secondary_window"] {
+        let window = rate_limit.get(key);
         let used_percent = rate_limit
             .get(key)
             .and_then(|window| {
@@ -164,11 +170,18 @@ fn record_rate_limit(quotas: &mut BTreeMap<String, ModelQuota>, name: &str, rate
             .and_then(Value::as_f64);
         if let Some(used_percent) = used_percent {
             let remaining = (100.0 - used_percent).clamp(0.0, 100.0);
-            quota.remaining_min = Some(
-                quota
-                    .remaining_min
-                    .map_or(remaining, |current| current.min(remaining)),
-            );
+            let reset = window
+                .and_then(Value::as_object)
+                .and_then(reset_time_from_object);
+            if quota
+                .remaining_min
+                .is_none_or(|current| remaining < current)
+            {
+                quota.remaining_min = Some(remaining);
+                quota.resets_at = reset;
+            } else if quota.remaining_min == Some(remaining) && quota.resets_at.is_none() {
+                quota.resets_at = reset;
+            }
         }
     }
 }

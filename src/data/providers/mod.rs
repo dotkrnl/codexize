@@ -5,7 +5,7 @@ pub mod gemini;
 pub mod kimi;
 pub mod opencode;
 pub use common::{build_http_client, home_dir, parse_json_response, percent_to_u8, send_request};
-pub(crate) use common::{fetch_json_response, run_provider_warmup};
+pub(crate) use common::{fetch_json_response, reset_time_from_object, run_provider_warmup};
 /// A live model with its current quota status.
 #[derive(Debug, Clone)]
 pub struct LiveModel {

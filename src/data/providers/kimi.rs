@@ -1,6 +1,7 @@
-use super::{LiveModel, build_http_client, fetch_json_response, home_dir};
+use super::{LiveModel, build_http_client, fetch_json_response, home_dir, reset_time_from_object};
 use crate::runner::{ChildLaunch, run_child_with_timeout};
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -18,9 +19,18 @@ pub const SHARED_QUOTA_KEY: &str = "kimi-shared";
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let api_key = resolve_api_key()?;
     let payload = fetch_usage_payload(&api_key).await?;
-    let mut models = BTreeMap::<String, Option<u8>>::new();
+    live_models_from_payload(&payload)
+}
+fn live_models_from_payload(payload: &Value) -> Result<Vec<LiveModel>> {
+    let mut models = BTreeMap::<String, KimiQuota>::new();
     if let Some(usage) = payload.get("usage").and_then(Value::as_object) {
-        models.insert(SHARED_QUOTA_KEY.to_string(), usage_remaining_percent(usage));
+        models.insert(
+            SHARED_QUOTA_KEY.to_string(),
+            KimiQuota {
+                quota_percent: usage_remaining_percent(usage),
+                quota_resets_at: usage_reset_time(usage),
+            },
+        );
     }
     if let Some(limits) = payload.get("limits").and_then(Value::as_array) {
         for item in limits {
@@ -34,7 +44,13 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
                 .or_else(|| detail.get("title").and_then(Value::as_str))
                 .unwrap_or("kimi")
                 .to_ascii_lowercase();
-            models.insert(name, usage_remaining_percent(detail));
+            models.insert(
+                name,
+                KimiQuota {
+                    quota_percent: usage_remaining_percent(detail),
+                    quota_resets_at: usage_reset_time(detail),
+                },
+            );
         }
     }
     if models.is_empty() {
@@ -42,12 +58,17 @@ pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     }
     Ok(models
         .into_iter()
-        .map(|(name, quota_percent)| LiveModel {
+        .map(|(name, quota)| LiveModel {
             name,
-            quota_percent,
-            quota_resets_at: None,
+            quota_percent: quota.quota_percent,
+            quota_resets_at: quota.quota_resets_at,
         })
         .collect())
+}
+#[derive(Debug)]
+struct KimiQuota {
+    quota_percent: Option<u8>,
+    quota_resets_at: Option<DateTime<Utc>>,
 }
 fn resolve_api_key() -> Result<String> {
     if let Ok(value) = env::var("KIMI_API_KEY") {
@@ -135,6 +156,9 @@ fn usage_remaining_percent(data: &serde_json::Map<String, Value>) -> Option<u8> 
     };
     Some(remaining.round() as u8)
 }
+fn usage_reset_time(data: &serde_json::Map<String, Value>) -> Option<DateTime<Utc>> {
+    reset_time_from_object(data)
+}
 fn read_f64(value: Option<&Value>) -> Option<f64> {
     match value {
         Some(Value::Number(n)) => n.as_f64(),
@@ -142,3 +166,6 @@ fn read_f64(value: Option<&Value>) -> Option<f64> {
         _ => None,
     }
 }
+#[cfg(test)]
+#[path = "kimi_tests.rs"]
+mod tests;

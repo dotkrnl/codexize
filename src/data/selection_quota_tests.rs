@@ -117,87 +117,34 @@ fn fetch_set_for_returns_full_cli_set_when_provider_list_empty() {
 }
 
 #[test]
-fn kimi_quota_takes_min_across_windows() {
-    let mapped = live_map_kimi(vec![
-        LiveModel {
-            name: "kimi-k1.6".to_string(),
-            quota_percent: Some(80),
-            quota_resets_at: None,
-        },
-        LiveModel {
-            name: "kimi-k2".to_string(),
-            quota_percent: Some(20),
-            quota_resets_at: None,
-        },
-    ]);
-
-    let key = providers::kimi::SHARED_QUOTA_KEY;
-    assert_eq!(
-        mapped.0.get(key),
-        Some(&Some(20)),
-        "should use the minimum quota across all windows"
-    );
-    assert_eq!(mapped.1.get(key), Some(&None));
-}
-
-#[test]
-fn kimi_quota_returns_none_when_all_missing() {
-    let mapped = live_map_kimi(vec![LiveModel {
-        name: "kimi-k1.6".to_string(),
-        quota_percent: None,
-        quota_resets_at: None,
-    }]);
-
-    assert_eq!(
-        mapped.0.get(providers::kimi::SHARED_QUOTA_KEY),
-        Some(&None),
-        "should return None when no quotas are available"
-    );
-}
-
-#[test]
-fn live_map_normalizes_dotted_canonical_to_dashed_keys() {
-    // Live providers return dotted canonical names (e.g. claude-opus-4.7,
-    // gemini-2.5-pro) while baked launch_names are dashed
-    // (claude-opus-4-7, gemini-2-5-pro). The live-map builders must
-    // normalize keys via `normalize_ipbr_key` so the assemble-side lookup
-    // by launch_name finds the entry.
+fn live_map_passes_provider_keys_through_unchanged() {
+    // Per-CLI launch_names now match what each provider returns, so the
+    // single `live_map` mapper is a structural transform: it just
+    // unzips `Vec<LiveModel>` into the (quota-percent, reset-time) pair
+    // of maps without touching the names themselves. Mirrors the
+    // production cache shape: dotted per-model entries for codex/gemini
+    // and shared-pool sentinels for claude/kimi/opencode.
     let models = vec![
         LiveModel {
-            name: "claude-opus-4.7".to_string(),
+            name: "claude-shared".to_string(),
             quota_percent: Some(80),
-            quota_resets_at: None,
+            quota_resets_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-05-09T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
         },
         LiveModel {
-            name: "gemini-2.5-pro".to_string(),
+            name: "gpt-5.4".to_string(),
             quota_percent: Some(50),
             quota_resets_at: None,
         },
     ];
 
-    let (claude_map, _) = live_map_claude(models.clone());
-    assert_eq!(
-        claude_map.get("claude-opus-4-7"),
-        Some(&Some(80)),
-        "dotted canonical must normalize to dashed lookup key"
-    );
+    let (quotas, resets) = live_map(models);
 
-    let (gemini_map, _) = live_map_direct(models);
-    assert_eq!(gemini_map.get("gemini-2-5-pro"), Some(&Some(50)));
-}
-
-#[test]
-fn live_map_direct_passthrough_per_model() {
-    // After dropping the GEMINI_KNOWN_QUOTA_MODELS injection, the map only
-    // contains entries for the models the provider's live API actually
-    // returned — no synthetic backfill names.
-    let mapped = live_map_direct(vec![LiveModel {
-        name: "gemini-3-pro".to_string(),
-        quota_percent: Some(42),
-        quota_resets_at: None,
-    }]);
-
-    assert_eq!(mapped.0.len(), 1);
-    assert_eq!(mapped.0.get("gemini-3-pro"), Some(&Some(42)));
-    assert_eq!(mapped.1.get("gemini-3-pro"), Some(&None));
+    assert_eq!(quotas.get("claude-shared"), Some(&Some(80)));
+    assert_eq!(quotas.get("gpt-5.4"), Some(&Some(50)));
+    assert!(resets.get("claude-shared").unwrap().is_some());
+    assert!(resets.get("gpt-5.4").unwrap().is_none());
 }

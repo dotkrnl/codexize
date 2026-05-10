@@ -1,7 +1,6 @@
 //! Backend probes that resolve per-vendor quota and reset maps from the
 //! provider adapters.
 use crate::data::config::schema::ProviderEntry;
-use crate::data::dashboard_model::normalize_ipbr_key;
 use crate::data::providers::{self, LiveModel};
 use crate::logic::selection::types::{CliKind, QuotaError, SubscriptionKind};
 use chrono::{DateTime, Utc};
@@ -116,76 +115,45 @@ async fn load_quota_map_for_subscription(
     match subscription {
         SubscriptionKind::Codex => providers::codex::load_live_models_async()
             .await
-            .map(live_map_codex)
+            .map(live_map)
             .map_err(|e| e.to_string()),
         SubscriptionKind::Claude => providers::claude::load_live_models_async()
             .await
-            .map(live_map_claude)
+            .map(live_map)
             .map_err(|e| e.to_string()),
         SubscriptionKind::Gemini => providers::gemini::load_live_models_async()
             .await
-            .map(live_map_direct)
+            .map(live_map)
             .map_err(|e| e.to_string()),
         SubscriptionKind::Kimi => providers::kimi::load_live_models_async()
             .await
-            .map(live_map_kimi)
+            .map(live_map)
             .map_err(|e| e.to_string()),
         SubscriptionKind::OpencodeGo => providers::opencode::load_live_models_async()
             .await
-            .map(live_map_opencode)
+            .map(live_map)
             .map_err(|e| e.to_string()),
         SubscriptionKind::Direct => Ok((BTreeMap::new(), BTreeMap::new())),
     }
 }
-fn live_map_codex(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
-    let mapped: BTreeMap<String, Option<u8>> = models
-        .into_iter()
-        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
-        .collect();
-    let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
-    (mapped, resets)
-}
-fn live_map_claude(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
+/// Trivial mapper: every provider returns `LiveModel` entries already
+/// keyed by the same shape the baked `launch_name` (or
+/// `quota_lookup_key`) carries. Shared-pool subscriptions
+/// (claude/kimi/opencode) emit a single sentinel `LiveModel`
+/// (`claude-shared` / `kimi-shared` / `opencode-shared`); per-model
+/// subscriptions (codex/gemini) emit one entry per advertised model,
+/// already in the dotted shape the CLI accepts. No per-CLI key
+/// transformation is needed here.
+fn live_map(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
     let mapped: BTreeMap<String, Option<u8>> = models
         .iter()
-        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
+        .map(|m| (m.name.clone(), m.quota_percent))
         .collect();
     let resets: BTreeMap<String, Option<DateTime<Utc>>> = models
         .into_iter()
-        .map(|m| (normalize_ipbr_key(&m.name), m.quota_resets_at))
+        .map(|m| (m.name, m.quota_resets_at))
         .collect();
     (mapped, resets)
-}
-fn live_map_direct(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
-    let mapped: BTreeMap<String, Option<u8>> = models
-        .into_iter()
-        .map(|m| (normalize_ipbr_key(&m.name), m.quota_percent))
-        .collect();
-    let resets = mapped.keys().map(|name| (name.clone(), None)).collect();
-    (mapped, resets)
-}
-fn live_map_opencode(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
-    // Opencode runs on a single Go-tier dollar pool, so any non-None entry
-    // returned by the provider applies to every opencode-routed model name.
-    // Surface a single shared key — baked entries point their
-    // `quota_lookup_key` at it so per-row lookups resolve here.
-    let quota = models.into_iter().find_map(|m| m.quota_percent);
-    (
-        BTreeMap::from([(providers::opencode::SHARED_QUOTA_KEY.to_string(), quota)]),
-        BTreeMap::from([(providers::opencode::SHARED_QUOTA_KEY.to_string(), None)]),
-    )
-}
-fn live_map_kimi(models: Vec<LiveModel>) -> ModelQuotaAndResetMaps {
-    // Kimi runs every model off one shared usage pool, so we expose the
-    // quota under a single sentinel key. Baked Kimi entries set
-    // `quota_lookup_key = "kimi-shared"` so per-row lookups resolve here
-    // without aliasing a real ipbr model id (the way the former
-    // `kimi-latest` placeholder did).
-    let quota = models.into_iter().filter_map(|m| m.quota_percent).min();
-    (
-        BTreeMap::from([(providers::kimi::SHARED_QUOTA_KEY.to_string(), quota)]),
-        BTreeMap::from([(providers::kimi::SHARED_QUOTA_KEY.to_string(), None)]),
-    )
 }
 #[cfg(test)]
 #[path = "selection_quota_tests.rs"]

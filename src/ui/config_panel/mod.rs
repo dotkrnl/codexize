@@ -759,11 +759,18 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('g') => {
-                self.select_first_field_in_current_section();
+                if is_providers_section(self.current_section()) {
+                    self.providers_cursor = 0;
+                } else {
+                    self.select_first_field_in_current_section();
+                }
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('G') => {
-                if let Some(last) = field_indices_for(self.current_section()).last() {
+                if is_providers_section(self.current_section()) {
+                    let len = providers::get_lines(&self.config).len();
+                    self.providers_cursor = len.saturating_sub(1);
+                } else if let Some(last) = field_indices_for(self.current_section()).last() {
                     self.selected_field = *last;
                 }
                 PanelOutcome::KeepOpen
@@ -3246,6 +3253,64 @@ mod tests {
         );
         assert_eq!(editor.subscription, editor.available_models[0].0);
         assert_eq!(editor.model, editor.available_models[0].1);
+    }
+
+    #[test]
+    fn provider_detail_drawer_skips_baked_locked_rows_during_navigation() {
+        // Built-in providers expose `Official` / `Free` as derived flags
+        // rather than user-controllable toggles; the cursor must skip those
+        // rows so j/k always lands on something Space can flip.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { is_baked: true, .. }))
+            .expect("baked provider row");
+
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let initial_cursor = match state.editing {
+            Some(Editing::ProviderDetail { cursor }) => cursor,
+            _ => panic!("expected detail drawer"),
+        };
+        assert!(!PROVIDER_TOGGLES[initial_cursor].baked_locked);
+
+        // Walk one full circuit; every visited cursor must be unlocked.
+        for _ in 0..PROVIDER_TOGGLES.len() {
+            state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            let cursor = match state.editing {
+                Some(Editing::ProviderDetail { cursor }) => cursor,
+                _ => panic!("drawer should stay open"),
+            };
+            assert!(
+                !PROVIDER_TOGGLES[cursor].baked_locked,
+                "j on baked drawer landed on locked toggle {} (idx {cursor})",
+                PROVIDER_TOGGLES[cursor].label
+            );
+        }
+    }
+
+    #[test]
+    fn provider_detail_drawer_render_snapshot() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            false,
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.providers_cursor = providers::get_lines(&state.config)
+            .iter()
+            .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
+            .expect("provider row");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        insta::assert_snapshot!(render_to_text(&state, 90, 22));
     }
 
     #[test]

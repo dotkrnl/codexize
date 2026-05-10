@@ -131,7 +131,7 @@ impl App {
         );
         let run_id = self.state.next_agent_run_id();
         let run_key = Self::run_key_for("final-validation", None, round, attempt);
-        let artifacts_dir = artifacts.clone();
+        let artifacts_dir = artifacts;
         let launch_result = if let Some(result) =
             self.try_test_launch(Some(&verdict_path), &run_key, &artifacts_dir)
         {

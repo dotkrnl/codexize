@@ -171,7 +171,7 @@ impl SessionPicker {
                     "(no idea yet)".to_string()
                 } else {
                     let st = SessionState::load(&entry.session_id).ok();
-                    st.and_then(|s| s.idea_text.clone())
+                    st.and_then(|s| s.idea_text)
                         .unwrap_or_else(|| entry.idea_summary.clone())
                 };
                 let wrap_width = area.width.saturating_sub(14).max(1) as usize;

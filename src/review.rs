@@ -33,39 +33,24 @@ pub fn validate(path: &Path) -> Result<ReviewVerdict> {
     if parsed.summary.trim().is_empty() {
         bail!("summary is empty");
     }
-    if parsed.status == ReviewStatus::Approved && !parsed.new_tasks.is_empty() {
-        bail!("status=approved must not include new_tasks");
-    }
-    if parsed.status == ReviewStatus::Refine && !parsed.new_tasks.is_empty() {
-        bail!("status=refine must not include new_tasks");
-    }
-    if matches!(
-        parsed.status,
-        ReviewStatus::Refine
-            | ReviewStatus::Revise
-            | ReviewStatus::HumanBlocked
-            | ReviewStatus::AgentPivot
-    ) && parsed.feedback.is_empty()
+    let no_new_tasks_status = match parsed.status {
+        ReviewStatus::Approved => Some("approved"),
+        ReviewStatus::Refine => Some("refine"),
+        _ => None,
+    };
+    if let Some(status) = no_new_tasks_status
+        && !parsed.new_tasks.is_empty()
     {
+        bail!("status={status} must not include new_tasks");
+    }
+    if parsed.status != ReviewStatus::Approved && parsed.feedback.is_empty() {
         bail!(
             "status={:?} requires at least one feedback item",
             parsed.status
         );
     }
-    // Validate each new_task has the required fields (reuse tasks::validate-like check)
     for (i, t) in parsed.new_tasks.iter().enumerate() {
-        if t.title.trim().is_empty() {
-            bail!("new_tasks[{i}]: empty title");
-        }
-        if t.description.trim().is_empty() {
-            bail!("new_tasks[{i}]: empty description");
-        }
-        if t.test.trim().is_empty() {
-            bail!("new_tasks[{i}]: empty test");
-        }
-        if t.estimated_tokens == 0 {
-            bail!("new_tasks[{i}]: estimated_tokens must be > 0");
-        }
+        t.validate_fields(&format!("new_tasks[{i}]"))?;
     }
     Ok(parsed)
 }

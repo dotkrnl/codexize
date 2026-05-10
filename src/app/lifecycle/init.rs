@@ -48,15 +48,14 @@ impl App {
             // Same fallback as `App::session_dir`: only honor the
             // configured `sessions_root` when explicit, otherwise read
             // from the project-local `.codexize/sessions` the runner uses.
-            let resume_root = if config.paths.sessions_root.is_explicit() {
-                paths_view.sessions_root.clone()
+            let tasks_path = if config.paths.sessions_root.is_explicit() {
+                paths_view.sessions_root.join(&state.session_id)
             } else {
-                session_state::codexize_root().join("sessions")
+                session_state::codexize_root()
+                    .join("sessions")
+                    .join(&state.session_id)
             };
-            let tasks_path = resume_root
-                .join(&state.session_id)
-                .join("artifacts")
-                .join("tasks.toml");
+            let tasks_path = tasks_path.join("artifacts").join("tasks.toml");
             if let Ok(parsed) = tasks::validate(&tasks_path) {
                 session_state::load_task_titles_if_empty(
                     &mut state,

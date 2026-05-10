@@ -80,7 +80,7 @@ impl App {
                 run_id: run.id,
                 intent: TerminationIntent::StopOnly,
             },
-            run.window_name.clone(),
+            run.window_name,
         );
     }
     fn retry_running_agent(&mut self) {
@@ -109,7 +109,7 @@ impl App {
                 run_id: run.id,
                 intent: TerminationIntent::StopAndRetry(retry_launch),
             },
-            run.window_name.clone(),
+            run.window_name,
         );
     }
     fn open_quit_running_agent_modal(&mut self) {

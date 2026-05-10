@@ -25,6 +25,23 @@ pub struct Ref {
     pub path: String,
     pub lines: String,
 }
+impl Task {
+    pub(crate) fn validate_fields(&self, label: &str) -> Result<()> {
+        if self.title.trim().is_empty() {
+            bail!("{label}: empty title");
+        }
+        if self.description.trim().is_empty() {
+            bail!("{label}: empty description");
+        }
+        if self.test.trim().is_empty() {
+            bail!("{label}: empty test");
+        }
+        if self.estimated_tokens == 0 {
+            bail!("{label}: estimated_tokens must be > 0");
+        }
+        Ok(())
+    }
+}
 /// Validate a tasks TOML file. Returns parsed structure on success,
 /// descriptive error on any structural problem.
 pub fn validate(path: &Path) -> Result<TasksFile> {
@@ -41,18 +58,7 @@ pub fn validate(path: &Path) -> Result<TasksFile> {
         if !seen_ids.insert(t.id) {
             bail!("task #{pos}: duplicate id {}", t.id);
         }
-        if t.title.trim().is_empty() {
-            bail!("task #{pos} (id={}): empty title", t.id);
-        }
-        if t.description.trim().is_empty() {
-            bail!("task #{pos} (id={}): empty description", t.id);
-        }
-        if t.test.trim().is_empty() {
-            bail!("task #{pos} (id={}): empty test", t.id);
-        }
-        if t.estimated_tokens == 0 {
-            bail!("task #{pos} (id={}): estimated_tokens must be > 0", t.id);
-        }
+        t.validate_fields(&format!("task #{pos} (id={})", t.id))?;
         for (j, r) in t.spec_refs.iter().chain(t.plan_refs.iter()).enumerate() {
             if r.path.trim().is_empty() {
                 bail!("task #{pos} (id={}): ref[{j}] has empty path", t.id);

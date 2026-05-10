@@ -10,6 +10,7 @@ use crate::data::{
 use crate::selection::CliKind;
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use itertools::Itertools;
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -1250,46 +1251,54 @@ impl ConfigPanelState {
     fn source_for(&self, meta: &FieldMeta) -> &'static str {
         match meta.key {
             "meta.version" => "(def)",
-            "ntfy.enabled" => source_bool(&self.config.ntfy.enabled),
-            "ntfy.server" => source_string(&self.config.ntfy.server),
-            "ntfy.topic" => source_string(&self.config.ntfy.topic),
-            "ntfy.detail_mode" => source_copy(&self.config.ntfy.detail_mode),
-            "ntfy.retry_attempts" => source_copy(&self.config.ntfy.retry_attempts),
-            "ntfy.retry_delay_ms" => source_copy(&self.config.ntfy.retry_delay_ms),
-            "ntfy.http_timeout_secs" => source_copy(&self.config.ntfy.http_timeout_secs),
-            "ntfy.body_max_bytes" => source_copy(&self.config.ntfy.body_max_bytes),
-            "ntfy.excerpt_max_chars" => source_copy(&self.config.ntfy.excerpt_max_chars),
-            "ntfy.created_at" => source_copy(&self.config.ntfy.created_at),
-            "ntfy.updated_at" => source_copy(&self.config.ntfy.updated_at),
-            "ntfy.events.phase_wait" => source_bool(&self.config.ntfy.events.phase_wait),
+            "ntfy.enabled" => source_override(&self.config.ntfy.enabled),
+            "ntfy.server" => source_override(&self.config.ntfy.server),
+            "ntfy.topic" => source_override(&self.config.ntfy.topic),
+            "ntfy.detail_mode" => source_override(&self.config.ntfy.detail_mode),
+            "ntfy.retry_attempts" => source_override(&self.config.ntfy.retry_attempts),
+            "ntfy.retry_delay_ms" => source_override(&self.config.ntfy.retry_delay_ms),
+            "ntfy.http_timeout_secs" => source_override(&self.config.ntfy.http_timeout_secs),
+            "ntfy.body_max_bytes" => source_override(&self.config.ntfy.body_max_bytes),
+            "ntfy.excerpt_max_chars" => source_override(&self.config.ntfy.excerpt_max_chars),
+            "ntfy.created_at" => source_override(&self.config.ntfy.created_at),
+            "ntfy.updated_at" => source_override(&self.config.ntfy.updated_at),
+            "ntfy.events.phase_wait" => source_override(&self.config.ntfy.events.phase_wait),
             "ntfy.events.interactive_wait" => {
-                source_bool(&self.config.ntfy.events.interactive_wait)
+                source_override(&self.config.ntfy.events.interactive_wait)
             }
-            "ntfy.events.pipeline_done" => source_bool(&self.config.ntfy.events.pipeline_done),
-            "acp.policy.shell_policy" => source_copy(&self.config.acp.policy.shell_policy),
-            "acp.policy.shell_allowlist" => source_vec(&self.config.acp.policy.shell_allowlist),
+            "ntfy.events.pipeline_done" => source_override(&self.config.ntfy.events.pipeline_done),
+            "acp.policy.shell_policy" => source_override(&self.config.acp.policy.shell_policy),
+            "acp.policy.shell_allowlist" => {
+                source_override(&self.config.acp.policy.shell_allowlist)
+            }
             "acp.policy.allowed_write_paths" => {
-                source_vec(&self.config.acp.policy.allowed_write_paths)
+                source_override(&self.config.acp.policy.allowed_write_paths)
             }
             "acp.install.claude_acp_root" => {
-                source_string(&self.config.acp.install.claude_acp_root)
+                source_override(&self.config.acp.install.claude_acp_root)
             }
-            "runner.full_review_interval" => source_copy(&self.config.runner.full_review_interval),
-            "paths.cache_root" => source_string(&self.config.paths.cache_root),
-            "paths.sessions_root" => source_string(&self.config.paths.sessions_root),
-            "paths.runs_root" => source_string(&self.config.paths.runs_root),
-            "paths.memory_root" => source_string(&self.config.paths.memory_root),
-            "ui.prefer_split_on_open" => source_bool(&self.config.ui.prefer_split_on_open),
-            "ui.colon_palette.show_help" => source_bool(&self.config.ui.colon_palette.show_help),
-            "ui.footer.show_keys" => source_bool(&self.config.ui.footer.show_keys),
-            "diagnostics.log_level" => source_copy(&self.config.diagnostics.log_level),
-            "diagnostics.json_logs" => source_bool(&self.config.diagnostics.json_logs),
-            "memory.enabled" => source_bool(&self.config.memory.enabled),
-            "memory.max_topics_per_read" => source_copy(&self.config.memory.max_topics_per_read),
+            "runner.full_review_interval" => {
+                source_override(&self.config.runner.full_review_interval)
+            }
+            "paths.cache_root" => source_override(&self.config.paths.cache_root),
+            "paths.sessions_root" => source_override(&self.config.paths.sessions_root),
+            "paths.runs_root" => source_override(&self.config.paths.runs_root),
+            "paths.memory_root" => source_override(&self.config.paths.memory_root),
+            "ui.prefer_split_on_open" => source_override(&self.config.ui.prefer_split_on_open),
+            "ui.colon_palette.show_help" => {
+                source_override(&self.config.ui.colon_palette.show_help)
+            }
+            "ui.footer.show_keys" => source_override(&self.config.ui.footer.show_keys),
+            "diagnostics.log_level" => source_override(&self.config.diagnostics.log_level),
+            "diagnostics.json_logs" => source_override(&self.config.diagnostics.json_logs),
+            "memory.enabled" => source_override(&self.config.memory.enabled),
+            "memory.max_topics_per_read" => {
+                source_override(&self.config.memory.max_topics_per_read)
+            }
             "memory.journal_retention_months" => {
-                source_copy(&self.config.memory.journal_retention_months)
+                source_override(&self.config.memory.journal_retention_months)
             }
-            "acp.agents.claude.env" => source_copy(&self.config.acp.agents.claude.env),
+            "acp.agents.claude.env" => source_override(&self.config.acp.agents.claude.env),
             _ => "(def)",
         }
     }
@@ -1880,17 +1889,14 @@ fn middle_ellipsis(value: &str, width: usize) -> String {
 }
 
 fn format_list(values: &[String]) -> String {
-    let parts = values
-        .iter()
-        .map(|v| format!("\"{v}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{parts}]")
+    format!("[{}]", values.iter().map(|v| format!("\"{v}\"")).join(", "))
 }
 
 fn format_map(map: &std::collections::BTreeMap<String, String>) -> String {
-    let parts: Vec<String> = map.iter().map(|(k, v)| format!("{k} = \"{v}\"")).collect();
-    format!("{{ {} }}", parts.join(", "))
+    format!(
+        "{{ {} }}",
+        map.iter().map(|(k, v)| format!("{k} = \"{v}\"")).join(", ")
+    )
 }
 
 fn wrap_index(current: usize, len: usize, delta: isize) -> usize {
@@ -1909,31 +1915,7 @@ fn value_bool(value: &Override<bool>) -> String {
     value.value().to_string()
 }
 
-fn source_bool(value: &Override<bool>) -> &'static str {
-    if value.is_explicit() {
-        "override"
-    } else {
-        "(def)"
-    }
-}
-
-fn source_string(value: &Override<String>) -> &'static str {
-    if value.is_explicit() {
-        "override"
-    } else {
-        "(def)"
-    }
-}
-
-fn source_vec(value: &Override<Vec<String>>) -> &'static str {
-    if value.is_explicit() {
-        "override"
-    } else {
-        "(def)"
-    }
-}
-
-fn source_copy<T>(value: &Override<T>) -> &'static str {
+fn source_override<T>(value: &Override<T>) -> &'static str {
     if value.is_explicit() {
         "override"
     } else {

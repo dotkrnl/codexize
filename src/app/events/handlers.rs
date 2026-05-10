@@ -340,7 +340,7 @@ impl App {
                         run_id,
                         intent: TerminationIntent::StopAndQuit,
                     },
-                    run.window_name.clone(),
+                    run.window_name,
                 );
                 false
             }

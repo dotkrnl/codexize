@@ -1244,7 +1244,7 @@ fn test_task_node_tough_badge() {
     };
     state.agent_runs.push(normal_run.clone());
 
-    let mut tough_run = normal_run.clone();
+    let mut tough_run = normal_run;
     tough_run.id = 2;
     tough_run.task_id = Some(2);
     tough_run.effort = crate::adapters::EffortLevel::Tough;

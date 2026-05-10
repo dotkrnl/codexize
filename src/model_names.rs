@@ -38,21 +38,15 @@ const DISPLAY: &[(&str, &str, &str)] = &[
 ];
 
 pub fn display_vendor(canonical: &str) -> Option<&'static str> {
-    DISPLAY
-        .iter()
-        .find(|(c, _, _)| *c == canonical)
-        .map(|(_, v, _)| *v)
+    display_entry(canonical).map(|(_, v, _)| v)
 }
 
 pub fn display_short(canonical: &str) -> Option<&'static str> {
-    DISPLAY
-        .iter()
-        .find(|(c, _, _)| *c == canonical)
-        .map(|(_, _, s)| *s)
+    display_entry(canonical).map(|(_, _, s)| s)
 }
 
 pub fn is_curated(canonical: &str) -> bool {
-    DISPLAY.iter().any(|(c, _, _)| *c == canonical)
+    display_entry(canonical).is_some()
 }
 
 pub fn run_label_name(canonical: &str) -> String {
@@ -60,6 +54,13 @@ pub fn run_label_name(canonical: &str) -> String {
         .strip_prefix("claude-")
         .unwrap_or(canonical)
         .to_string()
+}
+
+fn display_entry(canonical: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    DISPLAY
+        .iter()
+        .copied()
+        .find(|(candidate, _, _)| *candidate == canonical)
 }
 
 #[cfg(test)]

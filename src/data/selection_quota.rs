@@ -72,12 +72,9 @@ pub async fn load_quota_maps_for_async(
     // probe target — `load_quota_map_for_subscription` would just return
     // empty maps for it. Drop it up front so callers cannot accidentally
     // fan out a no-op task into the worker pool.
-    let subscriptions = subscriptions
-        .into_iter()
-        .filter(|s| !matches!(s, SubscriptionKind::Direct))
-        .collect::<Vec<_>>();
     let tasks = subscriptions
         .into_iter()
+        .filter(|s| !matches!(s, SubscriptionKind::Direct))
         .map(|subscription| {
             (
                 subscription,

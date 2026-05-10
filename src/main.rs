@@ -263,8 +263,8 @@ async fn try_main_async(plan: LaunchPlan) -> Result<()> {
         LaunchPlan::Picker { create_modes } => {
             let mut picker = picker::SessionPicker::new_with_paths(
                 create_modes,
-                sessions_root.clone(),
-                memory_root_override.clone(),
+                sessions_root,
+                memory_root_override,
             )?;
             let selection = match picker.run(terminal_guard.terminal_mut())? {
                 Some(selection) => selection,

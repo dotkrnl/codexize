@@ -3,7 +3,7 @@
 //! The CLI's `set <dotted.key> <value>`, `get <dotted.key>`,
 //! `unset <dotted.key>`, and `reset <section>` commands all funnel
 //! through this module. Keeping the schema-walking logic in one place
-//! lets the loader, the CLI, and the upcoming TUI panel share a single
+//! lets the loader, the CLI, and the TUI config panel share a single
 //! source of truth for which keys exist and how their values parse.
 //!
 //! `MutationError` is the structured failure shape; the CLI renders it

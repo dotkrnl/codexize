@@ -172,6 +172,23 @@ fn term_h_below_floor_returns_empty_preserving_prev_mode() {
 }
 
 #[test]
+fn full_table_renders_uncurated_provider_model() {
+    let models = vec![vendor_model_with_axis_score(
+        SubscriptionKind::Kimi,
+        "kimi-cli-only",
+        1.0,
+        0,
+    )];
+
+    let (lines, mode) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
+
+    assert_eq!(mode, ModelsAreaMode::FullTable);
+    let rendered = render_model_text(&lines, 120).join("\n");
+    assert!(rendered.contains("[kimi]"), "{rendered}");
+    assert!(rendered.contains("kimi-cli-only"), "{rendered}");
+}
+
+#[test]
 fn full_to_compact_uses_strict_threshold() {
     let models = vec![
         model_with_axis_score("gpt-5.2", 1.0, 0),

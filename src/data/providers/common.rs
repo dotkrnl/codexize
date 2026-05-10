@@ -113,8 +113,12 @@ fn parse_epoch_timestamp(value: f64) -> Option<DateTime<Utc>> {
     } else {
         value
     };
-    let secs = seconds.trunc() as i64;
-    let nanos = ((seconds.fract()) * 1_000_000_000.0).round() as u32;
+    let mut secs = seconds.trunc() as i64;
+    let mut nanos = ((seconds.fract()) * 1_000_000_000.0).round() as u32;
+    if nanos >= 1_000_000_000 {
+        secs = secs.checked_add(1)?;
+        nanos -= 1_000_000_000;
+    }
     DateTime::from_timestamp(secs, nanos)
 }
 fn number_or_numeric_string(value: &Value) -> Option<f64> {

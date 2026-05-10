@@ -25,6 +25,17 @@ fn percent_to_u8_clamps_and_rounds() {
 }
 
 #[test]
+fn parse_reset_time_carries_fractional_nanosecond_rounding() {
+    let value = serde_json::json!(0.999_999_999_9_f64);
+    let parsed = parse_reset_time(Some(&value)).expect("timestamp should parse");
+
+    assert_eq!(
+        parsed,
+        DateTime::from_timestamp(1, 0).expect("valid timestamp")
+    );
+}
+
+#[test]
 fn home_dir_returns_path_from_env() {
     let _guard = crate::state::test_fs_lock()
         .lock()

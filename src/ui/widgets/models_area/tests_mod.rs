@@ -895,6 +895,34 @@ fn wide_layout_shows_relative_reset_time() {
 }
 
 #[test]
+fn quota_summary_compacts_reset_before_dropping_to_mid_form() {
+    let models = vec![model_with_reset(
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
+        Utc::now() + Duration::days(2),
+    )];
+
+    let line = quota_summary_line(&models, &[], 25).expect("compact quota line should fit");
+    let row: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+
+    assert!(
+        row.contains("Quota: claude 100% 2d"),
+        "compact reset should use the quota label before dropping reset: {row:?}"
+    );
+    assert!(
+        !row.contains("(2d)"),
+        "compact reset should omit parentheses: {row:?}"
+    );
+    assert!(
+        !row.contains("in "),
+        "compact reset should drop the relative prefix: {row:?}"
+    );
+}
+
+#[test]
 fn full_table_keeps_quota_and_phase_width_tiers_together() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Claude,

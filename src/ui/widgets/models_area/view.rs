@@ -354,6 +354,29 @@ fn format_reset_time(dt: DateTime<Utc>) -> String {
     }
     truncated
 }
+
+fn format_reset_time_compact(dt: DateTime<Utc>) -> String {
+    let dur = dt.signed_duration_since(Utc::now());
+    if dur.num_seconds() <= 0 {
+        return "expired".to_string();
+    }
+    let days = dur.num_days();
+    let hours = dur.num_hours() % 24;
+    let mins = dur.num_minutes() % 60;
+    if days > 0 {
+        let rounded_days = days + u8::from(hours >= 12) as i64;
+        format!("{rounded_days}d")
+    } else if hours > 0 {
+        let rounded_hours = hours + u8::from(mins >= 30) as i64;
+        if rounded_hours >= 24 {
+            "1d".to_string()
+        } else {
+            format!("{rounded_hours}h")
+        }
+    } else {
+        format!("{mins}m")
+    }
+}
 fn display_quota_percent(value: u8) -> u8 {
     value.min(99)
 }
@@ -423,6 +446,7 @@ struct QuotaSummaryEntry<'a> {
 #[derive(Clone, Copy)]
 enum QuotaSummaryForm {
     Long,
+    ResetCompact,
     Mid,
     Short,
     Extreme,
@@ -442,6 +466,7 @@ fn quota_summary_line(
     }
     for form in [
         QuotaSummaryForm::Long,
+        QuotaSummaryForm::ResetCompact,
         QuotaSummaryForm::Mid,
         QuotaSummaryForm::Short,
         QuotaSummaryForm::Extreme,
@@ -499,7 +524,7 @@ fn build_quota_summary_line(
                 Style::default().fg(Color::DarkGray),
             ));
         }
-        QuotaSummaryForm::Mid => {
+        QuotaSummaryForm::ResetCompact | QuotaSummaryForm::Mid => {
             spans.push(Span::styled(
                 "Quota: ",
                 Style::default().fg(Color::DarkGray),
@@ -510,15 +535,18 @@ fn build_quota_summary_line(
     for (index, entry) in entries.iter().enumerate() {
         if index > 0 {
             let sep = match form {
-                QuotaSummaryForm::Long | QuotaSummaryForm::Mid => ", ",
+                QuotaSummaryForm::Long | QuotaSummaryForm::ResetCompact | QuotaSummaryForm::Mid => {
+                    ", "
+                }
                 QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => " ",
             };
             spans.push(Span::styled(sep, Style::default().fg(Color::DarkGray)));
         }
         let label = match form {
-            QuotaSummaryForm::Long | QuotaSummaryForm::Mid | QuotaSummaryForm::Short => {
-                subscription_tag(entry.subscription).to_string()
-            }
+            QuotaSummaryForm::Long
+            | QuotaSummaryForm::ResetCompact
+            | QuotaSummaryForm::Mid
+            | QuotaSummaryForm::Short => subscription_tag(entry.subscription).to_string(),
             QuotaSummaryForm::Extreme => {
                 quota_summary_extreme_label(entry.subscription).to_string()
             }
@@ -528,20 +556,39 @@ fn build_quota_summary_line(
             Style::default().fg(subscription_color(entry.subscription)),
         ));
         let separator = match form {
-            QuotaSummaryForm::Long | QuotaSummaryForm::Mid | QuotaSummaryForm::Short => " ",
+            QuotaSummaryForm::Long
+            | QuotaSummaryForm::ResetCompact
+            | QuotaSummaryForm::Mid
+            | QuotaSummaryForm::Short => " ",
             QuotaSummaryForm::Extreme => "",
         };
         spans.push(Span::raw(separator));
         push_quota_value(&mut spans, *entry, form);
-        if matches!(form, QuotaSummaryForm::Long)
-            && let Some(quota_resets_at) = entry.model.quota_resets_at
+        if matches!(
+            form,
+            QuotaSummaryForm::Long | QuotaSummaryForm::ResetCompact
+        ) && let Some(quota_resets_at) = entry.model.quota_resets_at
         {
-            spans.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));
+            let (prefix, suffix) = match form {
+                QuotaSummaryForm::Long => (" (", ")"),
+                QuotaSummaryForm::ResetCompact => (" ", ""),
+                QuotaSummaryForm::Mid | QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => {
+                    ("", "")
+                }
+            };
+            spans.push(Span::styled(prefix, Style::default().fg(Color::DarkGray)));
+            let reset_text = match form {
+                QuotaSummaryForm::Long => format_reset_time(quota_resets_at),
+                QuotaSummaryForm::ResetCompact => format_reset_time_compact(quota_resets_at),
+                QuotaSummaryForm::Mid | QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => {
+                    String::new()
+                }
+            };
             spans.push(Span::styled(
-                format_reset_time(quota_resets_at),
+                reset_text,
                 Style::default().fg(Color::DarkGray),
             ));
-            spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(suffix, Style::default().fg(Color::DarkGray)));
         }
     }
     let used = spans.iter().map(|span| span.content.width()).sum::<usize>();
@@ -577,14 +624,16 @@ fn push_quota_value(
 
 fn quota_value_text(value: u8, form: QuotaSummaryForm) -> String {
     match form {
-        QuotaSummaryForm::Long | QuotaSummaryForm::Mid => format!("{value}%"),
+        QuotaSummaryForm::Long | QuotaSummaryForm::ResetCompact | QuotaSummaryForm::Mid => {
+            format!("{value}%")
+        }
         QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => value.to_string(),
     }
 }
 
 fn quota_unknown_text(form: QuotaSummaryForm) -> &'static str {
     match form {
-        QuotaSummaryForm::Long | QuotaSummaryForm::Mid => "--%",
+        QuotaSummaryForm::Long | QuotaSummaryForm::ResetCompact | QuotaSummaryForm::Mid => "--%",
         QuotaSummaryForm::Short | QuotaSummaryForm::Extreme => "--",
     }
 }

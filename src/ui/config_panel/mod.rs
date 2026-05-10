@@ -8,6 +8,7 @@ use crate::data::{
     notifications,
 };
 use crate::selection::CliKind;
+use crate::ui::chrome::{bottom_rule, top_rule_with_left_spans};
 use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use itertools::Itertools;
@@ -15,7 +16,8 @@ use ratatui::{
     Frame,
     buffer::Buffer,
     layout::Rect,
-    text::Line,
+    style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 use std::{
@@ -429,7 +431,6 @@ enum ConflictBanner {
     MtimeAdvanced,
     DiscardPrompt,
     RegenerateTopicPrompt,
-    ResetSectionPrompt { section: String, count: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -623,15 +624,6 @@ impl ConfigPanelState {
                 }
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Char('D') => {
-                if !self.read_only {
-                    let section = self.current_section().to_string();
-                    let count = self.section_override_count(&section);
-                    self.conflict = Some(ConflictBanner::ResetSectionPrompt { section, count });
-                    self.status = format!("reset section? {count} overrides");
-                }
-                PanelOutcome::KeepOpen
-            }
             KeyCode::Char('r') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
                 self.reveal_topic = !self.reveal_topic;
                 self.status = if self.reveal_topic {
@@ -649,6 +641,10 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Tab => {
+                self.move_section(1);
+                PanelOutcome::KeepOpen
+            }
+            KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.move_section(1);
                 PanelOutcome::KeepOpen
             }
@@ -810,26 +806,6 @@ impl ConfigPanelState {
                         .and_then(|topic| self.set_value("ntfy.topic", &topic))
                     {
                         Ok(()) => self.status = "regenerated ntfy.topic".to_string(),
-                        Err(err) => self.status = err.to_string(),
-                    }
-                    self.conflict = None;
-                    Some(PanelOutcome::KeepOpen)
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    self.conflict = None;
-                    self.status = "unchanged".to_string();
-                    Some(PanelOutcome::KeepOpen)
-                }
-                _ => Some(PanelOutcome::KeepOpen),
-            },
-            ConflictBanner::ResetSectionPrompt { section, count } => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                    match self.reset_visible_section(&section) {
-                        Ok(()) => {
-                            self.dirty = count > 0 || self.dirty;
-                            self.status = format!("reset {} to defaults", section_title(&section));
-                            self.select_first_field_in_current_section();
-                        }
                         Err(err) => self.status = err.to_string(),
                     }
                     self.conflict = None;
@@ -1308,30 +1284,6 @@ impl ConfigPanelState {
         }
     }
 
-    fn reset_visible_section(&mut self, section: &str) -> Result<()> {
-        let mut first_error: Option<anyhow::Error> = None;
-        for meta in FIELDS
-            .iter()
-            .filter(|meta| meta.section == section && !matches!(meta.kind, FieldKind::ReadOnly))
-        {
-            if self.source_for(meta) == "override"
-                && let Err(err) =
-                    mutate::unset_value(&mut self.config, meta.key).map_err(|err| anyhow!(err))
-            {
-                first_error = Some(err);
-                break;
-            }
-        }
-        if section == "models" && self.config.providers.is_explicit() {
-            self.config.providers = Override::baked(Vec::new());
-        }
-        if let Some(err) = first_error {
-            Err(err)
-        } else {
-            Ok(())
-        }
-    }
-
     fn value_for(&self, meta: &FieldMeta) -> String {
         match meta.key {
             "meta.version" => self.config.meta.version.to_string(),
@@ -1779,12 +1731,12 @@ fn render_dropdown(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
 fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line<'static>> {
     let w = width as usize;
     let mut lines = Vec::new();
-    lines.push(Line::from(header_text(&state.path, w)));
+    lines.push(header_line(&state.path, width));
     let tab_lines = tab_bar_lines(state, w);
     for line in tab_lines {
         lines.push(Line::from(line));
     }
-    lines.push(Line::from("─".repeat(w)));
+    lines.push(bottom_rule(width, None));
     let used = lines.len();
     // Reserve 3 lines for the trailing separator + help + footer so the
     // footer is never sacrificed when the tab bar wraps onto a third line
@@ -1806,7 +1758,7 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
             lines.push(Line::from(row));
         }
     }
-    lines.push(Line::from("─".repeat(w)));
+    lines.push(bottom_rule(width, None));
     lines.push(Line::from(help_text(state, w)));
     lines.push(Line::from(footer_line(state, w)));
     lines
@@ -1907,9 +1859,6 @@ fn help_text(state: &ConfigPanelState, width: usize) -> String {
         Some(ConflictBanner::RegenerateTopicPrompt) => {
             Some("regenerate ntfy.topic? y accept · n keep")
         }
-        Some(ConflictBanner::ResetSectionPrompt { .. }) => {
-            Some("reset section overrides? y accept · n keep")
-        }
         None => None,
     };
     if let Some(text) = banner {
@@ -1955,7 +1904,6 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
                 "Esc close",
                 "d default",
                 "/ search",
-                "D reset page",
             ],
         }
     };
@@ -1984,13 +1932,18 @@ fn footer_line(state: &ConfigPanelState, width: usize) -> String {
     fit_cell(&format!("{first}  |  {second}"), width)
 }
 
-fn header_text(path: &Path, width: usize) -> String {
-    let title = "codexize · settings";
+fn header_line(path: &Path, width: u16) -> Line<'static> {
     let path = path.display().to_string();
-    let reserve = title.width() + 3;
-    let path_w = width.saturating_sub(reserve);
-    let shown = middle_ellipsis(&path, path_w);
-    fit_cell(&format!("{title} · {shown}"), width)
+    let right_w = (width as usize).saturating_sub("settings".width() + 4);
+    let right = middle_ellipsis(&path, right_w);
+    top_rule_with_left_spans(
+        vec![Span::styled(
+            "settings".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )],
+        Some(&right),
+        width,
+    )
 }
 
 fn visible_fields(state: &ConfigPanelState) -> Vec<usize> {
@@ -2323,6 +2276,18 @@ mod tests {
         assert!(text.contains("▸ Common"));
         assert!(text.contains("▾ System"));
         insta::assert_snapshot!(text);
+    }
+
+    #[test]
+    fn ctrl_i_and_tab_both_switch_pages() {
+        let mut state = state_with_overrides();
+        assert_eq!(state.current_section(), "general");
+
+        state.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        assert_eq!(state.current_section(), "models");
+
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(state.current_section(), "notifications");
     }
 
     #[test]

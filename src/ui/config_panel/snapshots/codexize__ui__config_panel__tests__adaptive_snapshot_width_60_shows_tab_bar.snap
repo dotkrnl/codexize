@@ -1,9 +1,9 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 2271
+assertion_line: 2278
 expression: text
 ---
-"codexize · settings · /tmp/example/config.toml              "
+"settings────────────────────────────/tmp/example/config.toml"
 "▸ Common  ▸ Models  ▸ Notifications*  ▸ Agents  ▾ System*   "
 "────────────────────────────────────────────────────────────"
 "> Config version               │ 1                     (def)"

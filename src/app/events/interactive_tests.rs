@@ -155,6 +155,19 @@ fn palette_config_registered_and_opens_panel() {
 }
 
 #[test]
+fn palette_does_not_advertise_config_reset_command() {
+    let state = SessionState::new("config-reset-palette-test".to_string());
+    let app = mk_app(state);
+
+    assert!(
+        app.palette_commands()
+            .iter()
+            .all(|command| command.name != "config-reset-section"),
+        "config reset should not be a palette command"
+    );
+}
+
+#[test]
 #[serial_test::serial]
 fn ctrl_s_in_panel_clears_dirty_and_reloads_arc_config() {
     // Bake a config file that pins paths.sessions_root, swing

@@ -54,12 +54,6 @@ impl App {
                 help: "Edit unified config",
                 key_hint: None,
             },
-            PaletteCommand {
-                name: "config-reset-section",
-                aliases: &[],
-                help: "Reset focused config section",
-                key_hint: None,
-            },
         ];
         if self.can_go_back() || self.confirm_back {
             commands.push(PaletteCommand {
@@ -261,10 +255,6 @@ impl App {
             }
             "config" => {
                 self.open_config_panel_with_arg(args);
-                false
-            }
-            "config-reset-section" => {
-                self.config_panel_reset_focused_section();
                 false
             }
             "interrupt" => {

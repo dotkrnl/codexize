@@ -303,17 +303,6 @@ impl App {
             &config, path, false, initial,
         ));
     }
-    pub(crate) fn config_panel_reset_focused_section(&mut self) {
-        let Some(panel) = self.config_panel.as_mut() else {
-            self.push_status(
-                "config: no focused section".to_string(),
-                Severity::Warn,
-                Duration::from_secs(3),
-            );
-            return;
-        };
-        let _ = panel.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
-    }
     fn handle_config_panel_key(&mut self, key: KeyEvent) -> bool {
         let Some(panel) = self.config_panel.as_mut() else {
             return false;

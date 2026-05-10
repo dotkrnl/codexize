@@ -439,7 +439,7 @@ fn full_table_shows_full_name_on_wide_width() {
 fn full_table_uses_gemini_preview_display_label() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Gemini,
-        "gemini-3-1-pro-preview",
+        "gemini-3.1-pro-preview",
         1.0,
         0,
     )];
@@ -452,7 +452,7 @@ fn full_table_uses_gemini_preview_display_label() {
         "curated short display label should appear: {row:?}"
     );
     assert!(
-        !row.contains("gemini-3-1-pro-preview"),
+        !row.contains("gemini-3.1-pro-preview"),
         "raw canonical should not appear in display label: {row:?}"
     );
 }
@@ -505,10 +505,10 @@ fn compact_quota_renders_per_vendor_entries() {
     // keyed by canonical model name — pick baked names so the curated
     // brand-tags appear (e.g. `[kimi]`, `[claude]`, `[gpt]`, `[gemini]`).
     let models = vec![
-        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2-6", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-4", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2-5-pro", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 50.0, 0),
     ];
 
     let (lines, mode) = responsive_models_area(
@@ -533,8 +533,8 @@ fn compact_quota_renders_per_vendor_entries() {
 #[test]
 fn compact_quota_keeps_full_vendor_names_below_60() {
     let models = vec![
-        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2-6", 50.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 50.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 50.0, 0),
     ];
 
     let (lines, _) = responsive_models_area(
@@ -572,7 +572,7 @@ fn compact_quota_omits_below_40() {
 fn compact_quota_failed_fetch_renders_red_dashes() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Kimi,
-        "kimi-k2-6",
+        "kimi-k2.6",
         50.0,
         0,
     )];
@@ -608,7 +608,7 @@ fn compact_quota_failed_fetch_renders_red_dashes() {
 fn full_table_failed_vendor_renders_red_dashes_for_quota_and_probs() {
     let models = vec![vendor_model_with_axis_score(
         SubscriptionKind::Kimi,
-        "kimi-k2-6",
+        "kimi-k2.6",
         50.0,
         0,
     )];
@@ -653,10 +653,10 @@ fn full_table_dot_color_tracks_quota_not_score() {
     // both rows even though gpt-5-4 has zero quota (which collapses its
     // pool weight to 0 under the >10% visibility rule).
     let mut high_score_no_quota =
-        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-4", 1.0, 0);
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 1.0, 0);
     high_score_no_quota.quota_percent = Some(0);
     let mut low_score_full_quota =
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 1.0, 1);
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 1.0, 1);
     low_score_full_quota.quota_percent = Some(100);
     let models = vec![high_score_no_quota, low_score_full_quota];
 
@@ -698,10 +698,10 @@ fn snapshot_models() -> Vec<CachedModel> {
     // so phase ranks are deterministic. Use baked canonical names so the
     // curated brand-tags appear in rendered output.
     vec![
-        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2-6", 80.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Kimi, "kimi-k2.6", 80.0, 0),
         vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-5", 90.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-3-codex", 70.0, 0),
-        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2-5-pro", 60.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.3-codex", 70.0, 0),
+        vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 60.0, 0),
     ]
 }
 
@@ -1007,9 +1007,9 @@ fn term_h_below_50_forces_compact_quota() {
 }
 #[test]
 fn full_table_orders_by_build_score_descending() {
-    let m1 = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-4", 0.5, 0);
-    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 0.75, 0);
-    let m3 = vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2-5-pro", 1.0, 0);
+    let m1 = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 0.5, 0);
+    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 0.75, 0);
+    let m3 = vendor_model_with_axis_score(SubscriptionKind::Gemini, "gemini-2.5-pro", 1.0, 0);
     let models = vec![m1, m2, m3];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
@@ -1027,10 +1027,10 @@ fn full_table_renders_bracketed_curated_brand_tag_per_baked_model() {
     // exercises the curated brand mapping (e.g. opencode-go routes a
     // deepseek model, so the tag reads `[deepseek]`).
     let cases = [
-        (SubscriptionKind::Claude, "claude-opus-4-7", "[claude]"),
-        (SubscriptionKind::Codex, "gpt-5-4", "[gpt]"),
-        (SubscriptionKind::Gemini, "gemini-2-5-pro", "[gemini]"),
-        (SubscriptionKind::Kimi, "kimi-k2-6", "[kimi]"),
+        (SubscriptionKind::Claude, "claude-opus-4.7", "[claude]"),
+        (SubscriptionKind::Codex, "gpt-5.4", "[gpt]"),
+        (SubscriptionKind::Gemini, "gemini-2.5-pro", "[gemini]"),
+        (SubscriptionKind::Kimi, "kimi-k2.6", "[kimi]"),
         (
             SubscriptionKind::OpencodeGo,
             "deepseek-v4-flash",
@@ -1070,8 +1070,8 @@ fn full_table_renders_vendor_label_on_every_row() {
     // weight visibility threshold. The intent is to assert the vendor
     // label is rendered on consecutive same-vendor rows, not to drive any
     // particular ranking outcome.
-    let m1 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 100.0, 0);
-    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-sonnet-4-6", 100.0, 0);
+    let m1 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 100.0, 0);
+    let m2 = vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-sonnet-4.6", 100.0, 0);
     let models = vec![m1, m2];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
@@ -1222,7 +1222,7 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
     // Spec: known zero quota = exhausted (red dot) AND must not be
     // auto-selected. The pool scorer drops zero-quota candidates, so the
     // sampling cell should render at 0%.
-    let mut zero_quota = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5-4", 90.0, 0);
+    let mut zero_quota = vendor_model_with_axis_score(SubscriptionKind::Codex, "gpt-5.4", 90.0, 0);
     zero_quota.quota_percent = Some(0);
     // Mirror the row's exhausted state on the per-tuple Candidate —
     // the sampler reads the row's max effective quota across enabled
@@ -1230,7 +1230,7 @@ fn full_table_known_zero_quota_renders_exhausted_with_zero_sampling() {
     // disagree with the row-level `Some(0)` and re-enable the row.
     zero_quota.candidates[0].quota_percent = Some(0);
     let healthy =
-        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4-7", 90.0, 0);
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 90.0, 0);
     let models = vec![zero_quota, healthy];
 
     let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);

@@ -189,22 +189,22 @@ fn arbitration_uses_display_order_then_launch_name_tiebreakers() {
 #[test]
 fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
-    let mut direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
+    let mut direct = make_ipbr_entry("claude-opus-4.7", "claude", "claude-opus-4.7");
     direct.display_order = 0;
-    let mut routed = make_ipbr_entry("claude-opus-4-7", "opencode", "claude-opus-4-7");
+    let mut routed = make_ipbr_entry("claude-opus-4.7", "opencode", "claude-opus-4.7");
     routed.display_order = 1;
     let dashboard = vec![direct, routed];
     let quotas = make_quota_payload(&[
-        ("claude", "claude-opus-4-7", Some(70)),
-        ("opencode-go", "claude-opus-4-7", Some(95)),
+        ("claude", "claude-shared", Some(70)),
+        ("opencode-go", "claude-opus-4.7", Some(95)),
     ]);
     // The baked table only carries the Claude provider for
     // claude-opus-4-7; the operator's `[[providers]]` list adds the
     // opencode-routed alternative so both candidates land on the row.
     let providers = vec![ProviderEntry {
         cli: CliKind::Opencode,
-        launch_name: "claude-opus-4-7".to_string(),
-        model: "claude-opus-4-7".to_string(),
+        launch_name: "claude-opus-4.7".to_string(),
+        model: "claude-opus-4.7".to_string(),
         subscription: SubscriptionKind::OpencodeGo,
         enabled: true,
         free: false,
@@ -224,7 +224,7 @@ fn assemble_universe_builds_one_row_per_ipbr_name_with_all_candidates() {
 
     assert_eq!(models.len(), 1);
     let row = &models[0];
-    assert_eq!(row.name, "claude-opus-4-7");
+    assert_eq!(row.name, "claude-opus-4.7");
     assert_eq!(row.candidates.len(), 2);
     assert!(
         row.candidates
@@ -383,11 +383,11 @@ fn assemble_from_cache_with_available(
 
 #[test]
 fn assemble_merges_dashboard_and_quotas() {
-    let claude_entry = make_entry("claude-sonnet-4-6", "claude");
-    let dashboard = vec![claude_entry, make_entry("gpt-5-5", "openai")];
+    let claude_entry = make_entry("claude-sonnet-4.6", "claude");
+    let dashboard = vec![claude_entry, make_entry("gpt-5.5", "openai")];
     let quotas = make_quota_payload(&[
-        ("claude", "claude-sonnet-4-6", Some(80)),
-        ("openai", "gpt-5-5", Some(70)),
+        ("claude", "claude-shared", Some(80)),
+        ("openai", "gpt-5.5", Some(70)),
     ]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
@@ -395,21 +395,20 @@ fn assemble_merges_dashboard_and_quotas() {
     assert_eq!(models.len(), 2);
     let claude = models
         .iter()
-        .find(|m| m.name == "claude-sonnet-4-6")
+        .find(|m| m.name == "claude-sonnet-4.6")
         .unwrap();
     assert_eq!(claude.subscription, SubscriptionKind::Claude);
     assert_eq!(claude.quota_percent, Some(80));
-    let codex = models.iter().find(|m| m.name == "gpt-5-5").unwrap();
+    let codex = models.iter().find(|m| m.name == "gpt-5.5").unwrap();
     assert_eq!(codex.subscription, SubscriptionKind::Codex);
     assert_eq!(codex.quota_percent, Some(70));
 }
 
 #[test]
 fn assemble_merges_cached_quota_resets() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
-    let resets =
-        make_reset_payload(&[("claude", "claude-sonnet-4-6", Some("2026-04-30T12:00:00Z"))]);
+    let dashboard = vec![make_entry("claude-sonnet-4.6", "claude")];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
+    let resets = make_reset_payload(&[("claude", "claude-shared", Some("2026-04-30T12:00:00Z"))]);
 
     let models = assemble_from_cache(loaded_cache_with_resets(dashboard, quotas, resets));
 
@@ -463,8 +462,8 @@ fn assemble_collapsed_kimi_selection_uses_ipbr_phase_scores() {
 
 #[test]
 fn available_claude_keeps_anthropic_dashboard_entries() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "anthropic")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+    let dashboard = vec![make_entry("claude-sonnet-4.6", "anthropic")];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
     let available = BTreeSet::from([CliKind::Claude]);
 
     let models =
@@ -472,7 +471,7 @@ fn available_claude_keeps_anthropic_dashboard_entries() {
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].subscription, SubscriptionKind::Claude);
-    assert_eq!(models[0].name, "claude-sonnet-4-6");
+    assert_eq!(models[0].name, "claude-sonnet-4.6");
     assert_eq!(models[0].quota_percent, Some(80));
 }
 
@@ -481,15 +480,15 @@ fn stale_on_error_fallback_uses_expired_dashboard() {
     // Fresh (non-expired) dashboard should be used directly without fetching
     let loaded = LoadedCache {
         dashboard: Some(LoadedSection {
-            data: vec![make_entry("claude-sonnet-4-6", "claude")],
+            data: vec![make_entry("claude-sonnet-4.6", "claude")],
             expired: false,
         }),
         quotas: Some(LoadedSection {
-            data: make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]),
+            data: make_quota_payload(&[("claude", "claude-shared", Some(80))]),
             expired: false,
         }),
         quota_resets: Some(LoadedSection {
-            data: make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]),
+            data: make_reset_payload(&[("claude", "claude-sonnet-4.6", None)]),
             expired: false,
         }),
     };
@@ -497,7 +496,7 @@ fn stale_on_error_fallback_uses_expired_dashboard() {
     let models = assemble_from_cache(loaded);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].name, "claude-sonnet-4-6");
+    assert_eq!(models[0].name, "claude-sonnet-4.6");
     assert_eq!(models[0].quota_percent, Some(80));
 }
 
@@ -525,14 +524,14 @@ fn fresh_cache_with_empty_dashboard_returns_empty() {
 
 #[test]
 fn assemble_universe_uses_provided_snapshot_without_reloading() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+    let dashboard = vec![make_entry("claude-sonnet-4.6", "claude")];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
     let resets = empty_resets_for_quotas(&quotas);
 
     let (models, _warnings) = assemble_universe(dashboard, quotas, resets, &all_clis(), &[]);
 
     assert_eq!(models.len(), 1);
-    assert_eq!(models[0].name, "claude-sonnet-4-6");
+    assert_eq!(models[0].name, "claude-sonnet-4.6");
     assert_eq!(models[0].quota_percent, Some(80));
 }
 
@@ -542,8 +541,8 @@ fn quota_strict_lookup_returns_none_when_no_exact_match() {
     // quotas across Claude models. The candidate's quota_lookup_key
     // (or its launch_name fallback) must hit a real entry — otherwise
     // the row reports an unknown quota.
-    let dashboard = vec![make_entry("claude-opus-4-7", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(75))]);
+    let dashboard = vec![make_entry("claude-opus-4.7", "claude")];
+    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4.6", Some(75))]);
 
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
@@ -565,7 +564,7 @@ fn dedup_keeps_direct_when_quota_meets_floor() {
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
         assert_eq!(survivor.subscription, SubscriptionKind::Claude);
-        assert_eq!(survivor.name, "claude-opus-4-7");
+        assert_eq!(survivor.name, "claude-opus-4.7");
         assert_eq!(survivor.quota_percent, direct_quota);
     }
 }
@@ -583,18 +582,18 @@ fn dedup_keeps_direct_below_floor_when_opencode_does_not_win() {
     ] {
         let survivor = run_dedup(direct_quota, opencode_quota);
         assert_eq!(survivor.subscription, SubscriptionKind::Claude);
-        assert_eq!(survivor.name, "claude-opus-4-7");
+        assert_eq!(survivor.name, "claude-opus-4.7");
         assert_eq!(survivor.quota_percent, direct_quota);
     }
 }
 
 fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedModel {
-    let direct = make_ipbr_entry("claude-opus-4-7", "claude", "claude-opus-4-7");
+    let direct = make_ipbr_entry("claude-opus-4.7", "claude", "claude-opus-4.7");
     let mut routed = direct.clone();
     routed.name = "opencode/claude-opus-4-7".to_string();
     routed.dashboard_vendor = "opencode".to_string();
     let quotas = make_quota_payload(&[
-        ("claude", "claude-opus-4-7", direct_quota),
+        ("claude", "claude-shared", direct_quota),
         ("opencode", "opencode/claude-opus-4-7", opencode_quota),
     ]);
     let (models, _warnings) = assemble_universe(
@@ -611,7 +610,7 @@ fn run_dedup(direct_quota: Option<u8>, opencode_quota: Option<u8>) -> CachedMode
 #[test]
 fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
-    let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4-7");
+    let routed = make_ipbr_entry("opencode/claude-opus-4-7", "opencode", "claude-opus-4.7");
     // The unbaked dashboard row needs an explicit provider entry now
     // that synthesis is gone; the operator-supplied route is what
     // turns into the candidate.
@@ -643,7 +642,7 @@ fn opencode_ipbr_matched_inventory_renders_with_unknown_quota() {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].subscription, SubscriptionKind::OpencodeGo);
     assert_eq!(models[0].quota_percent, None);
-    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4-7"));
+    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4.7"));
 }
 
 #[test]
@@ -817,13 +816,13 @@ fn missing_quota_results_in_none() {
 #[test]
 fn reset_coverage_gaps_require_matching_model_keys() {
     let quotas = make_quota_payload(&[
-        ("claude", "claude-sonnet-4-6", Some(80)),
-        ("claude", "claude-opus-4-1", Some(80)),
+        ("claude", "claude-shared", Some(80)),
+        ("claude", "claude-opus-4.1", Some(80)),
     ]);
-    let partial_resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
+    let partial_resets = make_reset_payload(&[("claude", "claude-shared", None)]);
     let covered_resets = make_reset_payload(&[
-        ("claude", "claude-sonnet-4-6", None),
-        ("claude", "claude-opus-4-1", None),
+        ("claude", "claude-shared", None),
+        ("claude", "claude-opus-4.1", None),
     ]);
 
     assert!(has_reset_coverage_gaps(&quotas, &partial_resets));
@@ -981,15 +980,15 @@ fn provider_override_disables_baked_candidate_in_universe() {
     // baked tuples.
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
     let dashboard = vec![make_ipbr_entry(
-        "claude-opus-4-7",
+        "claude-opus-4.7",
         "claude",
-        "claude-opus-4-7",
+        "claude-opus-4.7",
     )];
-    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
+    let quotas = make_quota_payload(&[("claude", "claude-opus-4.7", Some(80))]);
     let providers = vec![ProviderEntry {
         cli: CliKind::Claude,
-        launch_name: "claude-opus-4-7".to_string(),
-        model: "claude-opus-4-7".to_string(),
+        launch_name: "claude-opus-4.7".to_string(),
+        model: "claude-opus-4.7".to_string(),
         subscription: SubscriptionKind::Claude,
         enabled: false,
         free: false,
@@ -1028,18 +1027,18 @@ fn provider_addition_appends_routed_candidate_to_dashboard_row() {
     // candidate appears as an addition with the user-supplied flags.
     use crate::data::config::schema::{EffortMapping, ProviderEntry};
     let dashboard = vec![make_ipbr_entry(
-        "claude-opus-4-7",
+        "claude-opus-4.7",
         "claude",
-        "claude-opus-4-7",
+        "claude-opus-4.7",
     )];
     let quotas = make_quota_payload(&[
-        ("claude", "claude-opus-4-7", Some(50)),
-        ("opencode-go", "claude-opus-4-7", Some(95)),
+        ("claude", "claude-opus-4.7", Some(50)),
+        ("opencode-go", "claude-opus-4.7", Some(95)),
     ]);
     let providers = vec![ProviderEntry {
         cli: CliKind::Opencode,
-        launch_name: "claude-opus-4-7".to_string(),
-        model: "claude-opus-4-7".to_string(),
+        launch_name: "claude-opus-4.7".to_string(),
+        model: "claude-opus-4.7".to_string(),
         subscription: SubscriptionKind::OpencodeGo,
         enabled: true,
         free: false,
@@ -1077,7 +1076,7 @@ fn assemble_marks_failed_subscription_candidate_with_50_percent_assumption() {
     // quota came back. Wire this through assemble_universe and read
     // the candidate's `effective_quota()`. Uses gpt-5-5 because it
     // is in the baked table (the strict-baked path requires it).
-    let dashboard = vec![make_ipbr_entry("gpt-5-5", "codex", "gpt-5-5")];
+    let dashboard = vec![make_ipbr_entry("gpt-5.5", "codex", "gpt-5.5")];
     let mut quotas = QuotaPayload::default();
     quotas.failed_subscriptions.insert(SubscriptionKind::Codex);
     let available = BTreeSet::from([CliKind::Codex]);
@@ -1101,11 +1100,11 @@ fn available_clis_filters_by_cli_not_subscription() {
     // (Claude) is unchanged — confirming that availability now keys on
     // CLI presence rather than subscription presence.
     let dashboard = vec![make_ipbr_entry(
-        "claude-opus-4-7",
+        "claude-opus-4.7",
         "anthropic",
-        "claude-opus-4-7",
+        "claude-opus-4.7",
     )];
-    let quotas = make_quota_payload(&[("claude", "claude-opus-4-7", Some(80))]);
+    let quotas = make_quota_payload(&[("claude", "claude-opus-4.7", Some(80))]);
 
     // Claude CLI present → row's natural Claude candidate surfaces.
     let with_claude = BTreeSet::from([CliKind::Claude]);

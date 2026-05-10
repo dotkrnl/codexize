@@ -6,6 +6,13 @@
 //! Identity is `(cli, launch_name)`; `model` and `subscription` are
 //! properties of the row/provider.
 //!
+//! Naming conventions: every `model` and `launch_name` here matches the
+//! dashboard's `entry.name` (the lowercased ipbr `display_name`) and the
+//! shape the corresponding CLI accepts. The live quota provider returns
+//! values under that same shape — there is no normalization layer between
+//! the live key and the baked launch_name. Shared-pool subscriptions
+//! (claude/kimi/opencode) point `quota_lookup_key` at their pool sentinel.
+//!
 //! Resolution rules:
 //! - User entries with the same `(cli, launch_name)` as a baked entry
 //!   **override** the baked properties.
@@ -49,16 +56,16 @@ pub const ADDITION_DISPLAY_ORDER: u16 = u16::MAX;
 
 /// Static baked-defaults table — 30 hand-curated rows mirroring the
 /// ipbr scoreboard: 17 direct-subscription rows (Claude opus/sonnet,
-/// Codex gpt-5.x, Gemini variants, Kimi k2-6) plus 13 opencode-go rows
+/// Codex gpt-5.x, Gemini variants, Kimi k2.6) plus 13 opencode-go rows
 /// (deepseek, glm, grok, mimo, minimax, qwen) sharing the
 /// `"opencode-shared"` quota pool.
 pub const BAKED_TABLE: &[BakedRow] = &[
     // --- Claude opus (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="max" ---
     BakedRow {
-        model: "claude-opus-4-1",
+        model: "claude-opus-4.1",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-opus-4-1",
+            launch_name: "claude-opus-4.1",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -68,14 +75,14 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     BakedRow {
-        model: "claude-opus-4-5",
+        model: "claude-opus-4.5",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-opus-4-5",
+            launch_name: "claude-opus-4.5",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -85,14 +92,14 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     BakedRow {
-        model: "claude-opus-4-6",
+        model: "claude-opus-4.6",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-opus-4-6",
+            launch_name: "claude-opus-4.6",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -102,14 +109,14 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     BakedRow {
-        model: "claude-opus-4-7",
+        model: "claude-opus-4.7",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-opus-4-7",
+            launch_name: "claude-opus-4.7",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -119,7 +126,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     // --- Claude sonnet (3 rows): both cheap_eligible and tough_eligible, effort_tough="max" ---
@@ -137,14 +144,14 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     BakedRow {
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-4.5",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-sonnet-4-5",
+            launch_name: "claude-sonnet-4.5",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -154,14 +161,14 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     BakedRow {
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-4.6",
         providers: &[BakedProvider {
             cli: CliKind::Claude,
-            launch_name: "claude-sonnet-4-6",
+            launch_name: "claude-sonnet-4.6",
             subscription: SubscriptionKind::Claude,
             free: false,
             official: true,
@@ -171,15 +178,15 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "max",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("claude-shared"),
         }],
     },
     // --- Codex gpt-5.x (4 rows): tough_eligible=true, cheap_eligible=false, effort_tough="xhigh" ---
     BakedRow {
-        model: "gpt-5-2",
+        model: "gpt-5.2",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
-            launch_name: "gpt-5-2",
+            launch_name: "gpt-5.2",
             subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
@@ -193,10 +200,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "gpt-5-3-codex",
+        model: "gpt-5.3-codex",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
-            launch_name: "gpt-5-3-codex",
+            launch_name: "gpt-5.3-codex",
             subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
@@ -210,10 +217,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "gpt-5-4",
+        model: "gpt-5.4",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
-            launch_name: "gpt-5-4",
+            launch_name: "gpt-5.4",
             subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
@@ -227,10 +234,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "gpt-5-5",
+        model: "gpt-5.5",
         providers: &[BakedProvider {
             cli: CliKind::Codex,
-            launch_name: "gpt-5-5",
+            launch_name: "gpt-5.5",
             subscription: SubscriptionKind::Codex,
             free: false,
             official: true,
@@ -245,10 +252,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
     },
     // --- Gemini (5 rows): effort_eligible=false, effort_tough="high" ---
     BakedRow {
-        model: "gemini-2-5-flash",
+        model: "gemini-2.5-flash",
         providers: &[BakedProvider {
             cli: CliKind::Gemini,
-            launch_name: "gemini-2-5-flash",
+            launch_name: "gemini-2.5-flash",
             subscription: SubscriptionKind::Gemini,
             free: false,
             official: true,
@@ -262,10 +269,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "gemini-2-5-pro",
+        model: "gemini-2.5-pro",
         providers: &[BakedProvider {
             cli: CliKind::Gemini,
-            launch_name: "gemini-2-5-pro",
+            launch_name: "gemini-2.5-pro",
             subscription: SubscriptionKind::Gemini,
             free: false,
             official: true,
@@ -313,10 +320,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "gemini-3-1-pro-preview",
+        model: "gemini-3.1-pro-preview",
         providers: &[BakedProvider {
             cli: CliKind::Gemini,
-            launch_name: "gemini-3-1-pro-preview",
+            launch_name: "gemini-3.1-pro-preview",
             subscription: SubscriptionKind::Gemini,
             free: false,
             official: true,
@@ -329,9 +336,9 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: None,
         }],
     },
-    // --- Kimi (1 row): model=kimi-k2-6, launch_name=kimi-latest ---
+    // --- Kimi (1 row): model=kimi-k2.6, launch_name=kimi-latest, shared pool ---
     BakedRow {
-        model: "kimi-k2-6",
+        model: "kimi-k2.6",
         providers: &[BakedProvider {
             cli: CliKind::Kimi,
             launch_name: "kimi-latest",
@@ -344,7 +351,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             effort_cheap: "low",
             effort_normal: "medium",
             effort_tough: "high",
-            quota_lookup_key: None,
+            quota_lookup_key: Some("kimi-shared"),
         }],
     },
     // --- Opencode-go (13 rows): qualified launch_name, quota_lookup_key="opencode-shared" ---
@@ -383,10 +390,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "minimax-m2-5",
+        model: "minimax-m2.5",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/minimax-m2-5",
+            launch_name: "opencode-go/minimax-m2.5",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -400,10 +407,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "minimax-m2-7",
+        model: "minimax-m2.7",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/minimax-m2-7",
+            launch_name: "opencode-go/minimax-m2.7",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -417,10 +424,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "qwen3-6-plus",
+        model: "qwen3.6-plus",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/qwen3-6-plus",
+            launch_name: "opencode-go/qwen3.6-plus",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -468,10 +475,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "mimo-v2-5",
+        model: "mimo-v2.5",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/mimo-v2-5",
+            launch_name: "opencode-go/mimo-v2.5",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -485,10 +492,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "mimo-v2-5-pro",
+        model: "mimo-v2.5-pro",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/mimo-v2-5-pro",
+            launch_name: "opencode-go/mimo-v2.5-pro",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -502,10 +509,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "glm-4-6",
+        model: "glm-4.6",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/glm-4-6",
+            launch_name: "opencode-go/glm-4.6",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -519,10 +526,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "glm-4-7",
+        model: "glm-4.7",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/glm-4-7",
+            launch_name: "opencode-go/glm-4.7",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -553,10 +560,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
-        model: "glm-5-1",
+        model: "glm-5.1",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/glm-5-1",
+            launch_name: "opencode-go/glm-5.1",
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
@@ -667,30 +674,36 @@ mod tests {
 
     #[test]
     fn baked_table_seeds_known_claude_opus_with_max_tough_effort() {
-        let entry = baked_for("claude-opus-4-7", CliKind::Claude, "claude-opus-4-7").unwrap();
+        let entry = baked_for("claude-opus-4.7", CliKind::Claude, "claude-opus-4.7").unwrap();
         assert!(
             entry.official,
-            "claude/claude-opus-4-7 is intrinsically official"
+            "claude/claude-opus-4.7 is intrinsically official"
         );
         assert!(entry.tough_eligible);
         assert!(entry.effort_eligible);
         assert_eq!(entry.effort_mapping.tough, "max");
+        assert_eq!(
+            entry.quota_lookup_key.as_deref(),
+            Some("claude-shared"),
+            "claude rows route quota lookups to the shared pool sentinel"
+        );
     }
 
     #[test]
     fn baked_table_seeds_codex_with_xhigh_tough_effort() {
-        let entry = baked_for("gpt-5-4", CliKind::Codex, "gpt-5-4").unwrap();
+        let entry = baked_for("gpt-5.4", CliKind::Codex, "gpt-5.4").unwrap();
         assert_eq!(entry.effort_mapping.tough, "xhigh");
     }
 
     #[test]
     fn baked_table_seeds_kimi_with_launch_name_kimi_latest() {
-        let entry = baked_for("kimi-k2-6", CliKind::Kimi, "kimi-latest").unwrap();
-        assert_eq!(entry.model, "kimi-k2-6");
+        let entry = baked_for("kimi-k2.6", CliKind::Kimi, "kimi-latest").unwrap();
+        assert_eq!(entry.model, "kimi-k2.6");
         assert_eq!(entry.launch_name, "kimi-latest");
         assert!(entry.cheap_eligible);
         assert!(!entry.tough_eligible);
         assert!(!entry.effort_eligible);
+        assert_eq!(entry.quota_lookup_key.as_deref(), Some("kimi-shared"));
     }
 
     #[test]
@@ -741,8 +754,8 @@ mod tests {
     fn merge_user_override_replaces_baked_props_for_matching_tuple() {
         let user = vec![ProviderEntry {
             cli: CliKind::Claude,
-            launch_name: "claude-opus-4-7".to_string(),
-            model: "claude-opus-4-7".to_string(),
+            launch_name: "claude-opus-4.7".to_string(),
+            model: "claude-opus-4.7".to_string(),
             subscription: SubscriptionKind::Claude,
             enabled: false,
             free: false,
@@ -758,7 +771,7 @@ mod tests {
         let merged = merge_with_overrides(&user);
         let opus = merged
             .iter()
-            .find(|e| e.cli == CliKind::Claude && e.launch_name == "claude-opus-4-7")
+            .find(|e| e.cli == CliKind::Claude && e.launch_name == "claude-opus-4.7")
             .expect("opus row must remain present after override");
         assert!(!opus.enabled, "user override flipped enabled to false");
         assert!(opus.quota_disabled, "user override forced quota_disabled");
@@ -769,8 +782,8 @@ mod tests {
     fn merge_user_addition_for_unknown_identity_gets_addition_display_order() {
         let user = vec![ProviderEntry {
             cli: CliKind::Opencode,
-            launch_name: "opencode-go/claude-opus-4-7".to_string(),
-            model: "claude-opus-4-7".to_string(),
+            launch_name: "opencode-go/claude-opus-4.7".to_string(),
+            model: "claude-opus-4.7".to_string(),
             subscription: SubscriptionKind::OpencodeGo,
             enabled: true,
             free: false,
@@ -786,7 +799,7 @@ mod tests {
         let merged = merge_with_overrides(&user);
         let added = merged
             .iter()
-            .find(|e| e.cli == CliKind::Opencode && e.launch_name == "opencode-go/claude-opus-4-7")
+            .find(|e| e.cli == CliKind::Opencode && e.launch_name == "opencode-go/claude-opus-4.7")
             .expect("addition must appear in merged list");
         assert_eq!(added.display_order, ADDITION_DISPLAY_ORDER);
     }

@@ -95,14 +95,14 @@ fn loaded_cache_with_resets(
 #[serial_test::serial]
 async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
     let dashboard = vec![
-        make_entry("claude-sonnet-4-6", "claude"),
-        make_entry("claude-opus-4-1", "claude"),
+        make_entry("claude-sonnet-4.6", "claude"),
+        make_entry("claude-opus-4.1", "claude"),
     ];
     let quotas = make_quota_payload(&[
-        ("claude", "claude-sonnet-4-6", Some(80)),
-        ("claude", "claude-opus-4-1", Some(80)),
+        ("claude", "claude-shared", Some(80)),
+        ("claude", "claude-opus-4.1", Some(80)),
     ]);
-    let resets = make_reset_payload(&[("claude", "claude-sonnet-4-6", None)]);
+    let resets = make_reset_payload(&[("claude", "claude-shared", None)]);
     let available = BTreeSet::from([crate::selection::CliKind::Claude]);
     let temp = tempfile::TempDir::new().unwrap();
     let bin_dir = temp.path().join("bin");
@@ -158,12 +158,12 @@ async fn assemble_refreshes_when_cached_reset_coverage_is_partial() {
 fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     let loaded = loaded_cache_with(
         vec![
-            make_entry("claude-sonnet-4-6", "claude"),
-            make_entry("gpt-5-5", "openai"),
+            make_entry("claude-sonnet-4.6", "claude"),
+            make_entry("gpt-5.5", "openai"),
         ],
         make_quota_payload(&[
-            ("claude", "claude-sonnet-4-6", Some(80)),
-            ("openai", "gpt-5-5", Some(70)),
+            ("claude", "claude-shared", Some(80)),
+            ("openai", "gpt-5.5", Some(70)),
         ]),
     );
     let _guard = crate::state::test_fs_lock()
@@ -227,13 +227,13 @@ fn assemble_from_loaded_uses_acp_configured_vendor_availability() {
     assert_eq!(models.len(), 2);
     let gpt = models
         .iter()
-        .find(|m| m.name == "gpt-5-5")
+        .find(|m| m.name == "gpt-5.5")
         .expect("gpt-5-5 row must exist");
     assert_eq!(gpt.subscription, SubscriptionKind::Codex);
     assert_eq!(gpt.quota_percent, Some(70));
     let claude = models
         .iter()
-        .find(|m| m.name == "claude-sonnet-4-6")
+        .find(|m| m.name == "claude-sonnet-4.6")
         .expect("claude-sonnet row must exist");
     assert!(
         claude.candidates.is_empty(),
@@ -295,8 +295,8 @@ fn with_temp_home_cache<T>(
 
 #[test]
 fn assemble_models_uses_supplied_cache_dir_when_fresh() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+    let dashboard = vec![make_entry("claude-sonnet-4.6", "claude")];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
     with_temp_home_cache(dashboard, quotas, |cache_dir| {
         // Cache was just written under the supplied dir, so dashboard +
         // quotas are fresh; the async loader should not need any
@@ -311,7 +311,7 @@ fn assemble_models_uses_supplied_cache_dir_when_fresh() {
             "fresh cache should not trigger refresh errors"
         );
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "claude-sonnet-4-6");
+        assert_eq!(models[0].name, "claude-sonnet-4.6");
         assert_eq!(models[0].quota_percent, Some(80));
     });
 }
@@ -330,8 +330,8 @@ fn assemble_from_cached_only_returns_empty_when_no_cache() {
 
 #[test]
 fn assemble_from_cached_only_yields_models_when_cache_is_present() {
-    let dashboard = vec![make_entry("claude-sonnet-4-6", "claude")];
-    let quotas = make_quota_payload(&[("claude", "claude-sonnet-4-6", Some(80))]);
+    let dashboard = vec![make_entry("claude-sonnet-4.6", "claude")];
+    let quotas = make_quota_payload(&[("claude", "claude-shared", Some(80))]);
     with_temp_home_cache(dashboard, quotas, |cache_dir| {
         let models = assemble_from_cached_only(
             cache_dir,
@@ -339,7 +339,7 @@ fn assemble_from_cached_only_yields_models_when_cache_is_present() {
             &[],
         );
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "claude-sonnet-4-6");
+        assert_eq!(models[0].name, "claude-sonnet-4.6");
         assert_eq!(models[0].quota_percent, Some(80));
     });
 }

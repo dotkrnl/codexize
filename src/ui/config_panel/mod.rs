@@ -2383,8 +2383,8 @@ mod tests {
         config.providers = crate::data::config::schema::Override::explicit(vec![
             crate::data::config::schema::ProviderEntry {
                 cli: crate::selection::CliKind::Claude,
-                launch_name: "claude-opus-4-7".to_string(),
-                model: "claude-opus-4-7".to_string(),
+                launch_name: "claude-opus-4.7".to_string(),
+                model: "claude-opus-4.7".to_string(),
                 subscription: crate::selection::SubscriptionKind::Claude,
                 enabled: true,
                 free: false,
@@ -2408,11 +2408,11 @@ mod tests {
 
         let text = render_to_text(&state, 120, 18);
         assert!(
-            text.contains("claude / claude-opus-4-7"),
+            text.contains("claude / claude-opus-4.7"),
             "missing group header: {text}"
         );
         assert!(
-            text.contains("[x] claude · claude-opus-4-7 · (x) official · ( ) free"),
+            text.contains("[x] claude · claude-opus-4.7 · (x) official · ( ) free"),
             "missing provider entry: {text}"
         );
     }
@@ -2432,7 +2432,7 @@ mod tests {
         // footer; the section now has 30 baked rows and grows over time.
         let text = render_to_text(&state, 120, 80);
         assert!(
-            text.contains("claude / claude-opus-4-7"),
+            text.contains("claude / claude-opus-4.7"),
             "should show baked models: {text}"
         );
         assert!(
@@ -2471,7 +2471,7 @@ mod tests {
             editor
                 .available_models
                 .iter()
-                .any(|(v, m)| v == "claude" && m == "claude-opus-4-7"),
+                .any(|(v, m)| v == "claude" && m == "claude-opus-4.7"),
             "expected baked claude/claude-opus-4-7 in available models: {:?}",
             editor.available_models,
         );

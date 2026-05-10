@@ -390,7 +390,7 @@ impl SessionPicker {
                     Ok(config) => {
                         self.config_panel =
                             Some(crate::ui::config_panel::ConfigPanelState::open_at(
-                                &config, path, true, initial,
+                                &config, path, initial,
                             ));
                     }
                     Err(err) => {

@@ -822,42 +822,6 @@ fn degenerate_terminal_omits_expansion() {
 }
 
 #[test]
-fn palette_config_opens_panel_in_read_only_mode() {
-    let mut picker = test_picker("", 0);
-    picker.input_mode = false;
-
-    // Simulate :config command
-    picker.execute_palette_command("config", "").unwrap();
-
-    let panel = picker
-        .config_panel
-        .as_ref()
-        .expect("config panel should be open");
-    assert!(panel.read_only);
-}
-
-#[test]
-fn config_panel_read_only_mode_ignores_mutation_keys() {
-    let mut picker = test_picker("", 0);
-    picker.input_mode = false;
-    picker.execute_palette_command("config", "").unwrap();
-
-    let panel = picker.config_panel.as_mut().unwrap();
-    // Default selected page is Common.
-
-    // Press Enter to try to edit
-    panel.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(
-        panel.editing.is_none(),
-        "Enter should be ignored in read-only mode"
-    );
-
-    // Press d to reset
-    panel.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-    assert!(!panel.dirty, "d should be ignored in read-only mode");
-}
-
-#[test]
 fn picker_config_with_section_arg_jumps_to_section() {
     let mut picker = test_picker("", 0);
     picker.input_mode = false;
@@ -885,21 +849,19 @@ fn picker_config_with_unknown_section_errors_and_does_not_open() {
 }
 
 #[test]
-fn config_panel_e_toggles_read_only_off() {
+fn palette_config_opens_panel_directly_editable() {
+    // No more read-only/edit-mode toggle: pressing Enter on the first
+    // editable field should immediately enter the inline editor.
     let mut picker = test_picker("", 0);
     picker.input_mode = false;
     picker.execute_palette_command("config", "").unwrap();
 
     let panel = picker.config_panel.as_mut().unwrap();
-    assert!(panel.read_only);
-
-    // Press e to enable editing
-    panel.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
-    assert!(!panel.read_only);
-
-    // Now Enter should work
     panel.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(panel.editing.is_some());
+    assert!(
+        panel.editing.is_some(),
+        "Enter should start editing directly without a read-only toggle"
+    );
 }
 
 #[test]
@@ -930,7 +892,6 @@ fn config_panel_save_in_picker_reloads_picker_config() {
         .expect("open config panel");
 
     let panel = picker.config_panel.as_mut().expect("panel open");
-    panel.read_only = false;
     // Stage a paths.sessions_root change so the saved file genuinely differs.
     crate::data::config::mutate::set_value(
         &mut panel.config,

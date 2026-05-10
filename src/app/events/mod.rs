@@ -300,7 +300,7 @@ impl App {
             (*self.config).clone()
         });
         self.config_panel = Some(crate::ui::config_panel::ConfigPanelState::open_at(
-            &config, path, false, initial,
+            &config, path, initial,
         ));
     }
     fn handle_config_panel_key(&mut self, key: KeyEvent) -> bool {

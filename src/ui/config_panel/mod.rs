@@ -560,7 +560,6 @@ pub(crate) struct ConfigPanelState {
     conflict: Option<ConflictBanner>,
     pub(crate) dirty: bool,
     save_error: Option<String>,
-    pub(crate) read_only: bool,
     pub(crate) searching: Option<SearchState>,
     pub(crate) providers_cursor: usize,
     /// Top-of-viewport scroll offset for the providers list, kept in a Cell
@@ -581,7 +580,6 @@ impl ConfigPanelState {
     pub(crate) fn open_at(
         config: &Config,
         path: PathBuf,
-        read_only: bool,
         initial_section: Option<&str>,
     ) -> Self {
         let opened_mtime = mtime(&path);
@@ -595,18 +593,13 @@ impl ConfigPanelState {
             opened_mtime,
             selected_section,
             selected_field: 1,
-            status: if read_only {
-                "read-only mode · press e to edit".to_string()
-            } else {
-                "config open".to_string()
-            },
+            status: "config open".to_string(),
             editing: None,
             edit_buffer: String::new(),
             reveal_topic: false,
             conflict: None,
             dirty: false,
             save_error: None,
-            read_only,
             searching: None,
             providers_cursor: 0,
             providers_scroll: Cell::new(0),
@@ -624,10 +617,7 @@ impl ConfigPanelState {
         if self.searching.is_some() {
             return self.handle_search_key(key);
         }
-        if !self.read_only
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.code == KeyCode::Char('s')
-        {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
             self.save(false);
             // Save is only successful when the inline-edit buffer (if any)
             // committed cleanly, the file write hit no IO error, and no
@@ -648,15 +638,6 @@ impl ConfigPanelState {
             return outcome;
         }
         if self.editing.is_some() {
-            if self.read_only {
-                // Defensive: `Enter` is gated so editing should not be set in
-                // read-only mode through the normal flow. If a caller forces
-                // `editing = Some(...)`, refuse to mutate; only Esc/q unwind.
-                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
-                    self.editing = None;
-                }
-                return PanelOutcome::KeepOpen;
-            }
             self.handle_edit_key(key);
             return PanelOutcome::KeepOpen;
         }
@@ -673,11 +654,6 @@ impl ConfigPanelState {
                     PanelOutcome::Close
                 }
             }
-            KeyCode::Char('e') if self.read_only => {
-                self.read_only = false;
-                self.status = "edit mode enabled".to_string();
-                PanelOutcome::KeepOpen
-            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_field(-1);
                 PanelOutcome::KeepOpen
@@ -692,12 +668,10 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Enter => {
-                if !self.read_only {
-                    if is_providers_section(self.current_section()) {
-                        self.activate_provider_line();
-                    } else {
-                        self.activate_field();
-                    }
+                if is_providers_section(self.current_section()) {
+                    self.activate_provider_line();
+                } else {
+                    self.activate_field();
                 }
                 PanelOutcome::KeepOpen
             }
@@ -705,27 +679,21 @@ impl ConfigPanelState {
             //  · Bool fields: flip without opening a dropdown.
             //  · Provider rows: open the detail drawer (same as Enter).
             KeyCode::Char(' ') => {
-                if !self.read_only {
-                    if is_providers_section(self.current_section()) {
-                        self.activate_provider_line();
-                    } else if let Some(meta) = self.current_meta().copied()
-                        && matches!(meta.kind, FieldKind::Bool)
-                    {
-                        self.flip_bool(&meta);
-                    }
+                if is_providers_section(self.current_section()) {
+                    self.activate_provider_line();
+                } else if let Some(meta) = self.current_meta().copied()
+                    && matches!(meta.kind, FieldKind::Bool)
+                {
+                    self.flip_bool(&meta);
                 }
                 PanelOutcome::KeepOpen
             }
-            KeyCode::Char('a') if is_providers_section(self.current_section()) => {
-                if !self.read_only {
-                    self.open_add_provider_editor();
-                }
+            KeyCode::Char('n') if is_providers_section(self.current_section()) => {
+                self.open_add_provider_editor();
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('x') if is_providers_section(self.current_section()) => {
-                if !self.read_only {
-                    self.remove_selected_provider();
-                }
+                self.remove_selected_provider();
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -741,9 +709,7 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('d') => {
-                if !self.read_only {
-                    self.reset_field();
-                }
+                self.reset_field();
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('r') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
@@ -756,10 +722,8 @@ impl ConfigPanelState {
                 PanelOutcome::KeepOpen
             }
             KeyCode::Char('R') if self.current_meta().is_some_and(|m| m.key == "ntfy.topic") => {
-                if !self.read_only {
-                    self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
-                    self.status = "regenerate topic? y/n".to_string();
-                }
+                self.conflict = Some(ConflictBanner::RegenerateTopicPrompt);
+                self.status = "regenerate topic? y/n".to_string();
                 PanelOutcome::KeepOpen
             }
             KeyCode::Tab => {
@@ -1033,28 +997,76 @@ impl ConfigPanelState {
         let Some(Editing::AddProvider(ref mut editor)) = self.editing else {
             return;
         };
+
+        // Routing 1: a dropdown popup is open for one of the enum-style
+        // fields. Keys navigate the popup until the user picks (Enter)
+        // or backs out (Esc/q). Subscription/CLI/Model all funnel here.
+        if let Some(target) = editor.open_dropdown {
+            let options = editor.dropdown_options(target);
+            let len = options.len();
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => editor.close_dropdown(),
+                KeyCode::Up | KeyCode::Char('k') if len > 0 => {
+                    editor.dropdown_cursor = wrap_index(editor.dropdown_cursor, len, -1);
+                }
+                KeyCode::Down | KeyCode::Char('j') if len > 0 => {
+                    editor.dropdown_cursor = wrap_index(editor.dropdown_cursor, len, 1);
+                }
+                KeyCode::Enter => editor.commit_dropdown(),
+                _ => {}
+            }
+            return;
+        }
+
+        // Routing 2: form-level navigation. Enter on an enum field opens
+        // the dropdown; Enter on the text field commits the modal. Tab
+        // moves between fields.
         match key.code {
+            KeyCode::Esc | KeyCode::Char('q')
+                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
+            {
+                self.editing = None;
+                self.status = "add cancelled".to_string();
+            }
             KeyCode::Esc => {
                 self.editing = None;
                 self.status = "add cancelled".to_string();
             }
-            KeyCode::Enter => {
-                if editor.commit(&mut self.config) {
-                    self.dirty = true;
-                    self.status = "provider added".to_string();
-                    self.editing = None;
-                } else {
-                    self.status = "invalid provider data (duplicate or empty fields)".to_string();
-                }
-            }
-            KeyCode::Tab => {
-                editor.focus = editor.focus.next();
-            }
-            KeyCode::BackTab => {
+            KeyCode::Tab => editor.focus = editor.focus.next(),
+            KeyCode::BackTab => editor.focus = editor.focus.prev(),
+            KeyCode::Up | KeyCode::Char('k')
+                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
+            {
                 editor.focus = editor.focus.prev();
             }
-            KeyCode::Up => editor.cycle_focused(-1),
-            KeyCode::Down => editor.cycle_focused(1),
+            KeyCode::Down | KeyCode::Char('j')
+                if !matches!(editor.focus, providers::AddProviderField::LaunchName) =>
+            {
+                editor.focus = editor.focus.next();
+            }
+            KeyCode::Enter => match editor.focus {
+                providers::AddProviderField::Model
+                | providers::AddProviderField::Subscription
+                | providers::AddProviderField::Cli => {
+                    editor.open_dropdown(editor.focus);
+                }
+                providers::AddProviderField::LaunchName => {
+                    if editor.commit(&mut self.config) {
+                        self.dirty = true;
+                        self.status = "provider added".to_string();
+                        self.editing = None;
+                    } else {
+                        self.status =
+                            "invalid provider data (duplicate or empty fields)".to_string();
+                    }
+                }
+            },
+            KeyCode::Char(' ') => match editor.focus {
+                providers::AddProviderField::Model
+                | providers::AddProviderField::Subscription
+                | providers::AddProviderField::Cli => editor.open_dropdown(editor.focus),
+                providers::AddProviderField::LaunchName => editor.launch_name.push(' '),
+            },
             KeyCode::Backspace => {
                 if matches!(editor.focus, providers::AddProviderField::LaunchName) {
                     editor.launch_name.pop();
@@ -1218,7 +1230,8 @@ impl ConfigPanelState {
         };
 
         match line {
-            providers::ProvidersLine::GroupHeader { .. } => {}
+            providers::ProvidersLine::VendorHeader { .. }
+            | providers::ProvidersLine::ModelHeader { .. } => {}
             providers::ProvidersLine::Provider { entry, is_baked, .. } => {
                 let entry = entry.clone();
                 let is_baked = *is_baked;
@@ -1454,8 +1467,13 @@ impl ConfigPanelState {
                 // user can act on.
                 let mut next = wrap_index(self.providers_cursor, lines.len(), delta);
                 for _ in 0..lines.len() {
-                    if !matches!(lines.get(next), Some(providers::ProvidersLine::GroupHeader { .. }))
-                    {
+                    if !matches!(
+                        lines.get(next),
+                        Some(
+                            providers::ProvidersLine::VendorHeader { .. }
+                            | providers::ProvidersLine::ModelHeader { .. }
+                        )
+                    ) {
                         break;
                     }
                     next = wrap_index(next, lines.len(), delta);
@@ -1844,12 +1862,23 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
             Span::styled(pad_right(label, label_w), Style::default().fg(COLOR_DIM)),
             Span::styled(value_for(field), value_style),
         ];
+        // Show a chevron next to enum-style fields so the dropdown
+        // affordance reads at a glance.
+        if matches!(
+            field,
+            providers::AddProviderField::Model
+                | providers::AddProviderField::Subscription
+                | providers::AddProviderField::Cli
+        ) {
+            spans.push(Span::styled(
+                " ▼".to_string(),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
         if focused {
             let hint = match field {
-                providers::AddProviderField::LaunchName => "  type · ↑↓ presets",
-                providers::AddProviderField::Model => "  ↑↓ cycles known models",
-                providers::AddProviderField::Subscription => "  ↑↓ cycles subscriptions",
-                providers::AddProviderField::Cli => "  ↑↓ cycles CLIs",
+                providers::AddProviderField::LaunchName => "  type · Enter to add",
+                _ => "  Enter to choose",
             };
             spans.push(Span::styled(
                 hint.to_string(),
@@ -1866,7 +1895,7 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         render_row(providers::AddProviderField::Cli, "CLI"),
         render_row(providers::AddProviderField::LaunchName, "Launch name"),
         Line::from(""),
-        Line::from(dim("  Tab cycles fields · Enter confirms · Esc cancels")),
+        Line::from(dim("  Tab cycles fields · Enter opens/commits · Esc cancels")),
     ];
 
     Paragraph::new(lines)
@@ -1875,11 +1904,92 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(COLOR_FOCUS))
                 .title(Span::styled(
-                    " Add provider ".to_string(),
+                    " New model ".to_string(),
                     Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
                 )),
         )
         .render(rect, buf);
+
+    // Dropdown popup overlay on top of the modal when an enum field is open.
+    if let Some(target) = editor.open_dropdown {
+        render_add_provider_dropdown(editor, target, rect, area, buf);
+    }
+}
+
+fn render_add_provider_dropdown(
+    editor: &providers::ProvidersEditor,
+    target: providers::AddProviderField,
+    modal_rect: Rect,
+    area: Rect,
+    buf: &mut Buffer,
+) {
+    let options = editor.dropdown_options(target);
+    if options.is_empty() {
+        return;
+    }
+    let label_w: usize = 12;
+    let max_opt_w = options.iter().map(|o| o.width()).max().unwrap_or(0);
+    let popup_w = ((max_opt_w + 4) as u16).max(20).min(area.width);
+    let popup_h_wanted = (options.len() as u16 + 2).min(12); // border + max 10 rows
+    let popup_h = popup_h_wanted.min(area.height.saturating_sub(2).max(3));
+    if popup_h < 3 {
+        return;
+    }
+
+    // Anchor under the field row inside the modal (modal_rect.y is the top
+    // border; rows 1..=4 are the four form fields).
+    let field_row_offset: u16 = match target {
+        providers::AddProviderField::Model => 2,
+        providers::AddProviderField::Subscription => 3,
+        providers::AddProviderField::Cli => 4,
+        _ => 2,
+    };
+    let row_y = modal_rect.y.saturating_add(field_row_offset);
+    let popup_x = modal_rect
+        .x
+        .saturating_add(1 + 1 + 1 + label_w as u16)
+        .min(area.x + area.width.saturating_sub(popup_w));
+    let area_bottom = area.y.saturating_add(area.height);
+    let mut popup_y = row_y.saturating_add(1);
+    if popup_y + popup_h > area_bottom {
+        popup_y = row_y.saturating_sub(popup_h);
+    }
+    let popup_rect = Rect::new(popup_x, popup_y, popup_w, popup_h);
+    Clear.render(popup_rect, buf);
+
+    let inner_rows = popup_h.saturating_sub(2) as usize;
+    let cursor = editor.dropdown_cursor.min(options.len().saturating_sub(1));
+    let win_start = cursor
+        .saturating_sub(inner_rows.saturating_sub(1))
+        .min(options.len().saturating_sub(inner_rows.min(options.len())));
+    let lines: Vec<Line<'static>> = options
+        .iter()
+        .enumerate()
+        .skip(win_start)
+        .take(inner_rows)
+        .map(|(i, opt)| {
+            let focused = i == cursor;
+            Line::from(vec![
+                focus_span(focused),
+                Span::raw(" "),
+                Span::styled(
+                    opt.clone(),
+                    if focused {
+                        Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    },
+                ),
+            ])
+        })
+        .collect();
+    Paragraph::new(lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_FOCUS)),
+        )
+        .render(popup_rect, buf);
 }
 
 fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
@@ -2286,7 +2396,8 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
     let meta = &FIELDS[idx];
     let focused = idx == state.selected_field;
     let is_override = state.source_for(meta) == "override";
-    let read_only = matches!(meta.kind, FieldKind::ReadOnly | FieldKind::List | FieldKind::Map);
+    let field_locked =
+        matches!(meta.kind, FieldKind::ReadOnly | FieldKind::List | FieldKind::Map);
 
     let value_text = if focused && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {
@@ -2306,7 +2417,7 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
 
     let label_style = if focused {
         Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
-    } else if read_only {
+    } else if field_locked {
         Style::default().fg(COLOR_DIM)
     } else {
         Style::default()
@@ -2319,7 +2430,7 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else if is_override {
         Style::default().fg(COLOR_OVERRIDE)
-    } else if read_only {
+    } else if field_locked {
         Style::default().fg(COLOR_DIM)
     } else {
         Style::default()
@@ -2401,7 +2512,7 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
     }
     if is_providers_section(state.current_section()) {
         return Line::from(dim(ellipsize_end(
-            "Enter opens the per-provider detail drawer · a adds a custom entry · x removes",
+            "Enter opens the per-provider detail drawer · n adds a new model · x removes",
             width,
         )));
     }
@@ -2415,52 +2526,56 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
 fn footer_line(state: &ConfigPanelState, width: usize) -> Line<'static> {
     let hotkeys: &[(&str, &str)] = if state.searching.is_some() {
         &[("↑↓", "select"), ("Enter", "jump"), ("Esc", "cancel")]
-    } else if state.read_only {
-        &[
-            ("Tab", "page"),
-            ("/", "search"),
-            ("e", "edit"),
-            ("q/Esc", "close"),
-        ]
     } else {
-        match &state.editing {
-            Some(Editing::Choice { .. }) => &[
+        let in_add_provider_dropdown = matches!(
+            &state.editing,
+            Some(Editing::AddProvider(editor)) if editor.open_dropdown.is_some()
+        );
+        if in_add_provider_dropdown {
+            &[
                 ("↑↓", "select"),
-                ("Enter", "commit"),
+                ("Enter", "pick"),
                 ("q/Esc", "cancel"),
-            ],
-            Some(Editing::Integer | Editing::String) => {
-                &[("Enter", "commit"), ("Esc", "cancel")]
+            ]
+        } else {
+            match &state.editing {
+                Some(Editing::Choice { .. }) => &[
+                    ("↑↓", "select"),
+                    ("Enter", "commit"),
+                    ("q/Esc", "cancel"),
+                ],
+                Some(Editing::Integer | Editing::String) => {
+                    &[("Enter", "commit"), ("Esc", "cancel")]
+                }
+                Some(Editing::AddProvider(_)) => &[
+                    ("Tab", "field"),
+                    ("Enter", "open/add"),
+                    ("Esc", "cancel"),
+                ],
+                Some(Editing::ProviderDetail { .. }) => &[
+                    ("↑↓", "option"),
+                    ("Space", "toggle"),
+                    ("x", "delete"),
+                    ("q/Esc", "close"),
+                ],
+                None if is_providers_section(state.current_section()) => &[
+                    ("↑↓", "model"),
+                    ("Enter", "details"),
+                    ("n", "new"),
+                    ("x", "remove"),
+                    ("Ctrl-S", "save"),
+                    ("q/Esc", "close"),
+                ],
+                None => &[
+                    ("Tab", "page"),
+                    ("Enter", "edit"),
+                    ("Space", "toggle"),
+                    ("d", "default"),
+                    ("/", "search"),
+                    ("Ctrl-S", "save"),
+                    ("q/Esc", "close"),
+                ],
             }
-            Some(Editing::AddProvider(_)) => &[
-                ("Tab", "field"),
-                ("↑↓", "cycle"),
-                ("Enter", "add"),
-                ("Esc", "cancel"),
-            ],
-            Some(Editing::ProviderDetail { .. }) => &[
-                ("↑↓", "option"),
-                ("Space", "toggle"),
-                ("x", "delete"),
-                ("q/Esc", "close"),
-            ],
-            None if is_providers_section(state.current_section()) => &[
-                ("↑↓", "model"),
-                ("Enter", "details"),
-                ("a", "add"),
-                ("x", "remove"),
-                ("Ctrl-S", "save"),
-                ("q/Esc", "close"),
-            ],
-            None => &[
-                ("Tab", "page"),
-                ("Enter", "edit"),
-                ("Space", "toggle"),
-                ("d", "default"),
-                ("/", "search"),
-                ("Ctrl-S", "save"),
-                ("q/Esc", "close"),
-            ],
         }
     };
 
@@ -2767,10 +2882,7 @@ mod tests {
         )
         .unwrap();
         ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            None,
+            &config, PathBuf::from("/tmp/example/config.toml"), None,
         )
     }
 
@@ -2822,10 +2934,7 @@ mod tests {
         // common operation (Space, Space) still flips availability.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = providers::get_lines(&state.config)
@@ -2873,10 +2982,7 @@ mod tests {
             },
         ]);
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = providers::get_lines(&state.config)
@@ -3243,37 +3349,6 @@ mod tests {
     }
 
     #[test]
-    fn read_only_blocks_dropdown_commit_even_if_editing_is_forced() {
-        // The natural flow gates `Enter` so editing cannot be opened while
-        // read_only is true; this defensive check verifies a forcibly-set
-        // Choice editing state still cannot mutate the underlying value.
-        let mut state = state_with_overrides();
-        state.read_only = true;
-        focus_field(&mut state, "ntfy.enabled");
-        let value_before = state.value_for(state.current_meta().unwrap());
-        let dirty_before = state.dirty;
-        state.editing = Some(Editing::Choice {
-            key: "ntfy.enabled",
-            options: vec!["true".to_string(), "false".to_string()],
-            selected: 1,
-        });
-
-        // Enter would normally commit "false" — must be ignored in read-only.
-        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
-        assert_eq!(state.dirty, dirty_before);
-
-        // Down arrow would normally move highlight; mutation keys must be inert.
-        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        assert_eq!(state.value_for(state.current_meta().unwrap()), value_before);
-        assert_eq!(state.dirty, dirty_before);
-
-        // Esc unwinds the forced-edit state defensively.
-        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(state.editing.is_none());
-    }
-
-    #[test]
     fn providers_section_renders_entries_with_unmatched_warning() {
         // Two entries: one matched against the known universe, one that
         // points at a row no provider serves yet. The matched entry renders
@@ -3298,21 +3373,25 @@ mod tests {
             },
         ]);
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
         let text = render_to_text(&state, 120, 18);
+        // Vendor and model headers render on separate lines (no longer
+        // "claude · claude-opus-4.7" together).
+        assert!(text.contains("▾ claude"), "missing claude vendor header: {text}");
         assert!(
-            text.contains("claude · claude-opus-4.7"),
-            "missing group header: {text}"
+            text.contains("▾ claude-opus-4.7"),
+            "missing model header under vendor: {text}"
         );
         assert!(
-            text.contains("✓ claude/claude  claude-opus-4.7"),
+            text.contains("✓ claude"),
             "missing enabled provider row: {text}"
+        );
+        assert!(
+            text.contains("claude-opus-4.7"),
+            "missing launch_name on row: {text}"
         );
         assert!(
             text.contains("built-in · official · paid"),
@@ -3324,10 +3403,7 @@ mod tests {
     fn providers_section_shows_baked_models_by_default() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
@@ -3335,12 +3411,16 @@ mod tests {
         // footer; the section now has 30 baked rows and grows over time.
         let text = render_to_text(&state, 120, 80);
         assert!(
-            text.contains("claude · claude-opus-4.7"),
-            "should show baked models: {text}"
+            text.contains("▾ claude"),
+            "should show claude vendor header: {text}"
         );
         assert!(
-            text.contains("+ Add model provider"),
-            "should show add button: {text}"
+            text.contains("▾ claude-opus-4.7"),
+            "should show baked model under vendor: {text}"
+        );
+        assert!(
+            text.contains("+ New model"),
+            "should show new-model button: {text}"
         );
     }
 
@@ -3348,10 +3428,7 @@ mod tests {
     fn providers_section_render_does_not_panic_at_multibyte_boundaries() {
         let config = Config::baked_defaults();
         let state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
 
         for width in MIN_WIDTH..=140 {
@@ -3369,10 +3446,7 @@ mod tests {
     fn add_provider_modal_populates_models_from_baked_universe() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
@@ -3407,25 +3481,38 @@ mod tests {
     fn providers_group_by_model_vendor_not_subscription_label() {
         // opencode-go is a subscription (it bills through the opencode pool),
         // not a vendor — the actual model vendor is deepseek/minimax/etc.
-        // Group headers must read off the model's vendor so opencode-go
-        // entries get filed under their real vendor.
+        // Now that providers render as vendor → model → entry, the test
+        // checks two facts: a `deepseek` vendor header exists and its
+        // child model header is `deepseek-v4-flash`; and `opencode-go`
+        // never appears as a vendor header.
         let config = Config::baked_defaults();
         let lines = providers::get_lines(&config);
-        let mut seen_groups: Vec<(String, String)> = Vec::new();
+        let mut seen_vendors: Vec<String> = Vec::new();
+        let mut seen_pairs: Vec<(String, String)> = Vec::new();
+        let mut current_vendor: Option<String> = None;
         for line in &lines {
-            if let providers::ProvidersLine::GroupHeader { vendor, model } = line {
-                seen_groups.push((vendor.clone(), model.clone()));
+            match line {
+                providers::ProvidersLine::VendorHeader { vendor } => {
+                    seen_vendors.push(vendor.clone());
+                    current_vendor = Some(vendor.clone());
+                }
+                providers::ProvidersLine::ModelHeader { model } => {
+                    if let Some(v) = &current_vendor {
+                        seen_pairs.push((v.clone(), model.clone()));
+                    }
+                }
+                _ => {}
             }
         }
         assert!(
-            seen_groups.iter().any(|(v, m)| v == "deepseek" && m == "deepseek-v4-flash"),
-            "expected deepseek-v4-flash filed under vendor 'deepseek', got: {seen_groups:?}"
+            seen_pairs
+                .iter()
+                .any(|(v, m)| v == "deepseek" && m == "deepseek-v4-flash"),
+            "expected deepseek-v4-flash filed under vendor 'deepseek', got: {seen_pairs:?}"
         );
         assert!(
-            !seen_groups
-                .iter()
-                .any(|(v, _)| v == "opencode-go"),
-            "subscription label 'opencode-go' must not appear as a vendor: {seen_groups:?}"
+            !seen_vendors.iter().any(|v| v == "opencode-go"),
+            "subscription label 'opencode-go' must not appear as a vendor: {seen_vendors:?}"
         );
     }
 
@@ -3458,25 +3545,27 @@ mod tests {
         config.providers = crate::data::config::schema::Override::explicit(overrides);
 
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
         let text = render_to_text(&state, 120, 80);
+        // With the new tree layout, vendor and model render on separate
+        // lines: "▾ kimi" / "  ▾ kimi-k2.6".
+        assert!(text.contains("▾ kimi"), "expected kimi vendor header: {text}");
         assert!(
-            text.contains("kimi · kimi-k2.6"),
-            "expected vendor-grouped header: {text}"
+            text.contains("▾ kimi-k2.6"),
+            "expected kimi-k2.6 model header under vendor: {text}"
         );
-        // Subscription label for SubscriptionKind::Kimi is "moonshotai".
+        // Provider rows render subscription · cli · launch_name as
+        // padded columns. Substring-match on each token (the column
+        // widths put two or more spaces between them).
         assert!(
-            text.contains("moonshotai/kimi  kimi-latest"),
-            "expected built-in kimi entry to show subscription/cli + launch_name: {text}"
+            text.contains("moonshotai") && text.contains("kimi-latest"),
+            "expected built-in kimi entry: {text}"
         );
         assert!(
-            text.contains("opencode-go/opencode  opencode-go/kimi-k2.6"),
+            text.contains("opencode-go") && text.contains("opencode-go/kimi-k2.6"),
             "expected opencode-routed kimi entry under the same group: {text}"
         );
     }
@@ -3488,10 +3577,7 @@ mod tests {
         // focused row stays visible and the bottom indicator updates.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
 
@@ -3522,10 +3608,7 @@ mod tests {
     fn providers_pagination_indicator_visible_when_overflowing() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         let text = render_to_text(&state, 100, 14);
@@ -3539,10 +3622,7 @@ mod tests {
     fn providers_navigation_skips_group_headers() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         let lines = providers::get_lines(&state.config);
@@ -3551,13 +3631,16 @@ mod tests {
             .iter()
             .position(|l| matches!(l, providers::ProvidersLine::Provider { .. }))
             .unwrap();
-        // Walking forward 10 steps must never land on a group header.
+        // Walking forward 10 steps must never land on a vendor or model header.
         for _ in 0..10 {
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
             assert!(
                 !matches!(
                     lines.get(state.providers_cursor),
-                    Some(providers::ProvidersLine::GroupHeader { .. })
+                    Some(
+                        providers::ProvidersLine::VendorHeader { .. }
+                            | providers::ProvidersLine::ModelHeader { .. }
+                    )
                 ),
                 "cursor {} landed on a header",
                 state.providers_cursor
@@ -3572,10 +3655,7 @@ mod tests {
         // rows so j/k always lands on something Space can flip.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = providers::get_lines(&state.config)
@@ -3609,10 +3689,7 @@ mod tests {
     fn providers_page_render_snapshot() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = providers::get_lines(&state.config)
@@ -3626,10 +3703,7 @@ mod tests {
     fn provider_detail_drawer_render_snapshot() {
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         state.providers_cursor = providers::get_lines(&state.config)
@@ -3648,10 +3722,7 @@ mod tests {
         // then Tab to CLI and cycle to Opencode, then type the launch name.
         let config = Config::baked_defaults();
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
         let lines = providers::get_lines(&state.config);
@@ -3662,55 +3733,70 @@ mod tests {
         state.providers_cursor = add_idx;
         state.activate_provider_line();
 
-        // Cycle the model picker until kimi-k2.6 is selected.
+        // Open the Model dropdown (Enter on the focused Model field) and
+        // navigate to kimi-k2.6, then Enter to commit the selection.
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         for _ in 0..50 {
             if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
-                && editor.model == "kimi-k2.6"
+                && editor.open_dropdown == Some(providers::AddProviderField::Model)
+                && editor
+                    .dropdown_options(providers::AddProviderField::Model)
+                    .get(editor.dropdown_cursor)
+                    == Some(&"kimi-k2.6".to_string())
             {
                 break;
             }
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         }
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
             matches!(state.editing.as_ref(),
                 Some(Editing::AddProvider(e)) if e.model == "kimi-k2.6"),
-            "could not navigate the picker to kimi-k2.6"
+            "model dropdown did not commit kimi-k2.6"
         );
 
-        // Tab to Subscription and walk to OpencodeGo.
+        // Tab to Subscription, open its dropdown, walk to opencode-go, commit.
         state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         for _ in 0..SUBSCRIPTION_OPTIONS_COUNT {
             if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
-                && editor.subscription == "opencode-go"
+                && editor
+                    .dropdown_options(providers::AddProviderField::Subscription)
+                    .get(editor.dropdown_cursor)
+                    == Some(&"opencode-go".to_string())
             {
                 break;
             }
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         }
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
             matches!(state.editing.as_ref(),
                 Some(Editing::AddProvider(e)) if e.subscription == "opencode-go"),
-            "subscription picker did not reach opencode-go"
+            "subscription dropdown did not commit opencode-go"
         );
 
-        // Tab to CLI and walk to Opencode.
+        // Tab to CLI, open dropdown, walk to opencode, commit.
         state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         for _ in 0..CLI_OPTIONS_COUNT {
             if let Some(Editing::AddProvider(editor)) = state.editing.as_ref()
-                && matches!(editor.cli, crate::selection::CliKind::Opencode)
+                && editor
+                    .dropdown_options(providers::AddProviderField::Cli)
+                    .get(editor.dropdown_cursor)
+                    == Some(&"opencode".to_string())
             {
                 break;
             }
             state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
         }
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        // Tab to Launch name and type a value.
+        // Tab to Launch name and type a value, then Enter to commit the form.
         state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         for c in "opencode-go/kimi-k2.6".chars() {
             state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
-
-        // Commit and confirm the provider lands under the kimi vendor group.
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(state.editing.is_none(), "modal should close after commit");
 
@@ -3735,13 +3821,13 @@ mod tests {
         // Nav mode: q closes the panel, just like Esc.
         let config = Config::baked_defaults();
         let mut state =
-            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None);
         let outcome = state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(matches!(outcome, PanelOutcome::Close));
 
         // Choice picker: q cancels the dropdown without committing.
         let mut state =
-            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None);
         focus_field(&mut state, "ntfy.detail_mode");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(state.editing, Some(Editing::Choice { .. })));
@@ -3750,10 +3836,7 @@ mod tests {
 
         // Provider detail drawer: q closes.
         let mut state = ConfigPanelState::open_at(
-            &config,
-            PathBuf::from("/tmp/example/config.toml"),
-            false,
-            Some("models"),
+            &config, PathBuf::from("/tmp/example/config.toml"), Some("models"),
         );
         state.providers_cursor = providers::get_lines(&state.config)
             .iter()
@@ -3766,7 +3849,7 @@ mod tests {
 
         // Inline text edit: q is a literal character in the buffer, not Esc.
         let mut state =
-            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None);
         focus_field(&mut state, "ntfy.server");
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(state.editing, Some(Editing::String)));
@@ -3786,7 +3869,7 @@ mod tests {
         // ntfy.topic regenerate moved off `q` (now an Esc alias) onto `R`.
         let config = Config::baked_defaults();
         let mut state =
-            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), false, None);
+            ConfigPanelState::open_at(&config, PathBuf::from("/tmp/example/config.toml"), None);
         focus_field(&mut state, "ntfy.topic");
         state.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::NONE));
         assert!(
@@ -3796,6 +3879,151 @@ mod tests {
         // q on the prompt cancels it (Esc alias).
         state.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(state.conflict.is_none(), "q should dismiss the prompt");
+    }
+
+    #[test]
+    fn providers_tree_renders_vendor_then_models_under_it() {
+        // The vendor section header appears once and the models beneath
+        // it drop the "<vendor> ·" prefix so the tree reads cleanly.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        let text = render_to_text(&state, 120, 50);
+
+        // Vendor header is bare; model header is indented and lacks the
+        // vendor prefix.
+        assert!(text.contains("▾ claude"));
+        assert!(text.contains("  ▾ claude-opus-4.1"));
+        assert!(
+            !text.contains("▾ claude · claude-opus-4.1"),
+            "model header should not repeat the vendor name"
+        );
+    }
+
+    #[test]
+    fn provider_rows_align_subscription_column_with_distinct_color() {
+        // moonshotai (10 chars) and claude (6 chars) both render padded
+        // to 11 chars so the cli column starts at the same screen offset.
+        // The rendered text strips style, so we just check the prefix
+        // padding here; the color is asserted via the snapshot.
+        let mut config = Config::baked_defaults();
+        let mut overrides = config.providers.value().clone();
+        overrides.push(crate::data::config::schema::ProviderEntry {
+            cli: crate::selection::CliKind::Opencode,
+            launch_name: "opencode-go/kimi-k2.6".to_string(),
+            model: "kimi-k2.6".to_string(),
+            subscription: crate::selection::SubscriptionKind::OpencodeGo,
+            enabled: true,
+            free: false,
+            official: false,
+            quota_disabled: false,
+            cheap_eligible: false,
+            tough_eligible: false,
+            effort_eligible: false,
+            effort_mapping: Default::default(),
+            quota_lookup_key: None,
+            display_order: 0,
+        });
+        config.providers = crate::data::config::schema::Override::explicit(overrides);
+
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        let text = render_to_text(&state, 140, 80);
+
+        // After the focus marker + ✓, the subscription label sits in a
+        // padded column. moonshotai is 10 chars wide so it carries one
+        // trailing space inside the 11-col cell; opencode-go is 11 chars
+        // wide so it fills the cell exactly. Both rows then drop two
+        // gap spaces before the cli column.
+        assert!(
+            text.contains("✓ moonshotai   kimi"),
+            "expected moonshotai padded to subscription column: {text}"
+        );
+        assert!(
+            text.contains("✓ opencode-go  opencode"),
+            "expected opencode-go padded to subscription column: {text}"
+        );
+    }
+
+    #[test]
+    fn add_provider_modal_n_key_opens_modal() {
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        assert!(
+            matches!(state.editing, Some(Editing::AddProvider(_))),
+            "n should open the Add Provider modal"
+        );
+    }
+
+    #[test]
+    fn add_provider_modal_enter_on_enum_field_opens_dropdown() {
+        // Enter on Model, Subscription, or CLI opens that field's
+        // dropdown popup; Enter on LaunchName commits the modal.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            Some("models"),
+        );
+        state.selected_section = SECTIONS.iter().position(|s| *s == "models").unwrap();
+        state.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+
+        // Default focus is Model — Enter opens the Model dropdown.
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            state.editing.as_ref(),
+            Some(Editing::AddProvider(e))
+                if e.open_dropdown == Some(providers::AddProviderField::Model)
+        ));
+
+        // Esc closes the dropdown but keeps the modal open.
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(
+            state.editing.as_ref(),
+            Some(Editing::AddProvider(e)) if e.open_dropdown.is_none()
+        ));
+
+        // Tab to Subscription field; Enter opens the Subscription dropdown.
+        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            state.editing.as_ref(),
+            Some(Editing::AddProvider(e))
+                if e.open_dropdown == Some(providers::AddProviderField::Subscription)
+        ));
+    }
+
+    #[test]
+    fn direct_edit_no_e_prefix_required() {
+        // Panel opens directly editable: Enter on the first numeric
+        // field enters inline-edit without any prior `e` keystroke.
+        let config = Config::baked_defaults();
+        let mut state = ConfigPanelState::open_at(
+            &config,
+            PathBuf::from("/tmp/example/config.toml"),
+            None,
+        );
+        // Move to a known integer field.
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(
+            matches!(state.editing, Some(Editing::Integer)),
+            "Enter should start editing without an e-toggle"
+        );
     }
 
     #[test]

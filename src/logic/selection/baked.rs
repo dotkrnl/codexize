@@ -78,7 +78,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: false,
-            tough_eligible: true,
+            tough_eligible: false,
             effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",
@@ -287,7 +287,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: false,
-            tough_eligible: true,
+            tough_eligible: false,
             effort_eligible: false,
             effort_cheap: "low",
             effort_normal: "medium",
@@ -418,6 +418,10 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
+        // `opencode models --verbose` exposes reasoningEffort
+        // low/medium/high/max for deepseek-v4-pro, so it qualifies as
+        // both effort- and tough-eligible. Bumped effort_tough to "max"
+        // to use the full ladder the model advertises.
         model: "deepseek-v4-pro",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
@@ -426,11 +430,11 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: false,
             cheap_eligible: false,
-            tough_eligible: false,
-            effort_eligible: false,
+            tough_eligible: true,
+            effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",
-            effort_tough: "high",
+            effort_tough: "max",
             quota_lookup_key: Some("opencode-shared"),
         }],
     },
@@ -491,6 +495,9 @@ pub const BAKED_TABLE: &[BakedRow] = &[
         }],
     },
     BakedRow {
+        // qwen exposes reasoning=true but no reasoningEffort scale via
+        // `opencode models --verbose`, so it stays effort-ineligible.
+        // Marked cheap so it joins the budget rotation.
         model: "qwen3.5-plus",
         providers: &[BakedProvider {
             cli: CliKind::Opencode,
@@ -498,7 +505,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
-            cheap_eligible: false,
+            cheap_eligible: true,
             tough_eligible: false,
             effort_eligible: false,
             effort_cheap: "low",
@@ -515,7 +522,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             subscription: SubscriptionKind::OpencodeGo,
             free: false,
             official: false,
-            cheap_eligible: false,
+            cheap_eligible: true,
             tough_eligible: false,
             effort_eligible: false,
             effort_cheap: "low",

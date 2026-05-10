@@ -541,7 +541,7 @@ fn compact_quota_renders_per_vendor_entries() {
     }
     assert!(
         row.contains("100%"),
-        "100% quota should render verbatim: {row:?}"
+        "100% quota should render verbatim in quota summary: {row:?}"
     );
 }
 
@@ -887,10 +887,74 @@ fn wide_layout_shows_relative_reset_time() {
     let (lines, mode) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
 
     assert_eq!(mode, ModelsAreaMode::FullTable);
-    let row = full_model_buffer_line(&lines, 0, 200);
+    let row = full_buffer_line(&lines, 0, 200);
     assert!(
         row.contains("in "),
-        "expected relative reset time in wide layout, got: {row:?}"
+        "expected relative reset time in quota summary, got: {row:?}"
+    );
+}
+
+#[test]
+fn full_table_keeps_quota_and_phase_width_tiers_together() {
+    let models = vec![vendor_model_with_axis_score(
+        SubscriptionKind::Claude,
+        "claude-opus-4.7",
+        100.0,
+        0,
+    )];
+
+    let (lines, _) = responsive_models_area(&models, &[], 71, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 71);
+
+    assert!(
+        !row.contains("Idea"),
+        "phase labels must not stay verbose after quota falls to narrow form: {row:?}"
+    );
+    assert!(
+        row.contains("Quota"),
+        "quota label should remain expanded when the phase labels downgrade together: {row:?}"
+    );
+}
+
+#[test]
+fn full_table_expanded_quota_single_digits_use_phase_cell_padding() {
+    let models = vec![model_with_quota(
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.7", 100.0, 0),
+        5,
+    )];
+
+    let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 120);
+
+    assert!(
+        row.contains("Quota  5%"),
+        "single-digit expanded quota should use two spaces like verbose phase cells: {row:?}"
+    );
+    assert!(
+        !row.contains("Quota   5%"),
+        "single-digit expanded quota should not use an independent three-column pad: {row:?}"
+    );
+}
+
+#[test]
+fn full_table_omits_reset_reminder_from_model_rows_but_keeps_quota_summary() {
+    let models = vec![model_with_reset(
+        vendor_model_with_axis_score(SubscriptionKind::Claude, "claude-opus-4.5", 90.0, 0),
+        Utc::now() + Duration::hours(2),
+    )];
+
+    let (lines, mode) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
+
+    assert_eq!(mode, ModelsAreaMode::FullTable);
+    let summary = full_buffer_line(&lines, 0, 200);
+    assert!(
+        summary.contains("Remaining Quota: claude 100% (in "),
+        "quota summary should keep reset reminder: {summary:?}"
+    );
+    let row = full_model_buffer_line(&lines, 0, 200);
+    assert!(
+        !row.contains("in "),
+        "model row should omit reset reminder: {row:?}"
     );
 }
 
@@ -920,10 +984,32 @@ fn wide_layout_marks_past_reset_as_expired() {
 
     let (lines, _) = responsive_models_area(&models, &[], 200, 50, ModelsAreaMode::FullTable);
 
-    let row = full_model_buffer_line(&lines, 0, 200);
+    let row = full_buffer_line(&lines, 0, 200);
     assert!(
         row.contains("expired"),
         "expected expired reset text, got: {row:?}"
+    );
+}
+
+#[test]
+fn full_table_model_row_caps_displayed_quota_at_99() {
+    let models = vec![vendor_model_with_axis_score(
+        SubscriptionKind::Claude,
+        "claude-opus-4.7",
+        100.0,
+        0,
+    )];
+
+    let (lines, _) = responsive_models_area(&models, &[], 120, 50, ModelsAreaMode::FullTable);
+    let row = full_model_buffer_line(&lines, 0, 120);
+
+    assert!(
+        row.contains("Quota 99%"),
+        "model-list quota should cap 100 at 99: {row:?}"
+    );
+    assert!(
+        !row.contains("Quota 100%"),
+        "model-list quota should not show 100: {row:?}"
     );
 }
 

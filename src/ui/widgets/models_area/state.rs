@@ -19,14 +19,8 @@ pub(super) enum ProbColumn {
     TopRank,
     None,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ResetColumn {
-    Shown,
-    Hidden,
-}
 const NAME_WIDTH_MIN: usize = 8;
 const ELLIPSIS: &str = "...";
-pub(super) const VERY_WIDE_THRESHOLD: u16 = 140;
 pub(super) const RESET_TIME_MAX_WIDTH: usize = 12;
 pub(super) fn choose_mode(
     visible_count: u16,
@@ -55,9 +49,8 @@ pub(super) fn name_budget_for(
     vendor_width: usize,
     quota: QuotaColumn,
     prob_col: ProbColumn,
-    reset_col: ResetColumn,
 ) -> usize {
-    let fixed = full_row_fixed_width(vendor_width, quota, prob_col, reset_col);
+    let fixed = full_row_fixed_width(vendor_width, quota, prob_col);
     (width as usize).saturating_sub(fixed)
 }
 pub(super) fn probability_percent(weight: f64, total: f64) -> u8 {
@@ -134,7 +127,6 @@ pub(super) fn full_row_fixed_width(
     vendor_width: usize,
     quota: QuotaColumn,
     prob_col: ProbColumn,
-    reset_col: ResetColumn,
 ) -> usize {
     let probs = match prob_col {
         ProbColumn::IpbrVerbose => 40,
@@ -144,14 +136,10 @@ pub(super) fn full_row_fixed_width(
     };
     let prob_separator = if probs == 0 { 0 } else { 1 };
     let quota_width = match quota {
-        QuotaColumn::Expanded => 10,
+        QuotaColumn::Expanded => 9,
         QuotaColumn::Narrow => 4,
     };
-    let reset_width = match reset_col {
-        ResetColumn::Shown => 1 + RESET_TIME_MAX_WIDTH,
-        ResetColumn::Hidden => 0,
-    };
-    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs + reset_width
+    vendor_width + 1 + 1 + 1 + quota_width + 1 + prob_separator + probs
 }
 fn name_style() -> Style {
     Style::default().fg(Color::Cyan)

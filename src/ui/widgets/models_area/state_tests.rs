@@ -15,28 +15,16 @@ fn choose_mode_holds_full_until_budget_tightens() {
 #[test]
 fn name_budget_for_subtracts_fixed_columns() {
     assert_eq!(
-        name_budget_for(
-            45,
-            6,
-            QuotaColumn::Narrow,
-            ProbColumn::TopRank,
-            ResetColumn::Hidden
-        ),
+        name_budget_for(45, 6, QuotaColumn::Narrow, ProbColumn::TopRank),
         27
     );
 }
 
 #[test]
-fn very_wide_reset_column_consumes_reserved_width() {
+fn verbose_expanded_columns_consume_reserved_width() {
     assert_eq!(
-        name_budget_for(
-            140,
-            6,
-            QuotaColumn::Expanded,
-            ProbColumn::IpbrVerbose,
-            ResetColumn::Shown
-        ),
-        66
+        name_budget_for(140, 6, QuotaColumn::Expanded, ProbColumn::IpbrVerbose),
+        80
     );
 }
 

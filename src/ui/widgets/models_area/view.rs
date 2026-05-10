@@ -9,9 +9,8 @@
 //! shifts.
 pub use super::state::ModelsAreaMode;
 use super::state::{
-    ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, ResetColumn, VERY_WIDE_THRESHOLD, choose_mode,
-    format_name_with_freshness, name_budget_for, name_width_min, probability_color,
-    probability_percent,
+    ProbColumn, QuotaColumn, RESET_TIME_MAX_WIDTH, choose_mode, format_name_with_freshness,
+    name_budget_for, name_width_min, probability_color, probability_percent,
 };
 use crate::app::models::{subscription_color, subscription_tag};
 use crate::model_names;
@@ -83,35 +82,21 @@ fn choose_layout(
     width: u16,
     vendor_width: usize,
     max_req_name_width: usize,
-) -> (QuotaColumn, ProbColumn, ResetColumn) {
+) -> (QuotaColumn, ProbColumn) {
     let layouts = [
         (QuotaColumn::Expanded, ProbColumn::IpbrVerbose),
-        (QuotaColumn::Narrow, ProbColumn::IpbrVerbose),
         (QuotaColumn::Expanded, ProbColumn::Ipbr),
-        (QuotaColumn::Narrow, ProbColumn::Ipbr),
-        (QuotaColumn::Expanded, ProbColumn::TopRank),
         (QuotaColumn::Narrow, ProbColumn::TopRank),
-        (QuotaColumn::Expanded, ProbColumn::None),
         (QuotaColumn::Narrow, ProbColumn::None),
     ];
     for &min_budget in &[max_req_name_width, name_width_min()] {
-        if width >= VERY_WIDE_THRESHOLD {
-            for &(quota, prob) in &layouts {
-                if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Shown)
-                    >= min_budget
-                {
-                    return (quota, prob, ResetColumn::Shown);
-                }
-            }
-        }
         for &(quota, prob) in &layouts {
-            if name_budget_for(width, vendor_width, quota, prob, ResetColumn::Hidden) >= min_budget
-            {
-                return (quota, prob, ResetColumn::Hidden);
+            if name_budget_for(width, vendor_width, quota, prob) >= min_budget {
+                return (quota, prob);
             }
         }
     }
-    (QuotaColumn::Narrow, ProbColumn::None, ResetColumn::Hidden)
+    (QuotaColumn::Narrow, ProbColumn::None)
 }
 fn render_full_table(
     models: &[CachedModel],
@@ -130,9 +115,9 @@ fn render_full_table(
         .max()
         .unwrap_or(0);
     let vendor_width = vendor_column_width();
-    let (quota_col, prob_col, reset_col) = choose_layout(width, vendor_width, max_req_name_width);
+    let (quota_col, prob_col) = choose_layout(width, vendor_width, max_req_name_width);
     let name_width =
-        name_budget_for(width, vendor_width, quota_col, prob_col, reset_col).max(name_width_min());
+        name_budget_for(width, vendor_width, quota_col, prob_col).max(name_width_min());
     // Sampling probability cells are sourced from the candidate-pool
     // scorer in ranking.rs: softmax over phase rank weighted by relative
     // quota pressure, normalized within the assembled set. That keeps the
@@ -232,19 +217,29 @@ fn render_full_table(
         let dot_span = Span::styled(STATUS_DOT, Style::default().fg(dot_color));
         let (quota_text, quota_color) = if vendor_failed {
             match quota_col {
-                QuotaColumn::Expanded => ("Quota  --%".to_string(), Color::Red),
+                QuotaColumn::Expanded => ("Quota --%".to_string(), Color::Red),
                 QuotaColumn::Narrow => (" --%".to_string(), Color::Red),
             }
         } else {
             match model.quota_percent {
                 Some(v) => match quota_col {
                     QuotaColumn::Expanded => {
-                        (format!("Quota {:>3}%", v), probability_color(v, 100))
+                        let displayed = display_quota_percent(v);
+                        (
+                            format!("Quota {:>2}%", displayed),
+                            probability_color(displayed, 100),
+                        )
                     }
-                    QuotaColumn::Narrow => (format!("{:>3}%", v), probability_color(v, 100)),
+                    QuotaColumn::Narrow => {
+                        let displayed = display_quota_percent(v);
+                        (
+                            format!("{:>3}%", displayed),
+                            probability_color(displayed, 100),
+                        )
+                    }
                 },
                 None => match quota_col {
-                    QuotaColumn::Expanded => ("Quota  --%".to_string(), Color::DarkGray),
+                    QuotaColumn::Expanded => ("Quota --%".to_string(), Color::DarkGray),
                     QuotaColumn::Narrow => (" --%".to_string(), Color::DarkGray),
                 },
             }
@@ -319,21 +314,6 @@ fn render_full_table(
             }
             ProbColumn::None => {}
         }
-        if let ResetColumn::Shown = reset_col {
-            spans.push(Span::raw(" "));
-            if let Some(quota_resets_at) = model.quota_resets_at {
-                let text = format_reset_time(quota_resets_at);
-                let pad = RESET_TIME_MAX_WIDTH.saturating_sub(text.width());
-                if pad > 0 {
-                    spans.push(Span::raw(" ".repeat(pad)));
-                }
-                spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
-            } else {
-                // Keep the column reserved so rows stay aligned even when only
-                // some providers currently expose reset timestamps.
-                spans.push(Span::raw(" ".repeat(RESET_TIME_MAX_WIDTH)));
-            }
-        }
         spans.push(Span::raw(" "));
         spans.push(quota_span);
         lines.push(Line::from(spans));
@@ -369,6 +349,9 @@ fn format_reset_time(dt: DateTime<Utc>) -> String {
         width += ch_width;
     }
     truncated
+}
+fn display_quota_percent(value: u8) -> u8 {
+    value.min(99)
 }
 // ---------------------------------------------------------------------------
 // Probability column helpers

@@ -3,12 +3,9 @@ use tempfile::TempDir;
 
 fn sample_entries() -> Vec<DashboardEntry> {
     vec![DashboardEntry {
-        dashboard_vendor: "claude".to_string(),
         name: "claude-sonnet".to_string(),
         ipbr_phase_scores: IpbrPhaseScores::default(),
         score_source: ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         display_order: 0,
     }]
 }
@@ -155,19 +152,16 @@ fn old_v7_cache_cannot_masquerade_as_current_cache() {
 }
 
 #[test]
-fn old_v8_normalized_dashboard_names_are_invalidated() {
+fn old_v8_dashboard_payload_is_invalidated() {
     let dir = TempDir::new().unwrap();
     let old_payload = serde_json::json!({
         "version": 8,
         "dashboard": {
             "fetched_at": now_secs(),
             "data": [{
-                "vendor": "anthropic",
-                "name": "claude-opus-4-6",
+                "name": "claude-opus-4.6",
                 "ipbr_phase_scores": {"idea": 91.0, "planning": 90.0, "build": 89.0, "review": 88.0},
                 "score_source": "ipbr",
-                "ipbr_row_matched": true,
-                "ipbr_match_key": "claude-opus-4-6",
                 "display_order": 0
             }]
         },
@@ -184,7 +178,7 @@ fn old_v8_normalized_dashboard_names_are_invalidated() {
 
     assert!(
         loaded.dashboard.is_none(),
-        "v8 normalized dashboard names must be refreshed under v{CACHE_VERSION}"
+        "v8 dashboard payload must be refreshed under v{CACHE_VERSION}"
     );
 }
 
@@ -283,11 +277,6 @@ fn entry_missing_ipbr_fields_defaults_to_unscored_non_ipbr() {
         "missing provenance must not default to Ipbr"
     );
     assert_eq!(entry.score_source, ScoreSource::None);
-    assert!(
-        !entry.ipbr_row_matched,
-        "no ipbr row should appear matched without explicit data"
-    );
-    assert_eq!(entry.ipbr_match_key, None);
 }
 
 #[test]
@@ -390,26 +379,32 @@ fn cache_file_omits_legacy_rank_weight_and_aistupidlevel_fields() {
 
     let text = fs::read_to_string(dir.path().join("models.json")).unwrap();
 
-    for forbidden in [
-        "idea_rank",
-        "planning_rank",
-        "build_rank",
-        "review_rank",
-        "idea_weight",
-        "planning_weight",
-        "build_weight",
-        "review_weight",
-        "stupid_level",
+    let forbidden = vec![
+        "idea_rank".to_string(),
+        "planning_rank".to_string(),
+        "build_rank".to_string(),
+        "review_rank".to_string(),
+        "idea_weight".to_string(),
+        "planning_weight".to_string(),
+        "build_weight".to_string(),
+        "review_weight".to_string(),
+        "stupid_level".to_string(),
         // v8 dropped these legacy aistupidlevel-shaped fields.
-        "axes",
-        "axis_provenance",
-        "overall_score",
-        "current_score",
-        "standard_error",
-        "fallback_from",
-    ] {
+        "axes".to_string(),
+        "axis_provenance".to_string(),
+        "overall_score".to_string(),
+        "current_score".to_string(),
+        "standard_error".to_string(),
+        "fallback_from".to_string(),
+        // v10 dropped raw upstream vendor strings and dashboard/IPBR
+        // match metadata.
+        "vendor".to_string(),
+        format!("{}{}", "ipbr_", "row_matched"),
+        format!("{}{}", "ipbr_", "match_key"),
+    ];
+    for forbidden in forbidden {
         assert!(
-            !text.contains(forbidden),
+            !text.contains(&forbidden),
             "cache file unexpectedly contained legacy field {forbidden}"
         );
     }

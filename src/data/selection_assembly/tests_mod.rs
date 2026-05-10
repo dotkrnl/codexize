@@ -2,14 +2,11 @@ use super::*;
 use crate::cache::{self, DashboardEntry, LoadedCache, LoadedSection, QuotaPayload, ResetPayload};
 use std::collections::BTreeMap;
 
-fn make_entry(name: &str, vendor: &str) -> DashboardEntry {
+fn make_entry(name: &str, _vendor: &str) -> DashboardEntry {
     DashboardEntry {
-        dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         display_order: 0,
     }
 }

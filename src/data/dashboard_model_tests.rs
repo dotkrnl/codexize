@@ -1,9 +1,8 @@
 use super::*;
 
-fn ipbr_score(name: &str, vendor: &str, value: f64, order: usize) -> ScoreEntry {
+fn ipbr_score(name: &str, value: f64, order: usize) -> ScoreEntry {
     ScoreEntry {
         name: name.to_string(),
-        vendor: vendor.to_string(),
         display_order: order,
         ipbr_phase_scores: IpbrPhaseScores {
             idea: Some(value),
@@ -12,15 +11,14 @@ fn ipbr_score(name: &str, vendor: &str, value: f64, order: usize) -> ScoreEntry 
             review: Some(value + 3.0),
         },
         score_source: ScoreSource::Ipbr,
-        ipbr_row_matched: true,
     }
 }
 
 #[test]
 fn models_surface_directly_from_ipbr_scores() {
     let result = models_from_scores(vec![
-        ipbr_score("claude-opus-4.6", "anthropic", 91.0, 2),
-        ipbr_score("gpt-5.4", "openai", 87.0, 1),
+        ipbr_score("claude-opus-4.6", 91.0, 2),
+        ipbr_score("gpt-5.4", 87.0, 1),
     ]);
 
     assert!(result.warnings.is_empty());
@@ -32,32 +30,23 @@ fn models_surface_directly_from_ipbr_scores() {
             .collect::<Vec<_>>(),
         vec!["gpt-5.4", "claude-opus-4.6"]
     );
-    assert_eq!(result.models[1].dashboard_vendor, "anthropic");
-    assert_eq!(
-        result.models[1].ipbr_match_key.as_deref(),
-        Some("claude-opus-4.6")
-    );
     assert_eq!(result.models[1].ipbr_phase_scores.build, Some(93.0));
 }
 
 #[test]
 fn models_keep_canonical_punctuation_without_normalization() {
-    let result = models_from_scores(vec![ipbr_score("claude-opus-4.6", "anthropic", 90.0, 0)]);
+    let result = models_from_scores(vec![ipbr_score("claude-opus-4.6", 90.0, 0)]);
 
     assert_eq!(result.models.len(), 1);
     assert_eq!(result.models[0].name, "claude-opus-4.6");
-    assert_eq!(
-        result.models[0].ipbr_match_key.as_deref(),
-        Some("claude-opus-4.6")
-    );
 }
 
 #[test]
 fn duplicate_ipbr_display_names_are_dropped_and_warned() {
     let result = models_from_scores(vec![
-        ipbr_score("claude-opus-4.6", "anthropic", 90.0, 1),
-        ipbr_score("claude-opus-4.6", "anthropic", 80.0, 2),
-        ipbr_score("gpt-5.4", "openai", 70.0, 3),
+        ipbr_score("claude-opus-4.6", 90.0, 1),
+        ipbr_score("claude-opus-4.6", 80.0, 2),
+        ipbr_score("gpt-5.4", 70.0, 3),
     ]);
 
     assert_eq!(result.models.len(), 1);
@@ -76,10 +65,8 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
     let mut out = String::new();
     for model in sorted {
         out.push_str(&format!("- name: {}\n", model.name));
-        out.push_str(&format!("  vendor: {}\n", model.dashboard_vendor));
         out.push_str(&format!("  display_order: {}\n", model.display_order));
         out.push_str(&format!("  score_source: {:?}\n", model.score_source));
-        out.push_str(&format!("  ipbr_row_matched: {}\n", model.ipbr_row_matched));
         out.push_str(&format!(
             "  ipbr_phase_scores: idea={:?} planning={:?} build={:?} review={:?}\n",
             model.ipbr_phase_scores.idea,
@@ -94,8 +81,8 @@ fn render_dashboard_models(models: &[DashboardModel]) -> String {
 #[test]
 fn dashboard_model_after_representative_merge_snapshot() {
     let result = models_from_scores(vec![
-        ipbr_score("claude-opus-4.6", "anthropic", 91.0, 0),
-        ipbr_score("gpt-5.4", "openai", 87.0, 1),
+        ipbr_score("claude-opus-4.6", 91.0, 0),
+        ipbr_score("gpt-5.4", 87.0, 1),
     ]);
 
     insta::assert_snapshot!(

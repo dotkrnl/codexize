@@ -35,8 +35,6 @@ fn fixture_cached_models() -> Vec<CachedModel> {
                     review: scores.get("review").copied(),
                 },
                 score_source: crate::selection::ScoreSource::Ipbr,
-                ipbr_row_matched: true,
-                ipbr_match_key: Some(name),
                 candidates: Vec::new(),
                 selected_candidate: None,
                 quota_percent: Some(80),
@@ -141,9 +139,7 @@ fn ranking_order_among_healthy_models_unchanged() {
 const IPBR_FIXTURE: &str = r#"
 [[models]]
 display_name = "claude-opus-4.7"
-canonical_id = "anthropic/claude-opus-4-7"
 vendor = "anthropic"
-aliases = ["claude_opus_4_7"]
 unknown_top_level = "ignored"
 
 [models.scores]
@@ -155,9 +151,7 @@ unused_extra = 7.0
 
 [[models]]
 display_name = "GPT-5.4"
-canonical_id = "openai/gpt-5-4"
 vendor = "openai"
-aliases = ["gpt5.4"]
 
 [models.scores]
 i_adj = 80.0
@@ -180,9 +174,7 @@ fn parse_ipbr_uses_display_name_as_canonical_model_name() {
         .iter()
         .find(|e| e.name == "claude-opus-4.7")
         .unwrap();
-    assert_eq!(opus.vendor, "anthropic");
     assert_eq!(opus.score_source, ScoreSource::Ipbr);
-    assert!(opus.ipbr_row_matched);
     assert_eq!(opus.ipbr_phase_scores.idea, Some(92.5));
     assert_eq!(opus.ipbr_phase_scores.planning, Some(91.0));
     assert_eq!(opus.ipbr_phase_scores.build, Some(90.0));
@@ -191,8 +183,8 @@ fn parse_ipbr_uses_display_name_as_canonical_model_name() {
 
 #[test]
 fn parse_ipbr_name_is_lowercase_only_without_punctuation_normalization() {
-    // Provider entries must use IPBR's canonical display_name. A dotted
-    // form like `gpt-5.4` must not become `gpt-5-4`.
+    // Provider entries must use IPBR's canonical display_name. Dots must
+    // not be converted to dashes.
     let entries = parse_ipbr_scoreboard(IPBR_FIXTURE).expect("fixture should parse");
     let gpt = entries.iter().find(|e| e.name == "gpt-5.4").unwrap();
     assert_eq!(gpt.name, "gpt-5.4");
@@ -209,7 +201,6 @@ fn parse_ipbr_row_missing_one_phase_marks_only_that_phase_absent() {
     assert_eq!(gpt.ipbr_phase_scores.build, Some(78.0));
     assert_eq!(gpt.ipbr_phase_scores.review, Some(77.0));
     assert_eq!(gpt.score_source, ScoreSource::Ipbr);
-    assert!(gpt.ipbr_row_matched);
 }
 
 #[test]
@@ -221,7 +212,6 @@ fn parse_ipbr_row_missing_all_phases_is_parseable_but_carries_no_ranking_authori
     // Provenance is still ipbr because the row itself came from ipbr;
     // selection layers must consult ipbr_phase_scores, not provenance.
     assert_eq!(gemini.score_source, ScoreSource::Ipbr);
-    assert!(gemini.ipbr_row_matched);
 }
 
 #[test]
@@ -265,5 +255,4 @@ fn parse_ipbr_scoreboard_is_what_load_scores_uses() {
         parse_ipbr_scoreboard("[[models]]\ndisplay_name = \"x\"\nvendor = \"v\"\n").unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "x");
-    assert_eq!(entries[0].vendor, "v");
 }

@@ -10,17 +10,12 @@ pub const IPBR_SCOREBOARD_URL: &str = "https://ipbr.dev/scoreboard.toml";
 #[derive(Debug, Clone)]
 pub struct DashboardModel {
     pub name: String,
-    pub dashboard_vendor: String,
     /// Per-phase ipbr rank scores. `None` per phase means the matched
     /// ipbr row did not provide that phase score.
     pub ipbr_phase_scores: crate::selection::IpbrPhaseScores,
     /// Where the per-phase rank scores came from. Defaults to
     /// `ScoreSource::None`; only `Ipbr` may drive automatic selection.
     pub score_source: crate::selection::ScoreSource,
-    /// `true` when this model matched an ipbr row by normalized exact
-    /// key. Inventory-/CLI-only visible models keep this `false`.
-    pub ipbr_row_matched: bool,
-    pub ipbr_match_key: Option<String>,
     pub display_order: usize,
 }
 /// Outcome of a dashboard refresh. ipbr is the sole authoritative source;
@@ -67,8 +62,6 @@ struct IpbrModelRow {
     #[serde(default)]
     display_name: String,
     #[serde(default)]
-    vendor: String,
-    #[serde(default)]
     scores: Option<IpbrScoresRow>,
 }
 #[derive(Debug, Deserialize, Default)]
@@ -89,7 +82,7 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
     for (i, row) in board.models.into_iter().enumerate() {
         // `display_name` is the canonical model id. Lowercase it for
         // case-stable provider matching, but do not collapse punctuation:
-        // `claude-opus-4.6` and `claude-opus-4-6` are different ids.
+        // `example-1.0` and `example-1-0` are different ids.
         let display_key = row.display_name.trim().to_ascii_lowercase();
         if display_key.is_empty() {
             // No usable display_name: cannot index this row. Skip rather
@@ -106,11 +99,9 @@ fn parse_ipbr_scoreboard(body: &str) -> Result<Vec<ScoreEntry>> {
         };
         entries.push(ScoreEntry {
             name: display_key,
-            vendor: row.vendor.trim().to_ascii_lowercase(),
             display_order: i,
             ipbr_phase_scores: phase_scores,
             score_source: ScoreSource::Ipbr,
-            ipbr_row_matched: true,
         });
     }
     anyhow::ensure!(!entries.is_empty(), "ipbr scoreboard returned no models");

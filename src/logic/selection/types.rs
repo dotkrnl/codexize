@@ -142,15 +142,6 @@ pub struct ModelRow {
     /// `ScoreSource::None`. Selection MUST treat anything other than
     /// `Ipbr` as unranked.
     pub score_source: ScoreSource,
-    /// `true` when this model matched an ipbr row by normalized exact key;
-    /// `false` for inventory-/CLI-only visible models. Distinguishes
-    /// "matched ipbr row but missing phase score" (still eligible for
-    /// other phases) from "no ipbr row at all".
-    pub ipbr_row_matched: bool,
-    /// Stored normalized/canonical ipbr match key. Route subscriptions can expose
-    /// different model labels for the same ipbr row, so later dedup must use
-    /// this stable key instead of recomputing from display names.
-    pub ipbr_match_key: Option<String>,
     pub candidates: Vec<Candidate>,
     pub selected_candidate: Option<usize>,
     pub quota_percent: Option<u8>,

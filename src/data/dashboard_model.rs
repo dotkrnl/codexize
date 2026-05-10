@@ -9,11 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone)]
 pub(crate) struct ScoreEntry {
     pub(crate) name: String,
-    pub(crate) vendor: String,
     pub(crate) display_order: usize,
     pub(crate) ipbr_phase_scores: IpbrPhaseScores,
     pub(crate) score_source: ScoreSource,
-    pub(crate) ipbr_row_matched: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -51,16 +49,9 @@ pub(crate) fn models_from_scores(scores: Vec<ScoreEntry>) -> MergeResult {
 
 fn dashboard_model_from_score(score: ScoreEntry) -> DashboardModel {
     DashboardModel {
-        name: score.name.clone(),
-        dashboard_vendor: score.vendor,
+        name: score.name,
         ipbr_phase_scores: score.ipbr_phase_scores,
         score_source: score.score_source,
-        ipbr_row_matched: score.ipbr_row_matched,
-        ipbr_match_key: if score.ipbr_row_matched {
-            Some(score.name)
-        } else {
-            None
-        },
         display_order: score.display_order,
     }
 }

@@ -6,11 +6,9 @@ fn sample_cached_model() -> CachedModel {
         name: "gpt-5.5".to_string(),
         ipbr_phase_scores: IpbrPhaseScores::default(),
         score_source: ScoreSource::None,
-        ipbr_row_matched: false,
         quota_percent: Some(73),
         quota_resets_at: None,
         display_order: 2,
-        ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
     }
@@ -29,7 +27,7 @@ fn cached_model_clone_and_fields_remain_accessible() {
 }
 
 #[test]
-fn new_ipbr_fields_default_to_unscored_and_unmatched() {
+fn new_ipbr_fields_default_to_unscored() {
     let model = sample_cached_model();
 
     assert_eq!(model.ipbr_phase_scores, IpbrPhaseScores::default());
@@ -38,8 +36,6 @@ fn new_ipbr_fields_default_to_unscored_and_unmatched() {
     assert_eq!(model.ipbr_phase_scores.build, None);
     assert_eq!(model.ipbr_phase_scores.review, None);
     assert_eq!(model.score_source, ScoreSource::None);
-    assert!(!model.ipbr_row_matched);
-    assert_eq!(model.ipbr_match_key, None);
 }
 
 #[test]
@@ -55,7 +51,7 @@ fn sample_candidate() -> Candidate {
     Candidate {
         subscription: SubscriptionKind::Claude,
         cli: CliKind::Claude,
-        launch_name: "claude-opus-4-7".to_string(),
+        launch_name: "claude-opus-4.7".to_string(),
         quota_percent: Some(60),
         quota_resets_at: None,
         display_order: 0,

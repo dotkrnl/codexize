@@ -6,8 +6,6 @@ fn sample_cached_model() -> CachedModel {
         name: "gpt-5.5".to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: Some(80),
@@ -26,7 +24,6 @@ fn ipbr_model(name: &str, score: f64, quota_percent: Option<u8>) -> CachedModel 
             review: Some(score + 3.0),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        ipbr_row_matched: true,
         quota_percent,
         ..sample_cached_model()
     }
@@ -42,7 +39,6 @@ fn phase_rank_score_maps_each_phase_to_ipbr_field() {
             review: Some(44.0),
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        ipbr_row_matched: true,
         ..sample_cached_model()
     };
 
@@ -63,7 +59,6 @@ fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
             ..crate::selection::IpbrPhaseScores::default()
         },
         score_source: crate::selection::ScoreSource::Ipbr,
-        ipbr_row_matched: true,
         ..sample_cached_model()
     };
     let unranked = CachedModel {
@@ -72,7 +67,6 @@ fn phase_rank_score_returns_none_when_phase_score_or_ipbr_source_missing() {
             ..crate::selection::IpbrPhaseScores::default()
         },
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
         ..sample_cached_model()
     };
 

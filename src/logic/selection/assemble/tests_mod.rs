@@ -249,27 +249,22 @@ fn all_clis() -> BTreeSet<CliKind> {
     .collect()
 }
 
-fn make_entry(name: &str, vendor: &str) -> DashboardEntry {
-    make_entry_with_order(name, vendor, 0)
+fn make_entry(name: &str, _vendor: &str) -> DashboardEntry {
+    make_entry_with_order(name, _vendor, 0)
 }
 
-fn make_entry_with_order(name: &str, vendor: &str, display_order: usize) -> DashboardEntry {
+fn make_entry_with_order(name: &str, _vendor: &str, display_order: usize) -> DashboardEntry {
     DashboardEntry {
-        dashboard_vendor: vendor.to_string(),
         name: name.to_string(),
         ipbr_phase_scores: crate::selection::IpbrPhaseScores::default(),
         score_source: crate::selection::ScoreSource::None,
-        ipbr_row_matched: false,
-        ipbr_match_key: None,
         display_order,
     }
 }
 
-fn make_ipbr_entry(name: &str, vendor: &str, match_key: &str) -> DashboardEntry {
+fn make_ipbr_entry(name: &str, vendor: &str, _match_key: &str) -> DashboardEntry {
     let mut entry = make_entry(name, vendor);
     entry.score_source = ScoreSource::Ipbr;
-    entry.ipbr_row_matched = true;
-    entry.ipbr_match_key = Some(match_key.to_string());
     entry
 }
 
@@ -287,7 +282,6 @@ fn ipbr_matched_row_name_uses_display_canonical_not_normalized_key() {
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].name, "claude-opus-4.6");
-    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4.6"));
 }
 
 fn opencode_available() -> BTreeSet<CliKind> {
@@ -448,6 +442,48 @@ fn assemble_omits_models_with_unknown_vendor() {
     let models = assemble_from_cache(loaded_cache_with(dashboard, quotas));
 
     assert!(models.is_empty());
+}
+
+#[test]
+fn assemble_warns_only_for_provider_models_missing_from_ipbr() {
+    use crate::data::config::schema::{EffortMapping, ProviderEntry};
+    let mut dashboard: Vec<DashboardEntry> = crate::logic::selection::baked::BAKED_TABLE
+        .iter()
+        .map(|row| make_ipbr_entry(row.model, "ipbr", row.model))
+        .collect();
+    dashboard.push(make_ipbr_entry("ipbr-only-row", "ipbr", "ipbr-only-row"));
+    let providers = vec![ProviderEntry {
+        cli: CliKind::Claude,
+        launch_name: "grok-4-latest".to_string(),
+        model: "grok-4-latest".to_string(),
+        subscription: SubscriptionKind::Claude,
+        enabled: true,
+        free: false,
+        official: true,
+        quota_disabled: false,
+        cheap_eligible: false,
+        tough_eligible: true,
+        effort_eligible: true,
+        effort_mapping: EffortMapping::default(),
+        quota_lookup_key: None,
+        display_order: 0,
+    }];
+
+    let (_models, warnings) = assemble_universe(
+        dashboard,
+        QuotaPayload::default(),
+        BTreeMap::new(),
+        &all_clis(),
+        &providers,
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("provider model 'grok-4-latest' is not present in ipbr"));
+    assert!(
+        !warnings[0].contains("ipbr-only-row"),
+        "unsupported IPBR rows should not warn: {:?}",
+        warnings
+    );
 }
 
 #[test]
@@ -675,7 +711,6 @@ fn provider_launch_name_can_differ_from_canonical_model_name() {
         "opencode-go/claude-opus-4.7"
     );
     assert_eq!(models[0].quota_percent, None);
-    assert_eq!(models[0].ipbr_match_key.as_deref(), Some("claude-opus-4.7"));
 }
 
 #[test]
@@ -1004,7 +1039,7 @@ fn ladder_returns_none_when_every_candidate_is_disabled() {
 
 #[test]
 fn provider_override_disables_baked_candidate_in_universe() {
-    // Operator marks the baked claude/claude-opus-4-7 tuple as
+    // Operator marks the baked claude/claude-opus-4.7 tuple as
     // disabled via `[[providers]]`; assemble must propagate the flag
     // so `select_candidate_index` skips it. The dashboard row stays
     // present (no auto-deletion), but it has zero selectable
@@ -1054,7 +1089,7 @@ fn provider_override_disables_baked_candidate_in_universe() {
 #[test]
 fn provider_addition_appends_routed_candidate_to_dashboard_row() {
     // The user adds an opencode-routed alternative for an existing
-    // claude-opus-4-7 dashboard row. The natural Claude candidate is
+    // claude-opus-4.7 dashboard row. The natural Claude candidate is
     // still produced (with its baked flags) AND the OpencodeGo
     // candidate appears as an addition with the user-supplied flags.
     use crate::data::config::schema::{EffortMapping, ProviderEntry};

@@ -73,6 +73,10 @@ pub fn assemble_universe(
     // inventory; IPBR supplies scores for matching canonical row names.
     let resolved_providers = baked::merge_with_overrides(providers);
     let providers_by_row = group_providers_by_row(&resolved_providers);
+    let ipbr_model_names: BTreeSet<String> = dashboard_entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect();
 
     let mut rows: BTreeMap<String, CachedModel> = BTreeMap::new();
     let mut consumed_providers: BTreeSet<(SubscriptionKind, String, CliKind, String)> =
@@ -96,7 +100,11 @@ pub fn assemble_universe(
         );
     }
 
-    let free_model_warnings: Vec<String> = Vec::new();
+    let warnings = providers_by_row
+        .keys()
+        .filter(|model| !ipbr_model_names.contains(*model))
+        .map(|model| format!("provider model '{model}' is not present in ipbr"))
+        .collect::<Vec<_>>();
 
     let mut models: Vec<CachedModel> = rows
         .into_values()
@@ -110,7 +118,7 @@ pub fn assemble_universe(
             .cmp(&b.display_order)
             .then_with(|| a.name.cmp(&b.name))
     });
-    (models, free_model_warnings)
+    (models, warnings)
 }
 
 fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
@@ -119,8 +127,6 @@ fn row_from_entry(name: String, entry: &DashboardEntry) -> CachedModel {
         name,
         ipbr_phase_scores: entry.ipbr_phase_scores,
         score_source: entry.score_source,
-        ipbr_row_matched: entry.ipbr_row_matched,
-        ipbr_match_key: entry.ipbr_match_key.clone(),
         candidates: Vec::new(),
         selected_candidate: None,
         quota_percent: None,
@@ -423,12 +429,9 @@ pub fn dashboard_models_to_entries(models: &[DashboardModel]) -> Vec<DashboardEn
     models
         .iter()
         .map(|m| DashboardEntry {
-            dashboard_vendor: m.dashboard_vendor.clone(),
             name: m.name.clone(),
             ipbr_phase_scores: m.ipbr_phase_scores,
             score_source: m.score_source,
-            ipbr_row_matched: m.ipbr_row_matched,
-            ipbr_match_key: m.ipbr_match_key.clone(),
             display_order: m.display_order,
         })
         .collect()

@@ -218,8 +218,6 @@ mod tests {
                 ..IpbrPhaseScores::default()
             },
             score_source: ScoreSource::Ipbr,
-            ipbr_row_matched: true,
-            ipbr_match_key: Some("dream-model".to_string()),
             candidates: Vec::new(),
             selected_candidate: None,
             quota_percent: Some(100),

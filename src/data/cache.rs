@@ -9,11 +9,10 @@ use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const TTL: Duration = Duration::from_secs(30 * 60);
-/// Bumped to 9 because dashboard rows are now exact IPBR `display_name`
-/// records with no CLI inventory merge and no normalized alias key. v8
-/// caches can contain normalized names such as `claude-opus-4-6`, so they
-/// must be dropped and refreshed from IPBR.
-pub const CACHE_VERSION: u32 = 9;
+/// Bumped to 10 because dashboard rows no longer persist raw upstream
+/// vendor strings or legacy IPBR match metadata. Cached dashboard rows
+/// must refresh into the exact provider/IPBR canonical shape.
+pub const CACHE_VERSION: u32 = 10;
 pub const DASHBOARD_TTL: Duration = Duration::from_secs(30 * 60);
 pub const QUOTA_TTL: Duration = Duration::from_secs(10 * 60);
 // ---------------------------------------------------------------------------
@@ -50,12 +49,6 @@ pub struct Section<T> {
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DashboardEntry {
-    /// Renamed from `vendor` in-source to `dashboard_vendor` for symmetry
-    /// with `DashboardModel.dashboard_vendor`. The on-disk JSON field is
-    /// kept as `"vendor"` via `#[serde(rename)]` so existing cache files
-    /// continue to load without churning the JSON shape unnecessarily.
-    #[serde(rename = "vendor")]
-    pub dashboard_vendor: String,
     pub name: String,
     /// Per-phase ipbr rank scores. `None` per phase means the matched
     /// ipbr row did not provide that phase score.
@@ -66,13 +59,6 @@ pub struct DashboardEntry {
     /// `Ipbr` authority.
     #[serde(default)]
     pub score_source: ScoreSource,
-    /// `true` when this row matched an ipbr scoreboard row by normalized
-    /// exact key. Defaults to `false` so legacy/inventory-only entries
-    /// do not appear matched.
-    #[serde(default)]
-    pub ipbr_row_matched: bool,
-    #[serde(default)]
-    pub ipbr_match_key: Option<String>,
     pub display_order: usize,
 }
 /// Per-vendor map of model name → optional quota percentage, paired

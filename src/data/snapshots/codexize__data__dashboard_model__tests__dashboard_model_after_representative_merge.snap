@@ -4,14 +4,10 @@ assertion_line: 101
 expression: render_dashboard_models(&result.models)
 ---
 - name: claude-opus-4.6
-  vendor: anthropic
   display_order: 0
   score_source: Ipbr
-  ipbr_row_matched: true
   ipbr_phase_scores: idea=Some(91.0) planning=Some(92.0) build=Some(93.0) review=Some(94.0)
 - name: gpt-5.4
-  vendor: openai
   display_order: 1
   score_source: Ipbr
-  ipbr_row_matched: true
   ipbr_phase_scores: idea=Some(87.0) planning=Some(88.0) build=Some(89.0) review=Some(90.0)

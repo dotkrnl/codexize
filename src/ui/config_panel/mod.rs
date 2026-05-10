@@ -44,6 +44,7 @@ const COLOR_DIM: Color = Color::Gray;
 const COLOR_DANGER: Color = Color::Red;
 const COLOR_OK: Color = Color::Green;
 const COLOR_SECTION_TITLE: Color = Color::Magenta;
+const COLOR_READONLY: Color = Color::Rgb(160, 160, 160);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldKind {
@@ -2737,22 +2738,16 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
     let value_w = width.saturating_sub(prefix_w + chip_w).max(1);
     let value_clipped = ellipsize_end(&value_text, value_w);
 
-    // Locked fields render fully dim regardless of focus so the
-    // "you can't edit this" affordance reads at a glance — italics on
-    // top of the dim color reinforces it for readers paying attention.
+    // Locked fields render in light gray to signal "read-only" at a glance.
     let label_style = if field_locked {
-        Style::default()
-            .fg(COLOR_DIM)
-            .add_modifier(Modifier::ITALIC)
+        Style::default().fg(COLOR_READONLY)
     } else if focused {
         Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
     let value_style = if field_locked {
-        Style::default()
-            .fg(COLOR_DIM)
-            .add_modifier(Modifier::ITALIC)
+        Style::default().fg(COLOR_READONLY)
     } else if focused
         && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {

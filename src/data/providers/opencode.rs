@@ -1,20 +1,12 @@
-//! Opencode provider IO: model enumeration and quota estimation.
+//! Opencode provider IO: quota estimation.
 //!
 //! Quota cascade: opencode does not currently expose a Go-tier remaining
 //! quota through a stable machine-readable surface, so we estimate from the
 //! `opencode stats --days 30 --models` output (which lists per-model spend
 //! the CLI itself computed) against the documented $60 Go API allowance.
 //! Any cookie/login-based path is intentionally absent — operator override.
-//!
-//! Enumeration cascade: prefer `opencode models opencode --verbose`. There
-//! is no hardcoded fallback — the per-tier model catalogue lives in
-//! `crate::logic::selection::baked::BAKED_TABLE` and CLI-failure simply
-//! yields an empty inventory contribution from this layer. No HTTP catalog
-//! endpoint is hit because opencode.ai exposes no documented unauthenticated
-//! catalog and authenticated cookie flows are out of scope.
 use super::LiveModel;
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
 use std::process::Command;
 /// Documented Go-tier API allowance the percentage scale is normalized
 /// against. If opencode raises or splits the cap, this constant moves with it.
@@ -26,21 +18,6 @@ const GO_PROVIDER_PREFIX: &str = "opencode-go/";
 /// `logic::selection::quota` will pick this single entry up regardless of
 /// which opencode model the universe is asking about.
 pub const SHARED_QUOTA_KEY: &str = "opencode-shared";
-/// Metadata describing one model opencode advertises. The selection layer
-/// later intersects these against ipbr to decide which actually surface.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpencodeModelMeta {
-    /// Bare model id (e.g. `gpt-5-nano`), as advertised by opencode.
-    pub id: String,
-    /// Provider id from the route header (typically `opencode`).
-    pub provider_id: String,
-    /// Pretty display name when the CLI provides one.
-    pub display_name: Option<String>,
-    /// `api.npm` field — preserved for diagnostics; underlying-vendor
-    /// inference is no longer performed here, since the per-tier catalogue
-    /// in `BAKED_TABLE` carries the authoritative subscription mapping.
-    pub api_npm: Option<String>,
-}
 /// Live quota fetch entry point used by the data-side selection plumbing.
 pub async fn load_live_models_async() -> Result<Vec<LiveModel>> {
     let stats_text = run_stats_command()?;
@@ -112,83 +89,6 @@ pub fn extract_go_tier_spend(stats_text: &str) -> Result<f64> {
     }
     Ok(total)
 }
-/// Enumerate models advertised by opencode across both the `opencode` and
-/// `opencode-go` providers. CLI-failure on either branch yields an empty
-/// contribution from that branch — the per-tier catalogue lives in
-/// `BAKED_TABLE`, not here.
-pub fn enumerate_models() -> Vec<OpencodeModelMeta> {
-    enumerate_with_cli_texts(
-        run_models_command(OPENCODE_PROVIDER).ok().as_deref(),
-        run_models_command(OPENCODE_GO_PROVIDER).ok().as_deref(),
-    )
-}
-/// Enumeration with the CLI invocations factored out so per-branch behavior
-/// is fixture-testable. Each `Option<&str>` may carry the CLI output for
-/// that provider; passing `None` simulates CLI failure for that branch,
-/// which contributes no rows (the empty `hardcoded_fallback_for`).
-pub fn enumerate_with_cli_texts(
-    opencode_text: Option<&str>,
-    opencode_go_text: Option<&str>,
-) -> Vec<OpencodeModelMeta> {
-    let mut models = enumerate_provider(opencode_text, OPENCODE_PROVIDER);
-    models.extend(enumerate_provider(opencode_go_text, OPENCODE_GO_PROVIDER));
-    models
-}
-fn enumerate_provider(cli_text: Option<&str>, provider: &str) -> Vec<OpencodeModelMeta> {
-    if let Some(text) = cli_text {
-        let parsed: Vec<OpencodeModelMeta> = parse_verbose_models(text)
-            .into_iter()
-            .filter(|m| m.provider_id == provider)
-            .collect();
-        if !parsed.is_empty() {
-            return parsed;
-        }
-    }
-    hardcoded_fallback_for(provider)
-}
-const OPENCODE_PROVIDER: &str = "opencode";
-const OPENCODE_GO_PROVIDER: &str = "opencode-go";
-/// Parse the multi-block output of `opencode models opencode --verbose`.
-/// Each block is an `opencode/<id>` route header followed by a pretty-printed
-/// JSON object. We rely on the JSON braces — not the route header — for
-/// boundary detection so reordered or relabeled headers do not break parsing.
-pub fn parse_verbose_models(text: &str) -> Vec<OpencodeModelMeta> {
-    let bytes = text.as_bytes();
-    let mut models = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'{'
-            && let Some(end) = find_matching_brace(bytes, i)
-        {
-            if let Ok(value) = serde_json::from_slice::<Value>(&bytes[i..=end])
-                && let Some(meta) = model_meta_from_value(&value)
-            {
-                models.push(meta);
-            }
-            i = end + 1;
-            continue;
-        }
-        i += 1;
-    }
-    models
-}
-/// CLI-failure fallback. Returns an empty list — the per-tier model
-/// catalogue now lives in `crate::logic::selection::baked::BAKED_TABLE`,
-/// so an unreachable opencode CLI simply contributes nothing to the
-/// dashboard inventory and downstream selection falls through to the
-/// baked rows directly.
-fn hardcoded_fallback_for(provider: &str) -> Vec<OpencodeModelMeta> {
-    let _ = provider;
-    Vec::new()
-}
-fn run_models_command(provider: &str) -> Result<String> {
-    let label = format!("opencode models {provider} --verbose");
-    let utf8_context: &'static str = match provider {
-        OPENCODE_GO_PROVIDER => "opencode-go models output was not UTF-8",
-        _ => "opencode models output was not UTF-8",
-    };
-    run_opencode_command(["models", provider, "--verbose"], &label, utf8_context)
-}
 fn run_stats_command() -> Result<String> {
     let days = STATS_WINDOW_DAYS.to_string();
     run_opencode_command(
@@ -210,60 +110,6 @@ fn run_opencode_command<const N: usize>(
         bail!("`{command_label}` exited with {:?}", output.status);
     }
     String::from_utf8(output.stdout).context(utf8_context)
-}
-fn model_meta_from_value(value: &Value) -> Option<OpencodeModelMeta> {
-    let obj = value.as_object()?;
-    let id = obj.get("id")?.as_str()?.to_string();
-    let provider_id = obj.get("providerID")?.as_str()?.to_string();
-    let display_name = obj
-        .get("name")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    let api_npm = obj
-        .get("api")
-        .and_then(Value::as_object)
-        .and_then(|api| api.get("npm"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    Some(OpencodeModelMeta {
-        id,
-        provider_id,
-        display_name,
-        api_npm,
-    })
-}
-fn find_matching_brace(bytes: &[u8], start: usize) -> Option<usize> {
-    debug_assert_eq!(bytes.get(start), Some(&b'{'));
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-    for (offset, &c) in bytes[start..].iter().enumerate() {
-        let i = start + offset;
-        if escape {
-            escape = false;
-            continue;
-        }
-        if in_string {
-            match c {
-                b'\\' => escape = true,
-                b'"' => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-        match c {
-            b'"' => in_string = true,
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 fn strip_box_chars(line: &str) -> String {
     line.chars()

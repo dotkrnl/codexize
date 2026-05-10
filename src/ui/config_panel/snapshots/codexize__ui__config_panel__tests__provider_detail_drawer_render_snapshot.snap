@@ -1,6 +1,6 @@
 ---
 source: src/ui/config_panel/mod.rs
-assertion_line: 4344
+assertion_line: 4364
 expression: "render_to_text(&state, 90, 22)"
 ---
 "⚙ Settings────────────────────────────────────────────────────────/tmp/example/config.toml"
@@ -11,7 +11,7 @@ expression: "render_to_text(&state, 90, 22)"
 "  ▾ c│ claude · claude-opus-4.1  (built-in)                                         │     "
 "    ▌│                                                                              │     "
 "  ▾ c│ ▌  ✓  Enabled                                                                │     "
-"     │    ✓  Official  built-in                                                     │     "
+"     │    ✓  Official                                                               │     "
 "  ▾ c│    ✗  Free                                                                   │     "
 "     │    ✗  Ignore quota                                                           │     "
 "  ▾ c│    ✗  Cheap eligible                                                         │     "

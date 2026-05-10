@@ -470,11 +470,11 @@ const PROVIDER_TOGGLES: &[ProviderToggle] = &[
         label: "Official",
         description: "Marks the provider as the vendor's official endpoint.",
         field: ToggleField::Official,
-        baked_locked: true,
+        baked_locked: false,
     },
     ProviderToggle {
         label: "Free",
-        description: "Marks usage as no-cost (display label only; does not affect billing).",
+        description: "Treat as free-tier for selection (always 100% quota weight).",
         field: ToggleField::Free,
         baked_locked: false,
     },
@@ -1137,6 +1137,12 @@ impl ConfigPanelState {
                 | providers::AddProviderField::Cli => {
                     editor.open_dropdown(editor.focus);
                 }
+                providers::AddProviderField::Official => {
+                    editor.official = !editor.official;
+                }
+                providers::AddProviderField::Free => {
+                    editor.free = !editor.free;
+                }
                 providers::AddProviderField::LaunchName => {
                     if editor.commit(&mut self.config) {
                         self.dirty = true;
@@ -1152,6 +1158,8 @@ impl ConfigPanelState {
                 providers::AddProviderField::Model
                 | providers::AddProviderField::Subscription
                 | providers::AddProviderField::Cli => editor.open_dropdown(editor.focus),
+                providers::AddProviderField::Official => editor.official = !editor.official,
+                providers::AddProviderField::Free => editor.free = !editor.free,
                 providers::AddProviderField::LaunchName => editor.launch_name.push(' '),
             },
             KeyCode::Backspace => {
@@ -1980,7 +1988,7 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
     }
 
     let overlay_w = area.width.saturating_sub(10).max(54).min(area.width);
-    let overlay_h: u16 = 12;
+    let overlay_h: u16 = 14;
     let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
     let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
     let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
@@ -1992,6 +2000,20 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
             providers::AddProviderField::Model => editor.model.clone(),
             providers::AddProviderField::Subscription => editor.subscription.clone(),
             providers::AddProviderField::Cli => editor.cli.as_str().to_string(),
+            providers::AddProviderField::Official => {
+                if editor.official {
+                    "✓ on".to_string()
+                } else {
+                    "✗ off".to_string()
+                }
+            }
+            providers::AddProviderField::Free => {
+                if editor.free {
+                    "✓ on".to_string()
+                } else {
+                    "✗ off".to_string()
+                }
+            }
             providers::AddProviderField::LaunchName => format!("{}_", editor.launch_name),
         }
     };
@@ -2026,6 +2048,9 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         if focused {
             let hint = match field {
                 providers::AddProviderField::LaunchName => "  type · Enter to add",
+                providers::AddProviderField::Official | providers::AddProviderField::Free => {
+                    "  Space to toggle"
+                }
                 _ => "  Enter to choose",
             };
             spans.push(Span::styled(
@@ -2041,11 +2066,14 @@ fn render_add_provider_overlay(state: &ConfigPanelState, area: Rect, buf: &mut B
         render_row(providers::AddProviderField::Model, "Model"),
         render_row(providers::AddProviderField::Subscription, "Subscription"),
         render_row(providers::AddProviderField::Cli, "CLI"),
+        render_row(providers::AddProviderField::Official, "Official"),
+        render_row(providers::AddProviderField::Free, "Free"),
         render_row(providers::AddProviderField::LaunchName, "Launch name"),
         Line::from(""),
         overlay_keymap_line(&[
+            ("Enter", "choose/commit"),
+            ("Space", "toggle"),
             ("Tab", "field"),
-            ("Enter", "open/commit"),
             ("Esc", "cancel"),
         ]),
     ];
@@ -2336,27 +2364,15 @@ fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Bu
 
 fn current_toggle_value(
     entry: &crate::data::config::schema::ProviderEntry,
-    is_baked: bool,
-    baked_free: bool,
-    baked_official: bool,
+    _is_baked: bool,
+    _baked_free: bool,
+    _baked_official: bool,
     toggle: &ProviderToggle,
 ) -> bool {
     match toggle.field {
         ToggleField::Enabled => entry.enabled,
-        ToggleField::Official => {
-            if is_baked {
-                baked_official
-            } else {
-                entry.official
-            }
-        }
-        ToggleField::Free => {
-            if is_baked {
-                baked_free
-            } else {
-                entry.free
-            }
-        }
+        ToggleField::Official => entry.official,
+        ToggleField::Free => entry.free,
         ToggleField::QuotaDisabled => entry.quota_disabled,
         ToggleField::Cheap => entry.cheap_eligible,
         ToggleField::Tough => entry.tough_eligible,
@@ -3121,7 +3137,11 @@ fn footer_bindings(state: &ConfigPanelState) -> (Vec<ConfigKey>, Vec<ConfigKey>)
             vec![ck("Esc", "cancel")],
         ),
         Some(Editing::AddProvider(_)) => (
-            vec![ck("Tab", "field"), ck_primary("Enter", "open")],
+            vec![
+                ck("Tab", "field"),
+                ck_primary("Enter", "choose/commit"),
+                ck("Space", "toggle"),
+            ],
             vec![ck("Esc", "cancel")],
         ),
         Some(Editing::ProviderDetail { .. }) => (
@@ -4423,8 +4443,10 @@ mod tests {
         }
         state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        // Tab to Launch name and type a value, then Enter to commit the form.
-        state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        // Tab to Launch name (skipping Official/Free) and type a value, then Enter to commit the form.
+        for _ in 0..3 {
+            state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
         for c in "opencode-go/kimi-k2.6".chars() {
             state.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }

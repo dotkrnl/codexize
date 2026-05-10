@@ -40,6 +40,8 @@ pub(crate) enum AddProviderField {
     Model,
     Subscription,
     Cli,
+    Official,
+    Free,
     LaunchName,
 }
 
@@ -48,7 +50,9 @@ impl AddProviderField {
         match self {
             AddProviderField::Model => AddProviderField::Subscription,
             AddProviderField::Subscription => AddProviderField::Cli,
-            AddProviderField::Cli => AddProviderField::LaunchName,
+            AddProviderField::Cli => AddProviderField::Official,
+            AddProviderField::Official => AddProviderField::Free,
+            AddProviderField::Free => AddProviderField::LaunchName,
             AddProviderField::LaunchName => AddProviderField::Model,
         }
     }
@@ -57,7 +61,9 @@ impl AddProviderField {
             AddProviderField::Model => AddProviderField::LaunchName,
             AddProviderField::Subscription => AddProviderField::Model,
             AddProviderField::Cli => AddProviderField::Subscription,
-            AddProviderField::LaunchName => AddProviderField::Cli,
+            AddProviderField::Official => AddProviderField::Cli,
+            AddProviderField::Free => AddProviderField::Official,
+            AddProviderField::LaunchName => AddProviderField::Free,
         }
     }
 }
@@ -85,6 +91,8 @@ pub(crate) struct ProvidersEditor {
     pub(crate) model: String,
     pub(crate) cli: CliKind,
     pub(crate) launch_name: String,
+    pub(crate) official: bool,
+    pub(crate) free: bool,
     /// Unique (subscription, model) pairs derived from the baked + override
     /// universe. Used as the Model dropdown's option list.
     pub(crate) available_models: Vec<(String, String)>,
@@ -117,6 +125,8 @@ impl ProvidersEditor {
             model,
             cli,
             launch_name: String::new(),
+            official: false,
+            free: false,
             available_models,
             selected_model_idx: 0,
             focus: AddProviderField::Model,
@@ -145,7 +155,9 @@ impl ProvidersEditor {
             AddProviderField::Cli => {
                 CLI_OPTIONS.iter().map(|c| c.as_str().to_string()).collect()
             }
-            AddProviderField::LaunchName => Vec::new(),
+            AddProviderField::Official | AddProviderField::Free | AddProviderField::LaunchName => {
+                Vec::new()
+            }
         }
     }
 
@@ -156,7 +168,7 @@ impl ProvidersEditor {
             AddProviderField::Model => self.selected_model_idx,
             AddProviderField::Subscription => self.subscription_idx,
             AddProviderField::Cli => self.cli_idx,
-            AddProviderField::LaunchName => 0,
+            AddProviderField::Official | AddProviderField::Free | AddProviderField::LaunchName => 0,
         };
         self.open_dropdown = Some(target);
     }
@@ -199,7 +211,7 @@ impl ProvidersEditor {
                     self.cli = CLI_OPTIONS[self.cli_idx];
                 }
             }
-            AddProviderField::LaunchName => {}
+            AddProviderField::Official | AddProviderField::Free | AddProviderField::LaunchName => {}
         }
         self.open_dropdown = None;
     }
@@ -228,8 +240,8 @@ impl ProvidersEditor {
             model: trimmed_model.to_string(),
             subscription,
             enabled: true,
-            free: false,
-            official: false,
+            free: self.free,
+            official: self.official,
             quota_disabled: false,
             cheap_eligible: false,
             tough_eligible: false,
@@ -419,9 +431,10 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
             // built-in is the implicit default — no chip. Custom entries
             // (user-added overrides) keep their yellow chip so they
             // stand out in the list.
+            let _ = baked_free;
             let _ = baked_official;
             let custom_chip = if *is_baked { None } else { Some("custom") };
-            let free = if *is_baked { *baked_free } else { entry.free };
+            let free = entry.free;
 
             let subscription_label =
                 crate::logic::selection::subscription::subscription_kind_to_str(entry.subscription);

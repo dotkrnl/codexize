@@ -23,8 +23,8 @@ const COLOR_OK: Color = Color::Green;
 const COLOR_SUBSCRIPTION: Color = Color::Magenta;
 /// Per-flag chip colors. Each enabled flag carries its own hue so
 /// scanning a row's eligibility set reads at a glance. Disabled flags
-/// don't render at all (avoids visual clutter).
-const COLOR_OFFICIAL: Color = Color::Green;
+/// don't render at all (avoids visual clutter). built-in and official
+/// are implicit defaults and never get a chip.
 const COLOR_FREE: Color = Color::Cyan;
 const COLOR_CHEAP: Color = Color::Blue;
 const COLOR_TOUGH: Color = Color::Red;
@@ -257,10 +257,9 @@ pub(crate) enum ProvidersLine {
     /// collapsed the section — only this header line renders, all the
     /// child models and providers are filtered out by `get_lines`.
     VendorHeader { vendor: String, folded: bool },
-    /// Model header nested under a vendor. `folded` hides the model's
-    /// provider rows; the header itself stays visible so the user
-    /// always sees which models the vendor offers.
-    ModelHeader { model: String, folded: bool },
+    /// Model header nested under a vendor — purely structural, never
+    /// folded or actionable. Cursor navigation skips it.
+    ModelHeader { model: String },
     Provider {
         entry: ProviderEntry,
         is_baked: bool,
@@ -284,12 +283,11 @@ pub(crate) fn vendor_for(model: &str, subscription: SubscriptionKind) -> String 
 pub(crate) fn get_lines(
     config: &Config,
     folded_vendors: &std::collections::BTreeSet<String>,
-    folded_models: &std::collections::BTreeSet<String>,
 ) -> Vec<ProvidersLine> {
     // Group rows by (vendor, model) so a single model collects every way
     // to launch it. The list is emitted as a 3-level tree (VendorHeader
     // · ModelHeader · Provider rows); folded vendors emit only their
-    // header, folded models keep the header but hide the provider rows.
+    // header. Model headers don't fold — they're structural breadcrumbs.
     let providers = baked::merge_with_overrides(config.providers.value());
     let mut buckets: Vec<((String, String), Vec<ProviderEntry>)> = Vec::new();
     for entry in providers {
@@ -317,14 +315,9 @@ pub(crate) fn get_lines(
         if current_vendor_folded {
             continue;
         }
-        let model_folded = folded_models.contains(&model);
         lines.push(ProvidersLine::ModelHeader {
             model: model.clone(),
-            folded: model_folded,
         });
-        if model_folded {
-            continue;
-        }
         for entry in entries {
             let baked = baked::baked_for(&model, entry.cli, &entry.launch_name);
             lines.push(ProvidersLine::Provider {
@@ -385,33 +378,17 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 Span::styled(vendor.clone(), vendor_style),
             ])
         }
-        ProvidersLine::ModelHeader { model, folded } => {
-            let chevron = if *folded { "▸" } else { "▾" };
-            let focus_glyph = if focused {
-                Span::styled(
-                    "▌".to_string(),
-                    Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
-                )
-            } else {
-                Span::raw(" ")
-            };
-            let model_style = if focused {
-                Style::default()
-                    .fg(COLOR_DIM)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else {
-                Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD)
-            };
-            Line::from(vec![
-                Span::raw(" "),
-                focus_glyph,
-                Span::styled(
-                    format!("{} ", chevron),
-                    Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(model.clone(), model_style),
-            ])
-        }
+        ProvidersLine::ModelHeader { model } => Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "▾ ".to_string(),
+                Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                model.clone(),
+                Style::default().fg(COLOR_DIM).add_modifier(Modifier::BOLD),
+            ),
+        ]),
         ProvidersLine::Provider {
             entry,
             is_baked,
@@ -439,14 +416,11 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 Style::default()
             };
 
-            let source_label = if *is_baked { "built-in" } else { "custom" };
-            let source_style = if *is_baked {
-                Style::default().fg(COLOR_DIM)
-            } else {
-                Style::default().fg(COLOR_OVERRIDE)
-            };
-
-            let official = if *is_baked { *baked_official } else { entry.official };
+            // built-in is the implicit default — no chip. Custom entries
+            // (user-added overrides) keep their yellow chip so they
+            // stand out in the list.
+            let _ = baked_official;
+            let custom_chip = if *is_baked { None } else { Some("custom") };
             let free = if *is_baked { *baked_free } else { entry.free };
 
             let subscription_label =
@@ -471,37 +445,35 @@ pub(crate) fn format_line(line: &ProvidersLine, focused: bool, _width: usize) ->
                 Span::styled(pad_right(entry.cli.as_str(), CLI_COL_WIDTH), primary_style),
                 Span::raw("  "),
                 Span::styled(entry.launch_name.clone(), primary_style),
-                Span::raw("  "),
-                Span::styled(source_label.to_string(), source_style),
             ];
 
             // Conditional, color-coded chip strip. Each flag renders only
-            // when on; the dim "off" form would just clutter the row.
-            // Colors: official=green (vendor blessing), free=cyan (cost),
-            // cheap=blue (budget tier), tough=red (heavy hitter),
-            // effort=yellow (effort-adjustable).
-            let mut chips: Vec<(&'static str, Color)> = Vec::new();
-            if official {
-                chips.push(("official", COLOR_OFFICIAL));
+            // when on; built-in/official are implicit and never shown.
+            // Colors: free=cyan (no cost), cheap=blue (budget tier),
+            // tough=red (heavy hitter), effort=yellow (effort-adjustable).
+            let mut chips: Vec<(String, Color)> = Vec::new();
+            if let Some(label) = custom_chip {
+                chips.push((label.to_string(), COLOR_OVERRIDE));
             }
             if free {
-                chips.push(("free", COLOR_FREE));
+                chips.push(("free".to_string(), COLOR_FREE));
             }
             if entry.cheap_eligible {
-                chips.push(("cheap", COLOR_CHEAP));
+                chips.push(("cheap".to_string(), COLOR_CHEAP));
             }
             if entry.tough_eligible {
-                chips.push(("tough", COLOR_TOUGH));
+                chips.push(("tough".to_string(), COLOR_TOUGH));
             }
             if entry.effort_eligible {
-                chips.push(("effort", COLOR_EFFORT));
+                chips.push(("effort".to_string(), COLOR_EFFORT));
             }
-            for (label, color) in chips {
+            for (idx, (label, color)) in chips.into_iter().enumerate() {
+                let separator = if idx == 0 { "  " } else { " · " };
                 spans.push(Span::styled(
-                    " · ".to_string(),
+                    separator.to_string(),
                     Style::default().fg(COLOR_DIM),
                 ));
-                spans.push(Span::styled(label.to_string(), Style::default().fg(color)));
+                spans.push(Span::styled(label, Style::default().fg(color)));
             }
             if entry.quota_disabled {
                 spans.push(Span::styled(

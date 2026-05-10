@@ -137,7 +137,9 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             quota_lookup_key: Some("claude-shared"),
         }],
     },
-    // --- Claude sonnet (3 rows): both cheap_eligible and tough_eligible, effort_tough="max" ---
+    // --- Claude sonnet (3 rows): cheap_eligible only — sonnet is the
+    // budget tier, not heavy enough for tough loops. effort_tough="max"
+    // is retained for non-tough effort scaling.
     BakedRow {
         model: "claude-sonnet-4",
         providers: &[BakedProvider {
@@ -147,7 +149,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: true,
-            tough_eligible: true,
+            tough_eligible: false,
             effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",
@@ -164,7 +166,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: true,
-            tough_eligible: true,
+            tough_eligible: false,
             effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",
@@ -181,7 +183,7 @@ pub const BAKED_TABLE: &[BakedRow] = &[
             free: false,
             official: true,
             cheap_eligible: true,
-            tough_eligible: true,
+            tough_eligible: false,
             effort_eligible: true,
             effort_cheap: "low",
             effort_normal: "medium",

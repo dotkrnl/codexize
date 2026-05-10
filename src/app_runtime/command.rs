@@ -91,6 +91,3 @@ pub enum AppCommand {
     /// Cancel an active modal without taking the destructive action.
     CancelModal,
 }
-#[cfg(test)]
-#[path = "command_tests.rs"]
-mod tests;

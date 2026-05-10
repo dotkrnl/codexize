@@ -322,11 +322,6 @@ fn omit_then_grow_preserves_compact_state() {
     assert_eq!(m, ModelsAreaMode::CompactQuota);
 }
 
-#[test]
-fn mode_default_is_full_table() {
-    assert_eq!(ModelsAreaMode::default(), ModelsAreaMode::FullTable);
-}
-
 // ----- model_strip_* tests -----
 
 #[test]

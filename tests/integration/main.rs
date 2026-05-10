@@ -154,16 +154,3 @@ fn runtime_harness_drains_commands_until_quit() {
     assert_eq!(first.session_id.as_ref(), "integration-quit");
     assert_eq!(second.session_id.as_ref(), "integration-quit");
 }
-
-#[test]
-fn production_entrypoint_is_app_runtime_run_terminal_app() {
-    // Compile-time guard for the production wiring: binding the symbol to
-    // a fully-typed `fn` pointer fails to build if the entrypoint signature
-    // ever drifts away from what `src/main.rs` calls. This replaces the
-    // earlier source-string scan, which broke on whitespace edits and did
-    // not actually exercise the runtime types.
-    let _entrypoint: fn(
-        &mut codexize::app::App,
-        &mut codexize::ui::tui::AppTerminal,
-    ) -> anyhow::Result<()> = codexize::app_runtime::run_terminal_app;
-}

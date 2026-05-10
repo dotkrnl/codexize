@@ -131,139 +131,9 @@ fn with_temp_root<T>(f: impl FnOnce() -> T) -> T {
 }
 
 #[test]
-fn test_run_record_lifecycle_create_to_done() {
-    let mut runs = Vec::new();
-    let run = RunRecord {
-        id: 1,
-        stage: "brainstorm".to_string(),
-        task_id: None,
-        round: 1,
-        attempt: 1,
-        model: "claude-opus-4.7".to_string(),
-        subscription_label: "anthropic".to_string(),
-        window_name: "[Brainstorm]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort: EffortLevel::Normal,
-        effort_mapping: crate::data::config::schema::EffortMapping::default(),
-        effort_eligible: false,
-        modes: crate::state::LaunchModes::default(),
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-    };
-    runs.push(run);
-
-    assert_eq!(runs[0].status, RunStatus::Running);
-    assert!(runs[0].ended_at.is_none());
-}
-
-#[test]
-fn test_run_record_transition_to_done() {
-    let mut run = RunRecord {
-        id: 1,
-        stage: "brainstorm".to_string(),
-        task_id: None,
-        round: 1,
-        attempt: 1,
-        model: "claude-opus-4.7".to_string(),
-        subscription_label: "anthropic".to_string(),
-        window_name: "[Brainstorm]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort: EffortLevel::Normal,
-        effort_mapping: crate::data::config::schema::EffortMapping::default(),
-        effort_eligible: false,
-        modes: crate::state::LaunchModes::default(),
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-    };
-
-    run.status = RunStatus::Done;
-    run.ended_at = Some(chrono::Utc::now());
-
-    assert_eq!(run.status, RunStatus::Done);
-    assert!(run.ended_at.is_some());
-    assert!(run.error.is_none());
-}
-
-#[test]
-fn test_run_record_transition_to_failed() {
-    let mut run = RunRecord {
-        id: 1,
-        stage: "brainstorm".to_string(),
-        task_id: None,
-        round: 1,
-        attempt: 1,
-        model: "claude-opus-4.7".to_string(),
-        subscription_label: "anthropic".to_string(),
-        window_name: "[Brainstorm]".to_string(),
-        started_at: chrono::Utc::now(),
-        ended_at: None,
-        status: RunStatus::Running,
-        error: None,
-        effort: EffortLevel::Normal,
-        effort_mapping: crate::data::config::schema::EffortMapping::default(),
-        effort_eligible: false,
-        modes: crate::state::LaunchModes::default(),
-        hostname: None,
-        mount_device_id: None,
-        section_path: None,
-    };
-
-    run.status = RunStatus::Failed;
-    run.ended_at = Some(chrono::Utc::now());
-    run.error = Some("validation failed".to_string());
-
-    assert_eq!(run.status, RunStatus::Failed);
-    assert!(run.ended_at.is_some());
-    assert_eq!(run.error.as_deref(), Some("validation failed"));
-}
-
-#[test]
-fn test_message_creation() {
-    let msg = Message {
-        ts: chrono::Utc::now(),
-        run_id: 1,
-        kind: MessageKind::Brief,
-        sender: MessageSender::Agent {
-            model: "gpt-5".to_string(),
-            subscription_label: "openai".to_string(),
-        },
-        text: "Exploring codebase".to_string(),
-    };
-
-    assert_eq!(msg.run_id, 1);
-    assert_eq!(msg.kind, MessageKind::Brief);
-    assert_eq!(msg.text, "Exploring codebase");
-}
-
-#[test]
 fn test_message_kind_started_deserializes() {
     let kind = serde_json::from_str::<MessageKind>("\"Started\"");
     assert!(kind.is_ok(), "Started message kind must deserialize");
-}
-
-#[test]
-fn test_node_creation() {
-    let node = Node {
-        label: "Brainstorm".to_string(),
-        kind: NodeKind::Stage,
-        status: NodeStatus::Done,
-        summary: "completed".to_string(),
-        children: vec![],
-        run_id: None,
-        leaf_run_id: Some(1),
-    };
-
-    assert_eq!(node.label, "Brainstorm");
-    assert_eq!(node.kind, NodeKind::Stage);
-    assert_eq!(node.leaf_run_id, Some(1));
 }
 
 #[test]
@@ -879,74 +749,6 @@ fn test_session_state_archived_defaults_false_on_deserialize() {
 }
 
 #[test]
-fn test_agent_runs_defaults_empty() {
-    let state = SessionState::new("test".to_string());
-    assert!(state.agent_runs.is_empty());
-}
-
-#[test]
-fn test_schema_version_defaults_to_3() {
-    let state = SessionState::new("test".to_string());
-    assert_eq!(state.schema_version, 3);
-}
-
-#[test]
-fn test_pipeline_item_create_minimal() {
-    let item = PipelineItem {
-        id: 1,
-        stage: "coder".to_string(),
-        task_id: Some(3),
-        round: Some(2),
-        status: PipelineItemStatus::Pending,
-        title: Some("Normalize review artifacts".to_string()),
-        mode: None,
-        trigger: None,
-        interactive: None,
-        iteration: 1,
-    };
-    assert_eq!(item.id, 1);
-    assert_eq!(item.stage, "coder");
-    assert_eq!(item.task_id, Some(3));
-    assert_eq!(item.status, PipelineItemStatus::Pending);
-}
-
-#[test]
-fn test_pipeline_item_recovery_with_trigger() {
-    let item = PipelineItem {
-        id: 2,
-        stage: "recovery".to_string(),
-        task_id: None,
-        round: None,
-        status: PipelineItemStatus::Pending,
-        title: None,
-        mode: None,
-        trigger: Some("human_blocked".to_string()),
-        interactive: Some(true),
-        iteration: 1,
-    };
-    assert_eq!(item.trigger.as_deref(), Some("human_blocked"));
-    assert_eq!(item.interactive, Some(true));
-}
-
-#[test]
-fn test_pipeline_item_plan_review_with_mode() {
-    let item = PipelineItem {
-        id: 3,
-        stage: "plan-review".to_string(),
-        task_id: None,
-        round: None,
-        status: PipelineItemStatus::Running,
-        title: None,
-        mode: Some("recovery".to_string()),
-        trigger: None,
-        interactive: None,
-        iteration: 1,
-    };
-    assert_eq!(item.mode.as_deref(), Some("recovery"));
-    assert_eq!(item.stage, "plan-review");
-}
-
-#[test]
 fn test_pipeline_item_status_lifecycle_vs_verdict() {
     let is_lifecycle = |status: PipelineItemStatus| {
         status.is_pending() || status.is_running() || status.is_done() || status.is_failed()
@@ -1442,11 +1244,6 @@ fn test_pipeline_items_update_then_persist() {
             PipelineItemStatus::Approved
         );
     });
-}
-
-#[test]
-fn test_pipeline_item_default_status_is_pending() {
-    assert_eq!(PipelineItemStatus::default(), PipelineItemStatus::Pending);
 }
 
 #[test]

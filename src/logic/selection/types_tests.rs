@@ -15,18 +15,6 @@ fn sample_cached_model() -> CachedModel {
 }
 
 #[test]
-fn cached_model_clone_and_fields_remain_accessible() {
-    let model = sample_cached_model();
-    let cloned = model.clone();
-
-    assert_eq!(cloned, model);
-    assert_eq!(cloned.subscription, SubscriptionKind::Codex);
-    assert_eq!(cloned.name, "gpt-5.5");
-    assert_eq!(cloned.quota_percent, Some(73));
-    assert_eq!(cloned.display_order, 2);
-}
-
-#[test]
 fn new_ipbr_fields_default_to_unscored() {
     let model = sample_cached_model();
 

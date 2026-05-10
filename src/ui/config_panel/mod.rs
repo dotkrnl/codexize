@@ -64,14 +64,6 @@ struct FieldMeta {
 
 const FIELDS: &[FieldMeta] = &[
     FieldMeta {
-        section: "system",
-        key: "meta.version",
-        label: "Config version",
-        kind: FieldKind::ReadOnly,
-        description: "Config schema version. This is stamped by the binary and cannot be edited.",
-        secret: false,
-    },
-    FieldMeta {
         section: "notifications",
         key: "ntfy.enabled",
         label: "Notifications",
@@ -535,9 +527,43 @@ fn step_toggle(current: usize, is_baked: bool, delta: isize) -> usize {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ConflictBanner {
     MtimeAdvanced,
-    DiscardPrompt,
+    /// Centered modal asking the user how to leave with unsaved
+    /// changes. `selected` indexes into [`EXIT_OPTIONS`].
+    ExitPrompt { selected: usize },
     RegenerateTopicPrompt,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitChoice {
+    Save,
+    Discard,
+    Cancel,
+}
+
+/// Order matters — the modal renders these top-to-bottom and the
+/// initial cursor position lands on the safest option.
+const EXIT_OPTIONS: &[(ExitChoice, &str, char, &str)] = &[
+    (
+        ExitChoice::Save,
+        "Save & close",
+        's',
+        "write the staged changes and close the panel",
+    ),
+    (
+        ExitChoice::Discard,
+        "Discard & close",
+        'd',
+        "drop unsaved changes and close",
+    ),
+    (
+        ExitChoice::Cancel,
+        "Cancel",
+        'c',
+        "keep editing without saving or closing",
+    ),
+];
+
+const EXIT_DEFAULT_SELECTION: usize = 2; // Cancel — safest if user fat-fingered Esc
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PanelOutcome {
@@ -647,8 +673,10 @@ impl ConfigPanelState {
             // edit, AddProvider's launch_name) still treat `q` as a literal.
             KeyCode::Esc | KeyCode::Char('q') => {
                 if self.dirty {
-                    self.conflict = Some(ConflictBanner::DiscardPrompt);
-                    self.status = "discard unsaved changes? y/n".to_string();
+                    self.conflict = Some(ConflictBanner::ExitPrompt {
+                        selected: EXIT_DEFAULT_SELECTION,
+                    });
+                    self.status = "unsaved changes — pick an exit option".to_string();
                     PanelOutcome::KeepOpen
                 } else {
                     PanelOutcome::Close
@@ -865,6 +893,37 @@ impl ConfigPanelState {
         PanelOutcome::KeepOpen
     }
 
+    fn execute_exit_choice(&mut self, choice: ExitChoice) -> PanelOutcome {
+        match choice {
+            ExitChoice::Save => {
+                self.conflict = None;
+                self.save(false);
+                // `save` reopens its own conflict banner on mtime drift,
+                // surfaces validation errors, or sets save_error. Only
+                // close when the write actually landed.
+                let saved = self.editing.is_none()
+                    && self.conflict.is_none()
+                    && self.save_error.is_none()
+                    && !self.dirty;
+                if saved {
+                    PanelOutcome::Close
+                } else {
+                    PanelOutcome::KeepOpen
+                }
+            }
+            ExitChoice::Discard => {
+                self.dirty = false;
+                self.conflict = None;
+                PanelOutcome::Close
+            }
+            ExitChoice::Cancel => {
+                self.conflict = None;
+                self.status = "kept editing".to_string();
+                PanelOutcome::KeepOpen
+            }
+        }
+    }
+
     fn handle_banner_key(&mut self, key: KeyEvent) -> Option<PanelOutcome> {
         let banner = self.conflict.clone()?;
         match banner {
@@ -895,22 +954,33 @@ impl ConfigPanelState {
                 }
                 _ => Some(PanelOutcome::KeepOpen),
             },
-            ConflictBanner::DiscardPrompt => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.dirty = false;
-                    self.conflict = None;
-                    Some(PanelOutcome::Close)
+            ConflictBanner::ExitPrompt { selected } => {
+                let len = EXIT_OPTIONS.len();
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let next = wrap_index(selected, len, -1);
+                        self.conflict = Some(ConflictBanner::ExitPrompt { selected: next });
+                        Some(PanelOutcome::KeepOpen)
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let next = wrap_index(selected, len, 1);
+                        self.conflict = Some(ConflictBanner::ExitPrompt { selected: next });
+                        Some(PanelOutcome::KeepOpen)
+                    }
+                    KeyCode::Enter => Some(self.execute_exit_choice(EXIT_OPTIONS[selected].0)),
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        Some(self.execute_exit_choice(ExitChoice::Save))
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        Some(self.execute_exit_choice(ExitChoice::Discard))
+                    }
+                    KeyCode::Char('c')
+                    | KeyCode::Char('C')
+                    | KeyCode::Char('q')
+                    | KeyCode::Esc => Some(self.execute_exit_choice(ExitChoice::Cancel)),
+                    _ => Some(PanelOutcome::KeepOpen),
                 }
-                KeyCode::Char('n')
-                | KeyCode::Char('N')
-                | KeyCode::Char('q')
-                | KeyCode::Esc => {
-                    self.conflict = None;
-                    self.status = "kept editing".to_string();
-                    Some(PanelOutcome::KeepOpen)
-                }
-                _ => Some(PanelOutcome::KeepOpen),
-            },
+            }
             ConflictBanner::RegenerateTopicPrompt => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     match notifications::generate_topic()
@@ -1787,6 +1857,7 @@ impl Widget for ConfigPanelWidget<'_> {
         render_search_overlay(self.state, area, buf);
         render_add_provider_overlay(self.state, area, buf);
         render_provider_detail_overlay(self.state, area, buf);
+        render_exit_prompt_overlay(self.state, area, buf);
     }
 }
 
@@ -2098,6 +2169,79 @@ fn render_provider_detail_overlay(state: &ConfigPanelState, area: Rect, buf: &mu
                 .title(Span::styled(
                     title,
                     Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+                )),
+        )
+        .render(rect, buf);
+}
+
+fn render_exit_prompt_overlay(state: &ConfigPanelState, area: Rect, buf: &mut Buffer) {
+    let Some(ConflictBanner::ExitPrompt { selected }) = state.conflict.as_ref() else {
+        return;
+    };
+    if area.width < MIN_WIDTH {
+        return;
+    }
+    let selected = *selected;
+
+    let overlay_w = area.width.saturating_sub(10).max(56).min(area.width);
+    let overlay_h: u16 = (EXIT_OPTIONS.len() as u16) + 6; // border + title + change line + spacing + footer
+    let overlay_h = overlay_h.min(area.height);
+    let overlay_x = area.x + (area.width.saturating_sub(overlay_w)) / 2;
+    let overlay_y = area.y + (area.height.saturating_sub(overlay_h)) / 2;
+    let rect = Rect::new(overlay_x, overlay_y, overlay_w, overlay_h);
+    Clear.render(rect, buf);
+
+    let mut body: Vec<Line<'static>> = Vec::new();
+    body.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "Your changes haven't been written to disk yet.".to_string(),
+            Style::default().fg(COLOR_OVERRIDE),
+        ),
+    ]));
+    body.push(Line::from(""));
+
+    for (idx, (_, label, key, hint)) in EXIT_OPTIONS.iter().enumerate() {
+        let focused = idx == selected;
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::raw(" "));
+        spans.push(focus_span(focused));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("[{}]", key),
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" "));
+        let label_style = if focused {
+            Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(label.to_string(), label_style));
+        if focused {
+            spans.push(Span::styled(
+                format!("  · {}", hint),
+                Style::default().fg(COLOR_DIM),
+            ));
+        }
+        body.push(Line::from(spans));
+    }
+
+    body.push(Line::from(""));
+    body.push(Line::from(dim(
+        " ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel",
+    )));
+
+    Paragraph::new(body)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(COLOR_OVERRIDE))
+                .title(Span::styled(
+                    " Unsaved changes ".to_string(),
+                    Style::default()
+                        .fg(COLOR_OVERRIDE)
+                        .add_modifier(Modifier::BOLD),
                 )),
         )
         .render(rect, buf);
@@ -2415,14 +2559,23 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
     let value_w = width.saturating_sub(prefix_w + chip_w).max(1);
     let value_clipped = ellipsize_end(&value_text, value_w);
 
-    let label_style = if focused {
+    // Locked fields render fully dim regardless of focus so the
+    // "you can't edit this" affordance reads at a glance — italics on
+    // top of the dim color reinforces it for readers paying attention.
+    let label_style = if field_locked {
+        Style::default()
+            .fg(COLOR_DIM)
+            .add_modifier(Modifier::ITALIC)
+    } else if focused {
         Style::default().fg(COLOR_FOCUS).add_modifier(Modifier::BOLD)
-    } else if field_locked {
-        Style::default().fg(COLOR_DIM)
     } else {
         Style::default()
     };
-    let value_style = if focused
+    let value_style = if field_locked {
+        Style::default()
+            .fg(COLOR_DIM)
+            .add_modifier(Modifier::ITALIC)
+    } else if focused
         && matches!(state.editing, Some(Editing::Integer | Editing::String))
     {
         Style::default()
@@ -2430,8 +2583,6 @@ fn field_row(state: &ConfigPanelState, idx: usize, width: usize) -> Line<'static
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else if is_override {
         Style::default().fg(COLOR_OVERRIDE)
-    } else if field_locked {
-        Style::default().fg(COLOR_DIM)
     } else {
         Style::default()
     };
@@ -2498,7 +2649,9 @@ fn help_text(state: &ConfigPanelState, width: usize) -> Line<'static> {
         Some(ConflictBanner::MtimeAdvanced) => {
             Some("mtime conflict: r reload · o overwrite · Esc keep editing")
         }
-        Some(ConflictBanner::DiscardPrompt) => Some("discard unsaved changes? y discard · n keep"),
+        // ExitPrompt is rendered as a centered modal — see
+        // `render_exit_prompt_overlay` — so no inline help-row banner.
+        Some(ConflictBanner::ExitPrompt { .. }) => None,
         Some(ConflictBanner::RegenerateTopicPrompt) => {
             Some("regenerate ntfy.topic? y accept · n keep")
         }
@@ -4024,6 +4177,73 @@ mod tests {
             matches!(state.editing, Some(Editing::Integer)),
             "Enter should start editing without an e-toggle"
         );
+    }
+
+    #[test]
+    fn config_version_field_is_not_listed() {
+        // The schema-version stamp is binary-managed and never useful in
+        // the UI — it must not appear in the editable field list.
+        assert!(
+            !FIELDS.iter().any(|f| f.key == "meta.version"),
+            "meta.version should be hidden from the field list"
+        );
+    }
+
+    #[test]
+    fn dirty_esc_pops_exit_modal_with_save_discard_cancel() {
+        let mut state = state_with_overrides();
+        // state_with_overrides isn't dirty (overrides are baked in), so
+        // stage a real change to flip the dirty bit.
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.set_edit_buffer_for_test("9".to_string());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(state.dirty);
+
+        let outcome = state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(outcome, PanelOutcome::KeepOpen));
+        assert!(matches!(
+            state.conflict,
+            Some(ConflictBanner::ExitPrompt { .. })
+        ));
+    }
+
+    #[test]
+    fn exit_modal_d_key_discards_and_closes() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.set_edit_buffer_for_test("11".to_string());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let outcome = state.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert!(matches!(outcome, PanelOutcome::Close));
+        assert!(state.conflict.is_none());
+    }
+
+    #[test]
+    fn exit_modal_render_snapshot() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.set_edit_buffer_for_test("11".to_string());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        insta::assert_snapshot!(render_to_text(&state, 90, 22));
+    }
+
+    #[test]
+    fn exit_modal_c_key_cancels_and_keeps_panel_open() {
+        let mut state = state_with_overrides();
+        focus_field(&mut state, "ntfy.retry_attempts");
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.set_edit_buffer_for_test("11".to_string());
+        state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        state.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let outcome = state.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert!(matches!(outcome, PanelOutcome::KeepOpen));
+        assert!(state.conflict.is_none(), "modal should close on cancel");
+        assert!(state.dirty, "dirty flag must stay set after cancel");
     }
 
     #[test]

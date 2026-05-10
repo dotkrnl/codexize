@@ -3,9 +3,7 @@
 //! Loader contract (spec §3):
 //! - Missing file → baked defaults; nothing is written.
 //! - Strict unknown-key rejection with nearest-key suggestion.
-//! - `[meta] version` missing → treated as `version = 1`.
-//! - Type mismatches and unsupported versions return structured errors
-//!   with line/column from `toml_edit::Document::decor` spans.
+//! - Type mismatches and unsupported versions return structured errors.
 //!
 //! Saver writes the **sparse** form: only fields whose `Override<T>`
 //! is `is_explicit() == true` and whose value differs from the baked
@@ -858,10 +856,8 @@ pub fn render_sparse(config: &Config) -> String {
     let baked = Config::baked_defaults();
     let mut out = String::new();
 
-    // [meta] is special: only emit it when the operator has overridden
-    // version (which the loader rejects unless == 1) — but for forward
-    // compatibility we always stamp meta.version on save so a sparse file
-    // can be inspected for its schema generation.
+    // Always stamp the current schema generation so sparse files identify
+    // the format that wrote them.
     out.push_str("[meta]\n");
     let _ = writeln!(out, "version = {}", config.meta.version);
 

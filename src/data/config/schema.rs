@@ -1,4 +1,4 @@
-//! Typed v1 config schema.
+//! Typed config schema.
 //!
 //! Each section is a struct of [`Override<T>`] fields. The loader marks a
 //! field as `explicit` when the on-disk file carried that key; sparse-save

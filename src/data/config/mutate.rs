@@ -171,7 +171,7 @@ pub fn get_value(config: &Config, key: &str) -> Result<String, MutationError> {
 pub fn set_value(config: &mut Config, key: &str, raw_value: &str) -> Result<(), MutationError> {
     let parts: Vec<&str> = key.split('.').collect();
     match parts.as_slice() {
-        // [meta] is forward-compat and not operator-tunable.
+        // [meta] is managed by the binary and not operator-tunable.
         ["meta", _] => {
             return Err(MutationError::NotSettable {
                 key: key.to_string(),

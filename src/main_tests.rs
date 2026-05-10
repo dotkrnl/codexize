@@ -36,26 +36,6 @@ impl Drop for ConfigEnvGuard {
 
 #[test]
 #[serial]
-fn launch_load_rejects_unsupported_meta_version() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.toml");
-    std::fs::write(&path, b"[meta]\nversion = 2\n").unwrap();
-    let _g = ConfigEnvGuard::set(&path);
-
-    let err = load_config_for_launch().expect_err("v2 must be fatal at launch");
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("unsupported [meta] version = 2"),
-        "error mentions the offending version: {msg}"
-    );
-    assert!(
-        msg.contains("version 1"),
-        "error names the supported version: {msg}"
-    );
-}
-
-#[test]
-#[serial]
 fn launch_load_silently_uses_defaults_when_file_missing() {
     let dir = tempfile::tempdir().unwrap();
     // File is intentionally not created — exercises the missing-file

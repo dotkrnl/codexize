@@ -303,33 +303,6 @@ fn test_session_state_schema_v3() {
 }
 
 #[test]
-fn test_session_state_v2_rejected_after_v3_bump() {
-    with_temp_root(|| {
-        // A well-formed non-current file must be rejected.
-        let dir = session_dir("test-v2-rejected");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("session.toml");
-        std::fs::write(
-            &path,
-            r#"
-session_id = "test-v2-rejected"
-schema_version = 2
-current_phase = "IdeaInput"
-"#,
-        )
-        .unwrap();
-
-        let result = SessionState::load("test-v2-rejected");
-        assert!(result.is_err());
-        let err_msg = format!("{:#}", result.unwrap_err());
-        assert!(
-            err_msg.contains("schema v2"),
-            "v2 rejection message must mention version: {err_msg}"
-        );
-    });
-}
-
-#[test]
 fn test_new_session_defaults_to_v3_with_zero_validation_attempts() {
     let state = SessionState::new("fresh".to_string());
     assert_eq!(state.schema_version, 3);

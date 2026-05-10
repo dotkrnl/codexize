@@ -1,5 +1,6 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 3646
 expression: text
 ---
 "⚙ Settings──────────────────────────/tmp/example/config.toml"
@@ -8,13 +9,13 @@ expression: text
 " ⊕ System (1 override)                                      "
 "▌  Notification config created  │                           "
 "   Notification config updated  │                           "
-"   Cache folder                 │ .codexize/cache           "
-" ● Sessions folder              │ $HOME/.codex… (overridden)"
-"   Runs folder                  │ .codexize/runs            "
-"   Memory folder                │ .codexize/memory          "
-"   Palette help row             │ ✓ on                      "
-"   JSON logs                    │ ✗ off                     "
-"   Memory topics per prompt     │ 6                         "
+"   Cache root                   │ .codexize/cache           "
+" ● Sessions root                │ $HOME/.codex… (overridden)"
+"   Runs root                    │ .codexize/runs            "
+"   Memory root                  │ .codexize/memory          "
+"   Show palette help row        │ ✓ on                      "
+"   Emit JSON logs               │ ✗ off                     "
+"   Max memory topics            │ 6                         "
 "────────────────────────────────────────────────────────────"
 "Metadata timestamp maintained by config mutat… │ config open"
 "←→ section · ↑↓ navigate  │              ^S save · Esc close"

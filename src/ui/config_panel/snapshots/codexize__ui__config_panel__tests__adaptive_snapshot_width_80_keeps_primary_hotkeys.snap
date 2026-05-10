@@ -1,14 +1,15 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 3635
 expression: text
 ---
 "⚙ Settings──────────────────────────────────────────────/tmp/example/config.toml"
 " [Common]  Models  Notifications ●  Agents  System ●                            "
 "────────────────────────────────────────────────────────────────────────────────"
 " ⚙ Common                                                                       "
-"▌  Review cadence               │ 5                                             "
+"▌  Review cadence (rounds)      │ 5                                             "
 "   Open runs in split view      │ ✗ off                                         "
-"   Footer key hints             │ ✓ on                                          "
+"   Show footer key hints        │ ✓ on                                          "
 "   Log level                    │ info                                          "
 "   Project memory               │ ✓ on                                          "
 "                                                                                "

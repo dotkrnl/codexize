@@ -32,6 +32,8 @@ pub(crate) mod providers;
 const MIN_WIDTH: u16 = 50;
 const TAB_SEPARATOR: &str = "  ";
 const LABEL_WIDTH: usize = 28;
+const TWO_PANE_MIN_WIDTH: usize = 100;
+const TWO_PANE_MIN_DETAILS_WIDTH: usize = 34;
 
 // Pipeline-style palette: focus accent matches the pipeline focus glyph,
 // override accent picks up the warning yellow used for waiting nodes.
@@ -71,7 +73,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.enabled",
-        label: "Notifications",
+        label: "Enable notifications",
         kind: FieldKind::Bool,
         description: "Enables notification delivery when a topic is configured.",
         secret: false,
@@ -95,7 +97,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.detail_mode",
-        label: "Message detail",
+        label: "Notification detail",
         kind: FieldKind::Enum(NtfyDetailMode::variants()),
         description: "Controls notification body length. Allowed: detailed, minimal. Default: detailed.",
         secret: false,
@@ -111,7 +113,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.retry_delay_ms",
-        label: "Retry delay",
+        label: "Retry delay (ms)",
         kind: FieldKind::Integer { min: 0 },
         description: "Delay between notification retries in milliseconds.",
         secret: false,
@@ -119,7 +121,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.http_timeout_secs",
-        label: "HTTP timeout",
+        label: "HTTP timeout (s)",
         kind: FieldKind::Integer { min: 1 },
         description: "HTTP timeout for ntfy requests. Minimum: 1 second.",
         secret: false,
@@ -127,7 +129,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.body_max_bytes",
-        label: "Body limit",
+        label: "Body limit (bytes)",
         kind: FieldKind::Integer { min: 256 },
         description: "Maximum notification body size in bytes. Minimum: 256.",
         secret: false,
@@ -135,7 +137,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.excerpt_max_chars",
-        label: "Excerpt limit",
+        label: "Excerpt limit (chars)",
         kind: FieldKind::Integer { min: 32 },
         description: "Maximum excerpt characters used in notifications. Minimum: 32.",
         secret: false,
@@ -159,7 +161,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.phase_wait",
-        label: "Phase wait alerts",
+        label: "Notify on phase wait",
         kind: FieldKind::Bool,
         description: "Notify when a phase is waiting.",
         secret: false,
@@ -167,7 +169,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.interactive_wait",
-        label: "Input wait alerts",
+        label: "Notify on input wait",
         kind: FieldKind::Bool,
         description: "Notify when an interactive run is waiting for input.",
         secret: false,
@@ -175,7 +177,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "notifications",
         key: "ntfy.events.pipeline_done",
-        label: "Done alerts",
+        label: "Notify on pipeline done",
         kind: FieldKind::Bool,
         description: "Notify when the pipeline finishes.",
         secret: false,
@@ -183,7 +185,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "agents",
         key: "acp.policy.shell_policy",
-        label: "Shell access",
+        label: "Shell access policy",
         kind: FieldKind::Enum(ShellPolicy::variants()),
         description: "Default ACP shell policy. Allowed: full-access, allowlist.",
         secret: false,
@@ -191,7 +193,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "agents",
         key: "acp.policy.shell_allowlist",
-        label: "Allowed shell commands",
+        label: "Shell allowlist",
         kind: FieldKind::List,
         description: "Read-only list in this panel; use the CLI for item-level edits.",
         secret: false,
@@ -199,7 +201,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "agents",
         key: "acp.policy.enforce_readonly_workspace",
-        label: "Read-only workspaces",
+        label: "Enforce read-only workspace",
         kind: FieldKind::Bool,
         description: "Force ACP runs to treat the workspace as read-only unless write paths are allowed.",
         secret: false,
@@ -207,7 +209,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "agents",
         key: "acp.policy.allowed_write_paths",
-        label: "Writable paths",
+        label: "Allowed write paths",
         kind: FieldKind::List,
         description: "Read-only list in this panel; use the CLI for item-level edits.",
         secret: false,
@@ -215,7 +217,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "agents",
         key: "acp.install.claude_acp_root",
-        label: "Claude ACP install root",
+        label: "Claude ACP install path",
         kind: FieldKind::String,
         description: "Claude ACP installation root; $HOME and ~/ are expanded by the loader.",
         secret: false,
@@ -231,7 +233,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "general",
         key: "runner.full_review_interval",
-        label: "Review cadence",
+        label: "Review cadence (rounds)",
         kind: FieldKind::Integer { min: 1 },
         description: "Run a full alignment review every N review rounds. Minimum: 1.",
         secret: false,
@@ -239,7 +241,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "paths.cache_root",
-        label: "Cache folder",
+        label: "Cache root",
         kind: FieldKind::String,
         description: "Root for cache files. $HOME and ~/ are expanded at load.",
         secret: false,
@@ -247,7 +249,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "paths.sessions_root",
-        label: "Sessions folder",
+        label: "Sessions root",
         kind: FieldKind::String,
         description: "Root for session artifacts. $HOME and ~/ are expanded at load.",
         secret: false,
@@ -255,7 +257,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "paths.runs_root",
-        label: "Runs folder",
+        label: "Runs root",
         kind: FieldKind::String,
         description: "Reserved top-level run root; no current subsystem consumes it directly.",
         secret: false,
@@ -263,7 +265,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "paths.memory_root",
-        label: "Memory folder",
+        label: "Memory root",
         kind: FieldKind::String,
         description: "Root for project memory files. $HOME and ~/ are expanded at load.",
         secret: false,
@@ -279,7 +281,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "ui.colon_palette.show_help",
-        label: "Palette help row",
+        label: "Show palette help row",
         kind: FieldKind::Bool,
         description: "Show the command palette help row.",
         secret: false,
@@ -287,7 +289,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "general",
         key: "ui.footer.show_keys",
-        label: "Footer key hints",
+        label: "Show footer key hints",
         kind: FieldKind::Bool,
         description: "Show footer key hints.",
         secret: false,
@@ -303,7 +305,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "diagnostics.json_logs",
-        label: "JSON logs",
+        label: "Emit JSON logs",
         kind: FieldKind::Bool,
         description: "Emit JSON logs unless the environment overrides diagnostics.",
         secret: false,
@@ -319,7 +321,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "memory.max_topics_per_read",
-        label: "Memory topics per prompt",
+        label: "Max memory topics",
         kind: FieldKind::Integer { min: 1 },
         description: "Maximum memory topics read into one prompt. Minimum: 1.",
         secret: false,
@@ -327,7 +329,7 @@ const FIELDS: &[FieldMeta] = &[
     FieldMeta {
         section: "system",
         key: "memory.journal_retention_months",
-        label: "Journal retention",
+        label: "Journal retention (months)",
         kind: FieldKind::Integer { min: 1 },
         description: "Monthly memory journals older than this are pruned at launch. Minimum: 1.",
         secret: false,
@@ -2565,23 +2567,60 @@ fn adaptive_lines(state: &ConfigPanelState, width: u16, height: u16) -> Vec<Line
     let chrome_used = lines.len() + 3;
     let body_h = h.saturating_sub(chrome_used);
 
-    // Section title with visual treatment
-    if body_h > 0 {
-        lines.push(section_header_line(state, w));
-    }
+    let use_two_pane =
+        body_h >= 4 && w >= TWO_PANE_MIN_WIDTH && !is_providers_section(state.current_section());
 
-    // Adjust body_h for section header
-    let content_h = body_h.saturating_sub(1);
+    if use_two_pane {
+        let sep = " │ ";
+        let sep_w = sep.width();
+        let left_w = w
+            .saturating_sub(TWO_PANE_MIN_DETAILS_WIDTH + sep_w)
+            .max(MIN_WIDTH as usize)
+            .min(w.saturating_sub(sep_w + TWO_PANE_MIN_DETAILS_WIDTH));
+        let right_w = w.saturating_sub(left_w + sep_w).max(1);
 
-    // Body content
-    if is_providers_section(state.current_section()) {
-        for body_line in providers_body_lines(state, w, content_h).into_iter().take(content_h) {
-            lines.push(body_line);
-        }
-    } else {
+        // Left pane: section header + rows (padded to `body_h`).
+        let mut left_lines: Vec<Line<'static>> = Vec::with_capacity(body_h);
+        left_lines.push(section_header_line(state, left_w));
+        let content_h = body_h.saturating_sub(1);
         let fields = visible_fields(state);
         for idx in fields.into_iter().take(content_h) {
-            lines.push(field_row(state, idx, w));
+            left_lines.push(field_row(state, idx, left_w));
+        }
+        while left_lines.len() < body_h {
+            left_lines.push(Line::from(""));
+        }
+
+        // Right pane: details card, same height as left body.
+        let mut right_lines = details_panel_lines(state, right_w, body_h);
+        right_lines.truncate(body_h);
+        while right_lines.len() < body_h {
+            right_lines.push(Line::from(""));
+        }
+
+        // Merge panes into full-width lines.
+        for (left, right) in left_lines.into_iter().zip(right_lines.into_iter()) {
+            lines.push(merge_two_pane_line(left, right, left_w, right_w, sep));
+        }
+    } else {
+        // Section title with visual treatment
+        if body_h > 0 {
+            lines.push(section_header_line(state, w));
+        }
+
+        // Adjust body_h for section header
+        let content_h = body_h.saturating_sub(1);
+
+        // Body content
+        if is_providers_section(state.current_section()) {
+            for body_line in providers_body_lines(state, w, content_h).into_iter().take(content_h) {
+                lines.push(body_line);
+            }
+        } else {
+            let fields = visible_fields(state);
+            for idx in fields.into_iter().take(content_h) {
+                lines.push(field_row(state, idx, w));
+            }
         }
     }
 
@@ -2638,7 +2677,7 @@ fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> 
     }
 
     // Fill remaining width with subtle separator
-    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let used: usize = spans.iter().map(|s| s.content.width()).sum();
     let remaining = width.saturating_sub(used);
     if remaining > 0 {
         spans.push(Span::styled(
@@ -2647,6 +2686,113 @@ fn section_header_line(state: &ConfigPanelState, width: usize) -> Line<'static> 
         ));
     }
 
+    Line::from(spans)
+}
+
+fn details_panel_lines(state: &ConfigPanelState, width: usize, height: usize) -> Vec<Line<'static>> {
+    if width < 10 || height == 0 {
+        return vec![Line::from("")];
+    }
+
+    let inner_w = width.saturating_sub(2);
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(height);
+
+    let title = "Details";
+    let label = format!(" {title} ");
+    let top = if inner_w > label.width() + 2 {
+        let remaining = inner_w.saturating_sub(label.width());
+        let left = remaining / 2;
+        let right = remaining.saturating_sub(left);
+        format!("┌{}{}{}┐", "─".repeat(left), label, "─".repeat(right))
+    } else {
+        format!("┌{}┐", "─".repeat(inner_w))
+    };
+    out.push(Line::from(Span::styled(
+        ellipsize_end(&top, width),
+        Style::default().fg(COLOR_DIM),
+    )));
+
+    let Some(meta) = state.current_meta() else {
+        for _ in 1..height.saturating_sub(1) {
+            out.push(Line::from(Span::raw(format!("│{}│", " ".repeat(inner_w)))));
+        }
+        let bottom = format!("└{}┘", "─".repeat(inner_w));
+        out.push(Line::from(Span::styled(bottom, Style::default().fg(COLOR_DIM))));
+        return out;
+    };
+
+    let source = state.source_for(meta);
+    let source_label = match source {
+        "override" => "Override",
+        "(def)" | "default" => "Default",
+        other => other,
+    };
+    let key_line = format!("Setting: {}", meta.label);
+    let source_line = format!("Source: {source_label}");
+
+    let mut value = if matches!(meta.kind, FieldKind::Bool) {
+        render_value_text(state, meta, false)
+    } else {
+        state.value_for(meta)
+    };
+    if meta.secret && !state.reveal_topic && !value.is_empty() {
+        value = middle_ellipsis(&value, 24);
+    }
+    let value_line = if value.is_empty() {
+        "Value: (empty)".to_string()
+    } else {
+        format!("Value: {value}")
+    };
+
+    let mut body: Vec<String> = Vec::new();
+    body.push(key_line);
+    body.push(source_line);
+    body.push(String::new());
+    body.extend(crate::tui::wrap_text(&value_line, inner_w));
+    body.push(String::new());
+    body.extend(crate::tui::wrap_text(meta.description, inner_w));
+
+    let max_body_lines = height.saturating_sub(2);
+    for i in 0..max_body_lines {
+        let content = body.get(i).cloned().unwrap_or_default();
+        let clipped = ellipsize_end(&content, inner_w);
+        let padded = pad_right(&clipped, inner_w);
+        out.push(Line::from(vec![
+            Span::styled("│".to_string(), Style::default().fg(COLOR_DIM)),
+            Span::raw(padded),
+            Span::styled("│".to_string(), Style::default().fg(COLOR_DIM)),
+        ]));
+    }
+
+    let bottom = format!("└{}┘", "─".repeat(inner_w));
+    out.push(Line::from(Span::styled(bottom, Style::default().fg(COLOR_DIM))));
+    out
+}
+
+fn merge_two_pane_line(
+    left: Line<'static>,
+    right: Line<'static>,
+    left_w: usize,
+    right_w: usize,
+    sep: &str,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut left = left;
+    let left_used = left.width();
+    if left_used < left_w {
+        left.spans.push(Span::raw(" ".repeat(left_w - left_used)));
+    }
+    spans.extend(left.spans);
+    spans.push(Span::styled(
+        sep.to_string(),
+        Style::default().fg(Color::DarkGray),
+    ));
+    let mut right = right;
+    let right_used = right.width();
+    if right_used < right_w {
+        right.spans.push(Span::raw(" ".repeat(right_w - right_used)));
+    }
+    spans.extend(right.spans);
     Line::from(spans)
 }
 
@@ -3739,7 +3885,7 @@ mod tests {
             "missing override dot on topic row: {text}"
         );
         assert!(
-            text.contains(" ● Message detail"),
+            text.contains(" ● Notification detail"),
             "missing override dot on detail_mode row: {text}"
         );
         assert!(

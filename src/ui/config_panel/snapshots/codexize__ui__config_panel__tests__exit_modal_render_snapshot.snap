@@ -1,23 +1,24 @@
 ---
 source: src/ui/config_panel/mod.rs
+assertion_line: 4716
 expression: "render_to_text(&state, 90, 22)"
 ---
 "⚙ Settings────────────────────────────────────────────────────────/tmp/example/config.toml"
 " Common  Models  [Notifications] ●  Agents  System ●                                      "
 "──────────────────────────────────────────────────────────────────────────────────────────"
 " 🔔 Notifications (3 overrides)                                                           " Hidden by multi-width symbols: [(2, " ")]
-"   Notifications                │ ✓ on                                                    "
+"   Enable notifications         │ ✓ on                                                    "
 "   Server URL                   │ https://ntfy.sh                                         "
 " ● To┌ Unsaved changes ─────────────────────────────────────────────────────────────┐     "
-" ● Me│ Your changes haven't been written to disk yet.                               │     "
+" ● No│ Your changes haven't been written to disk yet.                               │     "
 "▌● Re│                                                                              │     "
 "   Re│   [s] Save & close                                                           │     "
 "   HT│   [d] Discard & close                                                        │     "
 "   Bo│ ▌ [c] Cancel  · keep editing without saving or closing                       │     "
 "   Ex│                                                                              │     "
-"   Ph│ ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel                      │     "
-"   In└──────────────────────────────────────────────────────────────────────────────┘     "
-"   Done alerts                  │ ✓ on                                                    "
+"   No│ ↑↓ select · Enter confirm · s/d/c shortcut · Esc cancel                      │     "
+"   No└──────────────────────────────────────────────────────────────────────────────┘     "
+"   Notify on pipeline done      │ ✓ on                                                    "
 "                                                                                          "
 "                                                                                          "
 "                                                                                          "
